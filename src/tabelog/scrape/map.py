@@ -206,6 +206,83 @@ def geocode(addr: str, client: httpx.Client, cache: dict) -> dict | None:
     return None
 
 
+# Hand-curated grouping of the ~100 free-form Chinese genre tokens scraped
+# from Tabelog into 20 broad cuisine categories. Order here drives the order
+# in the filter dropdown. Unknown tokens (genres that aren't listed) fall
+# through to "其他".
+GENRE_CATEGORIES = {
+    "拉面·沾面": [
+        "拉面", "沾面", "无汤担担面", "碗",
+        "油荞麦面/马兹荞麦面", "油荞麦面/马泽荞麦面",
+        "油荞麦面/mazesoba", "油荞麦面/Mazesoba",
+    ],
+    "乌冬·荞麦": [
+        "乌冬面", "乌冬面。", "咖喱乌冬面",
+        "我喜欢乌冬面", "我爱乌冬面", "乌冬面爱好者",
+        "荞麦", "荞麦面",
+    ],
+    "寿司·海鲜": ["寿司", "海鲜", "鳗鱼"],
+    "烤肉·内脏": [
+        "烤肉", "荷尔蒙", "内脏", "激素",
+        "牛肉料理", "牛肉菜肴", "牛排",
+    ],
+    "烤鸡·串烧": [
+        "烤鸡肉串", "鸡肉料理", "鸡肉菜肴",
+        "炸鸡块", "串上",
+    ],
+    "天妇罗·炸物": [
+        "天妇罗", "天妇罗碗", "炸猪排", "猪排丼",
+        "炸猪排盖饭", "油炸食品", "炸串",
+    ],
+    "咖喱": ["咖喱", "印度咖喱", "印度菜", "汤咖喱", "斯里兰卡美食"],
+    "盖饭·亲子丼": ["盖饭", "亲子丼", "饭团"],
+    "居酒屋·酒吧": [
+        "居酒屋", "酒吧", "餐厅酒吧",
+        "清酒吧", "日本清酒酒吧", "餐吧",
+    ],
+    "日本料理·乡土": [
+        "日本料理", "创意料理", "乡土料理",
+        "当地美食", "创新", "创新的",
+    ],
+    "御好烧·铁板烧": ["御好烧", "大阪烧", "煎饼", "炒面", "铁板烧"],
+    "关东煮·锅物": ["关东煮", "奥登", "水烧", "涮锅", "火锅"],
+    "饺子·中餐": ["饺子", "中餐", "川菜"],
+    "韩国料理": ["韩国料理", "冷面"],
+    "意式·披萨": ["意大利", "披萨"],
+    "西餐·汉堡": ["西餐", "欧洲食品", "汉堡包"],
+    "咖啡·三明治": ["咖啡厅", "咖啡馆", "咖啡店", "三明治"],
+    "烘焙·西点": [
+        "蛋糕", "西式甜点", "西式糕点", "面包",
+        "巧克力", "布丁", "糖果", "马卡龙",
+    ],
+    "和果子·冰品": [
+        "日式甜点", "日本甜点", "大福",
+        "刨冰", "鲷鱼烧/大番烧",
+        "冰淇淋/冰淇淋", "意式冰淇淋/冰淇淋",
+        "甜点店", "甜品店", "甜点", "果汁摊",
+    ],
+    "其他": ["餐厅"],
+}
+
+_GENRE_TO_CAT = {tok: cat for cat, toks in GENRE_CATEGORIES.items() for tok in toks}
+_GENRE_SPLIT_RE = re.compile(r"[、,，]")
+
+
+def categorize_genre(genre_str: str) -> list[str]:
+    """Split the raw genre string into tokens and map each to its cuisine
+    category. Returns the deduplicated list (insertion-ordered). Unknown
+    tokens fall through to '其他'."""
+    if not genre_str:
+        return []
+    tokens = [t.strip() for t in _GENRE_SPLIT_RE.split(genre_str) if t.strip()]
+    cats: list[str] = []
+    for tok in tokens:
+        cat = _GENRE_TO_CAT.get(tok, "其他")
+        if cat not in cats:
+            cats.append(cat)
+    return cats
+
+
 # Price buckets — keys must match the JS filter values below.
 # (key, label, color, lower_inclusive, upper_exclusive)
 PRICE_BUCKETS = [
@@ -243,13 +320,19 @@ def price_bucket(row: dict) -> tuple[str, str, str]:
     return ("na", "价格 NA", "#9ca3af")
 
 
-def build_filter_panel_html() -> str:
+def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
     price_rows = "\n".join(
         f'      <label style="display:block;margin:1px 0;">'
         f'<input type="checkbox" name="ff-price" value="{key}" checked> '
         f'<span style="display:inline-block;width:11px;height:11px;background:{color};'
         f'border-radius:50%;margin:0 4px;vertical-align:middle;"></span>{label}</label>'
         for key, label, color, _, _ in PRICE_BUCKETS
+    )
+    genre_rows = "\n".join(
+        f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
+        f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
+        f'{cat} <span style="color:#9ca3af;">({cat_counts.get(cat, 0)})</span></label>'
+        for cat in GENRE_CATEGORIES
     )
     return f"""
 <div id="ff-panel" style="
@@ -281,6 +364,30 @@ def build_filter_panel_html() -> str:
     </span>
   </div>
 {price_rows}
+
+  <details id="ff-genre-box" style="margin-top:6px;margin-bottom:6px;">
+    <summary style="cursor:pointer;list-style:none;display:flex;
+                    justify-content:space-between;align-items:center;
+                    padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;
+                    background:#f9fafb;font-size:12px;">
+      <span style="font-weight:600;">菜系
+        <span id="ff-genre-summary" style="font-weight:400;color:#6b7280;
+              font-size:11px;margin-left:4px;">全部</span>
+      </span>
+      <span style="color:#6b7280;font-size:10px;">▾</span>
+    </summary>
+    <div style="margin-top:4px;font-size:11px;">
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:3px;">
+        <a href="#" id="ff-genre-all" style="color:#2563eb;text-decoration:none;">全选</a>
+        <span style="color:#d1d5db;">|</span>
+        <a href="#" id="ff-genre-none" style="color:#2563eb;text-decoration:none;">全清</a>
+      </div>
+      <div style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;
+                  border-radius:4px;padding:4px 6px;background:#fff;">
+{genre_rows}
+      </div>
+    </div>
+  </details>
 
   <div style="font-weight:600;margin-top:6px;margin-bottom:2px;">Tabelog 预约</div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 4px;margin-bottom:6px;">
@@ -840,15 +947,31 @@ FILTER_JS_TEMPLATE = r"""
     var onlyFavEl = document.getElementById('ff-only-fav');
     var hideBlackEl = document.getElementById('ff-hide-black');
 
+    var genreSummaryEl = document.getElementById('ff-genre-summary');
+    var genreBoxes = document.querySelectorAll('input[name=ff-genre]');
+    function updateGenreSummary() {
+      var total = genreBoxes.length;
+      var n = 0;
+      genreBoxes.forEach(function(c){ if (c.checked) n++; });
+      if (!genreSummaryEl) return;
+      if (n === total) genreSummaryEl.textContent = '全部';
+      else if (n === 0) genreSummaryEl.textContent = '无';
+      else genreSummaryEl.textContent = '已选 ' + n + ' / ' + total;
+    }
+
     function apply() {
       var minRating = parseFloat(ratingSlider.value);
       ratingLabel.textContent = minRating.toFixed(2);
       var pSet = {};
       document.querySelectorAll('input[name=ff-price]:checked').forEach(function(c){ pSet[c.value]=1; });
+      var gSet = {};
+      var gAny = false;
+      document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ gSet[c.value]=1; gAny=true; });
       var bEl = document.querySelector('input[name=ff-bookable]:checked');
       var book = bEl ? bEl.value : 'all';
       var onlyFav = onlyFavEl.checked;
       var hideBlack = hideBlackEl.checked;
+      updateGenreSummary();
 
       cluster.clearLayers();
       var keep = [];
@@ -864,6 +987,14 @@ FILTER_JS_TEMPLATE = r"""
           if (d.rating == null || d.rating < minRating) return;
         }
         if (!pSet[d.bucket]) return;
+        // Genre filter: OR across selected categories. If none checked, hide all.
+        if (!gAny) return;
+        var cats = d.categories || [];
+        var catMatch = false;
+        for (var i = 0; i < cats.length; i++) {
+          if (gSet[cats[i]]) { catMatch = true; break; }
+        }
+        if (!catMatch) return;
         if (book === 'yes' && !d.bookable) return;
         if (book === 'no' && d.bookable) return;
         if (onlyFav && !isFav(d)) return;
@@ -888,9 +1019,20 @@ FILTER_JS_TEMPLATE = r"""
       document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = false; });
       apply();
     });
+    document.getElementById('ff-genre-all').addEventListener('click', function(e) {
+      e.preventDefault();
+      document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
+      apply();
+    });
+    document.getElementById('ff-genre-none').addEventListener('click', function(e) {
+      e.preventDefault();
+      document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = false; });
+      apply();
+    });
     document.getElementById('ff-reset').addEventListener('click', function() {
       ratingSlider.value = '3.4';
       document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = true; });
+      document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
       document.querySelector('input[name=ff-bookable][value="all"]').checked = true;
       onlyFavEl.checked = false;
       hideBlackEl.checked = true;  // default: hide blacklist
@@ -1172,6 +1314,8 @@ def main() -> None:
     fav_set = load_favorites()
     black_set = load_blacklist()
     payload = []
+    cat_counts: dict[str, int] = {cat: 0 for cat in GENRE_CATEGORIES}
+    unmapped_tokens: set[str] = set()
     for row, loc in geocoded:
         bkey, blabel, bcolor = price_bucket(row)
         try:
@@ -1179,6 +1323,14 @@ def main() -> None:
         except (TypeError, ValueError):
             rating_num = None
         url = row.get("detail_url") or ""
+        cats = categorize_genre(row.get("genre") or "")
+        for cat in cats:
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        # Track tokens that fell through to "其他" so we notice when Tabelog
+        # adds a new genre label that deserves its own bucket.
+        for tok in (t.strip() for t in _GENRE_SPLIT_RE.split(row.get("genre") or "") if t.strip()):
+            if tok not in _GENRE_TO_CAT:
+                unmapped_tokens.add(tok)
         payload.append({
             "lat": loc["lat"],
             "lon": loc["lon"],
@@ -1186,6 +1338,7 @@ def main() -> None:
             "rating": rating_num,
             "bucket": bkey,
             "color": bcolor,
+            "categories": cats,
             "bookable": parse_bool(row.get("tabelog_bookable")),
             "detail_url": url,
             "favorited": url in fav_set,
@@ -1193,6 +1346,8 @@ def main() -> None:
             "popup": fmt_popup(row),
             "tooltip": f"{row.get('name')} · ★{row.get('rating')} · {blabel}",
         })
+    if unmapped_tokens:
+        print(f"  unmapped genre tokens (fell into 其他): {sorted(unmapped_tokens)}")
     n_fav = sum(1 for p in payload if p['favorited'])
     n_black = sum(1 for p in payload if p['blacklisted'])
     print(f"  favorites: {n_fav} from favorites.json, blacklist: {n_black} from blacklist.json")
@@ -1205,7 +1360,7 @@ def main() -> None:
     print(f"  payload: {len(payload_bytes):,} bytes → encrypted "
           f"({len(enc['ciphertext']):,} b64), PBKDF2 iters={enc['iters']:,}")
 
-    panel_html = build_filter_panel_html()
+    panel_html = build_filter_panel_html(cat_counts)
     filter_js = FILTER_JS_TEMPLATE.replace(
         "__ENCRYPTED__", json.dumps(enc)
     )
