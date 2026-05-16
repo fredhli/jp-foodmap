@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Playwright user profile (large, machine-local)
+.chrome_profile/
+
+# All raw data stays local — only the encrypted docs/index.html is committed.
+data/
+
+# Editor / tool state
+.claude/
+.idea/
+.vscode/
+
+# Local config (Gist ID, etc) — never commit
+config.json

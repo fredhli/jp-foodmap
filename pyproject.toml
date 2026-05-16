@@ -1,0 +1,11 @@
+[project]
+name = "tabelog"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=43",
+    "deep-translator>=1.11.4",
+    "folium>=0.20.0",
+    "httpx>=0.28.1",
+    "playwright>=1.59.0",
+]
