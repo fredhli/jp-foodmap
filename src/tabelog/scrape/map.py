@@ -36,10 +36,13 @@ PBKDF2_ITERS = 200_000
 
 
 def encrypt_payload(payload_bytes: bytes, password: str) -> dict:
-    """AES-256-GCM with a PBKDF2-SHA256 derived key. Returns the bundle the
-    browser needs to attempt decrypt: random salt + iv + ciphertext (which
-    AESGCM already appends the auth tag to). All as base64 for JSON embed."""
-    salt = os.urandom(16)
+    """AES-256-GCM with a PBKDF2-SHA256 derived key. Salt is derived
+    deterministically from the password so cached unlock keys survive
+    rebuilds — only changing the password invalidates them. The salt is
+    public anyway (baked into HTML), so making it deterministic doesn't
+    weaken anything an attacker couldn't already compute."""
+    import hashlib
+    salt = hashlib.sha256(b"jp-foodmap:" + password.encode("utf-8")).digest()[:16]
     iv = os.urandom(12)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt,
                      iterations=PBKDF2_ITERS)
@@ -506,13 +509,17 @@ FILTER_JS_TEMPLATE = r"""
   function loadCache() {
     try {
       var d = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
-      return {fav: d.fav || null, black: d.black || null};
-    } catch (_) { return {fav: null, black: null}; }
+      return {fav: d.fav || null, black: d.black || null, dirty: !!d.dirty};
+    } catch (_) { return {fav: null, black: null, dirty: false}; }
   }
-  function saveCache(state) {
+  // Persists state + the dirty flag. Storing dirty across reloads is the
+  // whole point — without it, an unpushed change would be silently
+  // overwritten by the next pull after a refresh.
+  function saveCache(state, dirtyFlag) {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       fav: Array.from(state.fav),
       black: Array.from(state.black),
+      dirty: !!dirtyFlag,
     }));
   }
 
@@ -628,7 +635,9 @@ FILTER_JS_TEMPLATE = r"""
                            : kind === 'ok'  ? '#16a34a'
                            : kind === 'busy'? '#2563eb' : '#6b7280';
     }
-    var etag = null, dirty = false, pushTimer = null, pollTimer = null;
+    // dirty is restored from cache so an unpushed change survives a refresh.
+    var etag = null, dirty = cache.dirty || false;
+    var pushTimer = null, pollTimer = null;
 
     function configured() {
       var c = loadConfig();
@@ -657,7 +666,7 @@ FILTER_JS_TEMPLATE = r"""
             var remote = parseGistFiles(j);
             if (remote.fav)   state.fav   = remote.fav;
             if (remote.black) state.black = remote.black;
-            saveCache(state);
+            saveCache(state, false);
             refreshAllMarkers();
             setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
           });
@@ -666,10 +675,10 @@ FILTER_JS_TEMPLATE = r"""
     }
     function push() {
       var c = configured();
-      saveCache(state);            // always cache locally
-      if (!c) { dirty = false; return; }
+      if (!c) { dirty = false; saveCache(state, false); return; }
       if (!c.pat) {                // read-only mode
         dirty = false;
+        saveCache(state, false);
         setStatus('只读模式（无 PAT，无法保存）', '');
         return;
       }
@@ -687,21 +696,33 @@ FILTER_JS_TEMPLATE = r"""
           if (!r.ok) throw new Error('HTTP ' + r.status);
           etag = r.headers.get('ETag');
           dirty = false;
+          saveCache(state, false);
           setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
         })
         .catch(function(e) {
-          dirty = false;
-          setStatus('保存失败: ' + e.message + '（已存本地）', 'err');
+          // Keep dirty=true (in memory AND in localStorage) on failure so the
+          // next pull — or a page refresh — doesn't silently clobber our
+          // unsaved change with the stale remote state. Change recovers when
+          // a future push succeeds.
+          saveCache(state, true);
+          var hint = e.message.indexOf('403') >= 0
+            ? '（PAT 没有写权限，去 settings → Gists 改 Read and write）'
+            : '（已存本地，将在下次成功推送时同步）';
+          setStatus('保存失败: ' + e.message + ' ' + hint, 'err');
         });
     }
     function schedulePush() {
       dirty = true;
-      saveCache(state);
+      saveCache(state, true);
       clearTimeout(pushTimer);
       pushTimer = setTimeout(push, 500);
     }
     function startSync() {
-      pull();
+      // If a previous session left an unpushed change, retry pushing it
+      // *before* pulling; otherwise pull would just confirm the remote
+      // state (which still lacks the change) and the user would see "已同步"
+      // while their edit is actually still local-only.
+      if (dirty) push(); else pull();
       clearInterval(pollTimer);
       pollTimer = setInterval(function() {
         if (document.visibilityState === 'visible') pull();
@@ -918,7 +939,9 @@ FILTER_JS_TEMPLATE = r"""
           saveConfig({gistId: gistId, pat: pat});
           cfgMsg.style.color = '#16a34a';
           var hasFiles = (j.files && (j.files['favorites.json'] || j.files['blacklist.json']));
-          cfgMsg.textContent = hasFiles ? '✓ 配置成功，正在拉取' : '✓ 已连接，Gist 是空的，下次操作会写入';
+          cfgMsg.textContent = dirty
+            ? '✓ 配置成功，正在重试上次失败的同步'
+            : (hasFiles ? '✓ 配置成功，正在拉取' : '✓ 已连接，Gist 是空的，下次操作会写入');
           etag = null;
           setTimeout(function() { closeModal(); startSync(); }, 700);
         })
