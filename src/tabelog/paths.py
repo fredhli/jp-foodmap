@@ -35,6 +35,7 @@ BLACKLIST_JSON = USER_DIR / "blacklist.json"
 # Rendered artifact — committed to docs/ so GitHub Pages picks it up.
 MAP_HTML = DOCS_DIR / "index.html"
 GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
+ATTRACTIONS_CSV = DATA / "attractions.csv"
 
 
 def _ensure_dirs() -> None:

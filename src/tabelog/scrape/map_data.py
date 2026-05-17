@@ -1,30 +1,33 @@
-"""Hand-curated data for map.py: cuisine buckets, marker emojis, and Osaka
-tourist anchors. Split out so it can be edited without touching rendering code."""
+"""Hand-curated data for map.py: cuisine buckets, marker emojis, and
+tourist anchors. Split out so it can be edited without touching
+rendering code.
 
-# 20 hand-picked Osaka tourist anchors. Coords typed from memory — accurate to
-# ~100-300m, fine for travel reference. Districts (e.g. 心斎橋) are pinned to
-# their commonly-cited centroid.
-ATTRACTIONS = [
-    ("大阪城", "🏯", 34.687315, 135.526201),
-    ("道顿堀", "🎭", 34.668731, 135.501291),
-    ("心斋桥筋商店街", "🛍️", 34.671804, 135.501306),
-    ("通天阁", "🗼", 34.652500, 135.506306),
-    ("新世界", "🍢", 34.652194, 135.506167),
-    ("日本环球影城", "🎢", 34.665442, 135.432338),
-    ("海游馆", "🐋", 34.654528, 135.428944),
-    ("梅田蓝天大厦 空中庭园", "🌃", 34.705278, 135.489722),
-    ("阿倍野海阔天空大厦", "🏢", 34.645833, 135.514444),
-    ("黑门市场", "🍣", 34.665278, 135.506389),
-    ("大阪站·梅田", "🚉", 34.702485, 135.495951),
-    ("难波", "🚆", 34.663333, 135.501944),
-    ("法善寺横丁", "🍶", 34.668056, 135.502222),
-    ("美国村", "🎵", 34.672222, 135.498333),
-    ("中之岛公园", "🌳", 34.692222, 135.512222),
-    ("国立国际美术馆", "🖼️", 34.691389, 135.491667),
-    ("住吉大社", "⛩️", 34.612222, 135.492500),
-    ("万博纪念公园 太阳塔", "🌞", 34.809444, 135.532500),
-    ("天保山大摩天轮", "🎡", 34.656111, 135.431111),
-]
+ATTRACTIONS is loaded from data/attractions.csv — edit that file (or
+run fetch_attractions.py to fill in coords for new rows) instead of
+pasting tuples here."""
+
+import csv
+
+from tabelog.paths import ATTRACTIONS_CSV
+
+
+def _load_attractions() -> list[tuple[str, str, float, float]]:
+    """(name_cn, emoji, lat, lon) for every CSV row whose lon and lat are
+    both filled. Blank-coord rows are skipped silently — run
+    fetch_attractions.py to resolve them."""
+    rows: list[tuple[str, str, float, float]] = []
+    if not ATTRACTIONS_CSV.exists():
+        return rows
+    with ATTRACTIONS_CSV.open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            lon, lat = r.get("lon", "").strip(), r.get("lat", "").strip()
+            if not lon or not lat:
+                continue
+            rows.append((r["name_cn"], r["emoji"], float(lat), float(lon)))
+    return rows
+
+
+ATTRACTIONS = _load_attractions()
 
 
 # Maps Tabelog's JP genre tokens to 20 broad cuisine categories. Dict order

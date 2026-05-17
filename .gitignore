@@ -11,7 +11,11 @@ __pycache__/
 .chrome_profile/
 
 # All raw data stays local — only docs/index.html is committed.
-data/
+# Uses data/* (not data/) so the !data/attractions.csv exception below
+# is reachable; a bare data/ ignore halts traversal at the directory and
+# silently swallows nested re-includes.
+data/*
+!data/attractions.csv
 
 # Editor / tool state
 .claude/
