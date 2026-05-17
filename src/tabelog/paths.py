@@ -24,16 +24,16 @@ RESTAURANTS_CSV = OMAKASE_DIR / "restaurants.csv"
 RESTAURANTS_ALL_CSV = OMAKASE_DIR / "restaurants_all.csv"
 BOOKABLE_CSV = OMAKASE_DIR / "bookable.csv"
 
-# Tabelog pipeline (tabelog.com)
-TABELOG_OSAKA_CSV = TABELOG_DIR / "tabelog_osaka.csv"
-TABELOG_OSAKA_RAW_CSV = INTERMEDIATE_DIR / "tabelog_osaka_raw.csv"
+# Tabelog pipeline (tabelog.com) — unified across regions; each row carries
+# a `region` column tagging which Tabelog list it was scraped from.
+TABELOG_CSV = TABELOG_DIR / "tabelog.csv"
 
 # User-curated state edited via the map UI
 FAVORITES_JSON = USER_DIR / "favorites.json"
 BLACKLIST_JSON = USER_DIR / "blacklist.json"
 
-# Rendered artifacts — committed to docs/ so GitHub Pages picks it up.
-OSAKA_MAP_HTML = DOCS_DIR / "index.html"
+# Rendered artifact — committed to docs/ so GitHub Pages picks it up.
+MAP_HTML = DOCS_DIR / "index.html"
 GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
 
 

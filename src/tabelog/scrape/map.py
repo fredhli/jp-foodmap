@@ -1,13 +1,15 @@
 """
-Plot data/tabelog/tabelog_osaka.csv (299 restaurants — full 3.65+ range)
-on an interactive Osaka map with a client-side filter panel: rating
-threshold, dinner-price bucket, Tabelog bookable.
+Plot data/tabelog/tabelog.csv on an interactive Japan-wide map with a
+client-side filter panel: rating threshold, dinner-price bucket, cuisine,
+Tabelog bookable. Each row carries a `region` column so rows from
+different regions (osaka, kobe, okayama, tottori, ...) all coexist in
+one file.
 
 Geocoding via GSI AddressSearch; results cached to data/cache/geocode_cache.json.
 
 CSV is utf-8-sig so Japanese addresses round-trip through Excel cleanly.
 
-Output: data/output/tabelog_osaka_map.html  (single file, open in any browser).
+Output: docs/index.html  (single file, open in any browser).
 """
 
 import argparse
@@ -30,20 +32,26 @@ if hasattr(sys.stdout, "reconfigure"):
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from tabelog.paths import (
-    TABELOG_OSAKA_CSV,
+    TABELOG_CSV,
     GEOCODE_CACHE,
-    OSAKA_MAP_HTML,
+    MAP_HTML,
     FAVORITES_JSON,
     BLACKLIST_JSON,
     OUTPUT_DIR,
     CACHE_DIR,
 )
+from tabelog.scrape.map_data import (
+    ATTRACTIONS,
+    DEFAULT_OFF_GENRES,
+    GENRE_CATEGORIES,
+    GENRE_EMOJI,
+)
 
 GSI_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
 
-CSV_PATH = TABELOG_OSAKA_CSV
+CSV_PATH = TABELOG_CSV
 CACHE_PATH = GEOCODE_CACHE
-OUT_HTML = OSAKA_MAP_HTML
+OUT_HTML = MAP_HTML
 
 # Baseline lists — JSON arrays of detail_url strings. Rebuilding the map
 # re-reads these files; in-browser ⭐ / 🚫 clicks live in localStorage as a
@@ -68,32 +76,7 @@ def load_favorites() -> set[str]:
 def load_blacklist() -> set[str]:
     return _load_url_set(BLACKLIST_PATH)
 
-OSAKA_CENTER = (34.6937, 135.5023)
-
-# 20 hand-picked Osaka tourist anchors. Coords typed from memory — accurate to
-# ~100-300m, fine for travel reference. Districts (e.g. 心斎橋) are pinned to
-# their commonly-cited centroid.
-ATTRACTIONS = [
-    ("大阪城", "🏯", 34.687315, 135.526201),
-    ("道顿堀", "🎭", 34.668731, 135.501291),
-    ("心斋桥筋商店街", "🛍️", 34.671804, 135.501306),
-    ("通天阁", "🗼", 34.652500, 135.506306),
-    ("新世界", "🍢", 34.652194, 135.506167),
-    ("日本环球影城", "🎢", 34.665442, 135.432338),
-    ("海游馆", "🐋", 34.654528, 135.428944),
-    ("梅田蓝天大厦 空中庭园", "🌃", 34.705278, 135.489722),
-    ("阿倍野海阔天空大厦", "🏢", 34.645833, 135.514444),
-    ("黑门市场", "🍣", 34.665278, 135.506389),
-    ("大阪站·梅田", "🚉", 34.702485, 135.495951),
-    ("难波", "🚆", 34.663333, 135.501944),
-    ("法善寺横丁", "🍶", 34.668056, 135.502222),
-    ("美国村", "🎵", 34.672222, 135.498333),
-    ("中之岛公园", "🌳", 34.692222, 135.512222),
-    ("国立国际美术馆", "🖼️", 34.691389, 135.491667),
-    ("住吉大社", "⛩️", 34.612222, 135.492500),
-    ("万博纪念公园 太阳塔", "🌞", 34.809444, 135.532500),
-    ("天保山大摩天轮", "🎡", 34.656111, 135.431111),
-]
+JAPAN_CENTER = (36.2048, 138.2529)
 
 
 def load_cache() -> dict[str, dict | None]:
@@ -173,66 +156,8 @@ def geocode(addr: str, client: httpx.Client, cache: dict) -> dict | None:
     return None
 
 
-# Maps Tabelog's JP genre tokens to 19 broad cuisine categories. Dict order
-# drives filter dropdown order. Single-tag: each restaurant lands in exactly
-# one bucket (the first matching token in the comma-separated genre string).
-GENRE_CATEGORIES = {
-    "拉面·沾面":     ["ラーメン", "つけ麺", "油そば・まぜそば",
-                      "担々麺", "汁なし担々麺"],
-    "乌冬·荞麦":     ["うどん", "そば", "うどんすき", "カレーうどん"],
-    "寿司·海鲜":     ["寿司", "海鮮", "うなぎ", "ふぐ"],
-    "烤肉·内脏":     ["焼肉", "ホルモン", "もつ焼き",
-                      "牛料理", "牛タン", "ステーキ", "肉料理",
-                      "しゃぶしゃぶ", "豚しゃぶ"],
-    "烤鸡·串烧":     ["焼き鳥", "鳥料理", "串焼き", "からあげ"],
-    "天妇罗·炸物":   ["天ぷら", "揚げ物", "串揚げ", "とんかつ"],
-    "咖喱":          ["カレー", "インドカレー", "インド料理",
-                      "スープカレー", "ネパール料理", "スリランカ料理"],
-    "盖饭·亲子丼":   ["丼", "親子丼", "天丼", "かつ丼", "おにぎり", "食堂"],
-    "居酒屋·酒吧":   ["居酒屋", "バー", "ダイニングバー", "ワインバー",
-                      "日本酒バー", "バル", "パブ", "立ち飲み"],
-    "日本料理·乡土": ["日本料理", "創作料理", "郷土料理", "イノベーティブ"],
-    "御好烧·铁板烧": ["お好み焼き", "焼きそば", "鉄板焼き"],
-    "关东煮·锅物":   ["おでん", "鍋", "ちゃんこ鍋", "水炊き"],
-    "饺子·中餐":     ["餃子", "中華料理", "四川料理"],
-    "韩国料理":      ["韓国料理", "冷麺"],
-    "西餐/西式料理": ["洋食", "ハンバーガー", "ハンバーグ", "フレンチ",
-                      "ヨーロッパ料理", "イタリアン", "ピザ", "パスタ"],
-    "咖啡·三明治":   ["カフェ", "喫茶店", "サンドイッチ", "パンケーキ"],
-    "烘焙·西点":     ["パン", "洋菓子", "ケーキ", "チョコレート",
-                      "マカロン", "プリン", "スイーツ", "ベーグル"],
-    "和果子·冰品":   ["和菓子", "大福", "甘味処", "かき氷",
-                      "たい焼き・大判焼き", "ジェラート・アイスクリーム",
-                      "ソフトクリーム", "ジューススタンド"],
-    "其他":          [],
-}
-
 _GENRE_TO_CAT = {tok: cat for cat, toks in GENRE_CATEGORIES.items() for tok in toks}
 _GENRE_SPLIT_RE = re.compile(r"[、,，]")
-
-# One emoji per bucket — rendered inside the map marker on top of the price
-# color. Picked to be visually distinct at 13px.
-GENRE_EMOJI = {
-    "拉面·沾面":     "🍜",
-    "乌冬·荞麦":     "🥣",
-    "寿司·海鲜":     "🍣",
-    "烤肉·内脏":     "🥩",
-    "烤鸡·串烧":     "🍗",
-    "天妇罗·炸物":   "🍤",
-    "咖喱":          "🍛",
-    "盖饭·亲子丼":   "🍚",
-    "居酒屋·酒吧":   "🍺",
-    "日本料理·乡土": "🍱",
-    "御好烧·铁板烧": "🥞",
-    "关东煮·锅物":   "🍲",
-    "饺子·中餐":     "🥟",
-    "韩国料理":      "🌶️",
-    "西餐/西式料理": "🍝",
-    "咖啡·三明治":   "☕",
-    "烘焙·西点":     "🥐",
-    "和果子·冰品":   "🍡",
-    "其他":          "🍽️",
-}
 
 
 def categorize_genre(genre_str: str) -> list[str]:
@@ -294,12 +219,16 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
         f'border-radius:50%;margin:0 4px;vertical-align:middle;"></span>{label}</label>'
         for key, label, color, _, _ in PRICE_BUCKETS
     )
+    # DEFAULT_OFF_GENRES (中/韩/西/南亚) are not shown in the cuisine filter
+    # at all — they're controlled by the standalone "隐藏外国料理" toggle below.
     genre_rows = "\n".join(
         f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
         f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
         f'{cat} <span style="color:#9ca3af;">({cat_counts.get(cat, 0)})</span></label>'
         for cat in GENRE_CATEGORIES
+        if cat not in DEFAULT_OFF_GENRES
     )
+    foreign_count = sum(cat_counts.get(c, 0) for c in DEFAULT_OFF_GENRES)
     return f"""
 <div id="ff-panel" style="
      position: fixed; top: 12px; right: 12px; z-index: 9999;
@@ -376,6 +305,14 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
   </div>
   <label style="display:block;margin-bottom:6px;">
     <input type="checkbox" id="ff-hide-black" checked> 隐藏弃用名单
+  </label>
+
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
+    <span style="font-weight:600;">外国料理</span>
+    <span style="font-size:11px;color:#6b7280;">🌏 <b>{foreign_count}</b></span>
+  </div>
+  <label style="display:block;margin-bottom:6px;">
+    <input type="checkbox" id="ff-hide-foreign" checked> 隐藏外国料理 (🇨🇳🇰🇷🇫🇷🇮🇳)
   </label>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;">
@@ -461,6 +398,70 @@ FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
   var EMBEDDED_DATA = __PAYLOAD__;
+
+  // ===== Apple-style emoji rendering via emojicdn =====
+  // Windows ships no flag glyphs in its system font, so we swap every emoji
+  // on the page for an <img> from emojicdn.elk.sh (?style=apple). The genre
+  // marker emoji is baked in directly via emojiImg(); everything else
+  // (popups, button labels, attraction divIcons) is caught by a
+  // MutationObserver that scans subtrees as they're inserted.
+  var EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}][\u{1F1E6}-\u{1F1FF}]|\p{Emoji_Presentation}|\p{Emoji}\uFE0F/gu;
+  function emojiImg(m, extraStyle) {
+    return '<img src="https://emojicdn.elk.sh/' + encodeURIComponent(m) +
+           '?style=apple" alt="' + m + '" draggable="false" ' +
+           'style="height:1em;width:1em;vertical-align:-0.15em;' +
+           'display:inline-block;' + (extraStyle || '') + '">';
+  }
+  function emojiHtml(s) {
+    if (!s) return '';
+    return String(s).replace(EMOJI_RE, function(m) { return emojiImg(m); });
+  }
+  function setEmojiHtml(el, text) {
+    if (el) el.innerHTML = emojiHtml(text);
+  }
+  function emojify(root) {
+    if (!root || root.nodeType !== 1) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) {
+        var p = n.parentNode;
+        if (!p) return NodeFilter.FILTER_REJECT;
+        var t = p.tagName;
+        if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEXTAREA' || t === 'INPUT') {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [], n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function(tn) {
+      var v = tn.nodeValue;
+      if (!v) return;
+      var html = v.replace(EMOJI_RE, function(m) { return emojiImg(m); });
+      if (html === v) return;
+      var span = document.createElement('span');
+      span.innerHTML = html;
+      tn.replaceWith(span);
+    });
+  }
+  function startEmojiObserver() {
+    emojify(document.body);
+    new MutationObserver(function(muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var nd = added[j];
+          if (nd.nodeType === 1) emojify(nd);
+          else if (nd.nodeType === 3 && nd.parentNode) emojify(nd.parentNode);
+        }
+      }
+    }).observe(document.body, {childList: true, subtree: true});
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startEmojiObserver);
+  } else {
+    startEmojiObserver();
+  }
 
   // ===== GitHub Gist sync layer =====
   //
@@ -738,8 +739,8 @@ FILTER_JS_TEMPLATE = r"""
                  '<div style="position:absolute;inset:0;border-radius:50%;' +
                  'background:radial-gradient(circle closest-side, ' +
                  color + 'EE 0%, ' + color + 'AA 50%, ' + color + '00 100%);"></div>' +
-                 '<span style="position:relative;font-size:16px;line-height:1;' +
-                 'text-shadow:0 1px 2px rgba(0,0,0,0.35);">' + emoji + '</span>' +
+                 emojiImg(emoji, 'position:relative;width:16px;height:16px;' +
+                                 'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));') +
                  badge +
                  '</div>';
       return L.divIcon({className: '', html: html,
@@ -834,6 +835,8 @@ FILTER_JS_TEMPLATE = r"""
 
     var onlyFavEl = document.getElementById('ff-only-fav');
     var hideBlackEl = document.getElementById('ff-hide-black');
+    var hideForeignEl = document.getElementById('ff-hide-foreign');
+    var FOREIGN_GENRES = new Set(__DEFAULT_OFF_GENRES__);
 
     var genreSummaryEl = document.getElementById('ff-genre-summary');
     var genreBoxes = document.querySelectorAll('input[name=ff-genre]');
@@ -859,6 +862,7 @@ FILTER_JS_TEMPLATE = r"""
       var book = bEl ? bEl.value : 'all';
       var onlyFav = onlyFavEl.checked;
       var hideBlack = hideBlackEl.checked;
+      var hideForeign = hideForeignEl.checked;
       updateGenreSummary();
 
       cluster.clearLayers();
@@ -875,14 +879,22 @@ FILTER_JS_TEMPLATE = r"""
           if (d.rating == null || d.rating < minRating) return;
         }
         if (!pSet[d.bucket]) return;
-        // Genre filter: OR across selected categories. If none checked, hide all.
-        if (!gAny) return;
+        // Foreign cuisines (中/韩/西/南亚) bypass the regular genre filter —
+        // they're gated entirely by hideForeignEl. When shown, they appear
+        // regardless of which Japanese-cuisine boxes are checked.
         var cats = d.categories || [];
-        var catMatch = false;
-        for (var i = 0; i < cats.length; i++) {
-          if (gSet[cats[i]]) { catMatch = true; break; }
+        var isForeign = cats.length > 0 && FOREIGN_GENRES.has(cats[0]);
+        if (isForeign) {
+          if (hideForeign) return;
+        } else {
+          // Genre filter: OR across selected categories. If none checked, hide all.
+          if (!gAny) return;
+          var catMatch = false;
+          for (var i = 0; i < cats.length; i++) {
+            if (gSet[cats[i]]) { catMatch = true; break; }
+          }
+          if (!catMatch) return;
         }
-        if (!catMatch) return;
         if (book === 'yes' && !d.bookable) return;
         if (book === 'no' && d.bookable) return;
         if (onlyFav && !isFav(d)) return;
@@ -923,7 +935,8 @@ FILTER_JS_TEMPLATE = r"""
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
       document.querySelector('input[name=ff-bookable][value="all"]').checked = true;
       onlyFavEl.checked = false;
-      hideBlackEl.checked = true;  // default: hide blacklist
+      hideBlackEl.checked = true;
+      hideForeignEl.checked = true;
       apply();
     });
 
@@ -1167,7 +1180,7 @@ def main() -> None:
     #     private rail / subway lines and full station names. Picked over
     #     OpenRailwayMap because that one 403s requests with empty Referer,
     #     which is what browsers send when the HTML is opened via file://.
-    m = folium.Map(location=OSAKA_CENTER, zoom_start=12, tiles=None)
+    m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None)
     folium.TileLayer(
         tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
         attr=('&copy; <a href="https://www.openstreetmap.org/copyright">'
@@ -1263,7 +1276,12 @@ def main() -> None:
     print(f"  payload: {len(payload_json.encode('utf-8')):,} bytes embedded")
 
     panel_html = build_filter_panel_html(cat_counts)
-    filter_js = FILTER_JS_TEMPLATE.replace("__PAYLOAD__", payload_json)
+    default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
+    filter_js = (
+        FILTER_JS_TEMPLATE
+        .replace("__PAYLOAD__", payload_json)
+        .replace("__DEFAULT_OFF_GENRES__", default_off_json)
+    )
     m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
     m.get_root().html.add_child(folium.Element(panel_html))
     m.get_root().html.add_child(folium.Element(filter_js))

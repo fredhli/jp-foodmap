@@ -1,14 +1,20 @@
 """
-Unified Tabelog Osaka scraper.
+Unified Tabelog list scraper. Pass a Tabelog region slug — the URL only
+varies by that one path segment.
 
-  uv run python src/tabelog/scrape/scrape_all.py --min-rating 3.65
-  uv run python src/tabelog/scrape/scrape_all.py --min-rating 3.65 --max-rating 3.80
+  uv run python src/tabelog/scrape/scrape_all.py osaka
+  uv run python src/tabelog/scrape/scrape_all.py hyogo --top-pct 0.5
+  uv run python src/tabelog/scrape/scrape_all.py okayama --hard-cap 200
+  uv run python src/tabelog/scrape/scrape_all.py tottori --top-pct 2 --hard-cap 100
 
-Phase 1 paginates the Osaka list (sorted by rating desc), keeping cards in
-[min_rating, max_rating). Phase 2 visits each detail page for address +
-tabelog_bookable (plus seat_count / reservation_policy as schema fillers).
-Phase 3 appends to data/tabelog/tabelog_osaka.csv and dedupes by detail_url,
-keeping the newly-scraped row when a URL appears in both.
+Phase 1 paginates the list (sorted by rating desc). On the first page it
+reads the region's total restaurant count (the "全 N 件" badge) and
+computes target = min(round(total * top_pct / 100), hard_cap), then keeps
+paginating until that many cards are collected. Phase 2 visits each detail
+page for address + tabelog_bookable (plus seat_count / reservation_policy
+as schema fillers). Phase 3 appends to data/tabelog/tabelog.csv (unified
+across all regions, each row carries a `region` column) and dedupes by
+detail_url, keeping the newly-scraped row when a URL appears in both.
 
 Genre / holiday / reservation_policy stay in Japanese — no translation.
 reservation_policy_chinese is preserved in the schema but left blank for new
@@ -27,9 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 from deep_translator import GoogleTranslator
 from playwright.async_api import async_playwright
 from tabelog.browser import get_or_spawn_chrome
-from tabelog.paths import INTERMEDIATE_DIR, TABELOG_DIR, TABELOG_OSAKA_CSV
+from tabelog.paths import INTERMEDIATE_DIR, TABELOG_CSV, TABELOG_DIR
 
-BASE = "https://tabelog.com/osaka/rstLst/{page}/?Srt=D&SrtT=rt&sort_mode=1"
+BASE_TEMPLATE = "https://tabelog.com/{region}/rstLst/{page}/?Srt=D&SrtT=rt&sort_mode=1"
 LIST_PAGE_DELAY_S = 2.0
 DETAIL_PAGE_DELAY_S = 1.5
 CHECKPOINT_EVERY = 10
@@ -37,6 +43,7 @@ MAX_RETRIES = 3                 # per row/page
 RECONNECT_BACKOFF_S = 3.0       # after the browser/page dies
 
 FIELDS = [
+    "region",
     "rank", "name", "rating", "review_count", "save_count",
     "genre", "station", "station_distance_m",
     "dinner_upper", "lunch_upper", "holiday",
@@ -49,7 +56,7 @@ FIELDS = [
 CARDS_JS = r"""
 () => {
     const cards = Array.from(document.querySelectorAll('.list-rst.js-rst-cassette-wrap'));
-    return cards.map(card => {
+    const cardData = cards.map(card => {
         const detailUrl = card.getAttribute('data-detail-url') || null;
         const rankEl = card.querySelector('.c-ranking-badge__contents');
         const rank = rankEl ? rankEl.innerText.trim() : null;
@@ -77,6 +84,11 @@ CARDS_JS = r"""
         return {detailUrl, rank, name, areaGenreText, rating,
                 review_count, save_count, dinner, lunch, holiday};
     });
+    // pull "全 N 件" from the page header (e.g. "1～20 件を表示 ／ 全 71824 件")
+    const bodyText = document.body ? (document.body.innerText || '') : '';
+    const m = bodyText.match(/全\s*([\d,]+)\s*件/);
+    const total = m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
+    return {cards: cardData, total};
 }
 """
 
@@ -196,8 +208,8 @@ def _is_session_dead(exc: Exception) -> bool:
     ))
 
 
-async def scrape_list_page(session: Session, page_num: int) -> list[dict]:
-    url = BASE.format(page=page_num)
+async def scrape_list_page(session: Session, region: str, page_num: int) -> tuple[list[dict], int | None]:
+    url = BASE_TEMPLATE.format(region=region, page=page_num)
     print(f"[list page {page_num}] GET {url}")
     last_err: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
@@ -216,9 +228,10 @@ async def scrape_list_page(session: Session, page_num: int) -> list[dict]:
     else:
         raise RuntimeError(f"list page {page_num} failed after {MAX_RETRIES} attempts: {last_err}")
     rows = []
-    for c in raw:
+    for c in raw["cards"]:
         genre, station, dist = parse_area_genre(c["areaGenreText"])
         rows.append({
+            "region": region,
             "rank": c["rank"], "name": c["name"],
             "rating": c["rating"], "review_count": c["review_count"],
             "save_count": c["save_count"],
@@ -230,15 +243,16 @@ async def scrape_list_page(session: Session, page_num: int) -> list[dict]:
             "reservation_policy_chinese": "", "tabelog_bookable": "",
             "detail_url": c["detailUrl"], "source_page": page_num,
         })
-    return rows
+    return rows, raw.get("total")
 
 
-async def collect_list(session: Session, min_rating: float, max_rating: float | None) -> list[dict]:
+async def collect_list(session: Session, region: str, top_pct: float, hard_cap: int) -> list[dict]:
     kept: list[dict] = []
+    target: int | None = None
     page_num = 1
     while True:
         try:
-            rows = await scrape_list_page(session, page_num)
+            rows, total = await scrape_list_page(session, region, page_num)
         except Exception as e:
             print(f"[list page {page_num}] gave up: {e}")
             break
@@ -246,28 +260,25 @@ async def collect_list(session: Session, min_rating: float, max_rating: float | 
             print(f"[list page {page_num}] no cards parsed; stopping")
             break
 
-        ratings = [float(r["rating"]) for r in rows
-                   if r["rating"] and re.match(r"^\d", r["rating"])]
-        min_r = min(ratings) if ratings else None
+        if target is None:
+            if total is None:
+                print(f"[list page {page_num}] could not read '全 N 件'; "
+                      f"falling back to hard-cap {hard_cap}")
+                target = hard_cap
+            else:
+                pct_quota = round(total * top_pct / 100)
+                target = min(pct_quota, hard_cap)
+                print(f"[list page {page_num}] total={total}, top {top_pct}% = "
+                      f"{pct_quota}, hard-cap={hard_cap} -> target={target}")
 
-        for r in rows:
-            if not r["rating"]:
-                continue
-            try:
-                rv = float(r["rating"])
-            except ValueError:
-                continue
-            if rv < min_rating:
-                continue
-            if max_rating is not None and rv >= max_rating:
-                continue
-            kept.append(r)
+        remaining = target - len(kept)
+        kept.extend(rows[:remaining])
 
-        print(f"[list page {page_num}] {len(rows)} cards, min={min_r}, "
-              f"running kept={len(kept)}")
+        print(f"[list page {page_num}] {len(rows)} cards, "
+              f"running kept={len(kept)}/{target}")
 
-        if min_r is not None and min_r < min_rating:
-            print(f"[list page {page_num}] crossed min_rating; stopping pagination")
+        if len(kept) >= target:
+            print(f"[list page {page_num}] reached target {target}; stopping pagination")
             break
         page_num += 1
     return kept
@@ -369,10 +380,16 @@ def append_and_dedupe(new_rows: list[dict], csv_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--min-rating", type=float, default=3.65,
-                    help="inclusive lower bound (default 3.65)")
-    ap.add_argument("--max-rating", type=float, default=None,
-                    help="exclusive upper bound (default: no upper bound)")
+    ap.add_argument("region", type=str,
+                    help="Tabelog region slug — the path segment between "
+                         "'tabelog.com/' and '/rstLst/'. Examples: osaka, "
+                         "hyogo, kyoto, okayama, tottori, kobe. Case-insensitive.")
+    ap.add_argument("--top-pct", type=float, default=1.0,
+                    help="scrape the top N%% of the region's restaurants "
+                         "by rating (default: 1.0)")
+    ap.add_argument("--hard-cap", type=int, default=400,
+                    help="absolute upper bound on rows kept, applied after "
+                         "top-pct (default: 400)")
     ap.add_argument("--translate", action=argparse.BooleanOptionalAction, default=False,
                     help="translate reservation_policy -> reservation_policy_chinese "
                          "via Google (default: off). Use --translate / --no-translate.")
@@ -381,24 +398,30 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
-    if args.max_rating is not None and args.max_rating <= args.min_rating:
-        sys.exit(f"--max-rating ({args.max_rating}) must be > --min-rating ({args.min_rating})")
+    if args.top_pct <= 0:
+        sys.exit(f"--top-pct must be > 0 (got {args.top_pct})")
+    if args.hard_cap <= 0:
+        sys.exit(f"--hard-cap must be > 0 (got {args.hard_cap})")
+
+    region = args.region.strip().lower()
+    if not region or "/" in region:
+        sys.exit(f"invalid region slug: {args.region!r}")
 
     INTERMEDIATE_DIR.mkdir(parents=True, exist_ok=True)
     TABELOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    range_tag = (f"{args.min_rating:.2f}_to_{args.max_rating:.2f}"
-                 if args.max_rating is not None else f"{args.min_rating:.2f}_plus")
-    intermediate = INTERMEDIATE_DIR / f"tabelog_osaka_scrape_{range_tag}.csv"
+    range_tag = f"top{args.top_pct:g}pct_cap{args.hard_cap}"
+    intermediate = INTERMEDIATE_DIR / f"tabelog_{region}_scrape_{range_tag}.csv"
+    out_csv = TABELOG_CSV
 
-    print(f"Range: [{args.min_rating}, "
-          f"{args.max_rating if args.max_rating is not None else '∞'})")
+    print(f"Region: {region}  ->  {out_csv.name}")
+    print(f"Target: top {args.top_pct}% of region, hard-capped at {args.hard_cap}")
 
     async with async_playwright() as p:
         session = Session(p)
         await session.connect()
 
-        kept = await collect_list(session, args.min_rating, args.max_rating)
+        kept = await collect_list(session, region, args.top_pct, args.hard_cap)
         print(f"\nCollected {len(kept)} list rows. Now visiting detail pages.")
         write_intermediate(kept, intermediate)
 
@@ -424,7 +447,7 @@ async def main() -> None:
     if args.translate:
         await translate_reservation_policy(kept, intermediate)
 
-    append_and_dedupe(kept, TABELOG_OSAKA_CSV)
+    append_and_dedupe(kept, out_csv)
 
 
 if __name__ == "__main__":
