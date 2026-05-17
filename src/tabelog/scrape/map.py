@@ -237,12 +237,20 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
      font-size: 12px; line-height: 1.45; color: #111827;
      box-shadow: 0 4px 12px rgba(0,0,0,0.12); width: 232px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;
+  <div id="ff-header" style="display:flex;justify-content:space-between;align-items:center;
               border-bottom:1px solid #e5e7eb;padding-bottom:5px;margin-bottom:6px;">
     <span style="font-weight:700;font-size:13px;">筛选</span>
-    <span style="font-size:11px;color:#6b7280;">显示 <b id="ff-count">–</b> / <span id="ff-total">–</span></span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;color:#6b7280;">显示 <b id="ff-count">–</b> / <span id="ff-total">–</span></span>
+      <button id="ff-collapse" title="折叠"
+              style="border:1px solid #d1d5db;background:#f9fafb;color:#374151;
+                     width:22px;height:22px;border-radius:4px;cursor:pointer;
+                     font-size:15px;line-height:1;padding:0;font-weight:700;
+                     display:flex;align-items:center;justify-content:center;">−</button>
+    </div>
   </div>
 
+  <div id="ff-body">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;">
     <span style="font-weight:600;">评分</span>
     <span style="font-size:11px;color:#374151;">≥ <b id="ff-rating-val">3.4</b></span>
@@ -325,6 +333,7 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
   </div>
   <div id="ff-sync-status" style="font-size:10px;color:#6b7280;text-align:center;
        margin-top:2px;min-height:13px;">本地模式</div>
+  </div>
 </div>
 
 <!-- Settings modal (Gist ID + PAT). Hidden by default. -->
@@ -929,6 +938,28 @@ FILTER_JS_TEMPLATE = r"""
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = false; });
       apply();
     });
+    // Collapse / expand the panel — handy on phones where the filter sits
+    // on top of the map. State is per-device, persisted in localStorage.
+    var collapseBtn = document.getElementById('ff-collapse');
+    var ffBody = document.getElementById('ff-body');
+    var ffHeader = document.getElementById('ff-header');
+    var COLLAPSE_KEY = 'tabelog.ffPanel.collapsed';
+    function setCollapsed(c) {
+      ffBody.style.display = c ? 'none' : '';
+      collapseBtn.textContent = c ? '+' : '−';
+      collapseBtn.title = c ? '展开' : '折叠';
+      ffHeader.style.borderBottom = c ? 'none' : '1px solid #e5e7eb';
+      ffHeader.style.paddingBottom = c ? '0' : '5px';
+      ffHeader.style.marginBottom = c ? '0' : '6px';
+      try { localStorage.setItem(COLLAPSE_KEY, c ? '1' : '0'); } catch (e) {}
+    }
+    collapseBtn.addEventListener('click', function() {
+      setCollapsed(ffBody.style.display !== 'none');
+    });
+    try {
+      if (localStorage.getItem(COLLAPSE_KEY) === '1') setCollapsed(true);
+    } catch (e) {}
+
     document.getElementById('ff-reset').addEventListener('click', function() {
       ratingSlider.value = '3.4';
       document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = true; });
