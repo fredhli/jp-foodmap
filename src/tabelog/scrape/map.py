@@ -391,6 +391,7 @@ LOCATE_ASSETS = """
 <meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css"/>
 <script defer src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.js"></script>
+<script defer src="transit-layer.js"></script>
 <style>
   /* Suppress iOS long-press callout + text-selection on the map so the
      contextmenu handler fires cleanly on touch. */
@@ -799,20 +800,23 @@ FILTER_JS_TEMPLATE = r"""
     }).addTo(map);
 
     // ===== FAB layer toggles: transit overlay + attractions =====
-    // OpenRailwayMap rail/transit overlay (transparent tile layer on top of
-    // the Voyager base). Off by default; user toggles via "🚇 公共交通" FAB.
-    // Tiles include public-rail (JR + private + subway) plus station icons.
-    var ormLayer = L.tileLayer(
-      'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
-      {
-        attribution: 'Rail data &copy; ' +
-          '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> ' +
-          '(CC-BY-SA)',
-        subdomains: ['a', 'b', 'c'],
-        maxZoom: 19, minZoom: 2,
-        tileSize: 256, opacity: 0.85
-      }
-    );
+    // Vector transit layer rendered from precomputed docs/transit/japan.geojson
+    // (built by src/tabelog/scrape/extract_japan_transit.py from a Geofabrik
+    // OSM extract). Loaded lazily on first toggle-on. Lines are colored by
+    // their OSM route relation's official `colour` tag where available; the
+    // remaining ~54% fall back to a Shinkansen palette or a name-hashed
+    // 30-color scheme so every line is visually distinguishable.
+    // Semi-transparent so restaurant markers stay legible underneath.
+    var transitLayer = (typeof L.transitLayer === 'function')
+      ? L.transitLayer({
+          geojsonUrl: 'transit/japan.geojson',
+          opacity: 0.4,
+          casingOpacity: 0.2
+        })
+      : null;
+    if (!transitLayer) {
+      console.warn('[tabelog] L.transitLayer unavailable — transit-layer.js failed to load');
+    }
 
     // Find the attractions FeatureGroup among map._layers. Duck-type rather
     // than `instanceof L.MarkerClusterGroup` because that class symbol can
@@ -857,7 +861,7 @@ FILTER_JS_TEMPLATE = r"""
         try { localStorage.setItem(storageKey, on ? '1' : '0'); } catch (e) {}
       });
     }
-    wireFab('fab-transit',     ormLayer,         'tabelog.showTransit',     false);
+    wireFab('fab-transit',     transitLayer,     'tabelog.showTransit',     false);
     wireFab('fab-attractions', attractionsLayer, 'tabelog.showAttractions', true);
 
     // Right-click (desktop) / long-press (mobile) on any blank spot of the
