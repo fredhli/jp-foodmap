@@ -10,10 +10,9 @@ CSV is utf-8-sig so Japanese addresses round-trip through Excel cleanly.
 Output: data/output/tabelog_osaka_map.html  (single file, open in any browser).
 """
 
-import base64
+import argparse
 import csv
 import json
-import os
 import re
 import sys
 import time
@@ -21,39 +20,7 @@ from pathlib import Path
 
 import folium
 import httpx
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
 from folium.plugins import MarkerCluster
-
-# Build-time access password. Same value must be entered in the browser to
-# decrypt the payload. Changing this requires rebuilding + re-pushing the HTML.
-ACCESS_PASSWORD = "085258"
-# PBKDF2 iteration count. Higher = slower brute force, slower legit unlock.
-# 200k ≈ ~100ms on a laptop — imperceptible for one attempt but multiplies
-# the 10^6 6-digit space to ~28 hours (CPU) of pure brute force.
-PBKDF2_ITERS = 200_000
-
-
-def encrypt_payload(payload_bytes: bytes, password: str) -> dict:
-    """AES-256-GCM with a PBKDF2-SHA256 derived key. Salt is derived
-    deterministically from the password so cached unlock keys survive
-    rebuilds — only changing the password invalidates them. The salt is
-    public anyway (baked into HTML), so making it deterministic doesn't
-    weaken anything an attacker couldn't already compute."""
-    import hashlib
-    salt = hashlib.sha256(b"jp-foodmap:" + password.encode("utf-8")).digest()[:16]
-    iv = os.urandom(12)
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt,
-                     iterations=PBKDF2_ITERS)
-    key = kdf.derive(password.encode("utf-8"))
-    ciphertext = AESGCM(key).encrypt(iv, payload_bytes, None)
-    return {
-        "salt":       base64.b64encode(salt).decode("ascii"),
-        "iv":         base64.b64encode(iv).decode("ascii"),
-        "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
-        "iters":      PBKDF2_ITERS,
-    }
 
 # Force UTF-8 stdout — Windows console defaults to cp1252 and chokes on
 # the Japanese restaurant names printed during the geocode pass.
@@ -206,87 +173,86 @@ def geocode(addr: str, client: httpx.Client, cache: dict) -> dict | None:
     return None
 
 
-# Hand-curated grouping of the ~100 free-form Chinese genre tokens scraped
-# from Tabelog into 20 broad cuisine categories. Order here drives the order
-# in the filter dropdown. Unknown tokens (genres that aren't listed) fall
-# through to "其他".
+# Maps Tabelog's JP genre tokens to 19 broad cuisine categories. Dict order
+# drives filter dropdown order. Single-tag: each restaurant lands in exactly
+# one bucket (the first matching token in the comma-separated genre string).
 GENRE_CATEGORIES = {
-    "拉面·沾面": [
-        "拉面", "沾面", "无汤担担面", "碗",
-        "油荞麦面/马兹荞麦面", "油荞麦面/马泽荞麦面",
-        "油荞麦面/mazesoba", "油荞麦面/Mazesoba",
-    ],
-    "乌冬·荞麦": [
-        "乌冬面", "乌冬面。", "咖喱乌冬面",
-        "我喜欢乌冬面", "我爱乌冬面", "乌冬面爱好者",
-        "荞麦", "荞麦面",
-    ],
-    "寿司·海鲜": ["寿司", "海鲜", "鳗鱼"],
-    "烤肉·内脏": [
-        "烤肉", "荷尔蒙", "内脏", "激素",
-        "牛肉料理", "牛肉菜肴", "牛排",
-    ],
-    "烤鸡·串烧": [
-        "烤鸡肉串", "鸡肉料理", "鸡肉菜肴",
-        "炸鸡块", "串上",
-    ],
-    "天妇罗·炸物": [
-        "天妇罗", "天妇罗碗", "炸猪排", "猪排丼",
-        "炸猪排盖饭", "油炸食品", "炸串",
-    ],
-    "咖喱": ["咖喱", "印度咖喱", "印度菜", "汤咖喱", "斯里兰卡美食"],
-    "盖饭·亲子丼": ["盖饭", "亲子丼", "饭团"],
-    "居酒屋·酒吧": [
-        "居酒屋", "酒吧", "餐厅酒吧",
-        "清酒吧", "日本清酒酒吧", "餐吧",
-    ],
-    "日本料理·乡土": [
-        "日本料理", "创意料理", "乡土料理",
-        "当地美食", "创新", "创新的",
-    ],
-    "御好烧·铁板烧": ["御好烧", "大阪烧", "煎饼", "炒面", "铁板烧"],
-    "关东煮·锅物": ["关东煮", "奥登", "水烧", "涮锅", "火锅"],
-    "饺子·中餐": ["饺子", "中餐", "川菜"],
-    "韩国料理": ["韩国料理", "冷面"],
-    "意式·披萨": ["意大利", "披萨"],
-    "西餐·汉堡": ["西餐", "欧洲食品", "汉堡包"],
-    "咖啡·三明治": ["咖啡厅", "咖啡馆", "咖啡店", "三明治"],
-    "烘焙·西点": [
-        "蛋糕", "西式甜点", "西式糕点", "面包",
-        "巧克力", "布丁", "糖果", "马卡龙",
-    ],
-    "和果子·冰品": [
-        "日式甜点", "日本甜点", "大福",
-        "刨冰", "鲷鱼烧/大番烧",
-        "冰淇淋/冰淇淋", "意式冰淇淋/冰淇淋",
-        "甜点店", "甜品店", "甜点", "果汁摊",
-    ],
-    "其他": ["餐厅"],
+    "拉面·沾面":     ["ラーメン", "つけ麺", "油そば・まぜそば",
+                      "担々麺", "汁なし担々麺"],
+    "乌冬·荞麦":     ["うどん", "そば", "うどんすき", "カレーうどん"],
+    "寿司·海鲜":     ["寿司", "海鮮", "うなぎ", "ふぐ"],
+    "烤肉·内脏":     ["焼肉", "ホルモン", "もつ焼き",
+                      "牛料理", "牛タン", "ステーキ", "肉料理",
+                      "しゃぶしゃぶ", "豚しゃぶ"],
+    "烤鸡·串烧":     ["焼き鳥", "鳥料理", "串焼き", "からあげ"],
+    "天妇罗·炸物":   ["天ぷら", "揚げ物", "串揚げ", "とんかつ"],
+    "咖喱":          ["カレー", "インドカレー", "インド料理",
+                      "スープカレー", "ネパール料理", "スリランカ料理"],
+    "盖饭·亲子丼":   ["丼", "親子丼", "天丼", "かつ丼", "おにぎり", "食堂"],
+    "居酒屋·酒吧":   ["居酒屋", "バー", "ダイニングバー", "ワインバー",
+                      "日本酒バー", "バル", "パブ", "立ち飲み"],
+    "日本料理·乡土": ["日本料理", "創作料理", "郷土料理", "イノベーティブ"],
+    "御好烧·铁板烧": ["お好み焼き", "焼きそば", "鉄板焼き"],
+    "关东煮·锅物":   ["おでん", "鍋", "ちゃんこ鍋", "水炊き"],
+    "饺子·中餐":     ["餃子", "中華料理", "四川料理"],
+    "韩国料理":      ["韓国料理", "冷麺"],
+    "西餐/西式料理": ["洋食", "ハンバーガー", "ハンバーグ", "フレンチ",
+                      "ヨーロッパ料理", "イタリアン", "ピザ", "パスタ"],
+    "咖啡·三明治":   ["カフェ", "喫茶店", "サンドイッチ", "パンケーキ"],
+    "烘焙·西点":     ["パン", "洋菓子", "ケーキ", "チョコレート",
+                      "マカロン", "プリン", "スイーツ", "ベーグル"],
+    "和果子·冰品":   ["和菓子", "大福", "甘味処", "かき氷",
+                      "たい焼き・大判焼き", "ジェラート・アイスクリーム",
+                      "ソフトクリーム", "ジューススタンド"],
+    "其他":          [],
 }
 
 _GENRE_TO_CAT = {tok: cat for cat, toks in GENRE_CATEGORIES.items() for tok in toks}
 _GENRE_SPLIT_RE = re.compile(r"[、,，]")
 
+# One emoji per bucket — rendered inside the map marker on top of the price
+# color. Picked to be visually distinct at 13px.
+GENRE_EMOJI = {
+    "拉面·沾面":     "🍜",
+    "乌冬·荞麦":     "🥣",
+    "寿司·海鲜":     "🍣",
+    "烤肉·内脏":     "🥩",
+    "烤鸡·串烧":     "🍗",
+    "天妇罗·炸物":   "🍤",
+    "咖喱":          "🍛",
+    "盖饭·亲子丼":   "🍚",
+    "居酒屋·酒吧":   "🍺",
+    "日本料理·乡土": "🍱",
+    "御好烧·铁板烧": "🥞",
+    "关东煮·锅物":   "🍲",
+    "饺子·中餐":     "🥟",
+    "韩国料理":      "🌶️",
+    "西餐/西式料理": "🍝",
+    "咖啡·三明治":   "☕",
+    "烘焙·西点":     "🥐",
+    "和果子·冰品":   "🍡",
+    "其他":          "🍽️",
+}
+
 
 def categorize_genre(genre_str: str) -> list[str]:
-    """Split the raw genre string into tokens and map each to its cuisine
-    category. Returns the deduplicated list (insertion-ordered). Unknown
-    tokens fall through to '其他'."""
+    """Single-tag: scan tokens left-to-right, return the first that maps to a
+    known bucket. Falls through to '其他' if no token matches. Returns a list
+    (length 0 or 1) so downstream iteration keeps working."""
     if not genre_str:
         return []
-    tokens = [t.strip() for t in _GENRE_SPLIT_RE.split(genre_str) if t.strip()]
-    cats: list[str] = []
-    for tok in tokens:
-        cat = _GENRE_TO_CAT.get(tok, "其他")
-        if cat not in cats:
-            cats.append(cat)
-    return cats
+    for tok in (t.strip() for t in _GENRE_SPLIT_RE.split(genre_str) if t.strip()):
+        cat = _GENRE_TO_CAT.get(tok)
+        if cat:
+            return [cat]
+    return ["其他"]
 
 
 # Price buckets — keys must match the JS filter values below.
 # (key, label, color, lower_inclusive, upper_exclusive)
 PRICE_BUCKETS = [
-    ("lt3k",   "< ¥3,000",         "#16a34a", None,   3000),
+    ("lt1k",   "< ¥1,000",         "#15803d", None,   1000),
+    ("1to3k",  "¥1,000 – 3,000",   "#16a34a", 1000,   3000),
     ("3to5k",  "¥3,000 – 5,000",   "#84cc16", 3000,   5000),
     ("5to10k", "¥5,000 – 10,000",  "#eab308", 5000,  10000),
     ("10to20k","¥10,000 – 20,000", "#f97316", 10000, 20000),
@@ -494,105 +460,7 @@ LOCATE_ASSETS = """
 FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
-  // ===== Encrypted payload + access gate =====
-  //
-  // The 299-restaurant payload is AES-256-GCM encrypted with a key derived
-  // via PBKDF2-SHA256 from the user's 6-digit password. The HTML source
-  // contains only the ciphertext + salt + iv. On first unlock we cache the
-  // *derived key* (not the password) in localStorage for 24h, so reloads
-  // skip the ~100ms PBKDF2 step. Wrong password = trial decrypt fails
-  // (AES-GCM auth tag mismatch) → "密码错误" with no information leak.
-  var ENCRYPTED = __ENCRYPTED__;
-  var GATE_CACHE_KEY = 'omakase_gate_key_v1';
-  var GATE_TTL_MS = 24 * 60 * 60 * 1000;
-
-  function b64ToBytes(s) {
-    return Uint8Array.from(atob(s), function(c) { return c.charCodeAt(0); });
-  }
-  function bytesToB64(b) {
-    var s = '', arr = new Uint8Array(b);
-    for (var i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-    return btoa(s);
-  }
-  async function deriveKey(password, saltBytes, iters) {
-    var enc = new TextEncoder();
-    var baseKey = await crypto.subtle.importKey(
-      'raw', enc.encode(password), {name: 'PBKDF2'}, false, ['deriveKey']);
-    return crypto.subtle.deriveKey(
-      {name: 'PBKDF2', salt: saltBytes, iterations: iters, hash: 'SHA-256'},
-      baseKey, {name: 'AES-GCM', length: 256}, true, ['decrypt']);
-  }
-  async function tryDecrypt(key) {
-    try {
-      var plain = await crypto.subtle.decrypt(
-        {name: 'AES-GCM', iv: b64ToBytes(ENCRYPTED.iv)},
-        key, b64ToBytes(ENCRYPTED.ciphertext));
-      return JSON.parse(new TextDecoder().decode(plain));
-    } catch (_) { return null; }
-  }
-  async function importCachedKey() {
-    try {
-      var c = JSON.parse(localStorage.getItem(GATE_CACHE_KEY) || '{}');
-      if (!c.key || !c.exp || c.exp < Date.now()) return null;
-      return await crypto.subtle.importKey(
-        'raw', b64ToBytes(c.key), {name: 'AES-GCM'}, true, ['decrypt']);
-    } catch (_) { return null; }
-  }
-  async function persistKey(key) {
-    var raw = await crypto.subtle.exportKey('raw', key);
-    localStorage.setItem(GATE_CACHE_KEY, JSON.stringify({
-      key: bytesToB64(raw), exp: Date.now() + GATE_TTL_MS,
-    }));
-  }
-  function showGateError(msg) {
-    var el = document.getElementById('gate-msg');
-    var btn = document.getElementById('gate-submit');
-    var input = document.getElementById('gate-input');
-    if (el) { el.style.color = '#dc2626'; el.textContent = msg; }
-    if (btn) btn.disabled = false;
-    if (input) { input.value = ''; input.focus(); }
-  }
-  function hideGate() {
-    var bg = document.getElementById('gate-bg');
-    if (bg) bg.remove();
-  }
-  async function bootGate() {
-    // Fast path: cached key still valid → decrypt and start map.
-    var cached = await importCachedKey();
-    if (cached) {
-      var data = await tryDecrypt(cached);
-      if (data) { hideGate(); initMap(data); return; }
-      // Key didn't fit (payload was re-encrypted with a new salt). Fall through.
-      localStorage.removeItem(GATE_CACHE_KEY);
-    }
-    var form = document.getElementById('gate-form');
-    var input = document.getElementById('gate-input');
-    var msg = document.getElementById('gate-msg');
-    var btn = document.getElementById('gate-submit');
-    if (!form) return;
-    if (input) input.focus();
-    form.addEventListener('submit', async function(e) {
-      e.preventDefault();
-      var pw = (input.value || '').trim();
-      if (!pw) return;
-      btn.disabled = true;
-      msg.style.color = '#6b7280';
-      msg.textContent = '解锁中…';
-      try {
-        var key = await deriveKey(pw, b64ToBytes(ENCRYPTED.salt), ENCRYPTED.iters);
-        var data = await tryDecrypt(key);
-        if (data) {
-          await persistKey(key);
-          hideGate();
-          initMap(data);
-        } else {
-          showGateError('密码错误');
-        }
-      } catch (err) {
-        showGateError('解锁失败: ' + err.message);
-      }
-    });
-  }
+  var EMBEDDED_DATA = __PAYLOAD__;
 
   // ===== GitHub Gist sync layer =====
   //
@@ -751,7 +619,7 @@ FILTER_JS_TEMPLATE = r"""
       return c.gistId ? c : null;
     }
     function refreshAllMarkers() {
-      markers.forEach(function(m){ m.setStyle(markerStyle(m._d)); });
+      markers.forEach(function(m){ m.setIcon(makeIcon(m._d)); });
       updateFavCount();
       updateBlackCount();
       apply();
@@ -848,15 +716,35 @@ FILTER_JS_TEMPLATE = r"""
       schedulePush();
     }
 
-    // Blacklist wins visually because it implies "don't go here", which
-    // matters more than "I starred this" when both are set.
-    function markerStyle(d) {
-      if (isBlack(d)) return {radius: 8, weight: 3, color: '#dc2626',
-                              fillColor: d.color, fillOpacity: 0.35};
-      if (isFav(d))   return {radius: 8, weight: 3, color: '#fbbf24',
-                              fillColor: d.color, fillOpacity: 1.0};
-      return {radius: 8, weight: 2, color: '#ffffff',
-              fillColor: d.color, fillOpacity: 1.0};
+    // No hard border — price color is a radial-gradient halo behind the
+    // emoji. Fav/black state shown via a small corner badge instead.
+    function makeIcon(d) {
+      var color = d.color || '#9ca3af';
+      var emoji = d.emoji || '🍽️';
+      var size = 36;
+      var opacity = 1.0;
+      var badge = '';
+      if (isBlack(d)) {
+        opacity = 0.4;
+        badge = '<span style="position:absolute;top:0;right:2px;font-size:11px;' +
+                'line-height:1;color:#dc2626;text-shadow:0 0 2px #fff;">✕</span>';
+      } else if (isFav(d)) {
+        badge = '<span style="position:absolute;top:0;right:2px;font-size:11px;' +
+                'line-height:1;text-shadow:0 0 2px #fff;">⭐</span>';
+      }
+      var html = '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;' +
+                 'display:flex;align-items:center;justify-content:center;' +
+                 'opacity:' + opacity + ';">' +
+                 '<div style="position:absolute;inset:0;border-radius:50%;' +
+                 'background:radial-gradient(circle closest-side, ' +
+                 color + 'EE 0%, ' + color + 'AA 50%, ' + color + '00 100%);"></div>' +
+                 '<span style="position:relative;font-size:16px;line-height:1;' +
+                 'text-shadow:0 1px 2px rgba(0,0,0,0.35);">' + emoji + '</span>' +
+                 badge +
+                 '</div>';
+      return L.divIcon({className: '', html: html,
+                        iconSize: [size, size],
+                        iconAnchor: [size / 2, size / 2]});
     }
     function syncFavButton(btn, d) {
       var label = btn.querySelector('.ff-fav-label');
@@ -886,7 +774,7 @@ FILTER_JS_TEMPLATE = r"""
     }
 
     var markers = data.map(function(d) {
-      var m = L.circleMarker([d.lat, d.lon], markerStyle(d));
+      var m = L.marker([d.lat, d.lon], {icon: makeIcon(d)});
       m.bindPopup(d.popup, {maxWidth: 360});
       m.bindTooltip(d.tooltip);
       m._d = d;
@@ -937,7 +825,7 @@ FILTER_JS_TEMPLATE = r"""
         syncBlackButton(blackBtn, m._d);
         updateBlackCount();
       }
-      m.setStyle(markerStyle(m._d));
+      m.setIcon(makeIcon(m._d));
       apply();
     });
 
@@ -1111,44 +999,11 @@ FILTER_JS_TEMPLATE = r"""
     // Kick off the first pull (or stay in local mode if not configured).
     startSync();
   }
-  // Entry point: gate first; gate calls initMap(data) on successful decrypt.
-  if (document.readyState !== 'loading') bootGate();
-  else document.addEventListener('DOMContentLoaded', bootGate);
+  function boot() { initMap(EMBEDDED_DATA); }
+  if (document.readyState !== 'loading') boot();
+  else document.addEventListener('DOMContentLoaded', boot);
 })();
 </script>
-"""
-
-
-GATE_HTML = """
-<div id="gate-bg" style="
-     position:fixed;inset:0;z-index:100000;background:#0f172a;
-     display:flex;align-items:center;justify-content:center;
-     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-     color:#e2e8f0;">
-  <form id="gate-form" autocomplete="off" style="text-align:center;
-        background:rgba(255,255,255,0.04);padding:32px 36px;border-radius:14px;
-        border:1px solid rgba(255,255,255,0.08);
-        box-shadow:0 10px 40px rgba(0,0,0,0.4);">
-    <div style="font-size:46px;line-height:1;margin-bottom:10px;">🔒</div>
-    <div style="font-size:13px;color:#94a3b8;margin-bottom:20px;">
-      请输入访问密码
-    </div>
-    <input id="gate-input" type="password" inputmode="numeric"
-           pattern="[0-9]*" maxlength="6" autocomplete="off" autofocus
-           style="font-size:30px;letter-spacing:10px;text-align:center;
-                  padding:10px 14px;width:220px;background:#1e293b;
-                  border:1px solid #334155;color:#f1f5f9;border-radius:8px;
-                  font-family:'SF Mono',Menlo,monospace;outline:none;">
-    <div id="gate-msg" style="height:18px;font-size:12px;margin-top:10px;
-         color:#94a3b8;"></div>
-    <button id="gate-submit" type="submit" style="
-            margin-top:10px;padding:9px 28px;font-size:14px;font-weight:600;
-            background:#2563eb;color:#fff;border:none;border-radius:7px;
-            cursor:pointer;letter-spacing:1px;">
-      解锁
-    </button>
-  </form>
-</div>
 """
 
 
@@ -1225,32 +1080,82 @@ def fmt_popup(row: dict) -> str:
     """
 
 
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--fillempty", action=argparse.BooleanOptionalAction, default=False,
+                    help="only geocode rows whose lat/lon are missing in CSV "
+                         "(default: re-geocode all, cache makes repeats cheap)")
+    return ap.parse_args()
+
+
+def _parse_latlon(row: dict) -> tuple[float, float] | None:
+    try:
+        lat, lon = float(row.get("lat") or ""), float(row.get("lon") or "")
+    except (TypeError, ValueError):
+        return None
+    return lat, lon
+
+
+def write_csv_with_coords(rows: list[dict], fieldnames: list[str]) -> None:
+    with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
 def main() -> None:
+    args = parse_args()
+
     with CSV_PATH.open(encoding="utf-8-sig", newline="") as f:
-        rows = [r for r in csv.DictReader(f) if r.get("address")]
-    print(f"{len(rows)} rows with non-empty address")
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        all_rows = list(reader)
+    for k in ("lat", "lon"):
+        if k not in fieldnames:
+            fieldnames.append(k)
+        for r in all_rows:
+            r.setdefault(k, "")
+
+    addr_rows = [r for r in all_rows if r.get("address")]
+    print(f"{len(addr_rows)} rows with non-empty address "
+          f"(of {len(all_rows)} total){'  [fillempty mode]' if args.fillempty else ''}")
 
     cache = load_cache()
-    geocoded = []
-    failed = []
+    geocoded: list[tuple[dict, dict]] = []
+    failed: list[dict] = []
+    n_skipped = 0
     client = httpx.Client(headers={"User-Agent": "omakase-tabelog-mapper/0.1"})
-    for i, row in enumerate(rows, 1):
+    for i, row in enumerate(addr_rows, 1):
         addr = row["address"]
+        if args.fillempty:
+            existing = _parse_latlon(row)
+            if existing is not None:
+                lat, lon = existing
+                geocoded.append((row, {"lat": lat, "lon": lon,
+                                       "matched_query": addr, "display": ""}))
+                n_skipped += 1
+                continue
         loc = geocode(addr, client, cache)
         if loc:
+            row["lat"] = loc["lat"]
+            row["lon"] = loc["lon"]
             geocoded.append((row, loc))
             print(
-                f"  [{i}/{len(rows)}] {row.get('name')!r} -> "
+                f"  [{i}/{len(addr_rows)}] {row.get('name')!r} -> "
                 f"({loc['lat']:.4f}, {loc['lon']:.4f})"
             )
         else:
             failed.append(row)
-            print(f"  [{i}/{len(rows)}] {row.get('name')!r}: NO MATCH ({addr!r})")
+            print(f"  [{i}/{len(addr_rows)}] {row.get('name')!r}: NO MATCH ({addr!r})")
         if i % 5 == 0:
             save_cache(cache)
     save_cache(cache)
 
-    print(f"\nGeocoded {len(geocoded)} / {len(rows)}; failed {len(failed)}")
+    write_csv_with_coords(all_rows, fieldnames)
+    print(f"\nWrote lat/lon back to {CSV_PATH.name}")
+    if args.fillempty:
+        print(f"Skipped {n_skipped} rows that already had coords")
+    print(f"Geocoded {len(geocoded)} / {len(addr_rows)}; failed {len(failed)}")
     if failed:
         print("Failed:")
         for f in failed:
@@ -1331,6 +1236,7 @@ def main() -> None:
         for tok in (t.strip() for t in _GENRE_SPLIT_RE.split(row.get("genre") or "") if t.strip()):
             if tok not in _GENRE_TO_CAT:
                 unmapped_tokens.add(tok)
+        emoji = GENRE_EMOJI.get(cats[0]) if cats else GENRE_EMOJI["其他"]
         payload.append({
             "lat": loc["lat"],
             "lon": loc["lon"],
@@ -1339,6 +1245,7 @@ def main() -> None:
             "bucket": bkey,
             "color": bcolor,
             "categories": cats,
+            "emoji": emoji,
             "bookable": parse_bool(row.get("tabelog_bookable")),
             "detail_url": url,
             "favorited": url in fav_set,
@@ -1352,27 +1259,18 @@ def main() -> None:
     n_black = sum(1 for p in payload if p['blacklisted'])
     print(f"  favorites: {n_fav} from favorites.json, blacklist: {n_black} from blacklist.json")
 
-    # Encrypt the whole payload — names, addresses, popups, favorites/blacklist
-    # baseline — so the deployed HTML reveals nothing about Tabelog content
-    # without the access password.
-    payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    enc = encrypt_payload(payload_bytes, ACCESS_PASSWORD)
-    print(f"  payload: {len(payload_bytes):,} bytes → encrypted "
-          f"({len(enc['ciphertext']):,} b64), PBKDF2 iters={enc['iters']:,}")
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    print(f"  payload: {len(payload_json.encode('utf-8')):,} bytes embedded")
 
     panel_html = build_filter_panel_html(cat_counts)
-    filter_js = FILTER_JS_TEMPLATE.replace(
-        "__ENCRYPTED__", json.dumps(enc)
-    )
+    filter_js = FILTER_JS_TEMPLATE.replace("__PAYLOAD__", payload_json)
     m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
-    m.get_root().html.add_child(folium.Element(GATE_HTML))
     m.get_root().html.add_child(folium.Element(panel_html))
     m.get_root().html.add_child(folium.Element(filter_js))
 
     m.save(str(OUT_HTML))
     print(f"\nMap written to {OUT_HTML}")
-    print(f"  {len(payload)} restaurants embedded (encrypted); "
-          f"gate password = {ACCESS_PASSWORD!r}")
+    print(f"  {len(payload)} restaurants embedded")
 
 
 if __name__ == "__main__":

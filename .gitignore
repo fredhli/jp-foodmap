@@ -10,7 +10,7 @@ __pycache__/
 # Playwright user profile (large, machine-local)
 .chrome_profile/
 
-# All raw data stays local — only the encrypted docs/index.html is committed.
+# All raw data stays local — only docs/index.html is committed.
 data/
 
 # Editor / tool state
