@@ -51,6 +51,7 @@ FIELDS = [
     "reservation_policy_chinese", "tabelog_bookable",
     "detail_url", "source_page",
     "lat", "lon",
+    "photo1_url", "photo2_url", "photo3_url",
 ]
 
 CARDS_JS = r"""

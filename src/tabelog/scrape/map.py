@@ -403,6 +403,225 @@ LOCATE_ASSETS = """
 """
 
 
+# Page-level zoom lock + iOS Safari bounce kill. The viewport meta folium
+# emits already has user-scalable=no, but iOS Safari has ignored that
+# since iOS 10 for accessibility, so we need event listeners too.
+# Leaflet uses raw touch events for its own map gestures, not iOS gesture*
+# events, so blocking gesture* on the document does NOT break map pinch.
+MAP_FAB_HTML = """
+<style>
+  /* Floating layer-control replacement (Google-Maps-style pills, bottom-right).
+     Container is pointer-events:none so the gaps don't block map drags;
+     each button re-enables pointer events. */
+  .map-fab-stack {
+    position: fixed; bottom: 18px; right: 14px;
+    z-index: 9995;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  .map-fab {
+    pointer-events: auto;
+    background: #fff; color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    display: inline-flex; align-items: center; gap: 6px;
+    user-select: none;
+    transition: background 0.15s ease-out, box-shadow 0.15s ease-out,
+                color 0.15s ease-out, border-color 0.15s ease-out;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1;
+  }
+  .map-fab:hover { background: #f9fafb;
+                   box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
+  .map-fab.active { background: #2563eb; color: #fff;
+                    border-color: #2563eb; }
+  .map-fab.active:hover { background: #1d4ed8; }
+  .map-fab-ic { font-size: 15px; line-height: 1; }
+  /* Tighten on narrow screens — drop the label, keep just the icon. */
+  @media (max-width: 480px) {
+    .map-fab { padding: 9px 10px; }
+    .map-fab-label { display: none; }
+    .map-fab-ic { font-size: 17px; }
+  }
+</style>
+<div class="map-fab-stack" role="group" aria-label="图层切换">
+  <button id="fab-transit" class="map-fab" type="button"
+          aria-pressed="false" title="叠加铁路 / 公交线路">
+    <span class="map-fab-ic">🚇</span><span class="map-fab-label">公共交通</span>
+  </button>
+  <button id="fab-attractions" class="map-fab active" type="button"
+          aria-pressed="true" title="景点锚点">
+    <span class="map-fab-ic">🗾</span><span class="map-fab-label">景点</span>
+  </button>
+</div>
+"""
+
+
+MOBILE_UX_ASSETS = """
+<style>
+  html, body { overscroll-behavior: none; }
+</style>
+<script>
+(function() {
+  // iOS Safari page-level pinch.
+  document.addEventListener('gesturestart',  function(e){ e.preventDefault(); });
+  document.addEventListener('gesturechange', function(e){ e.preventDefault(); });
+  document.addEventListener('gestureend',    function(e){ e.preventDefault(); });
+
+  // iOS Safari double-tap zoom. Scope to outside the map so Leaflet's
+  // own double-tap-to-zoom-in keeps working.
+  var lastTouchEnd = 0;
+  document.addEventListener('touchend', function(e){
+    if (e.target && e.target.closest && e.target.closest('.leaflet-container')) return;
+    var now = Date.now();
+    if (now - lastTouchEnd <= 350) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
+
+  // Desktop ctrl/cmd + wheel. Leaflet's wheel zoom doesn't use ctrlKey.
+  document.addEventListener('wheel', function(e){
+    if (e.ctrlKey || e.metaKey) e.preventDefault();
+  }, { passive: false });
+
+  // Desktop cmd/ctrl + 0/-/=/+ keyboard zoom.
+  document.addEventListener('keydown', function(e){
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === '=' || e.key === '-' || e.key === '+' || e.key === '0') {
+      e.preventDefault();
+    }
+  });
+})();
+</script>
+<style>
+  /* Bottom-sheet popup replacement. The markup lives near </body>; the
+     filter JS controls open/close. Default Leaflet popups got cut off at
+     mobile viewport edges; this sheet always docks to the bottom and
+     scrolls internally. */
+  #bs-backdrop {
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(0,0,0,0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.22s ease-out;
+  }
+  #bs-backdrop.bs-open { opacity: 1; pointer-events: auto; }
+  #bs-sheet {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 10002;
+    max-height: 75vh; max-height: 75dvh;
+    background: #fff;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
+    transform: translateY(100%);
+    transition: transform 0.25s ease-out;
+    display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #bs-sheet.bs-open { transform: translateY(0); }
+  /* Tablet: cap width and center; still bottom-anchored. */
+  @media (min-width: 700px) {
+    #bs-sheet { left: 50%; transform: translate(-50%, 100%);
+                max-width: 680px; right: auto;
+                max-height: 80vh; max-height: 80dvh;
+                border-radius: 14px 14px 0 0; }
+    #bs-sheet.bs-open { transform: translate(-50%, 0); }
+  }
+  /* Desktop: roomier sheet so the 2-column popup layout has space. */
+  @media (min-width: 1100px) {
+    #bs-sheet { max-width: 880px;
+                max-height: 85vh; max-height: 85dvh; }
+  }
+  #bs-grip {
+    position: relative;
+    padding: 9px 0 6px; flex-shrink: 0;
+    cursor: grab; touch-action: none;
+  }
+  #bs-grip::before {
+    content: ''; display: block;
+    width: 38px; height: 4px; margin: 0 auto;
+    background: #d1d5db; border-radius: 2px;
+  }
+  #bs-close {
+    position: absolute; top: 4px; right: 6px;
+    background: none; border: none;
+    font-size: 22px; line-height: 1; color: #9ca3af;
+    cursor: pointer; padding: 4px 10px;
+  }
+  #bs-close:hover { color: #374151; }
+  #bs-content {
+    overflow-y: auto;
+    padding: 0 14px 14px;
+    flex: 1 1 auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* ===== Restaurant detail card (lives inside #bs-content) ===== */
+  .rst-card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              font-size: 13px; color: #1f2937; }
+  .rst-header { display: flex; justify-content: space-between;
+                align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
+               line-height: 1.3; }
+  .rst-title .rst-rating { color: #c33; margin-left: 4px; font-weight: 700; }
+  .rst-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
+                gap: 6px; margin-bottom: 10px; }
+  .rst-photos a { display: block; min-width: 0; }
+  .rst-photos img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover;
+                    border-radius: 6px; display: block; background: #f3f4f6; }
+  .rst-genre { color: #4b5563; margin-bottom: 8px; }
+  .rst-info { display: grid; grid-template-columns: 1fr;
+              gap: 4px 16px; margin-bottom: 8px; }
+  .rst-info-row { display: flex; gap: 6px; align-items: baseline;
+                  line-height: 1.45; }
+  .rst-info-row .rst-label { color: #9ca3af; flex-shrink: 0;
+                             font-size: 12px; min-width: 38px; }
+  .rst-info-row .rst-value { color: #1f2937; min-width: 0;
+                             overflow-wrap: anywhere; }
+  .rst-policy { font-size: 12px; color: #6b7280; line-height: 1.5;
+                margin-bottom: 8px; }
+  .rst-footer { display: flex; justify-content: space-between;
+                align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rst-footer a { color: #2563eb; text-decoration: none; font-size: 13px; }
+  .rst-footer a:hover { text-decoration: underline; }
+  .rst-chip { background: #3b9c4f; color: #fff; padding: 2px 8px;
+              border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .rst-chip.rst-chip-off { background: #9ca3af; }
+  .rst-btn { padding: 4px 10px; font-size: 12px; cursor: pointer;
+             border: 1px solid #d1d5db; border-radius: 5px;
+             background: #f9fafb; color: #1f2937; }
+  .rst-btn:hover { background: #f3f4f6; }
+  /* Tablet+: tighter title, larger photos */
+  @media (min-width: 700px) {
+    .rst-card { font-size: 14px; }
+    .rst-title { font-size: 18px; }
+    .rst-photos { gap: 8px; }
+  }
+  /* Desktop: 2-column info grid; photos still 3-up but bigger */
+  @media (min-width: 1100px) {
+    #bs-content { padding: 0 22px 22px; }
+    .rst-card { font-size: 14px; }
+    .rst-title { font-size: 20px; }
+    .rst-info { grid-template-columns: 1fr 1fr; column-gap: 24px; }
+  }
+</style>"""
+
+
+# Bottom-sheet DOM. Injected into <body>; populated by openSheet() in the
+# filter JS. Backdrop is a sibling so taps fall through to it.
+BOTTOM_SHEET_HTML = """
+<div id="bs-backdrop"></div>
+<div id="bs-sheet" role="dialog" aria-modal="true" aria-hidden="true">
+  <div id="bs-grip"></div>
+  <button id="bs-close" aria-label="关闭">×</button>
+  <div id="bs-content"></div>
+</div>
+"""
+
+
 FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
@@ -538,6 +757,27 @@ FILTER_JS_TEMPLATE = r"""
     if (typeof L === 'undefined' || !L.markerClusterGroup) { setTimeout(function(){ initMap(data); }, 50); return; }
     if (!L.control.locate) { setTimeout(function(){ initMap(data); }, 50); return; }
 
+    // ===== Persisted map view =====
+    // Restore last center+zoom before any tiles render, then track every
+    // moveend (fires once per pan/zoom gesture, not per frame).
+    var STATE_KEY_VIEW = 'tabelog.mapView';
+    try {
+      var savedView = JSON.parse(localStorage.getItem(STATE_KEY_VIEW) || 'null');
+      if (savedView && typeof savedView.lat === 'number'
+                    && typeof savedView.lon === 'number'
+                    && typeof savedView.zoom === 'number') {
+        map.setView([savedView.lat, savedView.lon], savedView.zoom, {animate: false});
+      }
+    } catch (e) {}
+    map.on('moveend', function() {
+      try {
+        var c = map.getCenter();
+        localStorage.setItem(STATE_KEY_VIEW, JSON.stringify({
+          lat: c.lat, lon: c.lng, zoom: map.getZoom()
+        }));
+      } catch (e) {}
+    });
+
     // Live geolocation: click once to fly to current position, click again
     // for continuous follow; the plugin handles permission UI + accuracy ring.
     L.control.locate({
@@ -557,6 +797,68 @@ FILTER_JS_TEMPLATE = r"""
         outsideMapBoundsMsg: '当前位置在地图范围之外'
       }
     }).addTo(map);
+
+    // ===== FAB layer toggles: transit overlay + attractions =====
+    // OpenRailwayMap rail/transit overlay (transparent tile layer on top of
+    // the Voyager base). Off by default; user toggles via "🚇 公共交通" FAB.
+    // Tiles include public-rail (JR + private + subway) plus station icons.
+    var ormLayer = L.tileLayer(
+      'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+      {
+        attribution: 'Rail data &copy; ' +
+          '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> ' +
+          '(CC-BY-SA)',
+        subdomains: ['a', 'b', 'c'],
+        maxZoom: 19, minZoom: 2,
+        tileSize: 256, opacity: 0.85
+      }
+    );
+
+    // Find the attractions FeatureGroup among map._layers. Duck-type rather
+    // than `instanceof L.MarkerClusterGroup` because that class symbol can
+    // throw if the plugin hasn't fully exposed it yet — and any throw here
+    // would skip the FAB wiring below. A MarkerClusterGroup has the
+    // `refreshClusters` method; a plain FeatureGroup doesn't.
+    var attractionsLayer = null;
+    for (var lid in map._layers) {
+      var lyr = map._layers[lid];
+      if (typeof lyr.eachLayer !== 'function') continue;          // not a layer group
+      if (typeof lyr.refreshClusters === 'function') continue;    // is a cluster
+      if (!lyr._layers || Object.keys(lyr._layers).length === 0) continue;
+      attractionsLayer = lyr;
+      break;
+    }
+
+    function applyToggle(btn, layer, on) {
+      if (!btn || !layer) return;
+      if (on) {
+        if (!map.hasLayer(layer)) map.addLayer(layer);
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+      } else {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+        btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
+      }
+    }
+
+    function wireFab(btnId, layer, storageKey, defaultOn) {
+      var btn = document.getElementById(btnId);
+      if (!btn || !layer) return;
+      var on = defaultOn;
+      try {
+        var v = localStorage.getItem(storageKey);
+        if (v !== null) on = (v === '1');
+      } catch (e) {}
+      applyToggle(btn, layer, on);
+      btn.addEventListener('click', function() {
+        on = !on;
+        applyToggle(btn, layer, on);
+        try { localStorage.setItem(storageKey, on ? '1' : '0'); } catch (e) {}
+      });
+    }
+    wireFab('fab-transit',     ormLayer,         'tabelog.showTransit',     false);
+    wireFab('fab-attractions', attractionsLayer, 'tabelog.showAttractions', true);
 
     // Right-click (desktop) / long-press (mobile) on any blank spot of the
     // map -> popup with the coords + a copy button. Leaflet fires
@@ -783,13 +1085,86 @@ FILTER_JS_TEMPLATE = r"""
       }
     }
 
+    // ===== Bottom-sheet popup =====
+    // Replaces Leaflet's bindPopup. The sheet docks to the bottom of the
+    // viewport, never spills off-screen, and scrolls internally. On wide
+    // screens it caps at 440px width and stays bottom-centered.
+    var bsBackdrop = document.getElementById('bs-backdrop');
+    var bsSheet    = document.getElementById('bs-sheet');
+    var bsContent  = document.getElementById('bs-content');
+    var bsClose    = document.getElementById('bs-close');
+    var bsGrip     = document.getElementById('bs-grip');
+    var bsActive   = null;
+
+    function openSheet(d) {
+      bsContent.innerHTML = d.popup;
+      bsActive = d;
+      // Mirror the old popupopen ⭐/🚫 sync.
+      var favBtn   = bsContent.querySelector('.ff-fav-btn');
+      var blackBtn = bsContent.querySelector('.ff-black-btn');
+      if (favBtn)   syncFavButton(favBtn, d);
+      if (blackBtn) syncBlackButton(blackBtn, d);
+      bsContent.scrollTop = 0;
+      // Force reflow so the transition runs even on rapid reopen.
+      void bsSheet.getBoundingClientRect();
+      bsSheet.classList.add('bs-open');
+      bsBackdrop.classList.add('bs-open');
+      bsSheet.setAttribute('aria-hidden', 'false');
+    }
+    function closeSheet() {
+      bsSheet.classList.remove('bs-open');
+      bsBackdrop.classList.remove('bs-open');
+      bsSheet.setAttribute('aria-hidden', 'true');
+      bsActive = null;
+    }
+    bsBackdrop.addEventListener('click', closeSheet);
+    bsClose.addEventListener('click', closeSheet);
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && bsActive) closeSheet();
+    });
+
+    // Swipe-down on the grip to dismiss. Threshold 80px or fast flick.
+    var bsDrag = null;
+    function bsDragStart(e) {
+      var p = e.touches ? e.touches[0] : e;
+      bsDrag = { y0: p.clientY, t0: Date.now() };
+      bsSheet.style.transition = 'none';
+    }
+    function bsDragMove(e) {
+      if (!bsDrag) return;
+      var p = e.touches ? e.touches[0] : e;
+      var dy = Math.max(0, p.clientY - bsDrag.y0);
+      // Match the desktop centered transform so the sheet doesn't snap left.
+      var prefix = window.innerWidth >= 700 ? 'translate(-50%, ' + dy + 'px)'
+                                            : 'translateY(' + dy + 'px)';
+      bsSheet.style.transform = prefix;
+    }
+    function bsDragEnd(e) {
+      if (!bsDrag) return;
+      var p = (e.changedTouches && e.changedTouches[0]) || e;
+      var dy = p.clientY - bsDrag.y0;
+      var dt = Date.now() - bsDrag.t0;
+      bsSheet.style.transition = '';
+      bsSheet.style.transform = '';
+      if (dy > 80 || (dy > 30 && dt < 200)) closeSheet();
+      bsDrag = null;
+    }
+    bsGrip.addEventListener('touchstart', bsDragStart, { passive: true });
+    bsGrip.addEventListener('touchmove',  bsDragMove,  { passive: true });
+    bsGrip.addEventListener('touchend',   bsDragEnd);
+    bsGrip.addEventListener('mousedown',  bsDragStart);
+    document.addEventListener('mousemove', bsDragMove);
+    document.addEventListener('mouseup',   bsDragEnd);
+
     var markers = data.map(function(d) {
       var m = L.marker([d.lat, d.lon], {icon: makeIcon(d)});
-      m.bindPopup(d.popup, {maxWidth: 360});
-      m.bindTooltip(d.tooltip);
+      m.on('click', function(){ openSheet(d); });
       m._d = d;
       return m;
     });
+    // Tap on empty map area closes the sheet (mirrors Leaflet popup behavior).
+    map.on('click', function(){ if (bsActive) closeSheet(); });
+
     var markerByUrl = {};
     markers.forEach(function(m){ markerByUrl[m._d.detail_url] = m; });
     document.getElementById('ff-total').textContent = markers.length;
@@ -805,7 +1180,8 @@ FILTER_JS_TEMPLATE = r"""
       document.getElementById('ff-black-count').textContent = n;
     }
 
-    // Popups are re-instantiated each open, so sync button state then.
+    // Keep ⭐/🚫 buttons in sync if the sheet is open while the user toggles
+    // them from elsewhere (rare; kept for parity with the old popupopen path).
     map.on('popupopen', function(e) {
       var node = e.popup.getElement && e.popup.getElement();
       if (!node) return;
@@ -911,6 +1287,56 @@ FILTER_JS_TEMPLATE = r"""
       });
       cluster.addLayers(keep);
       document.getElementById('ff-count').textContent = keep.length;
+      saveFilterState();
+    }
+
+    // ===== Persisted filter state =====
+    // saveFilterState runs at the end of every apply(); restoreFilterState
+    // runs once before the first apply() to repopulate inputs from the last
+    // session. Reset button clears the inputs then calls apply(), which
+    // overwrites stored state with defaults — a true reset.
+    var STATE_KEY_FILTER = 'tabelog.filterState';
+    function saveFilterState() {
+      try {
+        var prices = [];
+        document.querySelectorAll('input[name=ff-price]:checked').forEach(function(c){ prices.push(c.value); });
+        var genres = [];
+        document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ genres.push(c.value); });
+        var bEl = document.querySelector('input[name=ff-bookable]:checked');
+        localStorage.setItem(STATE_KEY_FILTER, JSON.stringify({
+          rating: parseFloat(ratingSlider.value),
+          prices: prices,
+          genres: genres,
+          bookable: bEl ? bEl.value : 'all',
+          onlyFav: onlyFavEl.checked,
+          hideBlack: hideBlackEl.checked,
+          hideForeign: hideForeignEl.checked
+        }));
+      } catch (e) {}
+    }
+    function restoreFilterState() {
+      var s;
+      try { s = JSON.parse(localStorage.getItem(STATE_KEY_FILTER) || 'null'); }
+      catch (e) { return; }
+      if (!s) return;
+      if (typeof s.rating === 'number') ratingSlider.value = String(s.rating);
+      if (Array.isArray(s.prices)) {
+        var pSet = {};
+        s.prices.forEach(function(v){ pSet[v] = 1; });
+        document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = !!pSet[c.value]; });
+      }
+      if (Array.isArray(s.genres)) {
+        var gSet = {};
+        s.genres.forEach(function(v){ gSet[v] = 1; });
+        document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = !!gSet[c.value]; });
+      }
+      if (typeof s.bookable === 'string') {
+        var bEl = document.querySelector('input[name=ff-bookable][value="' + s.bookable + '"]');
+        if (bEl) bEl.checked = true;
+      }
+      if (typeof s.onlyFav === 'boolean') onlyFavEl.checked = s.onlyFav;
+      if (typeof s.hideBlack === 'boolean') hideBlackEl.checked = s.hideBlack;
+      if (typeof s.hideForeign === 'boolean') hideForeignEl.checked = s.hideForeign;
     }
 
     // Live update on drag, not just on release.
@@ -944,20 +1370,32 @@ FILTER_JS_TEMPLATE = r"""
     var ffBody = document.getElementById('ff-body');
     var ffHeader = document.getElementById('ff-header');
     var COLLAPSE_KEY = 'tabelog.ffPanel.collapsed';
-    function setCollapsed(c) {
+    function setCollapsed(c, persist) {
       ffBody.style.display = c ? 'none' : '';
       collapseBtn.textContent = c ? '+' : '−';
       collapseBtn.title = c ? '展开' : '折叠';
       ffHeader.style.borderBottom = c ? 'none' : '1px solid #e5e7eb';
       ffHeader.style.paddingBottom = c ? '0' : '5px';
       ffHeader.style.marginBottom = c ? '0' : '6px';
-      try { localStorage.setItem(COLLAPSE_KEY, c ? '1' : '0'); } catch (e) {}
+      if (persist !== false) {
+        try { localStorage.setItem(COLLAPSE_KEY, c ? '1' : '0'); } catch (e) {}
+      }
     }
     collapseBtn.addEventListener('click', function() {
       setCollapsed(ffBody.style.display !== 'none');
     });
     try {
-      if (localStorage.getItem(COLLAPSE_KEY) === '1') setCollapsed(true);
+      var saved = localStorage.getItem(COLLAPSE_KEY);
+      if (saved === '1') {
+        setCollapsed(true);
+      } else if (saved === null && window.matchMedia
+                 && window.matchMedia('(max-width: 768px)').matches) {
+        // First-load on a phone: collapse the panel so it doesn't eat the
+        // map. Don't persist — so opening on desktop later still defaults
+        // to expanded (localStorage sync across viewports is rare but cheap
+        // to avoid surprising).
+        setCollapsed(true, false);
+      }
     } catch (e) {}
 
     document.getElementById('ff-reset').addEventListener('click', function() {
@@ -1037,6 +1475,7 @@ FILTER_JS_TEMPLATE = r"""
       setStatus('本地模式', '');
     });
 
+    restoreFilterState();
     updateFavCount();
     updateBlackCount();
     apply();
@@ -1081,45 +1520,58 @@ def fmt_popup(row: dict) -> str:
     bookable = parse_bool(row.get("tabelog_bookable"))
     url = esc(row.get("detail_url"))
 
+    # Photo strip — thumbnails come from 150x150_square_ (~7KB each); click
+    # opens the 640x640_rect_ version in a new tab.
+    photos = [row.get(f"photo{i}_url") or "" for i in (1, 2, 3)]
+    photos = [p for p in photos if p]
+    if photos:
+        thumbs = "".join(
+            f'<a href="{esc(big)}" target="_blank" rel="noopener">'
+            f'<img src="{esc(big.replace("640x640_rect_", "150x150_square_"))}" '
+            f'loading="lazy" alt="" '
+            f'onerror="this.parentElement.style.display=\'none\'"></a>'
+            for big in photos
+        )
+        photo_html = f'<div class="rst-photos">{thumbs}</div>'
+    else:
+        photo_html = ""
+
     bookable_chip = (
-        '<span style="background:#3b9c4f;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;">可Tabelog预约</span>'
-        if bookable
-        else '<span style="background:#888;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;">不可Tabelog预约</span>'
+        '<span class="rst-chip">可Tabelog预约</span>' if bookable
+        else '<span class="rst-chip rst-chip-off">不可Tabelog预约</span>'
     )
-    dinner_s = f"晚 ¥{dinner}" if dinner not in (None, "", "None") else "晚 NA"
-    lunch_s = f"午 ¥{lunch}" if lunch not in (None, "", "None") else "午 NA"
+    dinner_s = f"¥{dinner}" if dinner not in (None, "", "None") else "NA"
+    lunch_s = f"¥{lunch}" if lunch not in (None, "", "None") else "NA"
     # Labels are filled in by JS at popupopen time based on current state;
     # the data-url binds each button to its restaurant.
     fav_btn = (
-        f'<button class="ff-fav-btn" data-url="{url}" '
-        f'style="padding:3px 8px;font-size:12px;cursor:pointer;'
-        f'border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;">'
+        f'<button class="ff-fav-btn rst-btn" data-url="{url}">'
         f'<span class="ff-fav-label">☆ 收藏</span></button>'
     )
     black_btn = (
-        f'<button class="ff-black-btn" data-url="{url}" '
-        f'style="padding:3px 8px;font-size:12px;cursor:pointer;'
-        f'border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;">'
+        f'<button class="ff-black-btn rst-btn" data-url="{url}">'
         f'<span class="ff-black-label">🚫 弃用</span></button>'
     )
     return f"""
-    <div style="font-family:sans-serif;font-size:13px;max-width:340px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px;">
-        <div style="font-weight:bold;font-size:15px;flex:1;min-width:0;">
-          {name} <span style="color:#c33;">★{rating}</span>
-        </div>
-        <div style="display:flex;gap:4px;flex-shrink:0;">
-          {fav_btn}
-          {black_btn}
-        </div>
+    <div class="rst-card">
+      <div class="rst-header">
+        <div class="rst-title">{name}<span class="rst-rating">★{rating}</span></div>
+        <div class="rst-actions">{fav_btn}{black_btn}</div>
       </div>
-      <div style="color:#555;margin-bottom:4px;">{genre} / {genre_zh}</div>
-      <div style="margin-bottom:4px;">{dinner_s} &nbsp; {lunch_s} &nbsp; · &nbsp; {seat}</div>
-      <div style="margin-bottom:4px;">📍 {station}</div>
-      <div style="font-size:12px;color:#666;margin-bottom:6px;">{addr}</div>
-      <div style="margin-bottom:6px;">{bookable_chip}</div>
-      <div style="font-size:11px;color:#666;margin-bottom:6px;">{policy_zh}</div>
-      <div><a href="{url}" target="_blank">Tabelog 详情 ↗</a></div>
+      {photo_html}
+      <div class="rst-genre">{genre} / {genre_zh}</div>
+      <div class="rst-info">
+        <div class="rst-info-row"><span class="rst-label">晚</span><span class="rst-value">{dinner_s}</span></div>
+        <div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 {station}</span></div>
+        <div class="rst-info-row"><span class="rst-label">午</span><span class="rst-value">{lunch_s}</span></div>
+        <div class="rst-info-row"><span class="rst-label">座位</span><span class="rst-value">{seat or '—'}</span></div>
+        <div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value">{addr}</span></div>
+      </div>
+      {f'<div class="rst-policy">{policy_zh}</div>' if policy_zh else ''}
+      <div class="rst-footer">
+        {bookable_chip}
+        <a href="{url}" target="_blank" rel="noopener">Tabelog 详情 ↗</a>
+      </div>
     </div>
     """
 
@@ -1205,12 +1657,10 @@ def main() -> None:
         for f in failed:
             print(f"  - {f.get('name')!r}: {f.get('address')!r}")
 
-    # Two switchable base maps (radio in the layer control):
-    #   - 公路: CartoDB Voyager — modern Google-Maps-like look, our default
-    #   - 公共交通: GSI 標準地図 — Japan's official survey map; renders JR /
-    #     private rail / subway lines and full station names. Picked over
-    #     OpenRailwayMap because that one 403s requests with empty Referer,
-    #     which is what browsers send when the HTML is opened via file://.
+    # CartoDB Voyager as the single base — clean Google-Maps-style. The
+    # transit option lives in custom JS as a togglable OpenRailwayMap
+    # overlay (rail lines + station markers drawn on top), wired to the
+    # floating "🚇 公共交通" pill button (see FAB_HTML / initMap).
     m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None)
     folium.TileLayer(
         tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
@@ -1220,14 +1670,6 @@ def main() -> None:
         name="公路 (CartoDB Voyager)",
         max_zoom=19,
         subdomains="abcd",
-    ).add_to(m)
-    folium.TileLayer(
-        tiles="https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
-        attr=('<a href="https://maps.gsi.go.jp/development/ichiran.html">'
-              '地理院タイル</a>'),
-        name="公共交通 (GSI 淡色)",
-        max_zoom=18,
-        show=False,
     ).add_to(m)
 
     # Empty MarkerCluster only to pull in plugin JS/CSS; markers are built
@@ -1257,7 +1699,7 @@ def main() -> None:
             ),
         ).add_to(attr_layer)
 
-    folium.LayerControl(collapsed=True, position="bottomleft").add_to(m)
+    # No LayerControl — replaced by the floating FAB stack (FAB_HTML).
 
     # Build the per-restaurant JSON payload the filter JS consumes.
     fav_set = load_favorites()
@@ -1314,6 +1756,9 @@ def main() -> None:
         .replace("__DEFAULT_OFF_GENRES__", default_off_json)
     )
     m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
+    m.get_root().header.add_child(folium.Element(MOBILE_UX_ASSETS))
+    m.get_root().html.add_child(folium.Element(BOTTOM_SHEET_HTML))
+    m.get_root().html.add_child(folium.Element(MAP_FAB_HTML))
     m.get_root().html.add_child(folium.Element(panel_html))
     m.get_root().html.add_child(folium.Element(filter_js))
 
