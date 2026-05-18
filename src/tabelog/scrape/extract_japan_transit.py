@@ -452,9 +452,19 @@ def step_postprocess(way_route_map: dict[int, dict]) -> None:
 
     DOCS_TRANSIT.mkdir(parents=True, exist_ok=True)
     out = {"type": "FeatureCollection", "features": out_feats}
-    FINAL_GEOJSON.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+    FINAL_GEOJSON.write_text(
+        json.dumps(out, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     size_mb = FINAL_GEOJSON.stat().st_size / 1024 / 1024
     print(f"  wrote {FINAL_GEOJSON} ({size_mb:.1f} MB)")
+
+    # Second pass: amusement-park / 廃線 blocklist, 200m cross-name station
+    # merge, line_count tagging for transfer-hub circles, is_longhaul split
+    # for the 长途/市内 FAB pair. See transit_postprocess.py for the rules.
+    print("  postprocessing (blocklist + cross-merge + line_count + longhaul)...")
+    from transit_postprocess import postprocess as transit_postprocess
+    transit_postprocess(FINAL_GEOJSON)
 
 
 def main() -> None:

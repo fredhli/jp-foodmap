@@ -35,21 +35,32 @@
     document.head.appendChild(style);
   }
 
-  // ---- classification (structural: minZ + weight + importance) ----------
+  // ---- classification (structural: minZ + weight + importance + bucket) --
+  // Each line is in exactly one bucket — 'long' (shinkansen / JR long-haul
+  // mainlines that the postprocess pass tagged with is_longhaul) or 'city'
+  // (everything commuter-scale and below). The two FABs in map.py each
+  // toggle one bucket.
+  //
+  // minZ values are tuned more aggressively than they used to be: the
+  // country-scale view (z<7) shows only shinkansen, z7-8 brings in JR
+  // mainlines, z9 adds JR city + private suburban rail, and subways /
+  // trams / monorails / narrow gauge only appear at z11+ where the bbox
+  // is already neighborhood-scale.
 
   var SHINKANSEN_RE = /新幹線|Shinkansen/i;
   var JR_OP_RE = /^(東日本旅客鉄道|西日本旅客鉄道|東海旅客鉄道|九州旅客鉄道|北海道旅客鉄道|四国旅客鉄道|日本貨物鉄道)/;
   var PRIVATE_OP_RE = /(東急|京急|京王|小田急|京成|東武|西武|相鉄|京阪|阪急|阪神|近鉄|南海|名鉄|西鉄|東京メトロ|都営|大阪メトロ|Osaka Metro|名古屋市|札幌市|福岡市|京都市|神戸市|横浜市|広島電鉄|長崎電気軌道|熊本市|鹿児島市|岡山電気軌道|江ノ島電鉄|つくばエクスプレス|京浜急行|相模鉄道)/;
 
   var CLASSES = {
-    shinkansen: { w: 3.4, minZ: 5,  importance: 5 },
-    jr:         { w: 2.6, minZ: 7,  importance: 4 },
-    subway:     { w: 2.4, minZ: 10, importance: 3 },
-    monorail:   { w: 2.2, minZ: 10, importance: 3 },
-    narrow:     { w: 1.9, minZ: 8,  importance: 3 },
-    private:    { w: 2.2, minZ: 8,  importance: 3 },
-    tram:       { w: 1.8, minZ: 11, importance: 2 },
-    other:      { w: 1.6, minZ: 11, importance: 1 }
+    shinkansen: { w: 3.4, minZ: 5,  importance: 5, bucket: 'long' },
+    jr_long:    { w: 2.6, minZ: 7,  importance: 4, bucket: 'long' },
+    jr_city:    { w: 2.4, minZ: 9,  importance: 3, bucket: 'city' },
+    subway:     { w: 2.4, minZ: 11, importance: 3, bucket: 'city' },
+    monorail:   { w: 2.0, minZ: 12, importance: 2, bucket: 'city' },
+    narrow:     { w: 1.9, minZ: 12, importance: 2, bucket: 'city' },
+    private:    { w: 2.2, minZ: 9,  importance: 3, bucket: 'city' },
+    tram:       { w: 1.8, minZ: 12, importance: 2, bucket: 'city' },
+    other:      { w: 1.6, minZ: 12, importance: 1, bucket: 'city' }
   };
 
   function classify(props) {
@@ -62,7 +73,13 @@
     if (rw === 'tram' || rw === 'light_rail') return 'tram';
     if (rw === 'monorail') return 'monorail';
     if (rw === 'narrow_gauge') return 'narrow';
-    if (JR_OP_RE.test(op)) return 'jr';
+    if (JR_OP_RE.test(op)) {
+      // is_longhaul flag baked in by src/tabelog/scrape/transit_postprocess.py
+      // (shinkansen / 特急 / JR mainline allowlist). Without it we have no
+      // way to tell the Yamanote loop from the Tokaido main line — they're
+      // both railway=rail with a JR operator.
+      return props.is_longhaul ? 'jr_long' : 'jr_city';
+    }
     if (PRIVATE_OP_RE.test(op)) return 'private';
     return 'other';
   }
@@ -149,11 +166,22 @@
       this._allLines = [];
       this._allStations = [];
       this._lineIndex = new Map();
+      // Which buckets the renderer is currently allowed to draw. Both
+      // default on so a bare addTo() keeps the historical behavior; map.py
+      // calls setVisibleBuckets({long, city}) from the FAB wiring to switch.
+      this._buckets = { long: true, city: true };
       // Volatile (cleared on remove)
       this._onMap = new Set();
       this._lastZoom = null;
       this._lastDrawCasing = null;
       this._rafToken = 0;
+    },
+
+    setVisibleBuckets: function(opts) {
+      if (opts && typeof opts.long === 'boolean') this._buckets.long = opts.long;
+      if (opts && typeof opts.city === 'boolean') this._buckets.city = opts.city;
+      if (this._map) this._scheduleRedraw();
+      return this;
     },
 
     onAdd: function(map) {
@@ -338,9 +366,13 @@
 
       var desired = new Set();
       var candidates = this._visibleLines();
+      var bk = this._buckets;
       for (var i = 0; i < candidates.length; i++) {
         var f = candidates[i];
-        if (zoom < CLASSES[f._class].minZ) continue;
+        var cls = CLASSES[f._class];
+        if (zoom < cls.minZ) continue;
+        if (cls.bucket === 'long' && !bk.long) continue;
+        if (cls.bucket === 'city' && !bk.city) continue;
         desired.add(f);
       }
 
@@ -393,23 +425,38 @@
       this._lastZoom = zoom;
       this._lastDrawCasing = drawCasing;
 
-      // Stations: lightweight recreate (small count visible at zoom >= 12)
+      // Stations: lightweight recreate (small count visible at zoom >= 12).
+      // Transfer hubs get a noticeably bigger circle so they read at a
+      // glance: line_count >= 6 ("mega-hub" — 渋谷 / 新宿 / 上野 / 池袋 /
+      // 京都...) and >= 3 ("regular hub") are precomputed by
+      // transit_postprocess.py. Stations on the wrong bucket — e.g., a
+      // pure shinkansen-only halt while the 长途 toggle is off — get
+      // skipped entirely so the dots don't outlive their lines.
       this._stationsLayer.clearLayers();
       if (zoom >= 12) {
         var b = this._map.getBounds().pad(0.1);
         var W = b.getWest(), E = b.getEast(), S2 = b.getSouth(), N = b.getNorth();
-        var radius = zoom >= 15 ? 4 : zoom >= 13 ? 3.2 : 2.6;
+        var anyBucketOn = bk.long || bk.city;
         var showLabel = zoom >= 14;
         for (var s = 0; s < this._allStations.length; s++) {
           var stn = this._allStations[s];
           var lon = stn.geometry.coordinates[0];
           var lat = stn.geometry.coordinates[1];
           if (lon < W || lon > E || lat < S2 || lat > N) continue;
+          if (!anyBucketOn) continue;
+          var lc = stn.properties.line_count | 0;
+          var radius;
+          if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;
+          else if (lc >= 3) radius = zoom >= 15 ? 6 : zoom >= 13 ? 5   : 4.2;
+          else              radius = zoom >= 15 ? 4 : zoom >= 13 ? 3.2 : 2.6;
           var isTram = stn.properties.railway === 'tram_stop';
+          var isHub = lc >= 3;
           var dot = L.circleMarker([lat, lon], {
-            radius: radius, weight: 1.5,
-            color: isTram ? '#c62828' : '#222',
-            fillColor: '#ffffff', fillOpacity: this.options.opacity,
+            radius: radius,
+            weight: isHub ? 2 : 1.5,
+            color: isTram ? '#c62828' : (isHub ? '#111' : '#222'),
+            fillColor: isHub ? '#fffbea' : '#ffffff',
+            fillOpacity: this.options.opacity,
             opacity: this.options.opacity
           });
           var nm = stn.properties.name;
@@ -420,7 +467,9 @@
               opts.direction = 'top';
               opts.offset = [0, -4];
             }
-            dot.bindTooltip(nm, opts);
+            var label = nm;
+            if (lc >= 3) label = nm + '  (' + lc + '线)';
+            dot.bindTooltip(label, opts);
           }
           this._stationsLayer.addLayer(dot);
         }

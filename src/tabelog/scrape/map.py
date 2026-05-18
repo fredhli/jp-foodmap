@@ -489,9 +489,13 @@ MAP_FAB_HTML = """
   }
 </style>
 <div class="map-fab-stack" role="group" aria-label="图层切换">
-  <button id="fab-transit" class="map-fab" type="button"
-          aria-pressed="false" title="叠加铁路 / 公交线路">
-    <span class="map-fab-ic">🚇</span><span class="map-fab-label">公共交通</span>
+  <button id="fab-transit-long" class="map-fab" type="button"
+          aria-pressed="false" title="新干线 / JR 长途线路">
+    <span class="map-fab-ic">🚄</span><span class="map-fab-label">长途</span>
+  </button>
+  <button id="fab-transit-city" class="map-fab" type="button"
+          aria-pressed="false" title="地铁 / 私铁 / 城市轨道">
+    <span class="map-fab-ic">🚇</span><span class="map-fab-label">市内</span>
   </button>
   <button id="fab-attractions" class="map-fab active" type="button"
           aria-pressed="true" title="景点锚点">
@@ -607,13 +611,55 @@ SEARCH_BOX_HTML = """
     flex-shrink: 0; font-size: 16px; line-height: 1; width: 20px;
     text-align: center; color: #6b7280;
   }
+  /* Mobile FAB that opens the search overlay. Off on desktop. Visually
+     matches the bottom-right .map-fab stack so the page reads as
+     "top-left = search, top-right = filter, bottom-right = layers". */
+  #ss-fab {
+    display: none;
+    position: fixed; top: 10px; left: 12px;
+    z-index: 9996;
+    width: 40px; height: 40px;
+    background: #fff; color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    font-size: 18px; line-height: 1;
+    align-items: center; justify-content: center;
+    cursor: pointer;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
+    pointer-events: auto;
+  }
+  #ss-fab:hover { background: #f9fafb; box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
+  #ss-fab:active { background: #f3f4f6; }
+  /* The "← back" affordance inside the expanded search bar on mobile.
+     Off on desktop (the 🔍 leading icon stays). */
+  #ss-back {
+    display: none;
+    border: none; background: none; cursor: pointer;
+    font-size: 20px; line-height: 1; color: #6b7280;
+    padding: 6px 6px 6px 14px;
+  }
+  #ss-back:hover { color: #374151; }
+
   @media (max-width: 480px) {
-    #ss-box { top: 8px; width: calc(100vw - 16px); }
     #ss-input { font-size: 16px; }   /* iOS no-zoom */
+    /* Search box hidden by default — opened via the top-left FAB. When
+       open it sits flush to the screen edges and rises above the filter
+       panel so the two never visually collide. */
+    #ss-box { display: none; top: 8px; width: calc(100vw - 16px); }
+    #ss-box.ss-mobile-open { display: block; z-index: 10000; }
+    #ss-fab { display: flex; }
+    #ss-fab.ss-hidden { display: none; }
+    /* Swap the decorative 🔍 for the actionable ← in the expanded state.
+       Tapping ← closes the overlay and brings the FAB back. */
+    #ss-icon { display: none; }
+    #ss-box.ss-mobile-open #ss-back { display: block; }
   }
 </style>
 <div id="ss-box">
   <div id="ss-input-wrap">
+    <button id="ss-back" type="button" aria-label="返回">←</button>
     <span id="ss-icon">🔍</span>
     <input id="ss-input" type="text" autocomplete="off"
            placeholder="搜索景点 / 地址 ...">
@@ -622,6 +668,7 @@ SEARCH_BOX_HTML = """
   </div>
   <div id="ss-list" role="listbox"></div>
 </div>
+<button id="ss-fab" type="button" aria-label="搜索景点 / 地址" title="搜索">🔍</button>
 """
 
 
@@ -1200,12 +1247,10 @@ FILTER_JS_TEMPLATE = r"""
 
     // ===== FAB layer toggles: transit overlay + attractions =====
     // Vector transit layer rendered from precomputed docs/transit/japan.geojson
-    // (built by src/tabelog/scrape/extract_japan_transit.py from a Geofabrik
-    // OSM extract). Loaded lazily on first toggle-on. Lines are colored by
-    // their OSM route relation's official `colour` tag where available; the
-    // remaining ~54% fall back to a Shinkansen palette or a name-hashed
-    // 30-color scheme so every line is visually distinguishable.
-    // Semi-transparent so restaurant markers stay legible underneath.
+    // (extract_japan_transit.py + transit_postprocess.py from a Geofabrik
+    // OSM extract). One layer instance, two FABs: 长途 (新干线 + JR 长途)
+    // and 市内 (subway + 私铁 + tram + ...) — each toggles a bucket on the
+    // same layer via setVisibleBuckets. Loaded lazily on first toggle-on.
     var transitLayer = (typeof L.transitLayer === 'function')
       ? L.transitLayer({
           geojsonUrl: 'transit/japan.geojson',
@@ -1216,6 +1261,44 @@ FILTER_JS_TEMPLATE = r"""
     if (!transitLayer) {
       console.warn('[tabelog] L.transitLayer unavailable — transit-layer.js failed to load');
     }
+    // The bucket-toggle FABs share the layer's add/remove lifecycle. The
+    // layer must be on the map when EITHER bucket is on (so we don't pay
+    // re-load cost flipping them); the layer is removed only when both are
+    // off. setVisibleBuckets handles intra-layer culling.
+    var transitBuckets = { long: false, city: false };
+    function applyTransitBucket(btn, key, on) {
+      if (!btn) return;
+      transitBuckets[key] = on;
+      if (btn) {
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+      if (!transitLayer) return;
+      var anyOn = transitBuckets.long || transitBuckets.city;
+      if (anyOn) {
+        transitLayer.setVisibleBuckets({ long: transitBuckets.long, city: transitBuckets.city });
+        if (!map.hasLayer(transitLayer)) map.addLayer(transitLayer);
+      } else {
+        if (map.hasLayer(transitLayer)) map.removeLayer(transitLayer);
+      }
+    }
+    function wireTransitFab(btnId, key, storageKey, defaultOn) {
+      var btn = document.getElementById(btnId);
+      if (!btn) return;
+      var on = defaultOn;
+      try {
+        var v = localStorage.getItem(storageKey);
+        if (v !== null) on = (v === '1');
+      } catch (e) {}
+      applyTransitBucket(btn, key, on);
+      btn.addEventListener('click', function() {
+        on = !on;
+        applyTransitBucket(btn, key, on);
+        try { localStorage.setItem(storageKey, on ? '1' : '0'); } catch (e) {}
+      });
+    }
+    wireTransitFab('fab-transit-long', 'long', 'tabelog.showTransitLong', false);
+    wireTransitFab('fab-transit-city', 'city', 'tabelog.showTransitCity', false);
 
     // Find the attractions FeatureGroup among map._layers. Duck-type rather
     // than `instanceof L.MarkerClusterGroup` because that class symbol can
@@ -1270,8 +1353,6 @@ FILTER_JS_TEMPLATE = r"""
         try { localStorage.setItem(storageKey, on ? '1' : '0'); } catch (e) {}
       });
     }
-    wireFab('fab-transit', transitLayer, 'tabelog.showTransit', false);
-
     // ===== 我的收藏 + 用户自添景点 (user-pinned places) =====
     // One JSON store (tabelog.bookmarks / bookmarks.json on the Gist) for
     // both kinds; each entry carries a `category` field — 'bookmark' (under
@@ -1622,9 +1703,27 @@ FILTER_JS_TEMPLATE = r"""
     var ssInput   = document.getElementById('ss-input');
     var ssClear   = document.getElementById('ss-clear');
     var ssList    = document.getElementById('ss-list');
+    var ssFab     = document.getElementById('ss-fab');
+    var ssBack    = document.getElementById('ss-back');
     var ssDebounce = null;
     var ssReqSeq  = 0;
     var ssTempMarker = null;
+
+    var ssMobileMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;
+    function ssIsMobile() { return !!(ssMobileMQ && ssMobileMQ.matches); }
+    function ssOpenMobile() {
+      ssBox.classList.add('ss-mobile-open');
+      ssFab.classList.add('ss-hidden');
+      // Defer focus past the show transition so iOS doesn't refuse the
+      // keyboard pop. requestAnimationFrame is enough; setTimeout 0 also works.
+      requestAnimationFrame(function() { ssInput.focus(); });
+    }
+    function ssCloseMobile() {
+      ssBox.classList.remove('ss-mobile-open');
+      ssFab.classList.remove('ss-hidden');
+      ssCloseDropdown();
+      ssInput.blur();
+    }
 
     function ssRemoveTempMarker() {
       if (ssTempMarker) { map.removeLayer(ssTempMarker); ssTempMarker = null; }
@@ -1699,6 +1798,10 @@ FILTER_JS_TEMPLATE = r"""
       ssCloseDropdown();
       ssInput.value = it.name;
       ssWrap.classList.add('has-text');
+      // On mobile the overlay covers most of the screen — once we've picked
+      // a result, get out of the way so the user can see the pin + popup.
+      // (Input keeps its text for refinement on next open.)
+      if (ssIsMobile()) ssCloseMobile();
       var latlng = L.latLng(it.lat, it.lon);
       // 16 is tight enough to read shop signs without losing context. flyTo
       // animates; Leaflet caps the duration so it's never jarring.
@@ -1835,10 +1938,19 @@ FILTER_JS_TEMPLATE = r"""
       ssInput.focus();
     });
     // Click outside the search box closes the dropdown but keeps the text
-    // so the user can re-focus and refine.
+    // so the user can re-focus and refine. On mobile a tap outside also
+    // closes the overlay back to the FAB — otherwise the user would have
+    // to find the ← button before they can interact with the map again.
     document.addEventListener('click', function(e) {
-      if (!ssBox.contains(e.target)) ssCloseDropdown();
+      if (ssBox.contains(e.target)) return;
+      if (e.target === ssFab) return;
+      ssCloseDropdown();
+      if (ssIsMobile() && ssBox.classList.contains('ss-mobile-open')) {
+        ssCloseMobile();
+      }
     });
+    ssFab.addEventListener('click', ssOpenMobile);
+    ssBack.addEventListener('click', ssCloseMobile);
 
     var cluster = L.markerClusterGroup({maxClusterRadius: 40, disableClusteringAtZoom: 17});
     map.addLayer(cluster);
