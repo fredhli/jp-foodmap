@@ -79,8 +79,11 @@ def load_blacklist() -> set[str]:
 
 
 def load_bookmarks() -> list[dict]:
-    """User-named map pins. Each entry: {id, name, emoji, lat, lon}. Anything
-    missing required fields is dropped silently — the in-browser editor is
+    """User-named map pins. Each entry: {id, name, emoji, lat, lon, category}.
+    Category is 'bookmark' (under the ⭐收藏 FAB) or 'attraction' (under the
+    🗾景点 FAB, alongside the curated data/attractions.csv entries). Missing
+    or unknown category falls back to 'bookmark' for backwards compat. Rows
+    missing required coords are dropped silently — the in-browser editor is
     the source of truth, the file is just the build-time seed."""
     if not BOOKMARKS_JSON.exists():
         return []
@@ -99,12 +102,16 @@ def load_bookmarks() -> list[dict]:
             lon = float(item["lon"])
         except (KeyError, TypeError, ValueError):
             continue
+        cat = str(item.get("category") or "bookmark")
+        if cat not in ("bookmark", "attraction"):
+            cat = "bookmark"
         out.append({
             "id": str(item.get("id") or f"{lat:.6f},{lon:.6f}"),
             "name": str(item.get("name") or "").strip() or "未命名",
             "emoji": str(item.get("emoji") or "📍"),
             "lat": lat,
             "lon": lon,
+            "category": cat,
         })
     return out
 
@@ -759,6 +766,33 @@ BOOKMARKS_MODAL_HTML = """
   }
   #bm-modal .bm-foot button.bm-save:hover { background: #1d4ed8; }
   #bm-modal .bm-foot button.bm-cancel:hover { background: #f3f4f6; }
+  /* 类型 segmented control: two buttons sharing one rounded shell, the
+     active one paints blue. Same shell width as a single text input so
+     it lines up with the rest of the form. */
+  #bm-modal .bm-kind-seg {
+    flex: 1; min-width: 0;
+    display: flex;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    overflow: hidden;
+    background: #fff;
+  }
+  #bm-modal .bm-kind-seg button {
+    flex: 1; min-width: 0;
+    background: transparent; border: none; cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    color: #6b7280;
+    padding: 7px 8px;
+    transition: background 0.12s ease-out, color 0.12s ease-out;
+  }
+  #bm-modal .bm-kind-seg button + button {
+    border-left: 1px solid #d1d5db;
+  }
+  #bm-modal .bm-kind-seg button:hover:not(.active) {
+    background: #f9fafb; color: #374151;
+  }
+  #bm-modal .bm-kind-seg button.active {
+    background: #2563eb; color: #fff;
+  }
 </style>
 <div id="bm-backdrop"></div>
 <div id="bm-modal" role="dialog" aria-modal="true" aria-hidden="true"
@@ -769,6 +803,15 @@ BOOKMARKS_MODAL_HTML = """
   </div>
   <div class="bm-body">
     <div class="bm-coord" id="bm-coord"></div>
+    <div class="bm-row">
+      <label>类型</label>
+      <div class="bm-kind-seg" role="radiogroup" aria-label="类型">
+        <button type="button" data-kind="bookmark" class="active"
+                role="radio" aria-checked="true">⭐ 收藏</button>
+        <button type="button" data-kind="attraction"
+                role="radio" aria-checked="false">🗾 景点</button>
+      </div>
+    </div>
     <div class="bm-row">
       <label for="bm-name">名称</label>
       <input type="text" id="bm-name" maxlength="40"
@@ -1189,41 +1232,52 @@ FILTER_JS_TEMPLATE = r"""
       break;
     }
 
-    function applyToggle(btn, layer, on) {
-      if (!btn || !layer) return;
+    function applyToggle(btn, layers, on) {
+      if (!btn) return;
+      var arr = Array.isArray(layers) ? layers : [layers];
+      arr.forEach(function(layer) {
+        if (!layer) return;
+        if (on) {
+          if (!map.hasLayer(layer)) map.addLayer(layer);
+        } else {
+          if (map.hasLayer(layer)) map.removeLayer(layer);
+        }
+      });
       if (on) {
-        if (!map.hasLayer(layer)) map.addLayer(layer);
         btn.classList.add('active');
         btn.setAttribute('aria-pressed', 'true');
       } else {
-        if (map.hasLayer(layer)) map.removeLayer(layer);
         btn.classList.remove('active');
         btn.setAttribute('aria-pressed', 'false');
       }
     }
 
-    function wireFab(btnId, layer, storageKey, defaultOn) {
+    // `layers` can be a single layer or an array — used by fab-attractions to
+    // co-toggle the folium-curated layer + the user-added attractions layer.
+    function wireFab(btnId, layers, storageKey, defaultOn) {
       var btn = document.getElementById(btnId);
-      if (!btn || !layer) return;
+      var arr = Array.isArray(layers) ? layers : [layers];
+      if (!btn || arr.every(function(l){ return !l; })) return;
       var on = defaultOn;
       try {
         var v = localStorage.getItem(storageKey);
         if (v !== null) on = (v === '1');
       } catch (e) {}
-      applyToggle(btn, layer, on);
+      applyToggle(btn, arr, on);
       btn.addEventListener('click', function() {
         on = !on;
-        applyToggle(btn, layer, on);
+        applyToggle(btn, arr, on);
         try { localStorage.setItem(storageKey, on ? '1' : '0'); } catch (e) {}
       });
     }
-    wireFab('fab-transit',     transitLayer,     'tabelog.showTransit',     false);
-    wireFab('fab-attractions', attractionsLayer, 'tabelog.showAttractions', true);
+    wireFab('fab-transit', transitLayer, 'tabelog.showTransit', false);
 
-    // ===== 我的收藏 (user-pinned places) =====
-    // Stored under 'tabelog.bookmarks' in localStorage. Baseline from the
-    // build-time bookmarks.json is used only if there's nothing cached yet,
-    // so a re-render of the page doesn't blow away locally-added pins.
+    // ===== 我的收藏 + 用户自添景点 (user-pinned places) =====
+    // One JSON store (tabelog.bookmarks / bookmarks.json on the Gist) for
+    // both kinds; each entry carries a `category` field — 'bookmark' (under
+    // the ⭐收藏 FAB) or 'attraction' (under the 🗾景点 FAB, alongside the
+    // curated data/attractions.csv set). The 景点 FAB toggles both layers
+    // together; the 收藏 FAB toggles only the bookmarks layer.
     var BM_KEY = 'tabelog.bookmarks';
     var bookmarks = (function() {
       try {
@@ -1240,22 +1294,29 @@ FILTER_JS_TEMPLATE = r"""
       } catch (_) { return EMBEDDED_BOOKMARKS.slice(); }
     })();
 
-    var bookmarksLayer = L.featureGroup();
+    var bookmarksLayer = L.featureGroup();        // category === 'bookmark'
+    var userAttractionsLayer = L.featureGroup();  // category === 'attraction'
+    // Stores both the marker and its parent layer so removal works without
+    // re-checking the entry's category (which the user could have changed
+    // by deleting + re-adding, etc.).
     var bmMarkerById = {};
 
     function saveBookmarks() {
       try { localStorage.setItem(BM_KEY, JSON.stringify(bookmarks)); } catch (_) {}
     }
-    function bookmarkIconHtml(emoji, name) {
-      // ~22px emoji vs the attraction layer's 30px so user pins read as
-      // secondary anchors. Same drop-shadow + label chip styling.
+    function bookmarkIconHtml(emoji, name, emojiSize, labelSize) {
+      // 22px / 10px for 收藏, 30px / 11px for user-added 景点 — the latter
+      // matches the build-time curated attractions so user additions blend
+      // visually with the existing tourist anchors.
+      var es = emojiSize || 22;
+      var ls = labelSize || 10;
       return '<div style="position:relative;transform:translate(-50%,-100%);' +
                        'text-align:center;width:max-content;">' +
-               '<div style="font-size:22px;line-height:1;' +
+               '<div style="font-size:' + es + 'px;line-height:1;' +
                           'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">' +
                  (emoji || '📍') +
                '</div>' +
-               '<div style="font-size:10px;font-weight:700;color:#1f2937;' +
+               '<div style="font-size:' + ls + 'px;font-weight:700;color:#1f2937;' +
                           'background:rgba(255,255,255,0.92);' +
                           'padding:1px 5px;border-radius:4px;margin-top:1px;' +
                           'white-space:nowrap;' +
@@ -1270,26 +1331,38 @@ FILTER_JS_TEMPLATE = r"""
       });
     }
     function renderBookmark(bm) {
+      var isAttraction = bm.category === 'attraction';
+      var targetLayer = isAttraction ? userAttractionsLayer : bookmarksLayer;
       var icon = L.divIcon({
         className: 'empty',
         iconSize: [0, 0],
         iconAnchor: [0, 0],
-        html: bookmarkIconHtml(bm.emoji, bm.name)
+        html: bookmarkIconHtml(bm.emoji, bm.name,
+                               isAttraction ? 30 : 22,
+                               isAttraction ? 11 : 10)
       });
       var m = L.marker([bm.lat, bm.lon], {icon: icon});
       m.bindTooltip(bm.name || '', {sticky: true});
       m.on('click', function() { openBookmarkPopup(bm, m); });
-      m.addTo(bookmarksLayer);
-      bmMarkerById[bm.id] = m;
+      m.addTo(targetLayer);
+      bmMarkerById[bm.id] = {marker: m, layer: targetLayer};
     }
     function removeBookmarkMarker(bm) {
-      var m = bmMarkerById[bm.id];
-      if (m) { bookmarksLayer.removeLayer(m); delete bmMarkerById[bm.id]; }
+      var entry = bmMarkerById[bm.id];
+      if (entry) {
+        entry.layer.removeLayer(entry.marker);
+        delete bmMarkerById[bm.id];
+      }
     }
     bookmarks.forEach(renderBookmark);
 
     function openBookmarkPopup(bm, marker) {
       var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
+      var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除收藏';
+      // Larger popup offset for attractions because they render at 30px
+      // instead of 22px — keeps the speech bubble tip from overlapping
+      // the emoji.
+      var offY = (bm.category === 'attraction') ? -30 : -22;
       var html =
         '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
           '<div style="font-weight:700;margin-bottom:4px;">' +
@@ -1301,9 +1374,9 @@ FILTER_JS_TEMPLATE = r"""
                   'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
                          'border:1px solid #fecaca;border-radius:4px;' +
                          'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
-                  '删除收藏</button>' +
+                  delLabel + '</button>' +
         '</div>';
-      L.popup({offset: [0, -22]})
+      L.popup({offset: [0, offY]})
         .setLatLng([bm.lat, bm.lon])
         .setContent(html)
         .openOn(map);
@@ -1321,18 +1394,39 @@ FILTER_JS_TEMPLATE = r"""
       }, 0);
     }
 
+    wireFab('fab-attractions',
+            [attractionsLayer, userAttractionsLayer],
+            'tabelog.showAttractions', true);
     wireFab('fab-bookmarks', bookmarksLayer, 'tabelog.showBookmarks', true);
 
     // ----- 加入收藏 modal -----
     var bmModal      = document.getElementById('bm-modal');
     var bmBackdrop   = document.getElementById('bm-backdrop');
     var bmCoordEl    = document.getElementById('bm-coord');
+    var bmTitleEl    = document.getElementById('bm-modal-title');
     var bmNameInput  = document.getElementById('bm-name');
     var bmEmojiInput = document.getElementById('bm-emoji');
     var bmEmojiMore  = document.getElementById('bm-emoji-more');
     var bmPicker     = document.getElementById('bm-emoji-picker');
     var bmError      = document.getElementById('bm-error');
+    var bmKindBtns   = bmModal.querySelectorAll('.bm-kind-seg button');
     var bmPending    = null;          // {lat, lng}
+    var bmKind       = 'bookmark';    // 'bookmark' | 'attraction'
+
+    function bmSetKind(kind) {
+      bmKind = (kind === 'attraction') ? 'attraction' : 'bookmark';
+      bmKindBtns.forEach(function(b) {
+        var on = b.getAttribute('data-kind') === bmKind;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      bmTitleEl.textContent = (bmKind === 'attraction') ? '加入景点' : '加入收藏';
+    }
+    bmKindBtns.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        bmSetKind(btn.getAttribute('data-kind'));
+      });
+    });
 
     // EMOJI_RE matches single emoji codepoints; ZWJ / VS / skin-tone
     // modifiers stitch sequences together (family, profession, tone). To
@@ -1365,6 +1459,7 @@ FILTER_JS_TEMPLATE = r"""
       bmCoordEl.textContent = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
       bmNameInput.value = prefillName || '';
       bmEmojiInput.value = '📍';
+      bmSetKind('bookmark');           // reset default each open
       bmShowError('');
       bmCollapsePicker();
       bmBackdrop.classList.add('bm-open');
@@ -1404,7 +1499,8 @@ FILTER_JS_TEMPLATE = r"""
         name: name,
         emoji: emoji,
         lat: bmPending.lat,
-        lon: bmPending.lng
+        lon: bmPending.lng,
+        category: bmKind
       };
       bookmarks.push(bm);
       renderBookmark(bm);
@@ -1420,9 +1516,11 @@ FILTER_JS_TEMPLATE = r"""
           ssRemoveTempMarker();
         }
       }
-      // Make sure the layer is visible after adding — if the user has the
-      // FAB toggled off, surface the pin by re-enabling it.
-      var fab = document.getElementById('fab-bookmarks');
+      // Make sure the right layer is visible after adding — if the user
+      // has the corresponding FAB toggled off, surface the pin by
+      // re-enabling it.
+      var fabId = (bm.category === 'attraction') ? 'fab-attractions' : 'fab-bookmarks';
+      var fab = document.getElementById(fabId);
       if (fab && fab.getAttribute('aria-pressed') !== 'true') fab.click();
       closeBookmarkModal();
     }
@@ -1802,9 +1900,12 @@ FILTER_JS_TEMPLATE = r"""
             if (remote.black) state.black = remote.black;
             if (remote.bookmarks) {
               // Wipe + re-render in place — closures hold the same array
-              // reference, so we mutate rather than reassign.
+              // reference, so we mutate rather than reassign. Both layers
+              // (bookmarks + user-added attractions) get cleared so the
+              // pull rebuild starts from a clean slate.
               bookmarks.length = 0;
               bookmarksLayer.clearLayers();
+              userAttractionsLayer.clearLayers();
               bmMarkerById = {};
               remote.bookmarks.forEach(function(bm) {
                 bookmarks.push(bm);
