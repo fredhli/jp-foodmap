@@ -31,6 +31,9 @@ TABELOG_CSV = TABELOG_DIR / "tabelog.csv"
 # User-curated state edited via the map UI
 FAVORITES_JSON = USER_DIR / "favorites.json"
 BLACKLIST_JSON = USER_DIR / "blacklist.json"
+# Pinned places (right-click → 加入收藏). Distinct from FAVORITES_JSON which
+# stores Tabelog restaurant URLs; this one stores user-named map pins.
+BOOKMARKS_JSON = USER_DIR / "bookmarks.json"
 
 # Rendered artifact — committed to docs/ so GitHub Pages picks it up.
 MAP_HTML = DOCS_DIR / "index.html"

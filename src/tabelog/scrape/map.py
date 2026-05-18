@@ -37,6 +37,7 @@ from tabelog.paths import (
     MAP_HTML,
     FAVORITES_JSON,
     BLACKLIST_JSON,
+    BOOKMARKS_JSON,
     OUTPUT_DIR,
     CACHE_DIR,
 )
@@ -75,6 +76,37 @@ def load_favorites() -> set[str]:
 
 def load_blacklist() -> set[str]:
     return _load_url_set(BLACKLIST_PATH)
+
+
+def load_bookmarks() -> list[dict]:
+    """User-named map pins. Each entry: {id, name, emoji, lat, lon}. Anything
+    missing required fields is dropped silently — the in-browser editor is
+    the source of truth, the file is just the build-time seed."""
+    if not BOOKMARKS_JSON.exists():
+        return []
+    try:
+        raw = json.loads(BOOKMARKS_JSON.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            lat = float(item["lat"])
+            lon = float(item["lon"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append({
+            "id": str(item.get("id") or f"{lat:.6f},{lon:.6f}"),
+            "name": str(item.get("name") or "").strip() or "未命名",
+            "emoji": str(item.get("emoji") or "📍"),
+            "lat": lat,
+            "lon": lon,
+        })
+    return out
 
 JAPAN_CENTER = (36.2048, 138.2529)
 
@@ -458,6 +490,319 @@ MAP_FAB_HTML = """
           aria-pressed="true" title="景点锚点">
     <span class="map-fab-ic">🗾</span><span class="map-fab-label">景点</span>
   </button>
+  <button id="fab-bookmarks" class="map-fab active" type="button"
+          aria-pressed="true" title="我的收藏">
+    <span class="map-fab-ic">⭐</span><span class="map-fab-label">收藏</span>
+  </button>
+</div>
+"""
+
+
+# Top-center floating search box. Hits Nominatim (OSM) and drops the
+# results into a clickable dropdown. CORS-safe from the browser; rate
+# limited by the JS-side debounce (~300ms per keystroke).
+SEARCH_BOX_HTML = """
+<style>
+  #ss-box {
+    position: fixed; top: 12px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 9996;
+    width: min(calc(100vw - 32px), 380px);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #ss-input-wrap {
+    position: relative; display: flex; align-items: center;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 22px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: box-shadow 0.15s ease-out;
+  }
+  #ss-input-wrap:focus-within {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+    border-color: #93c5fd;
+  }
+  #ss-icon {
+    padding-left: 14px; color: #6b7280; font-size: 14px;
+    line-height: 1; user-select: none;
+  }
+  #ss-input {
+    flex: 1; min-width: 0;
+    padding: 9px 6px 9px 8px;
+    border: none; outline: none; background: transparent;
+    font-size: 14px; color: #1f2937;
+    font-family: inherit;
+  }
+  #ss-input::placeholder { color: #9ca3af; }
+  #ss-clear {
+    border: none; background: none; cursor: pointer;
+    color: #9ca3af; font-size: 16px; line-height: 1;
+    padding: 6px 12px 6px 6px;
+    display: none;
+  }
+  #ss-clear:hover { color: #374151; }
+  #ss-input-wrap.has-text #ss-clear { display: block; }
+  #ss-spinner {
+    display: none;
+    width: 14px; height: 14px;
+    border: 2px solid #e5e7eb; border-top-color: #2563eb;
+    border-radius: 50%;
+    margin-right: 12px;
+    animation: ss-spin 0.8s linear infinite;
+  }
+  #ss-input-wrap.busy #ss-spinner { display: block; }
+  #ss-input-wrap.busy #ss-clear   { display: none; }
+  @keyframes ss-spin { to { transform: rotate(360deg); } }
+  #ss-list {
+    margin-top: 6px;
+    background: #fff;
+    border: 1px solid #d1d5db; border-radius: 10px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.16);
+    overflow: hidden;
+    display: none;
+    max-height: 65vh; max-height: 65dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #ss-list.open { display: block; }
+  #ss-list .ss-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid #f3f4f6;
+    cursor: pointer;
+    transition: background 0.1s ease-out;
+  }
+  #ss-list .ss-row:last-child { border-bottom: none; }
+  #ss-list .ss-row:hover { background: #f9fafb; }
+  #ss-list .ss-row.ss-empty {
+    cursor: default; color: #6b7280; font-size: 12px;
+    justify-content: center; padding: 14px 10px;
+  }
+  #ss-list .ss-row.ss-empty:hover { background: transparent; }
+  #ss-list .ss-row.ss-error { color: #b91c1c; }
+  #ss-list .ss-text { flex: 1; min-width: 0; }
+  #ss-list .ss-name {
+    font-size: 13px; font-weight: 600; color: #1f2937;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #ss-list .ss-addr {
+    font-size: 11px; color: #6b7280;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+  #ss-list .ss-fav {
+    flex-shrink: 0;
+    background: #f9fafb; border: 1px solid #d1d5db;
+    border-radius: 6px; cursor: pointer;
+    font-size: 14px; line-height: 1;
+    padding: 5px 8px; color: #374151;
+  }
+  #ss-list .ss-fav:hover { background: #fef3c7; border-color: #facc15; }
+  #ss-list .ss-icon {
+    flex-shrink: 0; font-size: 16px; line-height: 1; width: 20px;
+    text-align: center; color: #6b7280;
+  }
+  @media (max-width: 480px) {
+    #ss-box { top: 8px; width: calc(100vw - 16px); }
+    #ss-input { font-size: 16px; }   /* iOS no-zoom */
+  }
+</style>
+<div id="ss-box">
+  <div id="ss-input-wrap">
+    <span id="ss-icon">🔍</span>
+    <input id="ss-input" type="text" autocomplete="off"
+           placeholder="搜索景点 / 地址 ...">
+    <div id="ss-spinner"></div>
+    <button id="ss-clear" type="button" aria-label="清空">×</button>
+  </div>
+  <div id="ss-list" role="listbox"></div>
+</div>
+"""
+
+
+# Right-click → 加入收藏 modal. Two inputs (name + emoji) and a row of
+# preset emoji chips, plus a full emoji picker (Web Component from
+# CDN). The picker uses Shadow DOM, so the page-wide MutationObserver
+# that swaps emoji glyphs for Apple-CDN images can't reach inside it —
+# the picker renders system glyphs natively, which is exactly what its
+# search index expects.
+BOOKMARKS_MODAL_HTML = """
+<script type="module"
+        src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+<style>
+  #bm-backdrop {
+    position: fixed; inset: 0; z-index: 10010;
+    background: rgba(0,0,0,0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s ease-out;
+  }
+  #bm-backdrop.bm-open { opacity: 1; pointer-events: auto; }
+  #bm-modal {
+    position: fixed; left: 50%; top: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    z-index: 10011;
+    width: min(92vw, 340px);
+    max-height: 90vh; max-height: 90dvh;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #1f2937;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+    display: flex; flex-direction: column;
+  }
+  #bm-modal.bm-open {
+    opacity: 1; pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  #bm-modal .bm-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+  #bm-modal .bm-title { font-weight: 700; font-size: 14px; }
+  #bm-modal .bm-close {
+    background: none; border: none; cursor: pointer;
+    font-size: 20px; line-height: 1; color: #9ca3af;
+    padding: 2px 6px;
+  }
+  #bm-modal .bm-close:hover { color: #374151; }
+  #bm-modal .bm-body {
+    padding: 12px 14px; font-size: 13px;
+    overflow-y: auto; flex: 1 1 auto; min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  #bm-modal .bm-coord {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #6b7280; font-size: 12px;
+    margin-bottom: 10px; text-align: center;
+  }
+  #bm-modal .bm-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  }
+  #bm-modal .bm-row > label {
+    width: 42px; flex-shrink: 0; color: #6b7280; font-size: 12px;
+  }
+  #bm-modal .bm-row > input {
+    flex: 1; min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db; border-radius: 5px;
+    font-size: 13px; font-family: inherit;
+    box-sizing: border-box;
+  }
+  #bm-modal #bm-emoji {
+    flex: 1; min-width: 0;
+    text-align: left; font-size: 18px;
+  }
+  /* "常用" quick-pick row — small label + chip buttons, on a tinted
+     panel so the section is visually separate from the typed input. */
+  #bm-modal .bm-quick {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; margin-bottom: 8px;
+    background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 6px;
+  }
+  #bm-modal .bm-quick-label {
+    font-size: 11px; color: #6b7280; font-weight: 600;
+    flex-shrink: 0;
+  }
+  #bm-modal .bm-quick-list {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  #bm-modal .bm-quick-list button {
+    background: #fff; border: 1px solid #d1d5db; border-radius: 5px;
+    cursor: pointer; font-size: 16px; line-height: 1;
+    padding: 4px 7px;
+    font-family: inherit;
+  }
+  #bm-modal .bm-quick-list button:hover {
+    background: #eff6ff; border-color: #93c5fd;
+  }
+  /* Full-picker toggle sits inside .bm-quick-list as a 7th chip, but
+     tinted blue so it reads as "open a different surface" rather than
+     "another preset". */
+  #bm-modal #bm-emoji-more {
+    background: #eff6ff; border-color: #bfdbfe;
+  }
+  #bm-modal #bm-emoji-more:hover {
+    background: #dbeafe; border-color: #93c5fd;
+  }
+  #bm-modal #bm-emoji-picker {
+    display: none;
+    width: 100%;
+    height: 280px;
+    margin-top: 8px;
+    /* Tokens consumed by emoji-picker-element's shadow DOM. */
+    --background: #fff;
+    --border-color: #e5e7eb;
+    --border-radius: 8px;
+    --emoji-size: 1.15rem;
+    --num-columns: 8;
+  }
+  #bm-modal #bm-emoji-picker.bm-show { display: block; }
+  #bm-modal .bm-error {
+    color: #b91c1c; font-size: 12px;
+    min-height: 16px; margin-top: 8px;
+  }
+  #bm-modal .bm-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 8px 14px 12px;
+    flex-shrink: 0;
+    border-top: 1px solid #f3f4f6;
+  }
+  #bm-modal .bm-foot button {
+    padding: 6px 14px; border-radius: 5px; cursor: pointer;
+    font-size: 13px; font-weight: 600; border: 1px solid #d1d5db;
+    background: #f9fafb; color: #1f2937;
+  }
+  #bm-modal .bm-foot button.bm-save {
+    background: #2563eb; border-color: #2563eb; color: #fff;
+  }
+  #bm-modal .bm-foot button.bm-save:hover { background: #1d4ed8; }
+  #bm-modal .bm-foot button.bm-cancel:hover { background: #f3f4f6; }
+</style>
+<div id="bm-backdrop"></div>
+<div id="bm-modal" role="dialog" aria-modal="true" aria-hidden="true"
+     aria-labelledby="bm-modal-title">
+  <div class="bm-head">
+    <span class="bm-title" id="bm-modal-title">加入收藏</span>
+    <button class="bm-close" aria-label="关闭">×</button>
+  </div>
+  <div class="bm-body">
+    <div class="bm-coord" id="bm-coord"></div>
+    <div class="bm-row">
+      <label for="bm-name">名称</label>
+      <input type="text" id="bm-name" maxlength="40"
+             placeholder="例如：东京塔" autocomplete="off">
+    </div>
+    <div class="bm-row">
+      <label for="bm-emoji">Emoji</label>
+      <input type="text" id="bm-emoji" maxlength="8" value="📍"
+             placeholder="可粘贴任意 emoji" autocomplete="off">
+    </div>
+
+    <div class="bm-quick">
+      <span class="bm-quick-label">常用</span>
+      <div class="bm-quick-list">
+        <button type="button" data-emoji="🏠">🏠</button>
+        <button type="button" data-emoji="🏨">🏨</button>
+        <button type="button" data-emoji="🍽️">🍽️</button>
+        <button type="button" data-emoji="⭐">⭐</button>
+        <button type="button" data-emoji="❤️">❤️</button>
+        <button type="button" data-emoji="🛍️">🛍️</button>
+        <button type="button" id="bm-emoji-more"
+                aria-expanded="false" aria-controls="bm-emoji-picker"
+                title="打开完整 emoji 选择器">🔽</button>
+      </div>
+    </div>
+
+    <emoji-picker id="bm-emoji-picker"></emoji-picker>
+
+    <div class="bm-error" id="bm-error" aria-live="polite"></div>
+  </div>
+  <div class="bm-foot">
+    <button type="button" class="bm-cancel">取消</button>
+    <button type="button" class="bm-save">保存</button>
+  </div>
 </div>
 """
 
@@ -627,6 +972,7 @@ FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
   var EMBEDDED_DATA = __PAYLOAD__;
+  var EMBEDDED_BOOKMARKS = __BOOKMARKS__;
 
   // ===== Apple-style emoji rendering via emojicdn =====
   // Windows ships no flag glyphs in its system font, so we swap every emoji
@@ -864,39 +1210,524 @@ FILTER_JS_TEMPLATE = r"""
     wireFab('fab-transit',     transitLayer,     'tabelog.showTransit',     false);
     wireFab('fab-attractions', attractionsLayer, 'tabelog.showAttractions', true);
 
+    // ===== 我的收藏 (user-pinned places) =====
+    // Stored under 'tabelog.bookmarks' in localStorage. Baseline from the
+    // build-time bookmarks.json is used only if there's nothing cached yet,
+    // so a re-render of the page doesn't blow away locally-added pins.
+    var BM_KEY = 'tabelog.bookmarks';
+    var bookmarks = (function() {
+      try {
+        var raw = localStorage.getItem(BM_KEY);
+        if (raw === null) {
+          // First visit on this device — seed from the embedded baseline
+          // and persist it so subsequent edits anchor against that copy.
+          var seed = EMBEDDED_BOOKMARKS.slice();
+          localStorage.setItem(BM_KEY, JSON.stringify(seed));
+          return seed;
+        }
+        var arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch (_) { return EMBEDDED_BOOKMARKS.slice(); }
+    })();
+
+    var bookmarksLayer = L.featureGroup();
+    var bmMarkerById = {};
+
+    function saveBookmarks() {
+      try { localStorage.setItem(BM_KEY, JSON.stringify(bookmarks)); } catch (_) {}
+    }
+    function bookmarkIconHtml(emoji, name) {
+      // ~22px emoji vs the attraction layer's 30px so user pins read as
+      // secondary anchors. Same drop-shadow + label chip styling.
+      return '<div style="position:relative;transform:translate(-50%,-100%);' +
+                       'text-align:center;width:max-content;">' +
+               '<div style="font-size:22px;line-height:1;' +
+                          'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">' +
+                 (emoji || '📍') +
+               '</div>' +
+               '<div style="font-size:10px;font-weight:700;color:#1f2937;' +
+                          'background:rgba(255,255,255,0.92);' +
+                          'padding:1px 5px;border-radius:4px;margin-top:1px;' +
+                          'white-space:nowrap;' +
+                          'box-shadow:0 1px 2px rgba(0,0,0,0.2);">' +
+                 escapeHtml(name || '') +
+               '</div>' +
+             '</div>';
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function(c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    }
+    function renderBookmark(bm) {
+      var icon = L.divIcon({
+        className: 'empty',
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+        html: bookmarkIconHtml(bm.emoji, bm.name)
+      });
+      var m = L.marker([bm.lat, bm.lon], {icon: icon});
+      m.bindTooltip(bm.name || '', {sticky: true});
+      m.on('click', function() { openBookmarkPopup(bm, m); });
+      m.addTo(bookmarksLayer);
+      bmMarkerById[bm.id] = m;
+    }
+    function removeBookmarkMarker(bm) {
+      var m = bmMarkerById[bm.id];
+      if (m) { bookmarksLayer.removeLayer(m); delete bmMarkerById[bm.id]; }
+    }
+    bookmarks.forEach(renderBookmark);
+
+    function openBookmarkPopup(bm, marker) {
+      var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
+      var html =
+        '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
+          '<div style="font-weight:700;margin-bottom:4px;">' +
+            (bm.emoji || '📍') + ' ' + escapeHtml(bm.name || '') +
+          '</div>' +
+          '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
+                      'margin-bottom:8px;">' + coord + '</div>' +
+          '<button id="bm-del" ' +
+                  'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                         'border:1px solid #fecaca;border-radius:4px;' +
+                         'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
+                  '删除收藏</button>' +
+        '</div>';
+      L.popup({offset: [0, -22]})
+        .setLatLng([bm.lat, bm.lon])
+        .setContent(html)
+        .openOn(map);
+      setTimeout(function() {
+        var del = document.getElementById('bm-del');
+        if (!del) return;
+        del.addEventListener('click', function() {
+          var i = bookmarks.findIndex(function(x){ return x.id === bm.id; });
+          if (i >= 0) bookmarks.splice(i, 1);
+          removeBookmarkMarker(bm);
+          saveBookmarks();
+          map.closePopup();
+        });
+      }, 0);
+    }
+
+    wireFab('fab-bookmarks', bookmarksLayer, 'tabelog.showBookmarks', true);
+
+    // ----- 加入收藏 modal -----
+    var bmModal      = document.getElementById('bm-modal');
+    var bmBackdrop   = document.getElementById('bm-backdrop');
+    var bmCoordEl    = document.getElementById('bm-coord');
+    var bmNameInput  = document.getElementById('bm-name');
+    var bmEmojiInput = document.getElementById('bm-emoji');
+    var bmEmojiMore  = document.getElementById('bm-emoji-more');
+    var bmPicker     = document.getElementById('bm-emoji-picker');
+    var bmError      = document.getElementById('bm-error');
+    var bmPending    = null;          // {lat, lng}
+
+    // EMOJI_RE matches single emoji codepoints; ZWJ / VS / skin-tone
+    // modifiers stitch sequences together (family, profession, tone). To
+    // judge "is the whole string emoji-only", strip both and check nothing
+    // remains. Pure-ASCII / Han / random punctuation will leave residue.
+    function isPureEmoji(s) {
+      if (!s) return false;
+      // ZWJ U+200D, variation selectors U+FE0E/FE0F, Fitzpatrick skin tones
+      // U+1F3FB–U+1F3FF. EMOJI_RE catches the base glyphs; this regex
+      // catches the glue and modifiers that sit between/after them.
+      var stripped = s.replace(EMOJI_RE, '')
+                      .replace(/[‍︎️\u{1F3FB}-\u{1F3FF}]/gu, '');
+      return stripped.trim() === '';
+    }
+    function bmShowError(msg) { bmError.textContent = msg || ''; }
+    function bmFlagInput(input) {
+      input.focus();
+      input.style.borderColor = '#dc2626';
+      setTimeout(function(){ input.style.borderColor = ''; }, 1200);
+    }
+
+    function bmCollapsePicker() {
+      bmPicker.classList.remove('bm-show');
+      bmEmojiMore.setAttribute('aria-expanded', 'false');
+      bmEmojiMore.textContent = '🔽';
+    }
+
+    function openBookmarkModal(latlng, prefillName) {
+      bmPending = {lat: latlng.lat, lng: latlng.lng};
+      bmCoordEl.textContent = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
+      bmNameInput.value = prefillName || '';
+      bmEmojiInput.value = '📍';
+      bmShowError('');
+      bmCollapsePicker();
+      bmBackdrop.classList.add('bm-open');
+      bmModal.classList.add('bm-open');
+      bmModal.setAttribute('aria-hidden', 'false');
+      // Pull focus into the name field after the open transition starts so
+      // mobile keyboards pop up immediately.
+      setTimeout(function(){ bmNameInput.focus(); }, 50);
+    }
+    function closeBookmarkModal() {
+      bmBackdrop.classList.remove('bm-open');
+      bmModal.classList.remove('bm-open');
+      bmModal.setAttribute('aria-hidden', 'true');
+      bmCollapsePicker();
+      bmShowError('');
+      bmPending = null;
+    }
+    function commitBookmark() {
+      if (!bmPending) return;
+      var name = (bmNameInput.value || '').trim();
+      var emojiRaw = (bmEmojiInput.value || '').trim();
+      if (!name) {
+        bmShowError('名称不能为空');
+        bmFlagInput(bmNameInput);
+        return;
+      }
+      if (emojiRaw && !isPureEmoji(emojiRaw)) {
+        bmShowError('图标必须是 emoji（试试 😀 按钮里的选择器）');
+        bmFlagInput(bmEmojiInput);
+        return;
+      }
+      var emoji = emojiRaw || '📍';
+      bmShowError('');
+      var bm = {
+        id: 'bm-' + Date.now().toString(36) + '-' +
+            Math.random().toString(36).slice(2, 7),
+        name: name,
+        emoji: emoji,
+        lat: bmPending.lat,
+        lon: bmPending.lng
+      };
+      bookmarks.push(bm);
+      renderBookmark(bm);
+      saveBookmarks();
+      // If a search-temp 📍 sits at this exact spot it's the one being
+      // bookmarked — drop it so the bookmark emoji doesn't stack on top.
+      // Coord match instead of a "source" flag keeps the right-click path
+      // from accidentally clearing an unrelated search pin elsewhere.
+      if (ssTempMarker) {
+        var t = ssTempMarker.getLatLng();
+        if (Math.abs(t.lat - bm.lat) < 1e-7 && Math.abs(t.lng - bm.lon) < 1e-7) {
+          ssRemoveTempMarker();
+        }
+      }
+      // Make sure the layer is visible after adding — if the user has the
+      // FAB toggled off, surface the pin by re-enabling it.
+      var fab = document.getElementById('fab-bookmarks');
+      if (fab && fab.getAttribute('aria-pressed') !== 'true') fab.click();
+      closeBookmarkModal();
+    }
+    bmBackdrop.addEventListener('click', closeBookmarkModal);
+    bmModal.querySelector('.bm-close').addEventListener('click', closeBookmarkModal);
+    bmModal.querySelector('.bm-cancel').addEventListener('click', closeBookmarkModal);
+    bmModal.querySelector('.bm-save').addEventListener('click', commitBookmark);
+    // Quick-pick chips live in their own block; the 😀 picker button is
+    // a sibling of that block and is wired separately to toggle bmPicker.
+    bmModal.querySelectorAll('.bm-quick-list button[data-emoji]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        bmEmojiInput.value = btn.getAttribute('data-emoji') || '📍';
+        bmShowError('');
+      });
+    });
+    bmEmojiMore.addEventListener('click', function() {
+      var nowOpen = !bmPicker.classList.contains('bm-show');
+      bmPicker.classList.toggle('bm-show', nowOpen);
+      bmEmojiMore.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+      bmEmojiMore.textContent = nowOpen ? '🔼' : '🔽';
+    });
+    // emoji-picker-element fires 'emoji-click' with detail.unicode as the
+    // rendered glyph. Setting the input + closing the picker mirrors what
+    // most users expect after a pick.
+    bmPicker.addEventListener('emoji-click', function(ev) {
+      var u = ev && ev.detail && ev.detail.unicode;
+      if (!u) return;
+      bmEmojiInput.value = u;
+      bmShowError('');
+      bmEmojiInput.style.borderColor = '';
+      bmCollapsePicker();
+    });
+    bmNameInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); commitBookmark(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeBookmarkModal(); }
+    });
+    bmEmojiInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); commitBookmark(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeBookmarkModal(); }
+    });
+
     // Right-click (desktop) / long-press (mobile) on any blank spot of the
-    // map -> popup with the coords + a copy button. Leaflet fires
-    // 'contextmenu' for both gestures so we only need one handler.
+    // map -> popup with the coords + a copy button + a 加入收藏 button.
+    // Leaflet fires 'contextmenu' for both gestures so we only need one handler.
     map.on('contextmenu', function(e) {
       var s = e.latlng.lat.toFixed(6) + ', ' + e.latlng.lng.toFixed(6);
       var html =
-        '<div style="font:13px sans-serif;text-align:center;min-width:140px;">' +
-          '<div style="font-family:monospace;margin-bottom:6px;">' + s + '</div>' +
-          '<button id="ff-copy-coord" ' +
-                  'style="padding:3px 10px;font-size:12px;cursor:pointer;' +
-                  'border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;">' +
-                  '复制</button>' +
+        '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
+          '<div style="font-family:monospace;margin-bottom:8px;">' + s + '</div>' +
+          '<div style="display:flex;gap:6px;justify-content:center;">' +
+            '<button id="ff-copy-coord" ' +
+                    'style="padding:4px 10px;font-size:12px;cursor:pointer;' +
+                    'border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;">' +
+                    '复制</button>' +
+            '<button id="ff-add-bm" ' +
+                    'style="padding:4px 10px;font-size:12px;cursor:pointer;' +
+                    'border:1px solid #2563eb;border-radius:4px;' +
+                    'background:#2563eb;color:#fff;font-weight:600;">' +
+                    '⭐ 加入收藏</button>' +
+          '</div>' +
         '</div>';
       L.popup().setLatLng(e.latlng).setContent(html).openOn(map);
       setTimeout(function() {
         var btn = document.getElementById('ff-copy-coord');
+        if (btn) {
+          btn.addEventListener('click', function() {
+            var done = function() { btn.textContent = '已复制 ✓'; };
+            var fallback = function() {
+              var t = document.createElement('textarea');
+              t.value = s; t.style.position = 'fixed'; t.style.opacity = '0';
+              document.body.appendChild(t); t.select();
+              try { document.execCommand('copy'); } catch (_) {}
+              document.body.removeChild(t); done();
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(s).then(done).catch(fallback);
+            } else {
+              fallback();
+            }
+          });
+        }
+        var add = document.getElementById('ff-add-bm');
+        if (add) {
+          add.addEventListener('click', function() {
+            map.closePopup();
+            openBookmarkModal(e.latlng);
+          });
+        }
+      }, 0);
+    });
+
+    // ===== Nominatim search =====
+    // Browser → https://nominatim.openstreetmap.org/search?...&format=jsonv2
+    // CORS-open. Policy is ≤1 req/s — JS-side 300ms debounce keeps us well
+    // under that for normal typing. viewbox bounds Japan so "Tokyo" doesn't
+    // match the US street. zh/ja in accept-language for nicer labels.
+    var ssBox     = document.getElementById('ss-box');
+    var ssWrap    = document.getElementById('ss-input-wrap');
+    var ssInput   = document.getElementById('ss-input');
+    var ssClear   = document.getElementById('ss-clear');
+    var ssList    = document.getElementById('ss-list');
+    var ssDebounce = null;
+    var ssReqSeq  = 0;
+    var ssTempMarker = null;
+
+    function ssRemoveTempMarker() {
+      if (ssTempMarker) { map.removeLayer(ssTempMarker); ssTempMarker = null; }
+    }
+
+    function ssRender(items) {
+      ssList.innerHTML = '';
+      if (!items) { ssList.classList.remove('open'); return; }
+      if (items.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'ss-row ss-empty';
+        empty.textContent = '没有匹配的结果';
+        ssList.appendChild(empty);
+        ssList.classList.add('open');
+        return;
+      }
+      items.forEach(function(it) {
+        var row = document.createElement('div');
+        row.className = 'ss-row';
+        row.setAttribute('role', 'option');
+
+        var icon = document.createElement('span');
+        icon.className = 'ss-icon';
+        icon.textContent = '📍';
+
+        var text = document.createElement('div');
+        text.className = 'ss-text';
+        var n = document.createElement('div');
+        n.className = 'ss-name';
+        n.textContent = it.name;
+        var a = document.createElement('div');
+        a.className = 'ss-addr';
+        a.textContent = it.address;
+        text.appendChild(n); text.appendChild(a);
+
+        var favBtn = document.createElement('button');
+        favBtn.className = 'ss-fav';
+        favBtn.type = 'button';
+        favBtn.title = '加入收藏';
+        favBtn.textContent = '⭐';
+
+        row.appendChild(icon);
+        row.appendChild(text);
+        row.appendChild(favBtn);
+
+        row.addEventListener('click', function(ev) {
+          if (ev.target === favBtn) return;
+          ssGoto(it);
+        });
+        favBtn.addEventListener('click', function(ev) {
+          ev.stopPropagation();
+          ssCloseDropdown();
+          openBookmarkModal({lat: it.lat, lng: it.lon}, it.name);
+        });
+
+        ssList.appendChild(row);
+      });
+      ssList.classList.add('open');
+    }
+    function ssShowError(msg) {
+      ssList.innerHTML = '';
+      var r = document.createElement('div');
+      r.className = 'ss-row ss-empty ss-error';
+      r.textContent = msg;
+      ssList.appendChild(r);
+      ssList.classList.add('open');
+    }
+    function ssCloseDropdown() {
+      ssList.classList.remove('open');
+    }
+    function ssGoto(it) {
+      ssCloseDropdown();
+      ssInput.value = it.name;
+      ssWrap.classList.add('has-text');
+      var latlng = L.latLng(it.lat, it.lon);
+      // 16 is tight enough to read shop signs without losing context. flyTo
+      // animates; Leaflet caps the duration so it's never jarring.
+      map.flyTo(latlng, Math.max(map.getZoom(), 16), {duration: 0.8});
+      ssRemoveTempMarker();
+      var iconHtml =
+        '<div style="position:relative;transform:translate(-50%,-100%);' +
+                    'text-align:center;width:max-content;">' +
+          '<div style="font-size:26px;line-height:1;' +
+                      'filter:drop-shadow(0 1px 3px rgba(0,0,0,0.5));">📍</div>' +
+          '<div style="font-size:11px;font-weight:700;color:#1f2937;' +
+                      'background:rgba(255,255,255,0.95);' +
+                      'padding:1px 6px;border-radius:4px;margin-top:1px;' +
+                      'white-space:nowrap;max-width:220px;overflow:hidden;' +
+                      'text-overflow:ellipsis;' +
+                      'box-shadow:0 1px 2px rgba(0,0,0,0.2);">' +
+            escapeHtml(it.name) + '</div>' +
+        '</div>';
+      ssTempMarker = L.marker(latlng, {
+        icon: L.divIcon({className: 'empty', iconSize: [0,0], iconAnchor: [0,0], html: iconHtml})
+      }).addTo(map);
+      // Small popup attached so the user can immediately bookmark the
+      // searched place without scrolling back to the dropdown.
+      var popHtml =
+        '<div style="font:13px sans-serif;text-align:center;min-width:170px;">' +
+          '<div style="font-weight:700;margin-bottom:4px;">' +
+            escapeHtml(it.name) + '</div>' +
+          '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
+                      'margin-bottom:8px;">' +
+            it.lat.toFixed(6) + ', ' + it.lon.toFixed(6) + '</div>' +
+          '<button id="ss-add-bm" ' +
+                  'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                  'border:1px solid #2563eb;border-radius:4px;' +
+                  'background:#2563eb;color:#fff;font-weight:600;">' +
+                  '⭐ 加入收藏</button>' +
+        '</div>';
+      L.popup({offset: [0, -26]}).setLatLng(latlng).setContent(popHtml).openOn(map);
+      setTimeout(function() {
+        var btn = document.getElementById('ss-add-bm');
         if (!btn) return;
         btn.addEventListener('click', function() {
-          var done = function() { btn.textContent = '已复制 ✓'; };
-          var fallback = function() {
-            var t = document.createElement('textarea');
-            t.value = s; t.style.position = 'fixed'; t.style.opacity = '0';
-            document.body.appendChild(t); t.select();
-            try { document.execCommand('copy'); } catch (_) {}
-            document.body.removeChild(t); done();
-          };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(s).then(done).catch(fallback);
-          } else {
-            fallback();
-          }
+          map.closePopup();
+          openBookmarkModal({lat: it.lat, lng: it.lon}, it.name);
         });
       }, 0);
+    }
+    function ssParseResult(r) {
+      // Nominatim returns name/display_name as strings, lat/lon as
+      // stringified floats. namedetails.name:zh / :ja if present is a
+      // nicer label than the addressy display_name.
+      var nd = r.namedetails || {};
+      var name = nd['name:zh'] || nd['name:zh-Hans'] || nd['name:zh-Hant']
+              || nd['name:ja'] || r.name || nd.name
+              || (r.display_name || '').split(',')[0].trim();
+      return {
+        lat: parseFloat(r.lat),
+        lon: parseFloat(r.lon),
+        name: name || '未命名',
+        address: r.display_name || ''
+      };
+    }
+    function ssSearch(q) {
+      var seq = ++ssReqSeq;
+      ssWrap.classList.add('busy');
+      // Japan bbox: lon 122-154, lat 24-46. viewbox order:
+      //   x1 (left lon), y1 (top lat), x2 (right lon), y2 (bottom lat)
+      // bounded=1 forbids matches outside the box; otherwise OSM happily
+      // returns "Osaka, Texas" before the city in Japan.
+      var url = 'https://nominatim.openstreetmap.org/search?'
+              + 'format=jsonv2&limit=6&addressdetails=0&namedetails=1'
+              + '&viewbox=122,46,154,24&bounded=1'
+              + '&accept-language=zh-CN,zh,ja,en'
+              + '&q=' + encodeURIComponent(q);
+      fetch(url, {headers: {'Accept': 'application/json'}})
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(arr) {
+          if (seq !== ssReqSeq) return;       // stale response
+          ssWrap.classList.remove('busy');
+          var items = (Array.isArray(arr) ? arr : [])
+            .map(ssParseResult)
+            .filter(function(x){ return !isNaN(x.lat) && !isNaN(x.lon); });
+          ssRender(items);
+        })
+        .catch(function(err) {
+          if (seq !== ssReqSeq) return;
+          ssWrap.classList.remove('busy');
+          ssShowError('搜索失败: ' + err.message);
+        });
+    }
+    function ssOnInput() {
+      var v = ssInput.value.trim();
+      if (v) ssWrap.classList.add('has-text');
+      else   ssWrap.classList.remove('has-text');
+      clearTimeout(ssDebounce);
+      if (!v) {
+        ssReqSeq++;
+        ssWrap.classList.remove('busy');
+        ssCloseDropdown();
+        ssRemoveTempMarker();
+        return;
+      }
+      ssDebounce = setTimeout(function() { ssSearch(v); }, 300);
+    }
+    ssInput.addEventListener('input', ssOnInput);
+    ssInput.addEventListener('focus', function() {
+      if (ssList.children.length > 0) ssList.classList.add('open');
+    });
+    ssInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        if (ssList.classList.contains('open')) {
+          ssCloseDropdown();
+        } else {
+          ssInput.value = '';
+          ssWrap.classList.remove('has-text');
+          ssRemoveTempMarker();
+          ssInput.blur();
+        }
+      } else if (e.key === 'Enter') {
+        // Enter on a non-empty dropdown -> pick the first result.
+        var first = ssList.querySelector('.ss-row:not(.ss-empty)');
+        if (first) first.click();
+      }
+    });
+    ssClear.addEventListener('click', function() {
+      ssReqSeq++;
+      ssInput.value = '';
+      ssWrap.classList.remove('has-text');
+      ssWrap.classList.remove('busy');
+      ssCloseDropdown();
+      ssRemoveTempMarker();
+      ssInput.focus();
+    });
+    // Click outside the search box closes the dropdown but keeps the text
+    // so the user can re-focus and refine.
+    document.addEventListener('click', function(e) {
+      if (!ssBox.contains(e.target)) ssCloseDropdown();
     });
 
     var cluster = L.markerClusterGroup({maxClusterRadius: 40, disableClusteringAtZoom: 17});
@@ -1754,15 +2585,19 @@ def main(argv: list[str] | None = None) -> None:
 
     panel_html = build_filter_panel_html(cat_counts)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
+    bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
     filter_js = (
         FILTER_JS_TEMPLATE
         .replace("__PAYLOAD__", payload_json)
         .replace("__DEFAULT_OFF_GENRES__", default_off_json)
+        .replace("__BOOKMARKS__", bookmarks_json)
     )
     m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
     m.get_root().header.add_child(folium.Element(MOBILE_UX_ASSETS))
     m.get_root().html.add_child(folium.Element(BOTTOM_SHEET_HTML))
     m.get_root().html.add_child(folium.Element(MAP_FAB_HTML))
+    m.get_root().html.add_child(folium.Element(SEARCH_BOX_HTML))
+    m.get_root().html.add_child(folium.Element(BOOKMARKS_MODAL_HTML))
     m.get_root().html.add_child(folium.Element(panel_html))
     m.get_root().html.add_child(folium.Element(filter_js))
 

@@ -24,3 +24,6 @@ data/*
 
 # Local config (Gist ID, etc) — never commit
 config.json
+
+# Claude Code project context — kept local
+CLAUDE.md
