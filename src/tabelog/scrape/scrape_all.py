@@ -112,6 +112,35 @@ DETAIL_JS = r"""
 }
 """
 
+# Photo carousel images appear in detail-page HTML as
+#   https://tblg.k-img.com/resize/660x370c/restaurant/images/Rvw/{rid}/{photo_id}.jpg
+# The /resize/* paths are token-gated (403 outside the page), but the same
+# (rid, photo_id) rebuilds a public CDN URL that the map's JS can rewrite
+# to 150x150_square_ for thumbnails. photo_id is either a 32-char hex hash
+# or a numeric ID — both work with the 640x640_rect_ prefix.
+CAROUSEL_RE = re.compile(
+    r"tblg\.k-img\.com/resize/[^/]+/restaurant/images/Rvw/(\d+)/([A-Za-z0-9_-]+)\.jpg"
+)
+
+
+def extract_photo_urls(html: str, limit: int = 3) -> list[str]:
+    """First `limit` unique (rid, photo_id) pairs in document order, as
+    public CDN URLs."""
+    seen: set[tuple[str, str]] = set()
+    out: list[str] = []
+    for m in CAROUSEL_RE.finditer(html):
+        key = (m.group(1), m.group(2))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            f"https://tblg.k-img.com/restaurant/images/Rvw/{key[0]}/"
+            f"640x640_rect_{key[1]}.jpg"
+        )
+        if len(out) >= limit:
+            break
+    return out
+
 
 def parse_area_genre(s: str) -> tuple[str, str | None, int | None]:
     """'谷町六丁目駅 317m / 寿司' -> ('寿司', '谷町六丁目駅', 317)"""
@@ -293,6 +322,8 @@ async def fetch_detail(session: Session, url: str) -> dict:
             await asyncio.sleep(DETAIL_PAGE_DELAY_S)
             data = await session.page.evaluate(DETAIL_JS)
             data["address"] = clean_address(data.get("address"))
+            html = await session.page.content()
+            data["photos"] = extract_photo_urls(html)
             return data
         except Exception as e:
             last_err = e
@@ -379,7 +410,7 @@ def append_and_dedupe(new_rows: list[dict], csv_path: Path) -> None:
           f"collapsed) -> {csv_path}")
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("region", type=str,
                     help="Tabelog region slug — the path segment between "
@@ -394,11 +425,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--translate", action=argparse.BooleanOptionalAction, default=False,
                     help="translate reservation_policy -> reservation_policy_chinese "
                          "via Google (default: off). Use --translate / --no-translate.")
-    return ap.parse_args()
+    return ap.parse_args(argv)
 
 
-async def main() -> None:
-    args = parse_args()
+async def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
     if args.top_pct <= 0:
         sys.exit(f"--top-pct must be > 0 (got {args.top_pct})")
     if args.hard_cap <= 0:
@@ -439,8 +470,13 @@ async def main() -> None:
             row["address"] = d.get("address") or ""
             row["reservation_policy"] = d.get("reservation_policy") or ""
             row["tabelog_bookable"] = "True" if d.get("tabelog_bookable") else "False"
+            photos = d.get("photos") or []
+            row["photo1_url"] = photos[0] if len(photos) > 0 else ""
+            row["photo2_url"] = photos[1] if len(photos) > 1 else ""
+            row["photo3_url"] = photos[2] if len(photos) > 2 else ""
             print(f"  [{n}/{len(kept)}] {row.get('name')!r}: "
-                  f"seats={row['seat_count']!r}, bookable={row['tabelog_bookable']}")
+                  f"seats={row['seat_count']!r}, bookable={row['tabelog_bookable']}, "
+                  f"photos={len(photos)}")
             if n % CHECKPOINT_EVERY == 0:
                 write_intermediate(kept, intermediate)
         write_intermediate(kept, intermediate)

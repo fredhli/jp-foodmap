@@ -1580,12 +1580,12 @@ def fmt_popup(row: dict) -> str:
     """
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fillempty", action=argparse.BooleanOptionalAction, default=False,
                     help="only geocode rows whose lat/lon are missing in CSV "
                          "(default: re-geocode all, cache makes repeats cheap)")
-    return ap.parse_args()
+    return ap.parse_args(argv)
 
 
 def _parse_latlon(row: dict) -> tuple[float, float] | None:
@@ -1603,8 +1603,8 @@ def write_csv_with_coords(rows: list[dict], fieldnames: list[str]) -> None:
         w.writerows(rows)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
 
     with CSV_PATH.open(encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
