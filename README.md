@@ -32,14 +32,16 @@ git push
 
 Pages rebuilds in ~1 minute.
 
-## Sync (favorites + dismissals)
+## Sync (favorites + dismissals + bookmarks)
 
 Each browser keeps a local copy of these lists and pushes diffs to a shared
 secret GitHub Gist.
 
-1. Create a **secret** gist on gist.github.com containing two files:
+1. Create a **secret** gist on gist.github.com containing these files:
    - `favorites.json` — JSON array of detail URLs
    - `blacklist.json` — JSON array of detail URLs
+   - `bookmarks.json` — JSON array of map pins (`{id, name, emoji, lat, lon}`)
+     — optional; the page auto-creates it on first push if absent.
 2. Create a fine-grained PAT at github.com/settings/tokens with **Gists →
    Read and write** only.
 3. On the deployed page → ⚙️ 同步设置 → paste Gist ID + PAT → 保存并测试.

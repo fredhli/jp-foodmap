@@ -1087,10 +1087,20 @@ FILTER_JS_TEMPLATE = r"""
         return Array.isArray(arr) ? new Set(arr) : null;
       } catch (_) { return null; }
     }
+    function arrayFromFile(f) {
+      if (!f || typeof f.content !== 'string') return null;
+      try {
+        var arr = JSON.parse(f.content);
+        return Array.isArray(arr) ? arr : null;
+      } catch (_) { return null; }
+    }
     var files = json.files || {};
     return {
       fav: setFromFile(files['favorites.json']),
       black: setFromFile(files['blacklist.json']),
+      // null when the gist doesn't have this file yet — preserves local
+      // edits the first time a device starts syncing.
+      bookmarks: arrayFromFile(files['bookmarks.json']),
     };
   }
 
@@ -1305,6 +1315,7 @@ FILTER_JS_TEMPLATE = r"""
           if (i >= 0) bookmarks.splice(i, 1);
           removeBookmarkMarker(bm);
           saveBookmarks();
+          schedulePush();
           map.closePopup();
         });
       }, 0);
@@ -1398,6 +1409,7 @@ FILTER_JS_TEMPLATE = r"""
       bookmarks.push(bm);
       renderBookmark(bm);
       saveBookmarks();
+      schedulePush();
       // If a search-temp 📍 sits at this exact spot it's the one being
       // bookmarked — drop it so the bookmark emoji doesn't stack on top.
       // Coord match instead of a "source" flag keeps the right-click path
@@ -1788,6 +1800,18 @@ FILTER_JS_TEMPLATE = r"""
             var remote = parseGistFiles(j);
             if (remote.fav)   state.fav   = remote.fav;
             if (remote.black) state.black = remote.black;
+            if (remote.bookmarks) {
+              // Wipe + re-render in place — closures hold the same array
+              // reference, so we mutate rather than reassign.
+              bookmarks.length = 0;
+              bookmarksLayer.clearLayers();
+              bmMarkerById = {};
+              remote.bookmarks.forEach(function(bm) {
+                bookmarks.push(bm);
+                renderBookmark(bm);
+              });
+              saveBookmarks();
+            }
             saveCache(state, false);
             refreshAllMarkers();
             setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
@@ -1809,6 +1833,9 @@ FILTER_JS_TEMPLATE = r"""
         files: {
           'favorites.json': {content: JSON.stringify(Array.from(state.fav), null, 2)},
           'blacklist.json': {content: JSON.stringify(Array.from(state.black), null, 2)},
+          // Gist auto-creates this file on the first push from a device
+          // that previously only had favorites + blacklist set up.
+          'bookmarks.json': {content: JSON.stringify(bookmarks, null, 2)},
         },
       });
       var headers = gistHeaders(c.pat);
@@ -2413,9 +2440,9 @@ def fmt_popup(row: dict) -> str:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--fillempty", action=argparse.BooleanOptionalAction, default=False,
-                    help="only geocode rows whose lat/lon are missing in CSV "
-                         "(default: re-geocode all, cache makes repeats cheap)")
+    ap.add_argument("--fillall", action=argparse.BooleanOptionalAction, default=False,
+                    help="re-geocode every row (default: only geocode rows "
+                         "whose lat/lon are missing in CSV)")
     return ap.parse_args(argv)
 
 
@@ -2449,7 +2476,7 @@ def main(argv: list[str] | None = None) -> None:
 
     addr_rows = [r for r in all_rows if r.get("address")]
     print(f"{len(addr_rows)} rows with non-empty address "
-          f"(of {len(all_rows)} total){'  [fillempty mode]' if args.fillempty else ''}")
+          f"(of {len(all_rows)} total){'  [fillall mode]' if args.fillall else ''}")
 
     cache = load_cache()
     geocoded: list[tuple[dict, dict]] = []
@@ -2458,7 +2485,7 @@ def main(argv: list[str] | None = None) -> None:
     client = httpx.Client(headers={"User-Agent": "omakase-tabelog-mapper/0.1"})
     for i, row in enumerate(addr_rows, 1):
         addr = row["address"]
-        if args.fillempty:
+        if not args.fillall:
             existing = _parse_latlon(row)
             if existing is not None:
                 lat, lon = existing
@@ -2484,7 +2511,7 @@ def main(argv: list[str] | None = None) -> None:
 
     write_csv_with_coords(all_rows, fieldnames)
     print(f"\nWrote lat/lon back to {CSV_PATH.name}")
-    if args.fillempty:
+    if not args.fillall:
         print(f"Skipped {n_skipped} rows that already had coords")
     print(f"Geocoded {len(geocoded)} / {len(addr_rows)}; failed {len(failed)}")
     if failed:

@@ -7,10 +7,10 @@ regenerate docs/index.html.
   uv run python main.py okayama --hard-cap 200 --translate
 
 Flags are forwarded verbatim to scrape_all (region, --top-pct, --hard-cap,
---translate / --no-translate). The geocode + render step always runs with
---fillempty so only the freshly-scraped rows hit GSI; existing rows keep
-their cached lat/lon. Run src/tabelog/scrape/map.py directly if you need
-a full re-geocode.
+--translate / --no-translate). The geocode + render step runs map.py with
+its default (fill-empty) behavior, so only freshly-scraped rows hit GSI;
+existing rows keep their lat/lon. Pass --fillall to map.py directly if
+you need a full re-geocode.
 """
 
 import asyncio
@@ -28,7 +28,7 @@ async def _run(argv: list[str]) -> None:
     print("\n" + "=" * 60)
     print("Scrape done. Geocoding new rows and rebuilding map ...")
     print("=" * 60 + "\n")
-    map_mod.main(["--fillempty"])
+    map_mod.main([])
 
 
 def main() -> None:
