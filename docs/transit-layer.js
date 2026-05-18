@@ -436,14 +436,23 @@
       if (zoom >= 12) {
         var b = this._map.getBounds().pad(0.1);
         var W = b.getWest(), E = b.getEast(), S2 = b.getSouth(), N = b.getNorth();
-        var anyBucketOn = bk.long || bk.city;
         var showLabel = zoom >= 14;
         for (var s = 0; s < this._allStations.length; s++) {
           var stn = this._allStations[s];
           var lon = stn.geometry.coordinates[0];
           var lat = stn.geometry.coordinates[1];
           if (lon < W || lon > E || lat < S2 || lat > N) continue;
-          if (!anyBucketOn) continue;
+          // Hide the dot if its only nearby lines belong to a bucket that's
+          // off. Legacy stations without the per-bucket flags fall back to
+          // "show if any bucket is on" so old geojsons keep working.
+          var sHasLong = stn.properties.has_long_line;
+          var sHasCity = stn.properties.has_city_line;
+          var hasFlags = (typeof sHasLong !== 'undefined') ||
+                         (typeof sHasCity !== 'undefined');
+          var visibleByBucket = hasFlags
+            ? ((sHasLong && bk.long) || (sHasCity && bk.city))
+            : (bk.long || bk.city);
+          if (!visibleByBucket) continue;
           var lc = stn.properties.line_count | 0;
           var radius;
           if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;

@@ -143,6 +143,12 @@ def _banned(props):
 # ---- pass 2: long-haul tagging -------------------------------------------
 
 _PAREN_SUFFIX_RE = re.compile(r"\s*[（(][^)）]*[)）]\s*$")
+# Strip JR-company prefixes so "予讃線" / "JR予讃線" / "JR四国予讃線" /
+# "JR西日本山陽本線" all collapse to one key. Without this OSM's mixed
+# naming splits a single physical line across multiple aggregation keys
+# and the long-haul flag ends up inconsistent within one line — exactly
+# the bug the user hit on 予讃線 around Matsuyama.
+_JR_PREFIX_RE = re.compile(r"^JR(?:北海道|東日本|東海|西日本|四国|九州|貨物)?")
 
 def _route_key(props):
     """The label we group ways under for length aggregation and line_count.
@@ -158,34 +164,57 @@ def _route_key(props):
     while s != prev:
         prev = s
         s = _PAREN_SUFFIX_RE.sub("", s).strip()
+    s = _JR_PREFIX_RE.sub("", s).strip()
     return s
 
 def _tag_longhaul(lines):
-    """Mutates each line's properties to add is_longhaul: bool."""
-    agg_len = defaultdict(float)
+    """Mutates each line's properties to add is_longhaul: bool.
+
+    Decision is per logical line (normalized key), not per fragment — once
+    a key qualifies as long-haul, EVERY fragment with that key gets the
+    flag. This fixes the case where 予讃線 / JR予讃線 / `JR予讃線
+    (松山 → 高松)` fragments would split on naming variants and end up
+    inconsistently tagged within the same physical line."""
+    # Aggregate per key: collected names (for regex matching) and the union
+    # of operators seen on any fragment in this group.
+    groups = defaultdict(lambda: {"names": [], "ops": set()})
     for f in lines:
-        key = _route_key(f["properties"])
+        p = f["properties"]
+        key = _route_key(p)
         if not key:
             continue
-        agg_len[key] += _seg_len_m(f["geometry"]["coordinates"])
+        g = groups[key]
+        if p.get("name"):       g["names"].append(p["name"])
+        if p.get("route_name"): g["names"].append(p["route_name"])
+        if p.get("operator"):   g["ops"].add(p["operator"])
+
+    long_keys = set()
+    for key, info in groups.items():
+        nm_concat = " ".join(info["names"])
+        op_concat = " ".join(info["ops"])
+        # Service-class hit (新幹線 / 特急 / 寝台 / named airport express ...) wins
+        # unconditionally — these are always long-haul regardless of operator.
+        if LONGHAUL_SERVICE_RE.search(nm_concat):
+            long_keys.add(key)
+            continue
+        # JR mainline allowlist: regex is strict by design (specific 本線
+        # names, no generic "本線" catch-all), so a match plus a JR operator
+        # is enough — no aggregate-length floor needed.
+        if JR_OPERATOR_RE.search(op_concat) and JR_MAINLINE_RE.search(nm_concat):
+            long_keys.add(key)
 
     n_long = 0
     for f in lines:
+        key = _route_key(f["properties"])
         p = f["properties"]
-        nm = (p.get("name") or "") + " " + (p.get("route_name") or "")
-        op = p.get("operator") or ""
-        long = False
-        if LONGHAUL_SERVICE_RE.search(nm):
-            long = True
-        elif JR_OPERATOR_RE.search(op) and JR_MAINLINE_RE.search(nm):
-            # JR mainline allowlist hit — only count if the aggregate run is
-            # actually substantial (>80km), so a stray track fragment named
-            # "山陽本線 (連絡)" doesn't flip into long-haul on its own.
-            if agg_len.get(_route_key(p), 0.0) > 80_000:
-                long = True
-        if long:
+        if key in long_keys:
             p["is_longhaul"] = True
             n_long += 1
+        elif "is_longhaul" in p:
+            # Idempotency: rerunning postprocess on a previously-tagged
+            # geojson must be able to UN-tag a line whose key no longer
+            # qualifies (e.g., rule tweaked, blocklist change).
+            del p["is_longhaul"]
     return n_long
 
 
@@ -334,6 +363,7 @@ def _tag_line_count(stations, lines, proximity_m):
 
     prox_sq = proximity_m * proximity_m
     hub3 = hub6 = 0
+    long_only = city_only = 0
     for s in stations:
         sx, sy = s["geometry"]["coordinates"]
         gx0 = int(sx / grid_deg); gy0 = int(sy / grid_deg)
@@ -341,18 +371,33 @@ def _tag_line_count(stations, lines, proximity_m):
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 candidates |= cell_index.get((gx0 + dx, gy0 + dy), set())
-        distinct = set()
+        # key -> is_longhaul of that key's lines. Same key can't be both
+        # buckets after _tag_longhaul (it decides per-key), so reading the
+        # flag off the first matching line is safe.
+        distinct = {}
         for key, li in candidates:
             if key in distinct:
                 continue
             for c in lines[li]["geometry"]["coordinates"]:
                 if _dist_sq_m((sx, sy), c) < prox_sq:
-                    distinct.add(key)
+                    distinct[key] = bool(lines[li]["properties"].get("is_longhaul"))
                     break
         s["properties"]["line_count"] = len(distinct)
+        has_long = any(distinct.values())
+        has_city = any(not v for v in distinct.values())
+        # Default-true for stations with no nearby line at all (rare, can
+        # happen with isolated halts or geometry quirks) so the dot doesn't
+        # disappear just because we couldn't classify it. The renderer's
+        # zoom gate (z>=12) and bucket-toggle check still apply.
+        s["properties"]["has_long_line"] = has_long or not distinct
+        s["properties"]["has_city_line"] = has_city or not distinct
+        if has_long and not has_city: long_only += 1
+        elif has_city and not has_long: city_only += 1
         if len(distinct) >= 6: hub6 += 1
         elif len(distinct) >= 3: hub3 += 1
     print(f"  line_count tagged: {hub3} hubs (3-5 lines), {hub6} mega-hubs (6+ lines)")
+    print(f"  bucket split: {long_only} long-only, {city_only} city-only, "
+          f"{len(stations)-long_only-city_only} either-or-mixed")
 
 
 # ---- driver --------------------------------------------------------------
