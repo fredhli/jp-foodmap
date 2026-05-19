@@ -150,7 +150,16 @@
 
   L.TransitLayer = L.Layer.extend({
     options: {
+      // Legacy single-file mode. Used iff lodUrls is not set.
       geojsonUrl: 'transit/japan.geojson',
+      // Multi-LOD mode. Map of { low, mid, high } -> URL. When set, the
+      // layer loads only the LOD appropriate for the current zoom and
+      // hot-swaps on zoom changes that cross a break point. lodBreaks
+      // gives the [mid, high) boundaries — e.g. { mid: 9, high: 14 }
+      // means LOD 'low' is used for z<9, 'mid' for 9<=z<14, 'high' for
+      // z>=14.
+      lodUrls: null,
+      lodBreaks: null,
       opacity: 0.7,         // line opacity when overlaid on a base map
       casingOpacity: 0.45,  // white casing underneath, less prominent
       padding: 0.25,
@@ -166,6 +175,11 @@
       this._allLines = [];
       this._allStations = [];
       this._lineIndex = new Map();
+      // Per-LOD parsed-and-indexed data. Once an LOD is loaded it stays
+      // in this map; switching back is just a pointer swap, no refetch.
+      this._lodCache = {};
+      this._lodInflight = {};
+      this._currentLodKey = null;
       // Which buckets the renderer is currently allowed to draw. Both
       // default on so a bare addTo() keeps the historical behavior; map.py
       // calls setVisibleBuckets({long, city}) from the FAB wiring to switch.
@@ -212,20 +226,7 @@
         cancelAnimationFrame(this._rafToken);
         this._rafToken = 0;
       }
-      // Detach polylines and drop refs — they're tied to the renderers we're
-      // about to throw away, so caching them across add/remove would just
-      // pin dead references.
-      var it = this._onMap.values(), v;
-      while (!(v = it.next()).done) {
-        var f = v.value;
-        if (f._pl) { f._pl.remove(); f._pl = null; }
-        if (f._pl_casing) {
-          if (f._pl_casing._map) f._pl_casing.remove();
-          f._pl_casing = null;
-        }
-        if (f._pl_hit) { f._pl_hit.remove(); f._pl_hit = null; }
-      }
-      this._onMap.clear();
+      this._teardownActiveLayers();
       if (this._rCasing) this._rCasing.remove();
       if (this._rImp) {
         for (var imp = 1; imp <= 5; imp++) this._rImp[imp].remove();
@@ -239,22 +240,42 @@
       return this;
     },
 
+    // Detach polylines for everything currently on the map and drop the
+    // refs. The polylines belong to the renderers we may be about to throw
+    // away (onRemove) or to a soon-to-be-swapped LOD (LOD switch), so
+    // holding onto them would pin dead state.
+    _teardownActiveLayers: function() {
+      var it = this._onMap.values(), v;
+      while (!(v = it.next()).done) {
+        var f = v.value;
+        if (f._pl) { f._pl.remove(); f._pl = null; }
+        if (f._pl_casing) {
+          if (f._pl_casing._map) f._pl_casing.remove();
+          f._pl_casing = null;
+        }
+        if (f._pl_hit) { f._pl_hit.remove(); f._pl_hit = null; }
+      }
+      this._onMap.clear();
+    },
+
     _load: function() {
+      if (this.options.lodUrls && this.options.lodBreaks) {
+        // LOD mode: figure out the current zoom's target LOD and load it.
+        var target = this._targetLodKey() || 'low';
+        this._loadLod(target);
+      } else {
+        this._loadLegacy();
+      }
+    },
+
+    _loadLegacy: function() {
       if (this._loaded || this._loading) return;
       this._loading = true;
       var self = this;
       fetch(this.options.geojsonUrl)
         .then(function(r) { return r.json(); })
         .then(function(gj) {
-          for (var i = 0; i < gj.features.length; i++) {
-            var f = gj.features[i];
-            if (f.geometry.type === 'LineString') {
-              self._allLines.push(f);
-              self._indexLine(f);
-            } else if (f.geometry.type === 'Point') {
-              self._allStations.push(f);
-            }
-          }
+          self._parseInto(gj, self._allLines, self._allStations, self._lineIndex);
           self._loaded = true;
           self._loading = false;
           if (self._map) self._scheduleRedraw();
@@ -263,6 +284,112 @@
           console.error('[TransitLayer] load failed:', e);
           self._loading = false;
         });
+    },
+
+    // Walk a parsed GeoJSON FeatureCollection, sorting LineStrings into
+    // `lines` (and indexing them spatially into `lineIndex`) and Points
+    // into `stations`. _indexLine reads/writes this._lineIndex, so we
+    // temporarily swap it to the target index — keeps the existing
+    // indexing logic intact whether we're loading the legacy single
+    // file or one LOD into its own cache slot.
+    _parseInto: function(gj, lines, stations, lineIndex) {
+      var savedIndex = this._lineIndex;
+      this._lineIndex = lineIndex;
+      try {
+        for (var i = 0; i < gj.features.length; i++) {
+          var f = gj.features[i];
+          if (!f.geometry) continue;
+          if (f.geometry.type === 'LineString') {
+            lines.push(f);
+            this._indexLine(f);
+          } else if (f.geometry.type === 'Point') {
+            stations.push(f);
+          }
+        }
+      } finally {
+        this._lineIndex = savedIndex;
+      }
+    },
+
+    // Pick the LOD whose zoom band the map is currently in. Returns null
+    // if LOD mode isn't configured (caller falls back to legacy load).
+    _targetLodKey: function() {
+      if (!this._map || !this.options.lodBreaks) return null;
+      var z = this._map.getZoom();
+      var b = this.options.lodBreaks;
+      if (b.high != null && z >= b.high) return 'high';
+      if (b.mid  != null && z >= b.mid)  return 'mid';
+      return 'low';
+    },
+
+    // Fetch + parse one LOD into the cache. If the LOD is already cached
+    // (hit on revisit, or arrived from a previous fetch), activates
+    // immediately. If a fetch is already in flight for this LOD, returns
+    // its promise so concurrent triggers coalesce.
+    _loadLod: function(key) {
+      if (!this.options.lodUrls || !this.options.lodUrls[key]) return Promise.resolve();
+      if (this._lodCache[key]) {
+        this._activateLod(key);
+        return Promise.resolve();
+      }
+      if (this._lodInflight[key]) return this._lodInflight[key];
+      var self = this;
+      var p = fetch(this.options.lodUrls[key])
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(gj) {
+          var data = { lines: [], stations: [], lineIndex: new Map() };
+          self._parseInto(gj, data.lines, data.stations, data.lineIndex);
+          self._lodCache[key] = data;
+          delete self._lodInflight[key];
+          // Only activate if the user is still in this LOD's zoom band.
+          // Otherwise just cache for when they come back — activating
+          // out-of-band would briefly render the wrong detail level.
+          if (self._map && self._targetLodKey() === key) {
+            self._activateLod(key);
+          }
+        })
+        .catch(function(e) {
+          console.error('[TransitLayer] LOD ' + key + ' load failed:', e);
+          delete self._lodInflight[key];
+        });
+      this._lodInflight[key] = p;
+      return p;
+    },
+
+    // Switch the active feature set to the given LOD. Tears down the
+    // currently-rendered polylines (they belong to the previous LOD's
+    // features and have to be rebuilt on the new geometry) and points
+    // _allLines / _allStations / _lineIndex at the cached LOD data.
+    _activateLod: function(key) {
+      var data = this._lodCache[key];
+      if (!data || this._currentLodKey === key) return;
+      this._teardownActiveLayers();
+      this._allLines = data.lines;
+      this._allStations = data.stations;
+      this._lineIndex = data.lineIndex;
+      this._currentLodKey = key;
+      this._loaded = true;
+      // Force the next redraw to re-evaluate everything — the casing
+      // threshold and zoom-vs-minZ gates are LOD-independent, but
+      // _lastZoom/_lastDrawCasing should not be considered "still
+      // current" across a LOD swap.
+      this._lastZoom = null;
+      this._lastDrawCasing = null;
+      if (this._map) this._scheduleRedraw();
+    },
+
+    // Called inside the rAF wrapper before each redraw — if the current
+    // zoom calls for a different LOD than the one loaded, kick off the
+    // fetch. The redraw proceeds with the existing LOD; the fresh one
+    // takes over when its fetch resolves and triggers another redraw.
+    _maybeSwapLod: function() {
+      if (!this.options.lodUrls || !this.options.lodBreaks) return;
+      var target = this._targetLodKey();
+      if (!target || target === this._currentLodKey) return;
+      this._loadLod(target);
     },
 
     _indexLine: function(f) {
@@ -358,6 +485,9 @@
       var self = this;
       this._rafToken = requestAnimationFrame(function() {
         self._rafToken = 0;
+        // Check LOD first so a zoom crossing kicks off the right fetch.
+        // No-op in legacy single-file mode.
+        self._maybeSwapLod();
         self._redraw();
       });
     },

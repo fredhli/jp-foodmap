@@ -1633,9 +1633,20 @@ FILTER_JS_TEMPLATE = r"""
     // OSM extract). One layer instance, two FABs: 长途 (新干线 + JR 长途)
     // and 市内 (subway + 私铁 + tram + ...) — each toggles a bucket on the
     // same layer via setVisibleBuckets. Loaded lazily on first toggle-on.
+    // LOD-aware loading: 'low' (long-haul only, ~1 MB gzipped) for the
+    // country-scale view, 'mid' (~2 MB) at regional zoom, 'high' (~4 MB,
+    // full detail) once the user is at street-level. Breaks line up with
+    // the minZ thresholds in transit-layer.js — subway / tram / monorail
+    // only appear at z>=11-12, so the 'mid' file kicks in just before
+    // they become visible.
     var transitLayer = (typeof L.transitLayer === 'function')
       ? L.transitLayer({
-          geojsonUrl: 'transit/japan.geojson',
+          lodUrls: {
+            low:  'transit/japan-low.geojson',
+            mid:  'transit/japan-mid.geojson',
+            high: 'transit/japan.geojson'
+          },
+          lodBreaks: { mid: 9, high: 14 },
           opacity: 0.4,
           casingOpacity: 0.2
         })

@@ -38,7 +38,23 @@ if _SRC_DIR not in sys.path:
 from tabelog.paths import DOCS_DIR
 
 GEOJSON_PATH = DOCS_DIR / "transit" / "japan.geojson"
+GEOJSON_LOW_PATH = DOCS_DIR / "transit" / "japan-low.geojson"
+GEOJSON_MID_PATH = DOCS_DIR / "transit" / "japan-mid.geojson"
 SUSPICIOUS_REPORT_PATH = DOCS_DIR / "transit" / "suspicious_lines.md"
+
+# LOD tolerances in degrees. ~111 km / degree latitude (less in longitude
+# off the equator, but visual simplification doesn't care about that level
+# of precision). Picked so the simplified line stays within ~1px of the
+# original at the zoom band the LOD is intended for:
+#   low  (z 0-8):  ~1.5 km tolerance — country-scale, only shinkansen +
+#                 JR mainlines drawn anyway, point reduction ~85-90%.
+#   mid  (z 9-13): ~200 m tolerance — regional/city; subway/tram start
+#                 appearing at z=11 so the tolerance has to stay tight
+#                 enough that 200m doesn't visibly displace lines on a
+#                 dense Tokyo grid.
+#   high (z 14+): no simplification — current japan.geojson is reused.
+LOD_LOW_EPSILON = 0.015
+LOD_MID_EPSILON = 0.002
 
 
 # Manual overrides applied during track-uniformity enforcement. (name, op)
@@ -710,6 +726,108 @@ def _tag_line_count(stations, lines, proximity_m):
           f"{len(stations)-long_only-city_only} either-or-mixed")
 
 
+# ---- LOD generation ------------------------------------------------------
+# Pure-Python iterative Douglas-Peucker. Avoids adding shapely (~12 MB
+# C-extension wheel) just for one geometry op; perf is fine at build time
+# even with ~700k points across ~10k lines (~10-20s on a midrange laptop).
+# Uses perpendicular distance to the segment endpoints' infinite line —
+# the classical DP formulation. For nearly-straight rail geometry this is
+# indistinguishable from point-to-segment distance in practice.
+
+def _simplify_dp(coords: list, epsilon: float) -> list:
+    n = len(coords)
+    if n <= 2:
+        return list(coords)
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    eps_sq = epsilon * epsilon
+    stack = [(0, n - 1)]
+    while stack:
+        lo, hi = stack.pop()
+        if hi - lo < 2:
+            continue
+        ax, ay = coords[lo]
+        bx, by = coords[hi]
+        dx, dy = bx - ax, by - ay
+        denom_sq = dx * dx + dy * dy
+        max_d_sq = 0.0
+        max_i = lo + 1
+        if denom_sq == 0.0:
+            # Endpoints coincide — measure plain distance to the common point.
+            for i in range(lo + 1, hi):
+                px, py = coords[i]
+                d_sq = (px - ax) * (px - ax) + (py - ay) * (py - ay)
+                if d_sq > max_d_sq:
+                    max_d_sq = d_sq
+                    max_i = i
+        else:
+            for i in range(lo + 1, hi):
+                px, py = coords[i]
+                num = dy * px - dx * py + bx * ay - by * ax
+                d_sq = num * num / denom_sq
+                if d_sq > max_d_sq:
+                    max_d_sq = d_sq
+                    max_i = i
+        if max_d_sq > eps_sq:
+            keep[max_i] = True
+            stack.append((lo, max_i))
+            stack.append((max_i, hi))
+    return [coords[i] for i in range(n) if keep[i]]
+
+
+def _simplify_lines(lines: list, epsilon: float) -> list:
+    # Returns fresh feature dicts so the caller's `lines` list (which gets
+    # written to high LOD) isn't mutated. Lines that collapse to <2 points
+    # after simplification are dropped — they wouldn't render anyway.
+    out = []
+    total_before = total_after = 0
+    for f in lines:
+        coords = f["geometry"]["coordinates"]
+        simplified = _simplify_dp(coords, epsilon)
+        total_before += len(coords)
+        total_after += len(simplified)
+        if len(simplified) < 2:
+            continue
+        out.append({
+            "type": f.get("type", "Feature"),
+            "properties": f["properties"],
+            "geometry": {"type": "LineString", "coordinates": simplified},
+        })
+    return out, total_before, total_after
+
+
+def _write_lods(lines: list, stations: list) -> None:
+    # Low LOD: only long-haul lines (shinkansen + JR mainlines). Nothing
+    # else is drawn at z<9 anyway (see CLASSES.minZ in transit-layer.js),
+    # so we ship a much smaller file. Stations dropped — at country zoom
+    # they'd just be a screen-filling cloud of dots.
+    long_lines = [f for f in lines if f["properties"].get("is_longhaul")]
+    low_lines, lp_before, lp_after = _simplify_lines(long_lines, LOD_LOW_EPSILON)
+    low = {"type": "FeatureCollection", "features": low_lines}
+    GEOJSON_LOW_PATH.write_text(
+        json.dumps(low, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    print(f"  wrote {GEOJSON_LOW_PATH.name} "
+          f"({GEOJSON_LOW_PATH.stat().st_size / 1024 / 1024:.1f} MB, "
+          f"{len(low_lines)}/{len(long_lines)} long-haul lines, "
+          f"points {lp_before} -> {lp_after})")
+
+    # Mid LOD: everything (both buckets) but moderately simplified.
+    # Stations carry over verbatim — they're points, no geometry to
+    # simplify, and at z 9-13 they're already the primary thing.
+    mid_lines, mp_before, mp_after = _simplify_lines(lines, LOD_MID_EPSILON)
+    mid = {"type": "FeatureCollection", "features": mid_lines + stations}
+    GEOJSON_MID_PATH.write_text(
+        json.dumps(mid, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    print(f"  wrote {GEOJSON_MID_PATH.name} "
+          f"({GEOJSON_MID_PATH.stat().st_size / 1024 / 1024:.1f} MB, "
+          f"{len(mid_lines)} lines + {len(stations)} stations, "
+          f"points {mp_before} -> {mp_after})")
+
+
 # ---- driver --------------------------------------------------------------
 
 def postprocess(in_path: Path, out_path: Path | None = None) -> None:
@@ -760,6 +878,10 @@ def postprocess(in_path: Path, out_path: Path | None = None) -> None:
     out_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     size_mb = out_path.stat().st_size / 1024 / 1024
     print(f"  wrote {out_path} ({size_mb:.1f} MB)")
+
+    # Pre-compute low/mid LODs so transit-layer.js can pick the right one
+    # for the current zoom. The full file above stays the high LOD.
+    _write_lods(lines, stations)
 
 
 if __name__ == "__main__":
