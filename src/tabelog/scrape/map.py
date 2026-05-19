@@ -135,26 +135,111 @@ def save_cache(cache: dict) -> None:
     )
 
 
+_FLOOR_RE = re.compile(
+    r"\s*[BbＢ]?[\d０-９]{1,2}\s*(?:[FfＦ]|階).*$"
+)
+_BUILDING_KW = ("ビル", "メゾン", "ハイツ", "マンション", "別邸", "アネックス")
+
+
 def simplify_address(addr: str) -> str:
-    """Strip floor / building suffix to give Nominatim a fighting chance."""
+    """Strip floor / building suffix to give the geocoder a fighting chance.
+    Handles ASCII and full-width floor markers (1F / ２Ｆ / 1 階) and trailing
+    building names — the building strip is unconditional (Sapporo's grid
+    addresses like 南5西3 don't carry hyphenated 番地 but still trip on a
+    ビル suffix)."""
     if not addr:
         return ""
     s = addr.strip()
-    # cut at floor markers like "1F" "B1F" "7F"
-    m = re.search(r"\s+[B]?\d{1,2}F\b", s)
-    if m:
-        s = s[: m.start()]
-    # cut at common building keywords if a hyphen-numeric block is already present
-    if re.search(r"\d+[-－]\d+", s):
-        for kw in ("ビル", "メゾン", "ハイツ", "マンション"):
-            i = s.find(kw)
-            if i > 5:
-                # walk back to last space before kw
-                space = s.rfind(" ", 0, i)
-                if space > 0:
-                    s = s[:space]
-                    break
+    s = _FLOOR_RE.sub("", s).rstrip()
+    for kw in _BUILDING_KW:
+        i = s.find(kw)
+        if i > 5:
+            space = s.rfind(" ", 0, i)
+            if space > 0:
+                s = s[:space]
+                break
     return s.strip()
+
+
+# Kyoto's old-town addresses encode the nearest street intersection rather
+# than just block numbers — e.g. "松原通大和大路東入2丁目轆轤町101". The
+# 町名+番地 at the tail (轆轤町101) is what GSI can actually resolve; the
+# 通り prefix confuses the matcher. This helper carves out <区><町名><番地>
+# by finding the last cross-street marker and keeping only what follows.
+_KYOTO_KU_RE = re.compile(r"^(京都府京都市\S+?区)")
+_KYOTO_CROSS_RE = re.compile(r"(?:西入ル|東入ル|西入|東入|上ル|下ル|上る|下る)")
+_KYOTO_TAIL_PREFIX_RE = re.compile(r"^(?:\d+丁目|(?:南側|北側|東側|西側)(?!町))+")
+
+
+def kyoto_simplify(addr: str) -> str | None:
+    if not addr or "京都府京都市" not in addr:
+        return None
+    m = _KYOTO_KU_RE.match(addr.strip())
+    if not m:
+        return None
+    ku = m.group(1)
+    rest = addr[m.end():]
+    last_end = -1
+    for c in _KYOTO_CROSS_RE.finditer(rest):
+        last_end = c.end()
+    if last_end < 0:
+        return None
+    tail = _KYOTO_TAIL_PREFIX_RE.sub("", rest[last_end:].lstrip())
+    tail = simplify_address(tail).strip()
+    if not tail:
+        return None
+    return ku + tail
+
+
+# Sapporo's grid is officially '南N条西M丁目' but Tabelog (and locals)
+# write '南N西M'. GSI's index uses the long form, so splice 条 in to match.
+_SAPPORO_GRID_RE = re.compile(r"([東西南北])(\d+)\s*([東西南北])(\d+)")
+
+
+def sapporo_simplify(addr: str) -> str | None:
+    if not addr or "札幌" not in addr:
+        return None
+    s = simplify_address(addr)
+    new, n = _SAPPORO_GRID_RE.subn(r"\1\2条\3\4", s, count=1)
+    return new if n else None
+
+
+# Some Tabelog Kyoto addresses drop the trailing 町 ('樋之口467-2' for
+# what GSI indexes as '樋之口町'). When the tail is a bare <name><番地>
+# with no 通 / 町, splice 町 in front of the number.
+_KYOTO_BARE_RE = re.compile(
+    r"^(京都府京都市\S+?区)([^\d\s通町]+?)(\d+(?:[-－]\d+)*)\s*$"
+)
+
+
+def kyoto_append_chome(addr: str) -> str | None:
+    if not addr or "京都府京都市" not in addr:
+        return None
+    m = _KYOTO_BARE_RE.match(simplify_address(addr).strip())
+    if not m:
+        return None
+    ku, tail, num = m.groups()
+    return f"{ku}{tail}町{num}"
+
+
+# Final-fallback for Kyoto addresses that omit the 入ル/西入 anchor
+# entirely (e.g. "高辻通高倉泉正寺町465-2", "東大路安井北門通月見町13").
+# Scans for the rightmost <町名><番地> token after the 区 prefix —
+# [^\s通]+? can't span 通 so the match auto-stops at the last 通り
+# boundary, giving us just the residential tail.
+_KYOTO_CHOME_RE = re.compile(r"[^\s通]+?町\d+(?:[-－]\d+)*")
+
+
+def kyoto_extract_chome(addr: str) -> str | None:
+    if not addr or "京都府京都市" not in addr:
+        return None
+    m = _KYOTO_KU_RE.match(addr.strip())
+    if not m:
+        return None
+    matches = list(_KYOTO_CHOME_RE.finditer(addr[m.end():]))
+    if not matches:
+        return None
+    return m.group(1) + matches[-1].group(0)
 
 
 def gsi_geocode(query: str, client: httpx.Client) -> dict | None:
@@ -184,7 +269,14 @@ def gsi_geocode(query: str, client: httpx.Client) -> dict | None:
 def geocode(addr: str, client: httpx.Client, cache: dict) -> dict | None:
     if addr in cache:
         return cache[addr]
-    candidates = [addr, simplify_address(addr)]
+    candidates = [
+        addr,
+        simplify_address(addr),
+        kyoto_simplify(addr),
+        kyoto_extract_chome(addr),
+        kyoto_append_chome(addr),
+        sapporo_simplify(addr),
+    ]
     candidates = [c for c in candidates if c]
     seen = set()
     for q in candidates:
@@ -267,18 +359,30 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
     # toggle below. Remaining buckets are grouped by MEAL_GROUPS with a
     # section header above each cluster.
     def _genre_section(group: str, buckets: list[str]) -> str:
+        visible = [cat for cat in buckets if cat not in DEFAULT_OFF_GENRES]
+        if not visible:
+            return ""
         rows = "\n".join(
             f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
             f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
             f'{cat} <span style="color:#9ca3af;">({cat_counts.get(cat, 0)})</span></label>'
-            for cat in buckets
-            if cat not in DEFAULT_OFF_GENRES
+            for cat in visible
         )
+        # Per-group 全选/全清 chips: same wiring as the section-wide ones,
+        # scoped to checkboxes inside this wrapper via the data attribute.
         header = (
-            f'        <div style="margin:6px 0 2px;font-weight:600;'
-            f'color:#374151;font-size:11px;letter-spacing:0.5px;">{group}</div>'
+            f'        <div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;margin:6px 0 2px;">'
+            f'<span style="font-weight:600;color:#374151;font-size:11px;'
+            f'letter-spacing:0.5px;">{group}</span>'
+            f'<span style="font-size:10px;">'
+            f'<a href="#" class="ff-group-all" style="color:#2563eb;text-decoration:none;">全选</a>'
+            f'<span style="color:#d1d5db;"> | </span>'
+            f'<a href="#" class="ff-group-none" style="color:#2563eb;text-decoration:none;">全清</a>'
+            f'</span>'
+            f'</div>'
         )
-        return header + "\n" + rows
+        return f'      <div data-genre-group="{group}">\n{header}\n{rows}\n      </div>'
     genre_rows = "\n".join(
         _genre_section(group, buckets) for group, buckets in MEAL_GROUPS.items()
     )
@@ -450,7 +554,7 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
     <span style="font-size:11px;color:#6b7280;">🌏 <b>{foreign_count}</b></span>
   </div>
   <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-hide-foreign" checked> 隐藏外国料理 (🇨🇳🇰🇷🇫🇷🇮🇳)
+    <input type="checkbox" id="ff-hide-foreign" checked> 隐藏外国料理 (🇨🇳🇹🇼🇰🇷🇫🇷🇮🇹🇺🇸🇮🇳🇹🇭🇱🇧)
   </label>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;">
@@ -2698,6 +2802,18 @@ FILTER_JS_TEMPLATE = r"""
       e.preventDefault();
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = false; });
       apply();
+    });
+    document.querySelectorAll('[data-genre-group]').forEach(function(box) {
+      box.querySelector('.ff-group-all').addEventListener('click', function(e) {
+        e.preventDefault();
+        box.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
+        apply();
+      });
+      box.querySelector('.ff-group-none').addEventListener('click', function(e) {
+        e.preventDefault();
+        box.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = false; });
+        apply();
+      });
     });
     // ===== Filter bottom sheet =====
     // Same visual treatment as the restaurant detail sheet (#bs-sheet);

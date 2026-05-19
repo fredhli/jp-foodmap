@@ -276,6 +276,12 @@
       f._bbox = [minX, minY, maxX, maxY];
       var cls = classify(f.properties);
       f._class = cls;
+      // Bucket is decided by is_longhaul (set by transit_postprocess.py),
+      // not by the visual class. Otherwise a 南海本線 way carrying サザン
+      // gets visually classified as 'private' (city bucket) even though the
+      // postprocess pass tagged is_longhaul=true, and stations end up
+      // disagreeing with lines about which filter they belong to.
+      f._bucket = f.properties.is_longhaul ? 'long' : 'city';
       f._color = colorFor(f.properties, cls);
       var ll = new Array(coords.length);
       for (var j = 0; j < coords.length; j++) ll[j] = [coords[j][1], coords[j][0]];
@@ -371,8 +377,8 @@
         var f = candidates[i];
         var cls = CLASSES[f._class];
         if (zoom < cls.minZ) continue;
-        if (cls.bucket === 'long' && !bk.long) continue;
-        if (cls.bucket === 'city' && !bk.city) continue;
+        if (f._bucket === 'long' && !bk.long) continue;
+        if (f._bucket === 'city' && !bk.city) continue;
         desired.add(f);
       }
 
