@@ -10,25 +10,35 @@ varies by that one path segment.
 Phase 1 paginates the list (sorted by rating desc). On the first page it
 reads the region's total restaurant count (the "全 N 件" badge) and
 computes target = min(round(total * top_pct / 100), hard_cap), then keeps
-paginating until that many cards are collected. Phase 2 visits each detail
-page for address + tabelog_bookable (plus seat_count / reservation_policy
-as schema fillers). Phase 3 appends to data/tabelog/tabelog.csv (unified
-across all regions, each row carries a `region` column) and dedupes by
-detail_url, keeping the newly-scraped row when a URL appears in both.
+paginating until that many cards are collected. A separate quota caps the
+number of fine-dining rows (dinner_upper or lunch_upper >= ¥20,000) at
+max(round(total * fine_dine_pct / 100), 5) — small regions still get
+at least 5 fine-dining slots. Once that quota is hit, further
+fine-dining cards are skipped while cheaper rows continue accumulating
+toward `target`. Phase 2 visits each detail page for address +
+tabelog_bookable (plus seat_count / reservation_policy as schema fillers).
+Phase 3 appends to data/tabelog/tabelog.csv (unified across all regions,
+each row carries a `region` column) and dedupes by detail_url, keeping
+the newly-scraped row when a URL appears in both.
 
-Genre / holiday / reservation_policy stay in Japanese — no translation.
-reservation_policy_chinese is preserved in the schema but left blank for new
-rows; existing translated rows keep their value unless overwritten by dedupe.
+reservation_policy is translated to zh-CN by default (uses Google Translate
+via deep_translator). Pass --no-translate to skip if you're rate-limited or
+want a quick run. Genre / holiday stay Japanese.
 """
 
 import argparse
 import asyncio
 import csv
+import json
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+
+# Windows: when launched through a subprocess / pipe, stdout falls back to
+# cp1252 and chokes on Japanese restaurant names in progress prints.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from deep_translator import GoogleTranslator
 from playwright.async_api import async_playwright
@@ -41,10 +51,13 @@ DETAIL_PAGE_DELAY_S = 1.5
 CHECKPOINT_EVERY = 10
 MAX_RETRIES = 3                 # per row/page
 RECONNECT_BACKOFF_S = 3.0       # after the browser/page dies
+FINE_DINE_THRESHOLD_YEN = 20000  # dinner_upper / lunch_upper at or above this = fine-dining
+FINE_DINE_MIN_CAP = 5            # floor for the fine-dine quota (so small regions still get a few)
 
 FIELDS = [
     "region",
     "rank", "name", "rating", "review_count", "save_count",
+    "awards",
     "genre", "station", "station_distance_m",
     "dinner_upper", "lunch_upper", "holiday",
     "seat_count", "address", "reservation_policy",
@@ -82,8 +95,22 @@ CARDS_JS = r"""
             else if (label === '昼の予算') lunch = val;
             else if (label === '定休日') holiday = val;
         }
+        const awards = Array.from(card.querySelectorAll('.list-rst__award-badge')).map(b => {
+            const span = b.querySelector('span[class*="c-badge-"]');
+            const tip = b.querySelector('.list-rst__award-tooltip');
+            const shortEl = b.querySelector('i');
+            const short = shortEl ? shortEl.innerText.trim() : '';
+            const long = tip ? tip.innerText.replace(/\s+/g, ' ').trim() : '';
+            const cls = span ? span.className : '';
+            const kind = cls.includes('c-badge-award') ? 'award'
+                       : cls.includes('c-badge-hyakumeiten') ? 'hyakumeiten'
+                       : 'other';
+            const m = cls.match(/--(\d{4}[a-z]+)/);
+            const variant = m ? m[1] : '';
+            return {kind, variant, short, long};
+        });
         return {detailUrl, rank, name, areaGenreText, rating,
-                review_count, save_count, dinner, lunch, holiday};
+                review_count, save_count, dinner, lunch, holiday, awards};
     });
     // pull "全 N 件" from the page header (e.g. "1～20 件を表示 ／ 全 71824 件")
     const bodyText = document.body ? (document.body.innerText || '') : '';
@@ -112,33 +139,42 @@ DETAIL_JS = r"""
 }
 """
 
-# Photo carousel images appear in detail-page HTML as
-#   https://tblg.k-img.com/resize/660x370c/restaurant/images/Rvw/{rid}/{photo_id}.jpg
-# The /resize/* paths are token-gated (403 outside the page), but the same
-# (rid, photo_id) rebuilds a public CDN URL that the map's JS can rewrite
-# to 150x150_square_ for thumbnails. photo_id is either a 32-char hex hash
-# or a numeric ID — both work with the 640x640_rect_ prefix.
+# Two URL shapes appear on detail pages depending on whether the restaurant
+# has a hero carousel:
+#   carousel:   tblg.k-img.com/resize/660x370c/restaurant/images/Rvw/{rid}/{photo_id}.jpg
+#   thumb grid: tblg.k-img.com/restaurant/images/Rvw/{rid}/{w}x{h}_(square|rect)_{photo_id}.jpg
+# /resize/* is token-gated (403 outside the page); the thumb-grid form is
+# the public CDN directly. Either way the (rid, photo_id) pair rebuilds a
+# 640x640_rect_ URL. photo_id is a 32-char hex hash or a numeric ID.
 CAROUSEL_RE = re.compile(
     r"tblg\.k-img\.com/resize/[^/]+/restaurant/images/Rvw/(\d+)/([A-Za-z0-9_-]+)\.jpg"
+)
+THUMBNAIL_RE = re.compile(
+    r"tblg\.k-img\.com/restaurant/images/Rvw/(\d+)/"
+    r"\d+x\d+_(?:square|rect)_([A-Za-z0-9]+)\.jpg"
 )
 
 
 def extract_photo_urls(html: str, limit: int = 3) -> list[str]:
-    """First `limit` unique (rid, photo_id) pairs in document order, as
-    public CDN URLs."""
+    """First `limit` unique (rid, photo_id) pairs as 640x640_rect_ URLs.
+
+    Tries the carousel form first; falls through to the thumbnail-grid
+    form for restaurants whose detail page has no hero carousel.
+    """
     seen: set[tuple[str, str]] = set()
     out: list[str] = []
-    for m in CAROUSEL_RE.finditer(html):
-        key = (m.group(1), m.group(2))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(
-            f"https://tblg.k-img.com/restaurant/images/Rvw/{key[0]}/"
-            f"640x640_rect_{key[1]}.jpg"
-        )
-        if len(out) >= limit:
-            break
+    for regex in (CAROUSEL_RE, THUMBNAIL_RE):
+        for m in regex.finditer(html):
+            key = (m.group(1), m.group(2))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                f"https://tblg.k-img.com/restaurant/images/Rvw/{key[0]}/"
+                f"640x640_rect_{key[1]}.jpg"
+            )
+            if len(out) >= limit:
+                return out
     return out
 
 
@@ -260,11 +296,14 @@ async def scrape_list_page(session: Session, region: str, page_num: int) -> tupl
     rows = []
     for c in raw["cards"]:
         genre, station, dist = parse_area_genre(c["areaGenreText"])
+        awards_list = c.get("awards") or []
+        awards_str = json.dumps(awards_list, ensure_ascii=False) if awards_list else ""
         rows.append({
             "region": region,
             "rank": c["rank"], "name": c["name"],
             "rating": c["rating"], "review_count": c["review_count"],
             "save_count": c["save_count"],
+            "awards": awards_str,
             "genre": genre, "station": station, "station_distance_m": dist,
             "dinner_upper": parse_price_upper(c["dinner"]),
             "lunch_upper": parse_price_upper(c["lunch"]),
@@ -276,9 +315,25 @@ async def scrape_list_page(session: Session, region: str, page_num: int) -> tupl
     return rows, raw.get("total")
 
 
-async def collect_list(session: Session, region: str, top_pct: float, hard_cap: int) -> list[dict]:
+def _is_fine_dine(row: dict) -> bool:
+    return (
+        (row.get("dinner_upper") or 0) >= FINE_DINE_THRESHOLD_YEN
+        or (row.get("lunch_upper") or 0) >= FINE_DINE_THRESHOLD_YEN
+    )
+
+
+async def collect_list(
+    session: Session,
+    region: str,
+    top_pct: float,
+    hard_cap: int,
+    fine_dine_pct: float,
+) -> list[dict]:
     kept: list[dict] = []
+    fine_dine_count = 0
+    fine_dine_skipped = 0
     target: int | None = None
+    fine_dine_cap: int | None = None
     page_num = 1
     while True:
         try:
@@ -293,22 +348,43 @@ async def collect_list(session: Session, region: str, top_pct: float, hard_cap: 
         if target is None:
             if total is None:
                 print(f"[list page {page_num}] could not read '全 N 件'; "
-                      f"falling back to hard-cap {hard_cap}")
+                      f"falling back to hard-cap {hard_cap} "
+                      f"(fine-dine cap disabled — needs total count)")
                 target = hard_cap
+                fine_dine_cap = None
             else:
                 pct_quota = round(total * top_pct / 100)
                 target = min(pct_quota, hard_cap)
+                fd_pct_quota = round(total * fine_dine_pct / 100)
+                fine_dine_cap = max(fd_pct_quota, FINE_DINE_MIN_CAP)
                 print(f"[list page {page_num}] total={total}, top {top_pct}% = "
-                      f"{pct_quota}, hard-cap={hard_cap} -> target={target}")
+                      f"{pct_quota}, hard-cap={hard_cap} -> target={target}; "
+                      f"fine-dine cap = max({fine_dine_pct}% = {fd_pct_quota}, "
+                      f"{FINE_DINE_MIN_CAP}) = {fine_dine_cap} "
+                      f"(>=¥{FINE_DINE_THRESHOLD_YEN:,})")
 
-        remaining = target - len(kept)
-        kept.extend(rows[:remaining])
+        page_kept = 0
+        page_skipped = 0
+        for row in rows:
+            if len(kept) >= target:
+                break
+            if _is_fine_dine(row):
+                if fine_dine_cap is not None and fine_dine_count >= fine_dine_cap:
+                    fine_dine_skipped += 1
+                    page_skipped += 1
+                    continue
+                fine_dine_count += 1
+            kept.append(row)
+            page_kept += 1
 
-        print(f"[list page {page_num}] {len(rows)} cards, "
-              f"running kept={len(kept)}/{target}")
+        print(f"[list page {page_num}] {len(rows)} cards, kept {page_kept} "
+              f"(skipped {page_skipped} fine-dine), running kept={len(kept)}/{target}, "
+              f"fine-dine={fine_dine_count}"
+              + (f"/{fine_dine_cap}" if fine_dine_cap is not None else ""))
 
         if len(kept) >= target:
-            print(f"[list page {page_num}] reached target {target}; stopping pagination")
+            print(f"[list page {page_num}] reached target {target}; stopping pagination "
+                  f"(fine-dine total={fine_dine_count}, skipped={fine_dine_skipped})")
             break
         page_num += 1
     return kept
@@ -336,27 +412,65 @@ async def fetch_detail(session: Session, url: str) -> dict:
     raise RuntimeError(f"detail fetch failed after {MAX_RETRIES} attempts: {last_err}")
 
 
+def _load_translation_cache(csv_path: Path) -> dict[str, str]:
+    """Build {ja: zh} from every row in csv_path that has both fields filled.
+    Used to skip API calls for policies we've already translated in a previous
+    scrape (and to seed the in-batch dedup cache). Returns {} on first run."""
+    cache: dict[str, str] = {}
+    if not csv_path.exists():
+        return cache
+    with csv_path.open(encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            ja = (r.get("reservation_policy") or "").strip()
+            zh = (r.get("reservation_policy_chinese") or "").strip()
+            if ja and zh:
+                cache[ja] = zh
+    return cache
+
+
 async def translate_reservation_policy(rows: list[dict], checkpoint: Path) -> None:
-    """ja -> zh-CN for reservation_policy only. Genre/holiday stay Japanese."""
-    targets = [r for r in rows if r.get("reservation_policy")]
+    """ja -> zh-CN for reservation_policy. Cache is seeded from the master
+    CSV and grown in-batch, so duplicate policies ("予約可", "予約不可", ...)
+    translate exactly once across the whole corpus."""
+    targets = [
+        r for r in rows
+        if (r.get("reservation_policy") or "").strip()
+        and not (r.get("reservation_policy_chinese") or "").strip()
+    ]
     if not targets:
         print("\nNo reservation_policy text to translate.")
         return
-    print(f"\nTranslating {len(targets)} reservation_policy values -> zh-CN ...")
+    cache = _load_translation_cache(TABELOG_CSV)
+    print(f"\nTranslating {len(targets)} reservation_policy values -> zh-CN "
+          f"(cache seeded with {len(cache)} entries) ...")
     translator = GoogleTranslator(source="ja", target="zh-CN")
+    n_api = 0
+    n_cache = 0
     for n, row in enumerate(targets, 1):
-        ja = row["reservation_policy"]
-        try:
-            zh = translator.translate(ja) or ""
-        except Exception as e:
-            print(f"  [{n}/{len(targets)}] FAIL: {e}")
-            zh = ""
+        ja = row["reservation_policy"].strip()
+        if ja in cache:
+            zh = cache[ja]
+            n_cache += 1
+            tag = "cache"
+        else:
+            try:
+                zh = translator.translate(ja) or ""
+            except Exception as e:
+                print(f"  [{n}/{len(targets)}] FAIL: {e}")
+                zh = ""
+            if zh:
+                cache[ja] = zh
+            n_api += 1
+            tag = "api"
         row["reservation_policy_chinese"] = zh
-        print(f"  [{n}/{len(targets)}] {row.get('name')!r}: {len(ja)} -> {len(zh)} chars")
+        print(f"  [{n}/{len(targets)}] [{tag}] {row.get('name')!r}: "
+              f"{len(ja)} -> {len(zh)} chars")
         if n % CHECKPOINT_EVERY == 0:
             write_intermediate(rows, checkpoint)
-        await asyncio.sleep(0.3)
+        if tag == "api":
+            await asyncio.sleep(0.3)
     write_intermediate(rows, checkpoint)
+    print(f"  translate summary: api {n_api}, cache {n_cache}")
 
 
 def write_intermediate(rows: list[dict], path: Path) -> None:
@@ -419,12 +533,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--top-pct", type=float, default=1.0,
                     help="scrape the top N%% of the region's restaurants "
                          "by rating (default: 1.0)")
-    ap.add_argument("--hard-cap", type=int, default=400,
+    ap.add_argument("--hard-cap", type=int, default=500,
                     help="absolute upper bound on rows kept, applied after "
-                         "top-pct (default: 400)")
-    ap.add_argument("--translate", action=argparse.BooleanOptionalAction, default=False,
+                         "top-pct (default: 500)")
+    ap.add_argument("--fine-dine-pct", type=float, default=0.1,
+                    help="max share of the region's total restaurants allowed "
+                         "to be fine-dining (dinner_upper or lunch_upper >= "
+                         f"¥{FINE_DINE_THRESHOLD_YEN:,}). The cap is "
+                         f"max(round(total * this%%), {FINE_DINE_MIN_CAP}) so "
+                         "small regions still get a floor of "
+                         f"{FINE_DINE_MIN_CAP} fine-dining slots. Once the cap "
+                         "is hit, further fine-dining cards are skipped while "
+                         "cheaper rows continue toward the top-pct/hard-cap "
+                         "target (default: 0.1)")
+    ap.add_argument("--translate", action=argparse.BooleanOptionalAction, default=True,
                     help="translate reservation_policy -> reservation_policy_chinese "
-                         "via Google (default: off). Use --translate / --no-translate.")
+                         "via Google (default: on). Use --no-translate to skip.")
     return ap.parse_args(argv)
 
 
@@ -434,6 +558,8 @@ async def main(argv: list[str] | None = None) -> None:
         sys.exit(f"--top-pct must be > 0 (got {args.top_pct})")
     if args.hard_cap <= 0:
         sys.exit(f"--hard-cap must be > 0 (got {args.hard_cap})")
+    if args.fine_dine_pct < 0:
+        sys.exit(f"--fine-dine-pct must be >= 0 (got {args.fine_dine_pct})")
 
     region = args.region.strip().lower()
     if not region or "/" in region:
@@ -447,13 +573,17 @@ async def main(argv: list[str] | None = None) -> None:
     out_csv = TABELOG_CSV
 
     print(f"Region: {region}  ->  {out_csv.name}")
-    print(f"Target: top {args.top_pct}% of region, hard-capped at {args.hard_cap}")
+    print(f"Target: top {args.top_pct}% of region, hard-capped at {args.hard_cap}; "
+          f"fine-dine cap = {args.fine_dine_pct}% of region "
+          f"(>=¥{FINE_DINE_THRESHOLD_YEN:,})")
 
     async with async_playwright() as p:
         session = Session(p)
         await session.connect()
 
-        kept = await collect_list(session, region, args.top_pct, args.hard_cap)
+        kept = await collect_list(
+            session, region, args.top_pct, args.hard_cap, args.fine_dine_pct,
+        )
         print(f"\nCollected {len(kept)} list rows. Now visiting detail pages.")
         write_intermediate(kept, intermediate)
 

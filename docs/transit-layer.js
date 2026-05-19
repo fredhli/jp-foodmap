@@ -52,7 +52,7 @@
   var PRIVATE_OP_RE = /(東急|京急|京王|小田急|京成|東武|西武|相鉄|京阪|阪急|阪神|近鉄|南海|名鉄|西鉄|東京メトロ|都営|大阪メトロ|Osaka Metro|名古屋市|札幌市|福岡市|京都市|神戸市|横浜市|広島電鉄|長崎電気軌道|熊本市|鹿児島市|岡山電気軌道|江ノ島電鉄|つくばエクスプレス|京浜急行|相模鉄道)/;
 
   var CLASSES = {
-    shinkansen: { w: 3.4, minZ: 5,  importance: 5, bucket: 'long' },
+    shinkansen: { w: 4.0, minZ: 5,  importance: 5, bucket: 'long' },
     jr_long:    { w: 2.6, minZ: 7,  importance: 4, bucket: 'long' },
     jr_city:    { w: 2.4, minZ: 9,  importance: 3, bucket: 'city' },
     subway:     { w: 2.4, minZ: 11, importance: 3, bucket: 'city' },

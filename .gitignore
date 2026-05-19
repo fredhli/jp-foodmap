@@ -27,3 +27,19 @@ config.json
 
 # Claude Code project context — kept local
 CLAUDE.md
+
+# One-shot / ad-hoc scripts and dev helpers that don't affect the build
+# output. Kept locally for the user but not part of the repo's pipeline.
+backfill_*.py
+prune_*.py
+run_batch.py
+batch.txt
+preview.ps1
+preview.ps1.tmp.*
+
+# Audit / probe tools — they read the dataset but don't produce anything
+# the map depends on. The pipeline code that does affect output
+# (scrape_all.py, scrape_topup.py, map.py, transit_postprocess.py) is
+# tracked normally.
+src/tabelog/scrape/audit_*.py
+src/tabelog/scrape/transit_audit.py

@@ -38,6 +38,49 @@ if _SRC_DIR not in sys.path:
 from tabelog.paths import DOCS_DIR
 
 GEOJSON_PATH = DOCS_DIR / "transit" / "japan.geojson"
+SUSPICIOUS_REPORT_PATH = DOCS_DIR / "transit" / "suspicious_lines.md"
+
+
+# Manual overrides applied during track-uniformity enforcement. (name, op)
+# pairs forced into one bucket regardless of how the per-route-key pass
+# voted. These are derived from human review of suspicious_lines.md:
+# either a real 特急 traversal that the propagation pass under-counts
+# (< 5 features named like the physical track inside long-haul groups), or
+# the inverse — a commuter through-line that majority-wins flipped to
+# long-haul because of incidental shared-track features.
+#
+# Tip when adding: keep the operator string EXACT to the geojson value.
+# OSM has multiple operator-string variants for the same operator
+# (e.g. "西日本旅客鉄道" vs "JR西日本", "東武鉄道" vs "東武鉄道 (Tobu Railway)")
+# and each maps to a separate physical-track row in the audit.
+FORCE_LONGHAUL_TRACKS = {
+    # JR West
+    ("JR湖西線",   "西日本旅客鉄道"),   # サンダーバード 大阪 ↔ 敦賀 全程
+    ("JR播但線",   "西日本旅客鉄道"),   # はまかぜ 姫路 ↔ 和田山 全程
+    ("JR舞鶴線",   "西日本旅客鉄道"),   # まいづる / はしだて 全程
+    ("JR阪和線",   "JR西日本"),         # くろしお / はるか — alt-op-string stub
+    # JR East
+    ("上越線",     "東日本旅客鉄道"),   # たにがわ + 湘南新宿ライン
+    # JR Hokkaido
+    ("JR根室本線", "北海道旅客鉄道"),   # おおぞら 札幌 ↔ 釧路
+    # JR Shikoku
+    ("内子線",     "四国旅客鉄道"),     # しおかぜ / 宇和海 — 予讃線 internal shortcut
+    # Private (private 特急 carriers)
+    ("近畿日本鉄道名古屋線", "近畿日本鉄道"),       # アーバンライナー / しまかぜ
+    ("近畿日本鉄道志摩線",   "近畿日本鉄道"),       # しまかぜ / 伊勢志摩ライナー
+    ("南海電気鉄道南海本線", "南海電気鉄道"),       # サザン / ラピート
+    ("東武日光線",           "東武鉄道"),           # スペーシア / きぬ
+    ("東武鬼怒川線",         "東武鉄道 (Tobu Railway)"),  # スペーシア / きぬ
+}
+FORCE_CITY_TRACKS = {
+    # Tokyo-metro commuter through-running — physically a new underground
+    # line, behaviorally a commuter limb of 相鉄・JR・東急 直通網. Same
+    # category as 武蔵野線 / 京葉線 (which stayed city).
+    ("相鉄新横浜線", "相模鉄道"),
+    # One-station stub off 京成本線 to old NRT terminal; primarily exists
+    # for 芝山鉄道 through-running. Bulk is local.
+    ("京成東成田線", "京成電鉄"),
+}
 
 
 # ---- blocklist -----------------------------------------------------------
@@ -106,6 +149,28 @@ JR_MAINLINE_RE = re.compile(
     "伯備線|瀬戸大橋線"
 )
 
+# Two-sided thresholds for the long-haul propagation pass (see _tag_longhaul).
+#
+# SOURCE side — LONGHAUL_PROPAGATE_MIN_FEATURES: a `name` (e.g. "JR福知山線")
+# is treated as a long-haul-carrier only if it shows up on at least this
+# many features that already sit in a long-haul group. Filters out the
+# 2-3-way junction outliers a 特急 relation sweeps up at station throats
+# (e.g., こうのとり's two 'JR東西線' ways near 尼崎). Real cases — こうのとり
+# carries 8 ways named 'JR福知山線', しなの ~20 named 'JR篠ノ井線' — clear
+# this easily.
+#
+# TARGET side — LONGHAUL_PROPAGATE_MIN_TARGET_FRAC: a candidate route-name
+# group only inherits the flag if at least this share of its own features
+# sits on the trusted physical track. Stops a single mis-tagged junction
+# way from flipping a whole private/local line: e.g., the しなの鉄道線
+# relation has 1 way out of 217 tagged 'name=篠ノ井線' (a junction at
+# 篠ノ井 station), which is plenty to overlap the trusted-name set but
+# clearly doesn't make the third-sector しなの鉄道線 a long-haul carrier.
+# Bulk-sharing relations (the 福知山線 普通 and 丹波路快速 groups, ~99%
+# of features on 'JR福知山線') sail through.
+LONGHAUL_PROPAGATE_MIN_FEATURES = 5
+LONGHAUL_PROPAGATE_MIN_TARGET_FRAC = 0.5
+
 
 # ---- geometry helpers ----------------------------------------------------
 
@@ -170,13 +235,32 @@ def _route_key(props):
 def _tag_longhaul(lines):
     """Mutates each line's properties to add is_longhaul: bool.
 
-    Decision is per logical line (normalized key), not per fragment — once
-    a key qualifies as long-haul, EVERY fragment with that key gets the
-    flag. This fixes the case where 予讃線 / JR予讃線 / `JR予讃線
-    (松山 → 高松)` fragments would split on naming variants and end up
-    inconsistently tagged within the same physical line."""
-    # Aggregate per key: collected names (for regex matching) and the union
-    # of operators seen on any fragment in this group.
+    Two-pass decision:
+
+      Pass 1 — per logical line. Group ways by normalized route_name and
+      tag the group long-haul if its aggregated names/operators match the
+      service-class regex (新幹線 / 特急 / 寝台 / named airport express) or
+      the strict JR-mainline allowlist. This catches the 特急 relations and
+      mainline 普通 service directly, and indirectly catches things like the
+      `JR中央線快速` relation (which doesn't itself match anything, but its
+      member ways have name='中央本線' so the group's name concat matches).
+
+      Pass 2 — physical-track propagation. The blind spot the first pass
+      misses is the inverse case: a 特急 service whose route_name relation
+      got tagged onto a few ways, while most ways on the same physical
+      track ended up in a `普通` / `快速` group whose own name doesn't
+      match the regex. OSM models the same track as a member of every
+      service relation that runs on it; `build_way_route_map` keeps just
+      one route_name per way via setdefault, so a single physical line
+      can end up split across multiple route_name groups with only some
+      flagged. The 福知山線 (こうのとり stranded as fragments) and the
+      篠ノ井線 (しなの stranded) bugs are both this shape. We propagate by
+      reading the `name` field — the physical track identifier — out of
+      already-flagged groups: if 'JR福知山線' shows up on ≥N (see
+      LONGHAUL_PROPAGATE_MIN_FEATURES) features inside long-haul groups,
+      we treat that physical line as long-haul-carrying, and any other
+      group with features named 'JR福知山線' inherits the flag.
+    """
     groups = defaultdict(lambda: {"names": [], "ops": set()})
     for f in lines:
         p = f["properties"]
@@ -192,16 +276,49 @@ def _tag_longhaul(lines):
     for key, info in groups.items():
         nm_concat = " ".join(info["names"])
         op_concat = " ".join(info["ops"])
-        # Service-class hit (新幹線 / 特急 / 寝台 / named airport express ...) wins
-        # unconditionally — these are always long-haul regardless of operator.
         if LONGHAUL_SERVICE_RE.search(nm_concat):
             long_keys.add(key)
             continue
-        # JR mainline allowlist: regex is strict by design (specific 本線
-        # names, no generic "本線" catch-all), so a match plus a JR operator
-        # is enough — no aggregate-length floor needed.
         if JR_OPERATOR_RE.search(op_concat) and JR_MAINLINE_RE.search(nm_concat):
             long_keys.add(key)
+
+    # Pass 2: physical-track propagation. Walk every feature once to
+    # collect (a) name -> count-in-already-longhaul-groups (source side)
+    # and (b) per-group total feature count + per-group count of features
+    # whose name is in the trusted set (target side, computed after we
+    # know the trusted set).
+    name_long_count = defaultdict(int)
+    feature_keys = [None] * len(lines)
+    feature_names = [None] * len(lines)
+    group_total = defaultdict(int)
+    for i, f in enumerate(lines):
+        p = f["properties"]
+        key = _route_key(p)
+        if not key:
+            continue
+        feature_keys[i] = key
+        group_total[key] += 1
+        nm = p.get("name")
+        if nm:
+            feature_names[i] = nm
+            if key in long_keys:
+                name_long_count[nm] += 1
+    trusted_names = {nm for nm, c in name_long_count.items()
+                     if c >= LONGHAUL_PROPAGATE_MIN_FEATURES}
+    n_propagated_keys = 0
+    if trusted_names:
+        group_trusted = defaultdict(int)
+        for i in range(len(lines)):
+            key = feature_keys[i]
+            nm = feature_names[i]
+            if key and nm and nm in trusted_names:
+                group_trusted[key] += 1
+        for key, n_trusted in group_trusted.items():
+            if key in long_keys:
+                continue
+            if n_trusted / group_total[key] >= LONGHAUL_PROPAGATE_MIN_TARGET_FRAC:
+                long_keys.add(key)
+                n_propagated_keys += 1
 
     n_long = 0
     for f in lines:
@@ -211,11 +328,204 @@ def _tag_longhaul(lines):
             p["is_longhaul"] = True
             n_long += 1
         elif "is_longhaul" in p:
-            # Idempotency: rerunning postprocess on a previously-tagged
-            # geojson must be able to UN-tag a line whose key no longer
-            # qualifies (e.g., rule tweaked, blocklist change).
             del p["is_longhaul"]
+    if n_propagated_keys:
+        print(f"  longhaul propagation: {n_propagated_keys} extra route keys "
+              f"promoted via {len(trusted_names)} trusted physical-track names")
     return n_long
+
+
+# ---- pass 2b: per-track uniformity enforcement ---------------------------
+#
+# Hard invariant (per user request): one physical line — identified by
+# (name, operator) — must be entirely long-haul or entirely city. Never
+# split. The per-route-key decision in _tag_longhaul can leave splits
+# because OSM models a single physical track as a member of multiple
+# route relations (普通 / 快速 / 特急), and our extract step retains only
+# one route relation per way. So a 福知山線 way that's a member of both
+# 普通 (city) and こうのとり (long-haul) gets classified as one or the
+# other depending on which relation won the route_name race.
+#
+# This pass resolves every split (name, op) by majority-wins (more
+# features wins; on ties, default to city — the conservative choice).
+# Every track that needed resolution is recorded so the user can review
+# whether the auto-decision was right (see suspicious_lines.md).
+
+
+def _enforce_track_uniformity(lines):
+    """Force every (name, operator) physical track to a single is_longhaul
+    classification. Returns a list of suspicious-track records for review."""
+    tracks = defaultdict(lambda: {
+        "T": 0, "F": 0,
+        "T_feats": [], "F_feats": [],
+        "T_keys": set(), "F_keys": set(),
+    })
+    for f in lines:
+        p = f["properties"]
+        nm = p.get("name")
+        if not nm:
+            continue
+        op = p.get("operator") or ""
+        rk = _route_key(p)
+        d = tracks[(nm, op)]
+        if p.get("is_longhaul"):
+            d["T"] += 1
+            d["T_feats"].append(f)
+            d["T_keys"].add(rk)
+        else:
+            d["F"] += 1
+            d["F_feats"].append(f)
+            d["F_keys"].add(rk)
+
+    suspicious = []
+    forced_applied = []
+    for (nm, op), d in tracks.items():
+        t, f = d["T"], d["F"]
+        key = (nm, op)
+        is_forced_long = key in FORCE_LONGHAUL_TRACKS
+        is_forced_city = key in FORCE_CITY_TRACKS
+        is_forced = is_forced_long or is_forced_city
+        is_mixed = t > 0 and f > 0
+        if not is_forced and not is_mixed:
+            continue
+
+        if is_forced_long:
+            decision_long = True
+        elif is_forced_city:
+            decision_long = False
+        else:
+            decision_long = t > f  # majority-wins; ties fall through to city
+
+        if decision_long:
+            for feat in d["F_feats"]:
+                feat["properties"]["is_longhaul"] = True
+        else:
+            for feat in d["T_feats"]:
+                feat["properties"].pop("is_longhaul", None)
+
+        record = {
+            "name": nm, "operator": op,
+            "n_long": t, "n_city": f,
+            "resolved_as": "longhaul" if decision_long else "city",
+            "long_keys": sorted(d["T_keys"]),
+            "city_keys": sorted(d["F_keys"]),
+        }
+        if is_forced:
+            forced_applied.append(record)
+        elif is_mixed:
+            suspicious.append(record)
+    return suspicious, forced_applied
+
+
+def _assert_no_mixed_tracks(lines) -> None:
+    """After uniformity enforcement, no (name, op) should be mixed.
+
+    The assertion guards against future regressions: if a new pass or rule
+    ever introduces a split, the build fails loudly instead of silently
+    shipping a fragmented overlay."""
+    tracks = defaultdict(lambda: [0, 0])
+    for f in lines:
+        p = f["properties"]
+        nm = p.get("name")
+        if not nm:
+            continue
+        op = p.get("operator") or ""
+        tracks[(nm, op)][0 if p.get("is_longhaul") else 1] += 1
+    mixed = [(k, v[0], v[1]) for k, v in tracks.items() if v[0] > 0 and v[1] > 0]
+    if mixed:
+        lines_out = [f"  {nm} [{op}]: T={t} F={f}"
+                     for (nm, op), t, f in mixed[:10]]
+        raise AssertionError(
+            f"_enforce_track_uniformity failed — {len(mixed)} tracks still "
+            f"mixed after pass:\n" + "\n".join(lines_out)
+        )
+
+
+def _write_suspicious_report(suspicious, forced, path) -> None:
+    """Markdown table of every track that needed disambiguation.
+
+    Sorted by how suspicious the decision looks: Type C (10–90% mixed)
+    first because those are the genuine coin-flips that most need human
+    review; then Type A (resolved → city, but might be real 特急
+    traversals worth flipping); then Type B (resolved → long-haul, the
+    safe auto-resolutions). Manual overrides are listed separately at
+    the top so the active force-list is visible at a glance."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    type_a, type_b, type_c = [], [], []
+    for s in suspicious:
+        pct = s["n_long"] / (s["n_long"] + s["n_city"])
+        if pct >= 0.9:
+            type_b.append(s)
+        elif pct <= 0.1:
+            type_a.append(s)
+        else:
+            type_c.append(s)
+
+    out = ["# Auto-resolved mixed transit lines",
+           "",
+           "Generated by `src/tabelog/scrape/transit_postprocess.py`. "
+           "Do not hand-edit — re-run postprocess to regenerate.",
+           "",
+           "Each row is a `(name, operator)` physical track whose features "
+           "split between long-haul (`T`) and city (`F`) classifications. "
+           "Either the manual override list in `transit_postprocess.py` "
+           "decided the class, or majority-wins picked the side with more "
+           "features.",
+           "",
+           f"**Manually overridden: {len(forced)} · Auto-resolved by majority-wins: {len(suspicious)}**",
+           ""]
+
+    def section(label, rows, hint):
+        if not rows:
+            return
+        rows.sort(key=lambda s: -(s["n_long"] + s["n_city"]))
+        out.append(f"## {label}  ({len(rows)})")
+        if hint:
+            out.append("")
+            out.append(hint)
+        out.append("")
+        out.append("| T | F | T% | resolved | name | operator | long-haul keys | city keys |")
+        out.append("|--:|--:|---:|----------|------|----------|----------------|-----------|")
+        for s in rows:
+            t, f = s["n_long"], s["n_city"]
+            total = t + f
+            pct = (t / total * 100) if total else 0.0
+            tk = "; ".join(s["long_keys"][:4])
+            fk = "; ".join(s["city_keys"][:4])
+            out.append(
+                f"| {t} | {f} | {pct:.1f}% | **{s['resolved_as']}** | "
+                f"{s['name']} | {s['operator']} | {tk} | {fk} |"
+            )
+        out.append("")
+
+    section(
+        "Manual overrides (FORCE_LONGHAUL_TRACKS / FORCE_CITY_TRACKS)",
+        forced,
+        "These tracks bypass majority-wins because human review found the "
+        "automatic decision wrong. Edit the FORCE_* sets in "
+        "`transit_postprocess.py` to add/remove entries."
+    )
+    section(
+        "Type C — closer mix (10% ≤ T% ≤ 90%)",
+        type_c,
+        "Real coin-flips. Read each row and decide if majority-wins picked right."
+    )
+    section(
+        "Type A — resolved → city, may have been real 特急 traversal",
+        type_a,
+        "Bulk-city tracks with a handful of long-haul leaks. If the leak keys "
+        "below name a real 特急 service that runs end-to-end on this line "
+        "(e.g. サンダーバード / たにがわ / しまかぜ / はまかぜ / きのさき), "
+        "this should probably be flipped to long-haul."
+    )
+    section(
+        "Type B — resolved → long-haul (low-risk auto-resolutions)",
+        type_b,
+        "Bulk long-haul tracks with a handful of city outliers — usually OSM "
+        "tagging noise."
+    )
+
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 # ---- pass 3: cross-name station merge (200m, any name) -------------------
@@ -424,6 +734,20 @@ def postprocess(in_path: Path, out_path: Path | None = None) -> None:
 
     n_long = _tag_longhaul(lines)
     print(f"  long-haul tagged: {n_long}/{len(lines)} lines")
+
+    suspicious, forced = _enforce_track_uniformity(lines)
+    _assert_no_mixed_tracks(lines)
+    if suspicious or forced:
+        _write_suspicious_report(suspicious, forced, SUSPICIOUS_REPORT_PATH)
+        print(f"  uniformity: {len(forced)} manual overrides + "
+              f"{len(suspicious)} majority-wins → {SUSPICIOUS_REPORT_PATH.name}")
+    else:
+        if SUSPICIOUS_REPORT_PATH.exists():
+            SUSPICIOUS_REPORT_PATH.unlink()
+        print("  uniformity: 0 mixed tracks (nothing to resolve)")
+    # Recount after uniformity enforcement.
+    n_long = sum(1 for f in lines if f["properties"].get("is_longhaul"))
+    print(f"  long-haul after uniformity: {n_long}/{len(lines)} lines")
 
     stations = _cross_merge_stations(stations, threshold_m=200.0)
     # 120m proximity for line counting: a typical big-station platform/concourse

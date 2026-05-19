@@ -35,8 +35,13 @@ BLACKLIST_JSON = USER_DIR / "blacklist.json"
 # stores Tabelog restaurant URLs; this one stores user-named map pins.
 BOOKMARKS_JSON = USER_DIR / "bookmarks.json"
 
-# Rendered artifact — committed to docs/ so GitHub Pages picks it up.
+# Rendered artifacts — committed to docs/ so GitHub Pages picks them up.
+# Core fields (lat/lon, filterable bits, tooltip) fetched on boot; popup HTML
+# split out so it can be fetched lazily on first marker click.
 MAP_HTML = DOCS_DIR / "index.html"
+DOCS_DATA_DIR = DOCS_DIR / "data"
+RESTAURANTS_JSON = DOCS_DATA_DIR / "restaurants.json"
+POPUPS_JSON = DOCS_DATA_DIR / "popups.json"
 GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
 ATTRACTIONS_CSV = DATA / "attractions.csv"
 
@@ -46,6 +51,6 @@ def _ensure_dirs() -> None:
     missing parents."""
     for d in (
         OMAKASE_DIR, TABELOG_DIR, USER_DIR, OUTPUT_DIR,
-        CACHE_DIR, INTERMEDIATE_DIR, DOCS_DIR,
+        CACHE_DIR, INTERMEDIATE_DIR, DOCS_DIR, DOCS_DATA_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)

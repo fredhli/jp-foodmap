@@ -35,6 +35,9 @@ from tabelog.paths import (
     TABELOG_CSV,
     GEOCODE_CACHE,
     MAP_HTML,
+    RESTAURANTS_JSON,
+    POPUPS_JSON,
+    DOCS_DATA_DIR,
     FAVORITES_JSON,
     BLACKLIST_JSON,
     BOOKMARKS_JSON,
@@ -46,6 +49,7 @@ from tabelog.scrape.map_data import (
     DEFAULT_OFF_GENRES,
     GENRE_CATEGORIES,
     GENRE_EMOJI,
+    MEAL_GROUPS,
 )
 
 GSI_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
@@ -258,38 +262,125 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
         f'border-radius:50%;margin:0 4px;vertical-align:middle;"></span>{label}</label>'
         for key, label, color, _, _ in PRICE_BUCKETS
     )
-    # DEFAULT_OFF_GENRES (中/韩/西/南亚) are not shown in the cuisine filter
-    # at all — they're controlled by the standalone "隐藏外国料理" toggle below.
+    # DEFAULT_OFF_GENRES (中/韩/西/南亚/中东·非洲) are not shown in the
+    # cuisine filter — they're controlled by the standalone "隐藏外国料理"
+    # toggle below. Remaining buckets are grouped by MEAL_GROUPS with a
+    # section header above each cluster.
+    def _genre_section(group: str, buckets: list[str]) -> str:
+        rows = "\n".join(
+            f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
+            f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
+            f'{cat} <span style="color:#9ca3af;">({cat_counts.get(cat, 0)})</span></label>'
+            for cat in buckets
+            if cat not in DEFAULT_OFF_GENRES
+        )
+        header = (
+            f'        <div style="margin:6px 0 2px;font-weight:600;'
+            f'color:#374151;font-size:11px;letter-spacing:0.5px;">{group}</div>'
+        )
+        return header + "\n" + rows
     genre_rows = "\n".join(
-        f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
-        f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
-        f'{cat} <span style="color:#9ca3af;">({cat_counts.get(cat, 0)})</span></label>'
-        for cat in GENRE_CATEGORIES
-        if cat not in DEFAULT_OFF_GENRES
+        _genre_section(group, buckets) for group, buckets in MEAL_GROUPS.items()
     )
     foreign_count = sum(cat_counts.get(c, 0) for c in DEFAULT_OFF_GENRES)
     return f"""
-<div id="ff-panel" style="
-     position: fixed; top: 12px; right: 12px; z-index: 9999;
-     background: rgba(255,255,255,0.97); padding: 10px 12px;
-     border: 1px solid #d1d5db; border-radius: 8px;
-     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-     font-size: 12px; line-height: 1.45; color: #111827;
-     box-shadow: 0 4px 12px rgba(0,0,0,0.12); width: 232px;">
-  <div id="ff-header" style="display:flex;justify-content:space-between;align-items:center;
-              border-bottom:1px solid #e5e7eb;padding-bottom:5px;margin-bottom:6px;">
-    <span style="font-weight:700;font-size:13px;">筛选</span>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="font-size:11px;color:#6b7280;">显示 <b id="ff-count">–</b> / <span id="ff-total">–</span></span>
-      <button id="ff-collapse" title="折叠"
-              style="border:1px solid #d1d5db;background:#f9fafb;color:#374151;
-                     width:22px;height:22px;border-radius:4px;cursor:pointer;
-                     font-size:15px;line-height:1;padding:0;font-weight:700;
-                     display:flex;align-items:center;justify-content:center;">−</button>
-    </div>
+<style>
+  /* Filter bottom-sheet — same visual treatment as the restaurant detail
+     sheet (#bs-sheet), with parallel width breakpoints. The two sheets are
+     mutually exclusive (opening one closes the other), so they share the
+     same vertical slot at the bottom of the viewport. */
+  #ff-backdrop {{
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(0,0,0,0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.22s ease-out;
+  }}
+  #ff-backdrop.ff-open {{ opacity: 1; pointer-events: auto; }}
+  #ff-sheet {{
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 10002;
+    max-height: 75vh; max-height: 75dvh;
+    background: #fff;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
+    transform: translateY(100%);
+    transition: transform 0.25s ease-out;
+    display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }}
+  #ff-sheet.ff-open {{ transform: translateY(0); }}
+  @media (min-width: 700px) {{
+    #ff-sheet {{ left: 50%; transform: translate(-50%, 100%);
+                 width: min(560px, calc(100vw - 32px)); right: auto;
+                 max-height: 80vh; max-height: 80dvh;
+                 border-radius: 14px 14px 0 0; }}
+    #ff-sheet.ff-open {{ transform: translate(-50%, 0); }}
+  }}
+  @media (min-width: 1100px) {{
+    #ff-sheet {{ width: min(640px, calc(100vw - 32px));
+                 max-height: 85vh; max-height: 85dvh; }}
+  }}
+  #ff-grip {{
+    position: relative;
+    padding: 9px 0 6px; flex-shrink: 0;
+    cursor: grab; touch-action: none;
+  }}
+  #ff-grip::before {{
+    content: ''; display: block;
+    width: 38px; height: 4px; margin: 0 auto;
+    background: #d1d5db; border-radius: 2px;
+  }}
+  #ff-sheet-content {{
+    overflow-y: auto;
+    padding: 0 16px 16px;
+    flex: 1 1 auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 13px; line-height: 1.5; color: #111827;
+  }}
+  /* Bottom-left FAB that opens the sheet. Matches the right-side .map-fab
+     style but stands alone — labelled with the live filter count so the
+     "how many results match" feedback survives the collapse to a sheet. */
+  #ff-fab {{
+    position: fixed; bottom: 18px; left: 14px;
+    z-index: 9995;
+    background: #fff; color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    padding: 9px 14px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    display: inline-flex; align-items: center; gap: 8px;
+    user-select: none;
+    transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1;
+  }}
+  #ff-fab:hover {{ background: #f9fafb;
+                   box-shadow: 0 4px 10px rgba(0,0,0,0.18); }}
+  #ff-fab[hidden] {{ display: none; }}
+  #ff-fab .ff-fab-ic {{ font-size: 15px; }}
+  #ff-fab .ff-fab-count {{ font-variant-numeric: tabular-nums; }}
+  #ff-fab .ff-fab-count b {{ color: #2563eb; }}
+</style>
+<button id="ff-fab" type="button" aria-label="打开筛选" title="筛选">
+  <span class="ff-fab-ic">🎛</span>
+  <span class="ff-fab-count"><b class="ff-count">–</b> / <span class="ff-total">–</span></span>
+</button>
+<div id="ff-backdrop"></div>
+<div id="ff-sheet" role="dialog" aria-modal="true" aria-hidden="true"
+     aria-labelledby="ff-sheet-title">
+  <div id="ff-grip"></div>
+  <div id="ff-sheet-content">
+  <div style="display:flex;justify-content:space-between;align-items:center;
+              border-bottom:1px solid #e5e7eb;padding:2px 0 8px;margin-bottom:10px;">
+    <span id="ff-sheet-title" style="font-weight:700;font-size:15px;">筛选</span>
+    <span style="font-size:12px;color:#6b7280;">
+      显示 <b class="ff-count">–</b> / <span class="ff-total">–</span>
+    </span>
   </div>
 
-  <div id="ff-body">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;">
     <span style="font-weight:600;">评分</span>
     <span style="font-size:11px;color:#374151;">≥ <b id="ff-rating-val">3.4</b></span>
@@ -376,6 +467,8 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
 </div>
 
 <!-- Settings modal (Gist ID + PAT). Hidden by default. -->
+<!-- Lives outside #ff-sheet so opening it doesn't have to fight the sheet's
+     own transform / overflow. Still owned by the filter UI for wiring. -->
 <div id="ff-modal-bg" style="display:none;position:fixed;inset:0;z-index:10000;
      background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;padding:18px 20px;width:340px;
@@ -439,6 +532,10 @@ LOCATE_ASSETS = """
     -webkit-user-select: none;
     user-select: none;
   }
+  /* The locate plugin renders its own top-left button; we drive it from
+     the bottom-right FAB stack instead, so suppress the default UI. The
+     control instance stays alive for its .start() / .stop() methods. */
+  .leaflet-control-locate { display: none !important; }
 </style>
 """
 
@@ -481,6 +578,22 @@ MAP_FAB_HTML = """
                     border-color: #2563eb; }
   .map-fab.active:hover { background: #1d4ed8; }
   .map-fab-ic { font-size: 15px; line-height: 1; }
+  /* Locate button is icon-only on every viewport — round, no label. The
+     SVG keeps it visually distinct from the pill-shaped layer toggles. */
+  .map-fab.map-fab-circle {
+    width: 40px; height: 40px; padding: 0;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    align-self: flex-end;       /* line up flush with the pill stack edge */
+  }
+  .map-fab .map-fab-svg {
+    width: 20px; height: 20px; display: block;
+    stroke: currentColor;
+  }
+  /* While the plugin is following the user, paint the FAB blue. The class
+     is added/removed by locateactivate/locatedeactivate map events. */
+  .map-fab.map-fab-circle.locating { background: #2563eb; color: #fff;
+                                     border-color: #2563eb; }
   /* Tighten on narrow screens — drop the label, keep just the icon. */
   @media (max-width: 480px) {
     .map-fab { padding: 9px 10px; }
@@ -489,6 +602,19 @@ MAP_FAB_HTML = """
   }
 </style>
 <div class="map-fab-stack" role="group" aria-label="图层切换">
+  <button id="fab-locate" class="map-fab map-fab-circle" type="button"
+          title="定位到我的位置" aria-label="定位到我的位置">
+    <svg class="map-fab-svg" viewBox="0 0 24 24" fill="none"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+         aria-hidden="true">
+      <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"></circle>
+      <circle cx="12" cy="12" r="7.5"></circle>
+      <line x1="12" y1="1.5" x2="12" y2="4"></line>
+      <line x1="12" y1="20" x2="12" y2="22.5"></line>
+      <line x1="1.5" y1="12" x2="4" y2="12"></line>
+      <line x1="20" y1="12" x2="22.5" y2="12"></line>
+    </svg>
+  </button>
   <button id="fab-transit-long" class="map-fab" type="button"
           aria-pressed="false" title="新干线 / JR 长途线路">
     <span class="map-fab-ic">🚄</span><span class="map-fab-label">长途</span>
@@ -611,55 +737,13 @@ SEARCH_BOX_HTML = """
     flex-shrink: 0; font-size: 16px; line-height: 1; width: 20px;
     text-align: center; color: #6b7280;
   }
-  /* Mobile FAB that opens the search overlay. Off on desktop. Visually
-     matches the bottom-right .map-fab stack so the page reads as
-     "top-left = search, top-right = filter, bottom-right = layers". */
-  #ss-fab {
-    display: none;
-    position: fixed; top: 10px; left: 12px;
-    z-index: 9996;
-    width: 40px; height: 40px;
-    background: #fff; color: #374151;
-    border: 1px solid #d1d5db;
-    border-radius: 999px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    font-size: 18px; line-height: 1;
-    align-items: center; justify-content: center;
-    cursor: pointer;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
-    pointer-events: auto;
-  }
-  #ss-fab:hover { background: #f9fafb; box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
-  #ss-fab:active { background: #f3f4f6; }
-  /* The "← back" affordance inside the expanded search bar on mobile.
-     Off on desktop (the 🔍 leading icon stays). */
-  #ss-back {
-    display: none;
-    border: none; background: none; cursor: pointer;
-    font-size: 20px; line-height: 1; color: #6b7280;
-    padding: 6px 6px 6px 14px;
-  }
-  #ss-back:hover { color: #374151; }
-
   @media (max-width: 480px) {
-    #ss-input { font-size: 16px; }   /* iOS no-zoom */
-    /* Search box hidden by default — opened via the top-left FAB. When
-       open it sits flush to the screen edges and rises above the filter
-       panel so the two never visually collide. */
-    #ss-box { display: none; top: 8px; width: calc(100vw - 16px); }
-    #ss-box.ss-mobile-open { display: block; z-index: 10000; }
-    #ss-fab { display: flex; }
-    #ss-fab.ss-hidden { display: none; }
-    /* Swap the decorative 🔍 for the actionable ← in the expanded state.
-       Tapping ← closes the overlay and brings the FAB back. */
-    #ss-icon { display: none; }
-    #ss-box.ss-mobile-open #ss-back { display: block; }
+    #ss-input { font-size: 16px; }       /* iOS no-zoom */
+    #ss-box { top: 8px; width: calc(100vw - 16px); }
   }
 </style>
 <div id="ss-box">
   <div id="ss-input-wrap">
-    <button id="ss-back" type="button" aria-label="返回">←</button>
     <span id="ss-icon">🔍</span>
     <input id="ss-input" type="text" autocomplete="off"
            placeholder="搜索景点 / 地址 ...">
@@ -668,7 +752,6 @@ SEARCH_BOX_HTML = """
   </div>
   <div id="ss-list" role="listbox"></div>
 </div>
-<button id="ss-fab" type="button" aria-label="搜索景点 / 地址" title="搜索">🔍</button>
 """
 
 
@@ -958,17 +1041,21 @@ MOBILE_UX_ASSETS = """
     padding-bottom: env(safe-area-inset-bottom);
   }
   #bs-sheet.bs-open { transform: translateY(0); }
-  /* Tablet: cap width and center; still bottom-anchored. */
+  /* Tablet: cap width and center; still bottom-anchored. The explicit
+     width keeps the sheet at a stable size regardless of content — without
+     it, `left: 50%; right: auto` makes the sheet shrink-to-fit, so swapping
+     the bottom-sheet content (e.g., loading placeholder → full card) would
+     make it jump wider. */
   @media (min-width: 700px) {
     #bs-sheet { left: 50%; transform: translate(-50%, 100%);
-                max-width: 680px; right: auto;
+                width: min(680px, calc(100vw - 32px)); right: auto;
                 max-height: 80vh; max-height: 80dvh;
                 border-radius: 14px 14px 0 0; }
     #bs-sheet.bs-open { transform: translate(-50%, 0); }
   }
   /* Desktop: roomier sheet so the 2-column popup layout has space. */
   @media (min-width: 1100px) {
-    #bs-sheet { max-width: 880px;
+    #bs-sheet { width: min(880px, calc(100vw - 32px));
                 max-height: 85vh; max-height: 85dvh; }
   }
   #bs-grip {
@@ -981,13 +1068,6 @@ MOBILE_UX_ASSETS = """
     width: 38px; height: 4px; margin: 0 auto;
     background: #d1d5db; border-radius: 2px;
   }
-  #bs-close {
-    position: absolute; top: 4px; right: 6px;
-    background: none; border: none;
-    font-size: 22px; line-height: 1; color: #9ca3af;
-    cursor: pointer; padding: 4px 10px;
-  }
-  #bs-close:hover { color: #374151; }
   #bs-content {
     overflow-y: auto;
     padding: 0 14px 14px;
@@ -1052,7 +1132,6 @@ BOTTOM_SHEET_HTML = """
 <div id="bs-backdrop"></div>
 <div id="bs-sheet" role="dialog" aria-modal="true" aria-hidden="true">
   <div id="bs-grip"></div>
-  <button id="bs-close" aria-label="关闭">×</button>
   <div id="bs-content"></div>
 </div>
 """
@@ -1061,8 +1140,32 @@ BOTTOM_SHEET_HTML = """
 FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
-  var EMBEDDED_DATA = __PAYLOAD__;
   var EMBEDDED_BOOKMARKS = __BOOKMARKS__;
+
+  // ===== Lazy popup loader =====
+  // The rendered popup HTML for all restaurants lives in docs/data/popups.json
+  // (one entry per Tabelog detail_url). It's ~4 MB gzipped, so we don't pull
+  // it on boot — only when the user taps the first marker. After that the
+  // map serves popups instantly from memory. The single shared promise means
+  // a second tap during the first fetch reuses it rather than racing.
+  var popupsMap = null;
+  var popupsPromise = null;
+  function loadPopups() {
+    if (popupsMap) return Promise.resolve(popupsMap);
+    if (popupsPromise) return popupsPromise;
+    popupsPromise = fetch('data/popups.json', {cache: 'force-cache'})
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(j) { popupsMap = j; return j; })
+      .catch(function(e) {
+        console.error('[tabelog] popups.json load failed:', e);
+        popupsPromise = null;
+        throw e;
+      });
+    return popupsPromise;
+  }
 
   // ===== Apple-style emoji rendering via emojicdn =====
   // Windows ships no flag glyphs in its system font, so we swap every emoji
@@ -1109,8 +1212,11 @@ FILTER_JS_TEMPLATE = r"""
       tn.replaceWith(span);
     });
   }
-  function startEmojiObserver() {
-    emojify(document.body);
+  // Attach a MutationObserver to one container so any future emoji-bearing
+  // content under it gets swapped to Apple PNGs. Exposed so initMap() can
+  // hook the Leaflet popup pane once Leaflet has created it.
+  function observeForEmoji(root) {
+    if (!root) return;
     new MutationObserver(function(muts) {
       for (var i = 0; i < muts.length; i++) {
         var added = muts[i].addedNodes;
@@ -1120,7 +1226,23 @@ FILTER_JS_TEMPLATE = r"""
           else if (nd.nodeType === 3 && nd.parentNode) emojify(nd.parentNode);
         }
       }
-    }).observe(document.body, {childList: true, subtree: true});
+    }).observe(root, {childList: true, subtree: true});
+  }
+  function startEmojiObserver() {
+    // One-shot pass over the static page (filter panel, FAB labels, modal
+    // titles…) — these never change after load.
+    emojify(document.body);
+    // Narrow ongoing observers only on the containers that mutate with
+    // emoji-bearing HTML at runtime. The previous wider `document.body`
+    // observer caught every marker insertion too, wasting one TreeWalker
+    // pass per marker on each pan — marker divIcons already pre-swap their
+    // emoji at construction (see makeIcon → emojiImg), so they don't need
+    // the observer. Leaflet popups (search result, right-click "加入收藏")
+    // live under .leaflet-popup-pane, which initMap() hooks once Leaflet
+    // has built its panes.
+    observeForEmoji(document.getElementById('bs-content'));
+    observeForEmoji(document.getElementById('bm-modal'));
+    observeForEmoji(document.getElementById('ss-list'));
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startEmojiObserver);
@@ -1204,6 +1326,12 @@ FILTER_JS_TEMPLATE = r"""
     if (typeof L === 'undefined' || !L.markerClusterGroup) { setTimeout(function(){ initMap(data); }, 50); return; }
     if (!L.control.locate) { setTimeout(function(){ initMap(data); }, 50); return; }
 
+    // Late-bound emoji observer for Leaflet popups: search-result temp
+    // marker and the right-click "加入收藏" popup both inject HTML into
+    // .leaflet-popup-pane, which only exists after the map initializes.
+    var popupPane = map.getPane && map.getPane('popupPane');
+    if (popupPane) observeForEmoji(popupPane);
+
     // ===== Persisted map view =====
     // Restore last center+zoom before any tiles render, then track every
     // moveend (fires once per pan/zoom gesture, not per frame).
@@ -1226,8 +1354,11 @@ FILTER_JS_TEMPLATE = r"""
     });
 
     // Live geolocation: click once to fly to current position, click again
-    // for continuous follow; the plugin handles permission UI + accuracy ring.
-    L.control.locate({
+    // to stop. The plugin's own top-left button is hidden via CSS in
+    // LOCATE_ASSETS; we drive it from the bottom-right locate FAB so the
+    // control sits alongside the layer toggles instead of being a stray
+    // Leaflet UI in the corner.
+    var locateCtl = L.control.locate({
       position: 'topleft',
       flyTo: true,
       setView: 'untilPan',
@@ -1244,6 +1375,19 @@ FILTER_JS_TEMPLATE = r"""
         outsideMapBoundsMsg: '当前位置在地图范围之外'
       }
     }).addTo(map);
+    var locateFab = document.getElementById('fab-locate');
+    if (locateFab) {
+      locateFab.addEventListener('click', function() {
+        // _active is the plugin's "currently tracking" flag. Toggle so a
+        // second tap turns it off, matching Google Maps' behavior.
+        if (locateCtl._active) locateCtl.stop(); else locateCtl.start();
+      });
+      // Paint the FAB blue while the plugin is tracking. The plugin emits
+      // these events on the map; locatedeactivate fires on .stop() and on
+      // permission denial.
+      map.on('locateactivate',   function() { locateFab.classList.add('locating'); });
+      map.on('locatedeactivate', function() { locateFab.classList.remove('locating'); });
+    }
 
     // ===== FAB layer toggles: transit overlay + attractions =====
     // Vector transit layer rendered from precomputed docs/transit/japan.geojson
@@ -1703,27 +1847,9 @@ FILTER_JS_TEMPLATE = r"""
     var ssInput   = document.getElementById('ss-input');
     var ssClear   = document.getElementById('ss-clear');
     var ssList    = document.getElementById('ss-list');
-    var ssFab     = document.getElementById('ss-fab');
-    var ssBack    = document.getElementById('ss-back');
     var ssDebounce = null;
     var ssReqSeq  = 0;
     var ssTempMarker = null;
-
-    var ssMobileMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;
-    function ssIsMobile() { return !!(ssMobileMQ && ssMobileMQ.matches); }
-    function ssOpenMobile() {
-      ssBox.classList.add('ss-mobile-open');
-      ssFab.classList.add('ss-hidden');
-      // Defer focus past the show transition so iOS doesn't refuse the
-      // keyboard pop. requestAnimationFrame is enough; setTimeout 0 also works.
-      requestAnimationFrame(function() { ssInput.focus(); });
-    }
-    function ssCloseMobile() {
-      ssBox.classList.remove('ss-mobile-open');
-      ssFab.classList.remove('ss-hidden');
-      ssCloseDropdown();
-      ssInput.blur();
-    }
 
     function ssRemoveTempMarker() {
       if (ssTempMarker) { map.removeLayer(ssTempMarker); ssTempMarker = null; }
@@ -1798,10 +1924,7 @@ FILTER_JS_TEMPLATE = r"""
       ssCloseDropdown();
       ssInput.value = it.name;
       ssWrap.classList.add('has-text');
-      // On mobile the overlay covers most of the screen — once we've picked
-      // a result, get out of the way so the user can see the pin + popup.
-      // (Input keeps its text for refinement on next open.)
-      if (ssIsMobile()) ssCloseMobile();
+      ssInput.blur();        // dismiss the on-screen keyboard on mobile
       var latlng = L.latLng(it.lat, it.lon);
       // 16 is tight enough to read shop signs without losing context. flyTo
       // animates; Leaflet caps the duration so it's never jarring.
@@ -1938,19 +2061,11 @@ FILTER_JS_TEMPLATE = r"""
       ssInput.focus();
     });
     // Click outside the search box closes the dropdown but keeps the text
-    // so the user can re-focus and refine. On mobile a tap outside also
-    // closes the overlay back to the FAB — otherwise the user would have
-    // to find the ← button before they can interact with the map again.
+    // so the user can re-focus and refine.
     document.addEventListener('click', function(e) {
       if (ssBox.contains(e.target)) return;
-      if (e.target === ssFab) return;
       ssCloseDropdown();
-      if (ssIsMobile() && ssBox.classList.contains('ss-mobile-open')) {
-        ssCloseMobile();
-      }
     });
-    ssFab.addEventListener('click', ssOpenMobile);
-    ssBack.addEventListener('click', ssCloseMobile);
 
     var cluster = L.markerClusterGroup({maxClusterRadius: 40, disableClusteringAtZoom: 17});
     map.addLayer(cluster);
@@ -1988,7 +2103,14 @@ FILTER_JS_TEMPLATE = r"""
       return c.gistId ? c : null;
     }
     function refreshAllMarkers() {
-      markers.forEach(function(m){ m.setIcon(makeIcon(m._d)); });
+      // Only the markers that have actually been materialized can have their
+      // icon updated. Rows outside the viewport will pick up the new state
+      // the next time they're added to the cluster (makeIcon reads fav/black
+      // state at construction time).
+      for (var i = 0; i < data.length; i++) {
+        var d = data[i];
+        if (d._m) d._m.setIcon(makeIcon(d));
+      }
       updateFavCount();
       updateBlackCount();
       apply();
@@ -2167,19 +2289,57 @@ FILTER_JS_TEMPLATE = r"""
     var bsBackdrop = document.getElementById('bs-backdrop');
     var bsSheet    = document.getElementById('bs-sheet');
     var bsContent  = document.getElementById('bs-content');
-    var bsClose    = document.getElementById('bs-close');
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
 
     function openSheet(d) {
-      bsContent.innerHTML = d.popup;
+      // Mutual exclusion with the filter sheet — both dock to the bottom.
+      // ffSheet exists once the filter UI has booted; marker clicks can't
+      // fire earlier, so the guard is for paranoia, not for races.
+      var ffs = document.getElementById('ff-sheet');
+      if (ffs && ffs.classList.contains('ff-open')) {
+        ffs.classList.remove('ff-open');
+        document.getElementById('ff-backdrop').classList.remove('ff-open');
+        ffs.setAttribute('aria-hidden', 'true');
+        var ffb = document.getElementById('ff-fab');
+        if (ffb) ffb.hidden = false;
+      }
       bsActive = d;
-      // Mirror the old popupopen ⭐/🚫 sync.
-      var favBtn   = bsContent.querySelector('.ff-fav-btn');
-      var blackBtn = bsContent.querySelector('.ff-black-btn');
-      if (favBtn)   syncFavButton(favBtn, d);
-      if (blackBtn) syncBlackButton(blackBtn, d);
-      bsContent.scrollTop = 0;
+      // Hide the filter FAB so the bottom-left corner stays clean while
+      // the restaurant card occupies the bottom slot.
+      var ffbtn = document.getElementById('ff-fab');
+      if (ffbtn) ffbtn.hidden = true;
+      function paint(html) {
+        // Guard: user may have closed the sheet or opened another one while
+        // the popups.json fetch was in flight.
+        if (bsActive !== d) return;
+        bsContent.innerHTML = html;
+        var favBtn   = bsContent.querySelector('.ff-fav-btn');
+        var blackBtn = bsContent.querySelector('.ff-black-btn');
+        if (favBtn)   syncFavButton(favBtn, d);
+        if (blackBtn) syncBlackButton(blackBtn, d);
+        bsContent.scrollTop = 0;
+      }
+      if (popupsMap) {
+        paint(popupsMap[d.detail_url] || '');
+      } else {
+        // First marker tap on this page load — show a minimal placeholder
+        // (name + rating) while popups.json is on the wire. Usually <500ms.
+        var name = (d.name || '').replace(/[&<>]/g, function(c) {
+          return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+        });
+        paint('<div class="rst-card"><div class="rst-header">' +
+              '<div class="rst-title">' + name +
+              '<span class="rst-rating">★' + (d.rating == null ? '–' : d.rating) +
+              '</span></div></div>' +
+              '<div style="margin-top:10px;color:#6b7280;font-size:13px;">加载中…</div>' +
+              '</div>');
+        loadPopups().then(function(map) { paint(map[d.detail_url] || ''); })
+                    .catch(function() {
+                      paint('<div class="rst-card"><div class="rst-title">' + name +
+                            '</div><div style="margin-top:10px;color:#dc2626;">加载失败,请检查网络</div></div>');
+                    });
+      }
       // Force reflow so the transition runs even on rapid reopen.
       void bsSheet.getBoundingClientRect();
       bsSheet.classList.add('bs-open');
@@ -2191,9 +2351,10 @@ FILTER_JS_TEMPLATE = r"""
       bsBackdrop.classList.remove('bs-open');
       bsSheet.setAttribute('aria-hidden', 'true');
       bsActive = null;
+      var ffbtn = document.getElementById('ff-fab');
+      if (ffbtn) ffbtn.hidden = false;
     }
     bsBackdrop.addEventListener('click', closeSheet);
-    bsClose.addEventListener('click', closeSheet);
     document.addEventListener('keydown', function(e){
       if (e.key === 'Escape' && bsActive) closeSheet();
     });
@@ -2231,27 +2392,78 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('mousemove', bsDragMove);
     document.addEventListener('mouseup',   bsDragEnd);
 
-    var markers = data.map(function(d) {
-      var m = L.marker([d.lat, d.lon], {icon: makeIcon(d)});
-      m.on('click', function(){ openSheet(d); });
-      m._d = d;
-      return m;
-    });
     // Tap on empty map area closes the sheet (mirrors Leaflet popup behavior).
     map.on('click', function(){ if (bsActive) closeSheet(); });
 
-    var markerByUrl = {};
-    markers.forEach(function(m){ markerByUrl[m._d.detail_url] = m; });
-    document.getElementById('ff-total').textContent = markers.length;
+    // ===== Viewport-driven marker construction =====
+    // We no longer build all 8000+ L.marker objects up front (that allocated
+    // ~30-50MB of heap on boot and pinned an inline divIcon DOM string per
+    // row). Instead, restaurants live as plain JS row objects; markers are
+    // materialized on first appearance and cached on the row as `d._m`.
+    // Pan/zoom triggers a viewport-clipped recompute; the filter UI calls
+    // the same recompute path. The cluster only ever sees the subset that
+    // (a) intersects the visible bbox and (b) passes the current filter.
+    //
+    // The 0.1° grid (~11 km cells) is fine enough that even a citywide view
+    // walks a handful of cells, not the full row list.
+    var GRID = 0.1;
+    var gridIndex = new Map();
+    var rowByUrl = {};
+    for (var di = 0; di < data.length; di++) {
+      var d = data[di];
+      if (typeof d.lat !== 'number' || typeof d.lon !== 'number') continue;
+      if (d.detail_url) rowByUrl[d.detail_url] = d;
+      var gx = Math.floor(d.lon / GRID), gy = Math.floor(d.lat / GRID);
+      var k = gx + ',' + gy;
+      var cell = gridIndex.get(k);
+      if (!cell) { cell = []; gridIndex.set(k, cell); }
+      cell.push(d);
+    }
+    var onMap = new Set();  // rows currently added to the cluster
+
+    function visibleRows() {
+      var b = map.getBounds().pad(0.25);
+      var W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
+      var gx0 = Math.floor(W / GRID), gx1 = Math.floor(E / GRID);
+      var gy0 = Math.floor(S / GRID), gy1 = Math.floor(N / GRID);
+      var out = [];
+      for (var gx = gx0; gx <= gx1; gx++) {
+        for (var gy = gy0; gy <= gy1; gy++) {
+          var cell = gridIndex.get(gx + ',' + gy);
+          if (!cell) continue;
+          for (var i = 0; i < cell.length; i++) {
+            var d = cell[i];
+            if (d.lon < W || d.lon > E || d.lat < S || d.lat > N) continue;
+            out.push(d);
+          }
+        }
+      }
+      return out;
+    }
+
+    function ensureMarker(d) {
+      if (d._m) return d._m;
+      var m = L.marker([d.lat, d.lon], {icon: makeIcon(d)});
+      m._d = d;
+      m.on('click', function() { openSheet(d); });
+      d._m = m;
+      return m;
+    }
+
+    function setCountText(cls, n) {
+      var nodes = document.querySelectorAll('.' + cls);
+      for (var i = 0; i < nodes.length; i++) nodes[i].textContent = n;
+    }
+    setCountText('ff-total', data.length);
 
     function updateFavCount() {
       var n = 0;
-      markers.forEach(function(m){ if (isFav(m._d)) n++; });
+      for (var i = 0; i < data.length; i++) if (isFav(data[i])) n++;
       document.getElementById('ff-fav-count').textContent = n;
     }
     function updateBlackCount() {
       var n = 0;
-      markers.forEach(function(m){ if (isBlack(m._d)) n++; });
+      for (var i = 0; i < data.length; i++) if (isBlack(data[i])) n++;
       document.getElementById('ff-black-count').textContent = n;
     }
 
@@ -2263,10 +2475,10 @@ FILTER_JS_TEMPLATE = r"""
       var favBtn = node.querySelector('.ff-fav-btn');
       var blackBtn = node.querySelector('.ff-black-btn');
       var url = (favBtn || blackBtn) && (favBtn || blackBtn).getAttribute('data-url');
-      var m = url && markerByUrl[url];
-      if (!m) return;
-      if (favBtn)   syncFavButton(favBtn, m._d);
-      if (blackBtn) syncBlackButton(blackBtn, m._d);
+      var d = url && rowByUrl[url];
+      if (!d) return;
+      if (favBtn)   syncFavButton(favBtn, d);
+      if (blackBtn) syncBlackButton(blackBtn, d);
     });
 
     // One delegated handler for both ⭐ and 🚫 clicks anywhere in the DOM.
@@ -2275,18 +2487,18 @@ FILTER_JS_TEMPLATE = r"""
       var blackBtn = e.target.closest && e.target.closest('.ff-black-btn');
       var btn = favBtn || blackBtn;
       if (!btn) return;
-      var m = markerByUrl[btn.getAttribute('data-url')];
-      if (!m) return;
+      var d = rowByUrl[btn.getAttribute('data-url')];
+      if (!d) return;
       if (favBtn) {
-        toggleFav(m._d.detail_url);
-        syncFavButton(favBtn, m._d);
+        toggleFav(d.detail_url);
+        syncFavButton(favBtn, d);
         updateFavCount();
       } else {
-        toggleBlack(m._d.detail_url);
-        syncBlackButton(blackBtn, m._d);
+        toggleBlack(d.detail_url);
+        syncBlackButton(blackBtn, d);
         updateBlackCount();
       }
-      m.setIcon(makeIcon(m._d));
+      if (d._m) d._m.setIcon(makeIcon(d));
       apply();
     });
 
@@ -2310,58 +2522,106 @@ FILTER_JS_TEMPLATE = r"""
       else genreSummaryEl.textContent = '已选 ' + n + ' / ' + total;
     }
 
-    function apply() {
-      var minRating = parseFloat(ratingSlider.value);
-      ratingLabel.textContent = minRating.toFixed(2);
-      var pSet = {};
-      document.querySelectorAll('input[name=ff-price]:checked').forEach(function(c){ pSet[c.value]=1; });
-      var gSet = {};
-      var gAny = false;
-      document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ gSet[c.value]=1; gAny=true; });
+    // Filter inputs are read once into this struct so `recompute()` (called
+    // on every pan/zoom moveend) doesn't have to re-touch the DOM. `apply()`
+    // is the user-callable side: it refreshes the cache, then recomputes.
+    var filterState = {
+      minRating: 3.4, pSet: {}, gSet: {}, gAny: false,
+      book: 'all', onlyFav: false, hideBlack: true, hideForeign: true
+    };
+    function readFilterInputs() {
+      filterState.minRating = parseFloat(ratingSlider.value);
+      ratingLabel.textContent = filterState.minRating.toFixed(2);
+      filterState.pSet = {};
+      document.querySelectorAll('input[name=ff-price]:checked').forEach(function(c){ filterState.pSet[c.value]=1; });
+      filterState.gSet = {};
+      filterState.gAny = false;
+      document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ filterState.gSet[c.value]=1; filterState.gAny=true; });
       var bEl = document.querySelector('input[name=ff-bookable]:checked');
-      var book = bEl ? bEl.value : 'all';
-      var onlyFav = onlyFavEl.checked;
-      var hideBlack = hideBlackEl.checked;
-      var hideForeign = hideForeignEl.checked;
-      updateGenreSummary();
+      filterState.book = bEl ? bEl.value : 'all';
+      filterState.onlyFav = onlyFavEl.checked;
+      filterState.hideBlack = hideBlackEl.checked;
+      filterState.hideForeign = hideForeignEl.checked;
+    }
+    function passesFilter(d) {
+      var fs = filterState;
+      // Blacklist short-circuits when "隐藏" is on, regardless of other
+      // filters. Hide-blacklist defeats only-fav so a starred-then-blacklisted
+      // restaurant still hides — easier mental model.
+      if (fs.hideBlack && isBlack(d)) return false;
+      // Slider min 3.4 covers the whole dataset, so we only filter when
+      // the user actually moves it above the minimum.
+      if (fs.minRating > 3.4) {
+        if (d.rating == null || d.rating < fs.minRating) return false;
+      }
+      if (!fs.pSet[d.bucket]) return false;
+      // Foreign cuisines (中/韩/西/南亚) bypass the regular genre filter —
+      // they're gated entirely by hideForeignEl. When shown, they appear
+      // regardless of which Japanese-cuisine boxes are checked.
+      var cats = d.categories || [];
+      var isForeign = cats.length > 0 && FOREIGN_GENRES.has(cats[0]);
+      if (isForeign) {
+        if (fs.hideForeign) return false;
+      } else {
+        // Genre filter: OR across selected categories. If none checked, hide all.
+        if (!fs.gAny) return false;
+        var ok = false;
+        for (var i = 0; i < cats.length; i++) {
+          if (fs.gSet[cats[i]]) { ok = true; break; }
+        }
+        if (!ok) return false;
+      }
+      if (fs.book === 'yes' && !d.bookable) return false;
+      if (fs.book === 'no' && d.bookable) return false;
+      if (fs.onlyFav && !isFav(d)) return false;
+      return true;
+    }
 
-      cluster.clearLayers();
-      var keep = [];
-      markers.forEach(function(m) {
-        var d = m._d;
-        // Blacklist short-circuits when "隐藏" is on, regardless of other
-        // filters. Hide-blacklist defeats only-fav so a starred-then-blacklisted
-        // restaurant still hides — easier mental model.
-        if (hideBlack && isBlack(d)) return;
-        // Slider min 3.4 covers the whole dataset, so we only filter when
-        // the user actually moves it above the minimum.
-        if (minRating > 3.4) {
-          if (d.rating == null || d.rating < minRating) return;
-        }
-        if (!pSet[d.bucket]) return;
-        // Foreign cuisines (中/韩/西/南亚) bypass the regular genre filter —
-        // they're gated entirely by hideForeignEl. When shown, they appear
-        // regardless of which Japanese-cuisine boxes are checked.
-        var cats = d.categories || [];
-        var isForeign = cats.length > 0 && FOREIGN_GENRES.has(cats[0]);
-        if (isForeign) {
-          if (hideForeign) return;
-        } else {
-          // Genre filter: OR across selected categories. If none checked, hide all.
-          if (!gAny) return;
-          var catMatch = false;
-          for (var i = 0; i < cats.length; i++) {
-            if (gSet[cats[i]]) { catMatch = true; break; }
-          }
-          if (!catMatch) return;
-        }
-        if (book === 'yes' && !d.bookable) return;
-        if (book === 'no' && d.bookable) return;
-        if (onlyFav && !isFav(d)) return;
-        keep.push(m);
+    function recompute() {
+      var candidates = visibleRows();
+      var desired = new Set();
+      for (var i = 0; i < candidates.length; i++) {
+        var d = candidates[i];
+        if (passesFilter(d)) desired.add(d);
+      }
+      // Diff against the current cluster contents — only add/remove the
+      // delta. MarkerCluster's bulk addLayers / removeLayers are much
+      // cheaper than clearLayers + rebuild on every pan.
+      var removeLayers = [];
+      onMap.forEach(function(d) {
+        if (!desired.has(d) && d._m) removeLayers.push(d._m);
       });
-      cluster.addLayers(keep);
-      document.getElementById('ff-count').textContent = keep.length;
+      if (removeLayers.length) cluster.removeLayers(removeLayers);
+      onMap.forEach(function(d) { if (!desired.has(d)) onMap.delete(d); });
+
+      var addLayers = [];
+      desired.forEach(function(d) {
+        if (!onMap.has(d)) {
+          addLayers.push(ensureMarker(d));
+          onMap.add(d);
+        }
+      });
+      if (addLayers.length) cluster.addLayers(addLayers);
+
+      setCountText('ff-count', desired.size);
+    }
+
+    // rAF-coalesce moveend so a long pan with many fired events still maps
+    // to one recompute per frame at most. Same pattern as the transit layer.
+    var recomputeRaf = 0;
+    function scheduleRecompute() {
+      if (recomputeRaf) return;
+      recomputeRaf = requestAnimationFrame(function() {
+        recomputeRaf = 0;
+        recompute();
+      });
+    }
+    map.on('moveend', scheduleRecompute);
+
+    function apply() {
+      readFilterInputs();
+      updateGenreSummary();
+      recompute();
       saveFilterState();
     }
 
@@ -2416,7 +2676,7 @@ FILTER_JS_TEMPLATE = r"""
 
     // Live update on drag, not just on release.
     ratingSlider.addEventListener('input', apply);
-    document.querySelectorAll('#ff-panel input[type=checkbox], #ff-panel input[type=radio]').forEach(function(el) {
+    document.querySelectorAll('#ff-sheet input[type=checkbox], #ff-sheet input[type=radio]').forEach(function(el) {
       el.addEventListener('change', apply);
     });
     document.getElementById('ff-price-all').addEventListener('click', function(e) {
@@ -2439,39 +2699,72 @@ FILTER_JS_TEMPLATE = r"""
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = false; });
       apply();
     });
-    // Collapse / expand the panel — handy on phones where the filter sits
-    // on top of the map. State is per-device, persisted in localStorage.
-    var collapseBtn = document.getElementById('ff-collapse');
-    var ffBody = document.getElementById('ff-body');
-    var ffHeader = document.getElementById('ff-header');
-    var COLLAPSE_KEY = 'tabelog.ffPanel.collapsed';
-    function setCollapsed(c, persist) {
-      ffBody.style.display = c ? 'none' : '';
-      collapseBtn.textContent = c ? '+' : '−';
-      collapseBtn.title = c ? '展开' : '折叠';
-      ffHeader.style.borderBottom = c ? 'none' : '1px solid #e5e7eb';
-      ffHeader.style.paddingBottom = c ? '0' : '5px';
-      ffHeader.style.marginBottom = c ? '0' : '6px';
-      if (persist !== false) {
-        try { localStorage.setItem(COLLAPSE_KEY, c ? '1' : '0'); } catch (e) {}
-      }
+    // ===== Filter bottom sheet =====
+    // Same visual treatment as the restaurant detail sheet (#bs-sheet);
+    // mutual exclusion ensures both never occupy the bottom slot at once.
+    // The bottom-left #ff-fab is the entry point; the restaurant detail
+    // sheet auto-closes the filter sheet when a marker is tapped.
+    var ffSheet    = document.getElementById('ff-sheet');
+    var ffBackdrop = document.getElementById('ff-backdrop');
+    var ffGrip     = document.getElementById('ff-grip');
+    var ffFab      = document.getElementById('ff-fab');
+
+    function openFilterSheet() {
+      if (bsActive) closeSheet();        // restaurant detail yields to filter
+      ffSheet.classList.add('ff-open');
+      ffBackdrop.classList.add('ff-open');
+      ffSheet.setAttribute('aria-hidden', 'false');
+      ffFab.hidden = true;
     }
-    collapseBtn.addEventListener('click', function() {
-      setCollapsed(ffBody.style.display !== 'none');
+    function closeFilterSheet() {
+      ffSheet.classList.remove('ff-open');
+      ffBackdrop.classList.remove('ff-open');
+      ffSheet.setAttribute('aria-hidden', 'true');
+      ffFab.hidden = false;
+    }
+    function ffIsOpen() { return ffSheet.classList.contains('ff-open'); }
+
+    ffFab.addEventListener('click', openFilterSheet);
+    ffBackdrop.addEventListener('click', closeFilterSheet);
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && ffIsOpen()) closeFilterSheet();
     });
-    try {
-      var saved = localStorage.getItem(COLLAPSE_KEY);
-      if (saved === '1') {
-        setCollapsed(true);
-      } else if (saved === null && window.matchMedia
-                 && window.matchMedia('(max-width: 768px)').matches) {
-        // First-load on a phone: collapse the panel so it doesn't eat the
-        // map. Don't persist — so opening on desktop later still defaults
-        // to expanded (localStorage sync across viewports is rare but cheap
-        // to avoid surprising).
-        setCollapsed(true, false);
+
+    // Reuse the bottom-sheet swipe-down dismiss from the restaurant card.
+    function makeSheetDrag(sheet, onClose) {
+      var drag = null;
+      function start(e) {
+        var p = e.touches ? e.touches[0] : e;
+        drag = { y0: p.clientY, t0: Date.now() };
+        sheet.style.transition = 'none';
       }
-    } catch (e) {}
+      function move(e) {
+        if (!drag) return;
+        var p = e.touches ? e.touches[0] : e;
+        var dy = Math.max(0, p.clientY - drag.y0);
+        var prefix = window.innerWidth >= 700 ? 'translate(-50%, ' + dy + 'px)'
+                                              : 'translateY(' + dy + 'px)';
+        sheet.style.transform = prefix;
+      }
+      function end(e) {
+        if (!drag) return;
+        var p = (e.changedTouches && e.changedTouches[0]) || e;
+        var dy = p.clientY - drag.y0;
+        var dt = Date.now() - drag.t0;
+        sheet.style.transition = '';
+        sheet.style.transform = '';
+        if (dy > 80 || (dy > 30 && dt < 200)) onClose();
+        drag = null;
+      }
+      return { start: start, move: move, end: end };
+    }
+    var ffDrag = makeSheetDrag(ffSheet, closeFilterSheet);
+    ffGrip.addEventListener('touchstart', ffDrag.start, { passive: true });
+    ffGrip.addEventListener('touchmove',  ffDrag.move,  { passive: true });
+    ffGrip.addEventListener('touchend',   ffDrag.end);
+    ffGrip.addEventListener('mousedown',  ffDrag.start);
+    document.addEventListener('mousemove', ffDrag.move);
+    document.addEventListener('mouseup',   ffDrag.end);
 
     document.getElementById('ff-reset').addEventListener('click', function() {
       ratingSlider.value = '3.4';
@@ -2557,7 +2850,23 @@ FILTER_JS_TEMPLATE = r"""
     // Kick off the first pull (or stay in local mode if not configured).
     startSync();
   }
-  function boot() { initMap(EMBEDDED_DATA); }
+  function boot() {
+    function setTotals(text) {
+      var nodes = document.querySelectorAll('.ff-total');
+      for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
+    }
+    setTotals('加载中…');
+    fetch('data/restaurants.json', {cache: 'force-cache'})
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) { initMap(data); })
+      .catch(function(e) {
+        console.error('[tabelog] restaurants.json load failed:', e);
+        setTotals('加载失败');
+      });
+  }
   if (document.readyState !== 'loading') boot();
   else document.addEventListener('DOMContentLoaded', boot);
 })();
@@ -2585,7 +2894,8 @@ def fmt_popup(row: dict) -> str:
     name = esc(row.get("name"))
     rating = esc(row.get("rating"))
     genre = esc(row.get("genre"))
-    genre_zh = esc(row.get("genre_chinese"))
+    cats = categorize_genre(row.get("genre") or "")
+    bucket = esc(cats[0]) if cats else ""
     dinner = row.get("dinner_upper")
     lunch = row.get("lunch_upper")
     seat = esc(row.get("seat_count"))
@@ -2634,7 +2944,7 @@ def fmt_popup(row: dict) -> str:
         <div class="rst-actions">{fav_btn}{black_btn}</div>
       </div>
       {photo_html}
-      <div class="rst-genre">{genre} / {genre_zh}</div>
+      <div class="rst-genre">{genre} / {bucket}</div>
       <div class="rst-info">
         <div class="rst-info-row"><span class="rst-label">晚</span><span class="rst-value">{dinner_s}</span></div>
         <div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 {station}</span></div>
@@ -2736,7 +3046,8 @@ def main(argv: list[str] | None = None) -> None:
     # transit option lives in custom JS as a togglable OpenRailwayMap
     # overlay (rail lines + station markers drawn on top), wired to the
     # floating "🚇 公共交通" pill button (see FAB_HTML / initMap).
-    m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None)
+    m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None,
+                   zoom_control=False)
     folium.TileLayer(
         tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
         attr=('&copy; <a href="https://www.openstreetmap.org/copyright">'
@@ -2776,10 +3087,17 @@ def main(argv: list[str] | None = None) -> None:
 
     # No LayerControl — replaced by the floating FAB stack (FAB_HTML).
 
-    # Build the per-restaurant JSON payload the filter JS consumes.
+    # Build the per-restaurant JSON payload the filter JS consumes. We split
+    # into two files: a small "core" payload (everything the marker and the
+    # filter UI need, fetched on boot) and a fat popups map (rendered HTML for
+    # the bottom sheet, fetched lazily on first marker click). The core
+    # payload used to be inlined into index.html — splitting it out drops the
+    # HTML from ~25 MB to ~50 KB and lets the browser parse / paint before
+    # the popups have downloaded.
     fav_set = load_favorites()
     black_set = load_blacklist()
-    payload = []
+    core_rows: list[dict] = []
+    popups_map: dict[str, str] = {}
     cat_counts: dict[str, int] = {cat: 0 for cat in GENRE_CATEGORIES}
     unmapped_tokens: set[str] = set()
     for row, loc in geocoded:
@@ -2798,7 +3116,7 @@ def main(argv: list[str] | None = None) -> None:
             if tok not in _GENRE_TO_CAT:
                 unmapped_tokens.add(tok)
         emoji = GENRE_EMOJI.get(cats[0]) if cats else GENRE_EMOJI["其他"]
-        payload.append({
+        core_rows.append({
             "lat": loc["lat"],
             "lon": loc["lon"],
             "name": row.get("name") or "",
@@ -2811,24 +3129,35 @@ def main(argv: list[str] | None = None) -> None:
             "detail_url": url,
             "favorited": url in fav_set,
             "blacklisted": url in black_set,
-            "popup": fmt_popup(row),
             "tooltip": f"{row.get('name')} · ★{row.get('rating')} · {blabel}",
         })
+        if url:
+            popups_map[url] = fmt_popup(row)
     if unmapped_tokens:
         print(f"  unmapped genre tokens (fell into 其他): {sorted(unmapped_tokens)}")
-    n_fav = sum(1 for p in payload if p['favorited'])
-    n_black = sum(1 for p in payload if p['blacklisted'])
+    n_fav = sum(1 for p in core_rows if p['favorited'])
+    n_black = sum(1 for p in core_rows if p['blacklisted'])
     print(f"  favorites: {n_fav} from favorites.json, blacklist: {n_black} from blacklist.json")
 
-    payload_json = json.dumps(payload, ensure_ascii=False)
-    print(f"  payload: {len(payload_json.encode('utf-8')):,} bytes embedded")
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    restaurants_bytes = json.dumps(
+        core_rows, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    popups_bytes = json.dumps(
+        popups_map, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    RESTAURANTS_JSON.write_bytes(restaurants_bytes)
+    POPUPS_JSON.write_bytes(popups_bytes)
+    print(f"  restaurants.json: {len(restaurants_bytes):,} bytes "
+          f"({len(core_rows)} rows)")
+    print(f"  popups.json:      {len(popups_bytes):,} bytes "
+          f"({len(popups_map)} entries)")
 
     panel_html = build_filter_panel_html(cat_counts)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
     bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
     filter_js = (
         FILTER_JS_TEMPLATE
-        .replace("__PAYLOAD__", payload_json)
         .replace("__DEFAULT_OFF_GENRES__", default_off_json)
         .replace("__BOOKMARKS__", bookmarks_json)
     )
@@ -2843,7 +3172,7 @@ def main(argv: list[str] | None = None) -> None:
 
     m.save(str(OUT_HTML))
     print(f"\nMap written to {OUT_HTML}")
-    print(f"  {len(payload)} restaurants embedded")
+    print(f"  {len(core_rows)} restaurants in payload (fetched at runtime)")
 
 
 if __name__ == "__main__":

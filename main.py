@@ -4,13 +4,14 @@ regenerate docs/index.html.
 
   uv run python main.py osaka
   uv run python main.py hyogo --top-pct 0.5
-  uv run python main.py okayama --hard-cap 200 --translate
+  uv run python main.py okayama --hard-cap 200 --no-translate
 
 Flags are forwarded verbatim to scrape_all (region, --top-pct, --hard-cap,
---translate / --no-translate). The geocode + render step runs map.py with
-its default (fill-empty) behavior, so only freshly-scraped rows hit GSI;
-existing rows keep their lat/lon. Pass --fillall to map.py directly if
-you need a full re-geocode.
+--translate / --no-translate). Translation of reservation_policy -> Chinese
+is on by default; pass --no-translate if you want to skip it. The geocode +
+render step runs map.py with its default (fill-empty) behavior, so only
+freshly-scraped rows hit GSI; existing rows keep their lat/lon. Pass
+--fillall to map.py directly if you need a full re-geocode.
 """
 
 import asyncio
