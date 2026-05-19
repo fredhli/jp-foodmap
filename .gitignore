@@ -43,3 +43,6 @@ preview.ps1.tmp.*
 # tracked normally.
 src/tabelog/scrape/audit_*.py
 src/tabelog/scrape/transit_audit.py
+
+# Local rollback snapshots (e.g. map.py.bak before a big refactor)
+*.bak

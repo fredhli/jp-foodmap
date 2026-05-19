@@ -42,6 +42,10 @@ MAP_HTML = DOCS_DIR / "index.html"
 DOCS_DATA_DIR = DOCS_DIR / "data"
 RESTAURANTS_JSON = DOCS_DATA_DIR / "restaurants.json"
 POPUPS_JSON = DOCS_DATA_DIR / "popups.json"
+# Service worker — caches the big JSON / GeoJSON / tile assets so repeat
+# visits skip the network round-trip. Built fresh per run with a version
+# stamp so an older SW can't keep serving stale data after a redeploy.
+SW_JS = DOCS_DIR / "sw.js"
 GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
 ATTRACTIONS_CSV = DATA / "attractions.csv"
 
