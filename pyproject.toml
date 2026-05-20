@@ -6,5 +6,6 @@ dependencies = [
     "deep-translator>=1.11.4",
     "folium>=0.20.0",
     "httpx>=0.28.1",
+    "opencc-python-reimplemented>=0.1.7",
     "playwright>=1.59.0",
 ]

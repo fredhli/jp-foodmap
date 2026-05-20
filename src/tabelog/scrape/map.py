@@ -14,7 +14,9 @@ Output: docs/index.html  (single file, open in any browser).
 
 import argparse
 import csv
+import html as _html
 import json
+import math
 import re
 import sys
 import time
@@ -52,6 +54,48 @@ from tabelog.scrape.map_data import (
     GENRE_EMOJI,
     MEAL_GROUPS,
 )
+from tabelog.scrape.search_norm import build_han_variants, canon_str
+
+# Japan's 47 都道府県. Used as a whitelist for parse_admin_prefix because the
+# regex approach trips on 都/府/県 also appearing INSIDE prefecture names
+# (e.g. "京都府京都市..." has 都 inside 京都府 not as a suffix).
+_PREFECTURES = (
+    "北海道",
+    "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+    "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "神奈川県", "東京都",
+    "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+    "静岡県", "愛知県",
+    "三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県",
+    "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+    "徳島県", "香川県", "愛媛県", "高知県",
+    "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県",
+    "鹿児島県", "沖縄県",
+)
+# After the prefecture is stripped, repeated tokens of the form "<name><suffix>"
+# where suffix ∈ {市,郡,区,町,村}. The negation excludes digits so we stop
+# cleanly at the 番地 portion of the address.
+_ADMIN_RE = re.compile(r"^([^市郡区町村\d]{1,6}[市郡区町村])")
+
+
+def parse_admin_prefix(addr: str) -> str:
+    """Address → 'prefecture + city + ward' substring (no street/lot). Drives
+    the location-aware search: searching '眺游楼 横浜' boosts restaurants
+    whose admin prefix contains 横浜 to the top."""
+    if not addr:
+        return ""
+    parts: list[str] = []
+    for p in _PREFECTURES:
+        if addr.startswith(p):
+            parts.append(p)
+            addr = addr[len(p):]
+            break
+    for _ in range(3):
+        m = _ADMIN_RE.match(addr)
+        if not m:
+            break
+        parts.append(m.group(1))
+        addr = addr[m.end():]
+    return "".join(parts)
 
 GSI_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
 
@@ -309,6 +353,133 @@ def categorize_genre(genre_str: str) -> list[str]:
     return ["其他"]
 
 
+# Filterable award tags — slug, label, emoji. Order = display order in the
+# filter panel. Tag slugs are the JS-side filter values and the strings that
+# appear in each row's `awards` payload array.
+AWARD_TAGS = [
+    ("gold",   "Gold",         "🥇"),
+    ("silver", "Silver",       "🥈"),
+    ("bronze", "Bronze",       "🥉"),
+    ("hyaku",  "百名店",        "💯"),
+    ("hot",    "热门餐厅 2026", "🔥"),
+]
+_AWARD_ORDER = {slug: i for i, (slug, _, _) in enumerate(AWARD_TAGS)}
+
+
+def _award_ribbons_html(awards_json: str) -> str:
+    """Pre-render the ribbon strip shown above the restaurant name in the
+    bottom-sheet card. Returns '' when there are no awards; otherwise a
+    <div class="rst-ribbons">…</div> block of flat dark badges.
+
+    Order: medals (gold→silver→bronze) → 百名店 (newest year first) → hot.
+    Labels stay short ('2026 GOLD', '百名店 2025') to match the Tabelog
+    site style. Within 百名店, multiple lists in the same year (e.g.
+    ラーメン EAST + ラーメン TOKYO) collapse into a single chip — the
+    individual list names show up in the hover tooltip.
+    """
+    if not awards_json or not awards_json.strip():
+        return ""
+    try:
+        arr = json.loads(awards_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+    medal_order = {"gold": 0, "silver": 1, "bronze": 2}
+    medals: list[tuple[int, str, str, str]] = []   # (sort, cls, label, tip)
+    hyaku_by_year: dict[str, list[str]] = {}       # year -> [long labels]
+    hot_tips: list[str] = []
+    seen_medals: set[str] = set()
+
+    for a in arr:
+        if not isinstance(a, dict):
+            continue
+        kind = a.get("kind", "")
+        variant = (a.get("variant") or "")
+        short = (a.get("short") or "").strip()
+        long_ = (a.get("long")  or "").strip()
+
+        if kind == "award":
+            medal = next((m for m in ("gold", "silver", "bronze")
+                          if variant.endswith(m)), None)
+            if not medal or medal in seen_medals:
+                continue
+            seen_medals.add(medal)
+            label = f"2026 {medal.upper()}"
+            medals.append((medal_order[medal], f"rst-ribbon-{medal}",
+                           label, long_ or short))
+        elif kind == "hyakumeiten":
+            # variant is e.g. "2025ramen" — first 4 chars are the year.
+            m = re.match(r"^(\d{4})", variant)
+            year = m.group(1) if m else ""
+            if not year:
+                continue
+            hyaku_by_year.setdefault(year, []).append(long_ or short)
+        elif kind == "other":
+            if hot_tips:
+                continue
+            hot_tips.append(long_ or short)
+
+    medals.sort(key=lambda t: t[0])
+    parts: list[str] = []
+    for _, cls, label, tip in medals:
+        parts.append(
+            f'<span class="rst-ribbon {cls}" title="{_html.escape(tip)}">'
+            f'{_html.escape(label)}</span>'
+        )
+    # Newest year first.
+    for year in sorted(hyaku_by_year, reverse=True):
+        cls = f"rst-ribbon-hyaku-{year}"
+        # Browser tooltip respects \n as a line break — useful when a
+        # restaurant is on multiple 百名店 lists in the same year.
+        tip = "\n".join(hyaku_by_year[year])
+        parts.append(
+            f'<span class="rst-ribbon {cls}" title="{_html.escape(tip)}">'
+            f'{_html.escape(f"百名店 {year}")}</span>'
+        )
+    for tip in hot_tips:
+        parts.append(
+            f'<span class="rst-ribbon rst-ribbon-hot" '
+            f'title="{_html.escape(tip)}">热门 2026</span>'
+        )
+    if not parts:
+        return ""
+    return f'<div class="rst-ribbons">{"".join(parts)}</div>'
+
+
+def parse_awards(awards_json: str) -> list[str]:
+    """Normalize the awards CSV column (a JSON array of
+    {kind, variant, short, long}) into a deduped, ordered list of tag slugs
+    drawn from AWARD_TAGS. Returns [] for empty / malformed values.
+
+    Mapping:
+      kind=award + variant ending in gold/silver/bronze → that medal
+      kind=hyakumeiten                                  → 'hyaku'
+      kind=other                                        → 'hot'
+    """
+    if not awards_json or not awards_json.strip():
+        return []
+    try:
+        arr = json.loads(awards_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    tags: set[str] = set()
+    for a in arr:
+        if not isinstance(a, dict):
+            continue
+        kind = a.get("kind", "")
+        variant = a.get("variant", "") or ""
+        if kind == "award":
+            for medal in ("gold", "silver", "bronze"):
+                if variant.endswith(medal):
+                    tags.add(medal)
+                    break
+        elif kind == "hyakumeiten":
+            tags.add("hyaku")
+        elif kind == "other":
+            tags.add("hot")
+    return sorted(tags, key=lambda t: _AWARD_ORDER.get(t, 99))
+
+
 # Price buckets — keys must match the JS filter values below.
 # (key, label, color, lower_inclusive, upper_exclusive)
 PRICE_BUCKETS = [
@@ -347,13 +518,24 @@ def price_bucket(row: dict) -> tuple[str, str, str]:
     return ("na", "价格 NA", "#9ca3af")
 
 
-def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
+def build_filter_panel_html(
+    cat_counts: dict[str, int],
+    award_counts: dict[str, int],
+) -> str:
     price_rows = "\n".join(
         f'      <label style="display:block;margin:1px 0;">'
         f'<input type="checkbox" name="ff-price" value="{key}" checked> '
         f'<span style="display:inline-block;width:11px;height:11px;background:{color};'
         f'border-radius:50%;margin:0 4px;vertical-align:middle;"></span>{label}</label>'
         for key, label, color, _, _ in PRICE_BUCKETS
+    )
+    award_rows = "\n".join(
+        f'    <label style="display:inline-flex;align-items:center;gap:4px;'
+        f'margin:0 8px 4px 0;font-size:12px;white-space:nowrap;">'
+        f'<input type="checkbox" name="ff-award" value="{slug}"> '
+        f'{emoji} {label} '
+        f'<span style="color:#9ca3af;font-size:11px;">({award_counts.get(slug, 0)})</span></label>'
+        for slug, label, emoji in AWARD_TAGS
     )
     # DEFAULT_OFF_GENRES (中/韩/西/南亚/中东·非洲) are not shown in the
     # cuisine filter — they're controlled by the standalone "隐藏外国料理"
@@ -526,6 +708,19 @@ def build_filter_panel_html(cat_counts: dict[str, int]) -> str:
       </div>
     </div>
   </details>
+
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
+    <span style="font-weight:600;">获奖</span>
+    <span style="font-size:11px;">
+      <a href="#" id="ff-award-none" style="color:#2563eb;text-decoration:none;">全清</a>
+    </span>
+  </div>
+  <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">
+    勾选后只看对应获奖店；多选取并集，不勾则不限制
+  </div>
+  <div style="display:flex;flex-wrap:wrap;margin-bottom:6px;">
+{award_rows}
+  </div>
 
   <div style="font-weight:600;margin-top:6px;margin-bottom:2px;">Tabelog 预约</div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 4px;margin-bottom:6px;">
@@ -817,7 +1012,10 @@ SEARCH_BOX_HTML = """
     box-shadow: 0 6px 16px rgba(0,0,0,0.16);
     overflow: hidden;
     display: none;
-    max-height: 65vh; max-height: 65dvh;
+    /* Cap at ~6 rows + 2 section headers; scroll inside when there are
+       more matches. Hard-clamped to viewport on small screens so we
+       never overflow the mobile bottom edge. */
+    max-height: min(360px, 70dvh);
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -859,6 +1057,17 @@ SEARCH_BOX_HTML = """
     flex-shrink: 0; font-size: 16px; line-height: 1; width: 20px;
     text-align: center; color: #6b7280;
   }
+  #ss-list .ss-icon img { width: 16px; height: 16px; vertical-align: -3px; }
+  #ss-list .ss-section-head {
+    padding: 4px 12px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    color: #6b7280; background: #f3f4f6;
+    text-transform: uppercase;
+  }
+  #ss-list .ss-rating {
+    flex-shrink: 0; font-size: 11px; font-weight: 600;
+    color: #b45309; padding: 0 6px;
+  }
   @media (max-width: 480px) {
     #ss-input { font-size: 16px; }       /* iOS no-zoom */
     #ss-box { top: 8px; width: calc(100vw - 16px); }
@@ -868,7 +1077,7 @@ SEARCH_BOX_HTML = """
   <div id="ss-input-wrap">
     <span id="ss-icon">🔍</span>
     <input id="ss-input" type="text" autocomplete="off"
-           placeholder="搜索景点 / 地址 ...">
+           placeholder="搜索餐厅 / 景点 / 地址 ...">
     <div id="ss-spinner"></div>
     <button id="ss-clear" type="button" aria-label="清空">×</button>
   </div>
@@ -1199,6 +1408,28 @@ MOBILE_UX_ASSETS = """
   /* ===== Restaurant detail card (lives inside #bs-content) ===== */
   .rst-card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
               font-size: 13px; color: #1f2937; }
+  /* Award ribbons sit above the title — flat dark badges matching the
+     Tabelog site style. Order in the JSX matches visual order:
+       medals (gold→silver→bronze) → 百名店 (newest year first) → hot.
+     Medals each get their own metallic-toned solid; hot gets a distinct
+     red so it doesn't blend with the gold family; 百名店 is a warm olive
+     ramp keyed off the year so 2026 is the deepest shade. */
+  .rst-ribbons { display: flex; flex-wrap: wrap; gap: 4px;
+                 margin: 0 0 6px; }
+  .rst-ribbon { display: inline-block;
+                font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+                padding: 3px 8px; border-radius: 2px; line-height: 1.45;
+                color: #fff; white-space: nowrap; user-select: none; }
+  .rst-ribbon-gold       { background: #a08a55; }
+  .rst-ribbon-silver     { background: #8e9398; }
+  .rst-ribbon-bronze     { background: #8c6239; }
+  .rst-ribbon-hot        { background: #c0392b; }
+  .rst-ribbon-hyaku      { background: #6a5a3a; }
+  .rst-ribbon-hyaku-2026 { background: #5a4a26; }
+  .rst-ribbon-hyaku-2025 { background: #7a6a3a; }
+  .rst-ribbon-hyaku-2024 { background: #998860; }
+  .rst-ribbon-hyaku-2023 { background: #b8a988; color: #3a2f15; }
+  .rst-ribbon-hyaku-2022 { background: #d4c8aa; color: #3a2f15; }
   .rst-header { display: flex; justify-content: space-between;
                 align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
@@ -1245,6 +1476,28 @@ MOBILE_UX_ASSETS = """
     .rst-title { font-size: 20px; }
     .rst-info { grid-template-columns: 1fr 1fr; column-gap: 24px; }
   }
+  /* Banner shown above the restaurant card when the active result is
+     currently filtered out of the map. */
+  #bs-banner {
+    padding: 8px 14px;
+    background: #fef3c7; border-bottom: 1px solid #fcd34d;
+    color: #78350f; font-size: 12px; line-height: 1.45;
+    flex-shrink: 0;
+  }
+  #bs-banner[hidden] { display: none; }
+  /* Highlighted marker (pulsing blue halo) + ghost marker (gray, no
+     emoji). The marker HTML lives in divIcons built by makeIcon /
+     makeGhostIcon — these classes hook the pulse animation. */
+  @keyframes mk-pulse {
+    0%   { transform: scale(0.9); opacity: 0.85; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+  .mk-pulse-ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid #2563eb;
+    animation: mk-pulse 1.6s ease-out infinite;
+    pointer-events: none;
+  }
 </style>"""
 
 
@@ -1254,6 +1507,7 @@ BOTTOM_SHEET_HTML = """
 <div id="bs-backdrop"></div>
 <div id="bs-sheet" role="dialog" aria-modal="true" aria-hidden="true">
   <div id="bs-grip"></div>
+  <div id="bs-banner" hidden></div>
   <div id="bs-content"></div>
 </div>
 """
@@ -1360,6 +1614,28 @@ FILTER_JS_TEMPLATE = r"""
   // off restaurants.json on every cold load.
   var BUCKET_COLOR = __BUCKET_COLORS__;
   var GENRE_EMOJI  = __GENRE_EMOJI__;
+  // Per-char variant → canonical (simplified Chinese) table. Used by the
+  // search box to normalize the query so "烧" matches names containing the
+  // JP shinjitai 焼, etc. Restaurant names are canonicalized on demand
+  // (lazily, cached on the row object) so the payload stays lean.
+  var HAN_VARIANTS = __HAN_VARIANTS__;
+  function normalizeForSearch(s) {
+    // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
+    // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
+    // regular space, so the post-NFKC \s+ rip catches both.
+    s = (s == null ? '' : String(s)).normalize('NFKC').toLowerCase()
+         .replace(/\s+/g, '');
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      out += HAN_VARIANTS[c] || c;
+    }
+    return out;
+  }
+  function rowNameNorm(d) {
+    if (d._nm == null) d._nm = normalizeForSearch(d.name || '');
+    return d._nm;
+  }
   // Service worker registration. Caches restaurants.json, popups.json,
   // transit GeoJSON, map tiles + emoji CDN on first fetch so repeat visits
   // (and second-tab loads) skip the network for the heavy bits. Failures
@@ -1813,6 +2089,9 @@ FILTER_JS_TEMPLATE = r"""
       if (!d || !p) return '';
       var genre   = p[0], dinner  = p[1], lunch   = p[2], seat    = p[3],
           station = p[4], addr    = p[5], policy  = p[6], photos  = p[7] || [];
+      // Slot 8 is server-rendered ribbon HTML — safe to inline as-is
+      // (only static class names + escaped award labels).
+      var ribbons = p[8] || '';
       var name    = escapeHtml(d.name || '');
       var rating  = d.rating == null ? '' : escapeHtml(d.rating);
       var bucket  = (d.categories && d.categories[0]) || '';
@@ -1832,6 +2111,7 @@ FILTER_JS_TEMPLATE = r"""
         ? '<span class="rst-chip">可Tabelog预约</span>'
         : '<span class="rst-chip rst-chip-off">不可Tabelog预约</span>';
       return '<div class="rst-card">'
+        + ribbons
         + '<div class="rst-header">'
           + '<div class="rst-title">' + name
             + '<span class="rst-rating">★' + rating + '</span></div>'
@@ -2158,10 +2438,151 @@ FILTER_JS_TEMPLATE = r"""
       if (ssTempMarker) { map.removeLayer(ssTempMarker); ssTempMarker = null; }
     }
 
-    function ssRender(items) {
+    // Restaurant-library matching. Scans the in-memory `data` array
+    // (closure over initMap), canonicalizes the query once, and ranks by
+    // relevance: earlier match position first, then shorter name (less
+    // noise around the match), then rating as final tiebreaker.
+    //
+    // Supports the "name location" pattern: if the query has whitespace,
+    // the trailing token is treated as a location candidate (e.g.
+    // "眺游楼 横浜"). Restaurants whose loc_norm contains that token are
+    // boosted above non-location-matched ones. Location miss = silent
+    // fallback to name-only matching (no error, no banner).
+    //
+    // The dropdown scrolls internally; SS_RESTAURANT_LIMIT only kicks in
+    // for pathologically broad queries ("の" etc.).
+    var SS_RESTAURANT_LIMIT = 200;
+    function relevanceSort(a, b) {
+      if (a.idx !== b.idx) return a.idx - b.idx;
+      if (a.len !== b.len) return a.len - b.len;
+      return (b.d.rating || 0) - (a.d.rating || 0);
+    }
+    function ssMatchLocal(q) {
+      // Tokenize on raw whitespace BEFORE canonicalization (canon strips
+      // whitespace, so we'd lose the split point otherwise).
+      var tokens = q.split(/\s+/).filter(function(t) { return t.length > 0; });
+      if (tokens.length === 0) return {items: [], total: 0};
+      var nameQN, locQN;
+      if (tokens.length === 1) {
+        nameQN = normalizeForSearch(tokens[0]);
+        locQN  = '';
+      } else {
+        locQN  = normalizeForSearch(tokens[tokens.length - 1]);
+        nameQN = normalizeForSearch(tokens.slice(0, -1).join(''));
+      }
+      if (!nameQN) return {items: [], total: 0};
+
+      // Pass 1: name-match candidates.
+      var candidates = [];
+      for (var i = 0; i < data.length; i++) {
+        var d = data[i];
+        var nm = rowNameNorm(d);
+        var idx = nm.indexOf(nameQN);
+        if (idx >= 0) candidates.push({d: d, idx: idx, len: nm.length});
+      }
+
+      if (locQN) {
+        // Partition by location match; boost matched to top.
+        var hit = [], miss = [];
+        for (var j = 0; j < candidates.length; j++) {
+          var lv = candidates[j].d.loc_norm || '';
+          (lv.indexOf(locQN) >= 0 ? hit : miss).push(candidates[j]);
+        }
+        if (hit.length > 0) {
+          hit.sort(relevanceSort);
+          miss.sort(relevanceSort);
+          candidates = hit.concat(miss);
+        } else {
+          // Silent fallback: location didn't match anyone, ignore it.
+          candidates.sort(relevanceSort);
+        }
+      } else {
+        candidates.sort(relevanceSort);
+      }
+
+      var items = [];
+      for (var k = 0; k < Math.min(candidates.length, SS_RESTAURANT_LIMIT); k++) {
+        items.push(candidates[k].d);
+      }
+      return {items: items, total: candidates.length};
+    }
+
+    // Two-section render. `localItems` are restaurant-library hits (row
+    // objects from `data`), `apiItems` are Nominatim places. Either can be
+    // null (= section hidden); apiPending=true draws a "搜索中…" placeholder
+    // under the API header while the fetch is in flight.
+    function ssAppendSectionHead(label) {
+      var h = document.createElement('div');
+      h.className = 'ss-section-head';
+      h.textContent = label;
+      ssList.appendChild(h);
+    }
+    function ssAppendRestaurantRow(d) {
+      var row = document.createElement('div');
+      row.className = 'ss-row';
+      row.setAttribute('role', 'option');
+      var cat = d.categories && d.categories[0];
+      var emojiChar = (cat && GENRE_EMOJI[cat]) || '🍽️';
+      var icon = document.createElement('span');
+      icon.className = 'ss-icon';
+      icon.innerHTML = emojiImg(emojiChar);
+      var text = document.createElement('div');
+      text.className = 'ss-text';
+      var n = document.createElement('div');
+      n.className = 'ss-name'; n.textContent = d.name || '';
+      var a = document.createElement('div');
+      a.className = 'ss-addr';
+      a.textContent = cat || '';
+      text.appendChild(n); text.appendChild(a);
+      var rating = document.createElement('span');
+      rating.className = 'ss-rating';
+      rating.textContent = (d.rating == null) ? '★ –' : ('★ ' + d.rating);
+      row.appendChild(icon);
+      row.appendChild(text);
+      row.appendChild(rating);
+      row.addEventListener('click', function() { ssGotoRestaurant(d); });
+      ssList.appendChild(row);
+    }
+    function ssAppendApiRow(it) {
+      var row = document.createElement('div');
+      row.className = 'ss-row';
+      row.setAttribute('role', 'option');
+      var icon = document.createElement('span');
+      icon.className = 'ss-icon';
+      icon.textContent = '📍';
+      var text = document.createElement('div');
+      text.className = 'ss-text';
+      var n = document.createElement('div');
+      n.className = 'ss-name'; n.textContent = it.name;
+      var a = document.createElement('div');
+      a.className = 'ss-addr'; a.textContent = it.address;
+      text.appendChild(n); text.appendChild(a);
+      var favBtn = document.createElement('button');
+      favBtn.className = 'ss-fav';
+      favBtn.type = 'button';
+      favBtn.title = '加入收藏';
+      favBtn.textContent = '⭐';
+      row.appendChild(icon);
+      row.appendChild(text);
+      row.appendChild(favBtn);
+      row.addEventListener('click', function(ev) {
+        if (ev.target === favBtn) return;
+        ssGoto(it);
+      });
+      favBtn.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        ssCloseDropdown();
+        openBookmarkModal({lat: it.lat, lng: it.lon}, it.name);
+      });
+      ssList.appendChild(row);
+    }
+    function ssRender(localMatch, apiItems, apiPending) {
       ssList.innerHTML = '';
-      if (!items) { ssList.classList.remove('open'); return; }
-      if (items.length === 0) {
+      var items = (localMatch && localMatch.items) || [];
+      var total = (localMatch && localMatch.total) || 0;
+      var hasLocal = items.length > 0;
+      var hasApi   = apiItems && apiItems.length > 0;
+      if (!hasLocal && !hasApi && !apiPending) {
         var empty = document.createElement('div');
         empty.className = 'ss-row ss-empty';
         empty.textContent = '没有匹配的结果';
@@ -2169,51 +2590,49 @@ FILTER_JS_TEMPLATE = r"""
         ssList.classList.add('open');
         return;
       }
-      items.forEach(function(it) {
-        var row = document.createElement('div');
-        row.className = 'ss-row';
-        row.setAttribute('role', 'option');
-
-        var icon = document.createElement('span');
-        icon.className = 'ss-icon';
-        icon.textContent = '📍';
-
-        var text = document.createElement('div');
-        text.className = 'ss-text';
-        var n = document.createElement('div');
-        n.className = 'ss-name';
-        n.textContent = it.name;
-        var a = document.createElement('div');
-        a.className = 'ss-addr';
-        a.textContent = it.address;
-        text.appendChild(n); text.appendChild(a);
-
-        var favBtn = document.createElement('button');
-        favBtn.className = 'ss-fav';
-        favBtn.type = 'button';
-        favBtn.title = '加入收藏';
-        favBtn.textContent = '⭐';
-
-        row.appendChild(icon);
-        row.appendChild(text);
-        row.appendChild(favBtn);
-
-        row.addEventListener('click', function(ev) {
-          if (ev.target === favBtn) return;
-          ssGoto(it);
-        });
-        favBtn.addEventListener('click', function(ev) {
-          ev.stopPropagation();
-          ssCloseDropdown();
-          openBookmarkModal({lat: it.lat, lng: it.lon}, it.name);
-        });
-
-        ssList.appendChild(row);
-      });
+      if (hasLocal) {
+        ssAppendSectionHead('餐厅库');
+        items.forEach(ssAppendRestaurantRow);
+        if (total > items.length) {
+          var more = document.createElement('div');
+          more.className = 'ss-row ss-empty';
+          more.textContent = '+' + (total - items.length) +
+                             ' 个其他匹配 · 输入更多字以缩小范围';
+          ssList.appendChild(more);
+        }
+      }
+      if (hasApi || apiPending) {
+        ssAppendSectionHead('地图搜索');
+        if (hasApi) {
+          apiItems.forEach(ssAppendApiRow);
+        } else {
+          var pending = document.createElement('div');
+          pending.className = 'ss-row ss-empty';
+          pending.textContent = '搜索中…';
+          ssList.appendChild(pending);
+        }
+      }
       ssList.classList.add('open');
     }
-    function ssShowError(msg) {
+    // Re-renders the dropdown with local section preserved, then appends a
+    // single error row in place of the API section. Local hits stay usable
+    // even when Nominatim is unreachable.
+    function ssShowError(localMatch, msg) {
       ssList.innerHTML = '';
+      var items = (localMatch && localMatch.items) || [];
+      var total = (localMatch && localMatch.total) || 0;
+      if (items.length > 0) {
+        ssAppendSectionHead('餐厅库');
+        items.forEach(ssAppendRestaurantRow);
+        if (total > items.length) {
+          var more = document.createElement('div');
+          more.className = 'ss-row ss-empty';
+          more.textContent = '+' + (total - items.length) +
+                             ' 个其他匹配 · 输入更多字以缩小范围';
+          ssList.appendChild(more);
+        }
+      }
+      ssAppendSectionHead('地图搜索');
       var r = document.createElement('div');
       r.className = 'ss-row ss-empty ss-error';
       r.textContent = msg;
@@ -2222,6 +2641,18 @@ FILTER_JS_TEMPLATE = r"""
     }
     function ssCloseDropdown() {
       ssList.classList.remove('open');
+    }
+    // Pan to a restaurant in the library and open its bottom sheet — the
+    // same code path a marker click triggers. Keeps a temp marker out of
+    // the way; the actual restaurant marker is already on the map.
+    function ssGotoRestaurant(d) {
+      ssCloseDropdown();
+      ssInput.value = d.name || '';
+      ssWrap.classList.add('has-text');
+      ssInput.blur();
+      ssRemoveTempMarker();
+      map.flyTo([d.lat, d.lon], Math.max(map.getZoom(), 16), {duration: 0.8});
+      openSheet(d);
     }
     function ssGoto(it) {
       ssCloseDropdown();
@@ -2289,6 +2720,9 @@ FILTER_JS_TEMPLATE = r"""
         address: r.display_name || ''
       };
     }
+    // Latest local match for the current query; held in module scope so the
+    // API callback can re-render with the same restaurant section on top.
+    var ssLocalMatch = {items: [], total: 0};
     function ssSearch(q) {
       var seq = ++ssReqSeq;
       ssWrap.classList.add('busy');
@@ -2312,12 +2746,12 @@ FILTER_JS_TEMPLATE = r"""
           var items = (Array.isArray(arr) ? arr : [])
             .map(ssParseResult)
             .filter(function(x){ return !isNaN(x.lat) && !isNaN(x.lon); });
-          ssRender(items);
+          ssRender(ssLocalMatch, items, false);
         })
         .catch(function(err) {
           if (seq !== ssReqSeq) return;
           ssWrap.classList.remove('busy');
-          ssShowError('搜索失败: ' + err.message);
+          ssShowError(ssLocalMatch, '搜索失败: ' + err.message);
         });
     }
     function ssOnInput() {
@@ -2327,11 +2761,17 @@ FILTER_JS_TEMPLATE = r"""
       clearTimeout(ssDebounce);
       if (!v) {
         ssReqSeq++;
+        ssLocalMatch = {items: [], total: 0};
         ssWrap.classList.remove('busy');
         ssCloseDropdown();
         ssRemoveTempMarker();
         return;
       }
+      // Restaurant-library match runs synchronously — paint it first so the
+      // user sees results in the same frame, no 300ms wait. The Nominatim
+      // call still goes through the debounce.
+      ssLocalMatch = ssMatchLocal(v);
+      ssRender(ssLocalMatch, null, true);
       ssDebounce = setTimeout(function() { ssSearch(v); }, 300);
     }
     // exitSearch: full bail-out. Used by the × button and Escape — clears
@@ -2339,6 +2779,7 @@ FILTER_JS_TEMPLATE = r"""
     // the input so the mobile keyboard goes away.
     function ssExitSearch() {
       ssReqSeq++;
+      ssLocalMatch = {items: [], total: 0};
       ssInput.value = '';
       ssWrap.classList.remove('has-text');
       ssWrap.classList.remove('busy');
@@ -2545,10 +2986,18 @@ FILTER_JS_TEMPLATE = r"""
       schedulePush();
     }
 
+    // Currently-active result from the search box. Held outside makeIcon so
+    // the icon HTML can pick up the highlight on (re)creation; recompute()
+    // also calls syncHighlight() at the end to flip between the real
+    // highlighted marker and the off-cluster ghost.
+    var highlightedRow = null;
+    var ghostMarker = null;
+
     // No hard border — price color is a radial-gradient halo behind the
     // emoji. Fav/black state shown via a small corner badge instead.
     function makeIcon(d) {
-      var color = BUCKET_COLOR[d.bucket] || '#9ca3af';
+      var highlighted = (d === highlightedRow);
+      var color = highlighted ? '#2563eb' : (BUCKET_COLOR[d.bucket] || '#9ca3af');
       var cat   = d.categories && d.categories[0];
       var emoji = (cat && GENRE_EMOJI[cat]) || '🍽️';
       var size = 36;
@@ -2562,9 +3011,13 @@ FILTER_JS_TEMPLATE = r"""
         badge = '<span style="position:absolute;top:0;right:2px;font-size:11px;' +
                 'line-height:1;text-shadow:0 0 2px #fff;">⭐</span>';
       }
+      var pulse = highlighted
+        ? '<div class="mk-pulse-ring"></div>'
+        : '';
       var html = '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;' +
                  'display:flex;align-items:center;justify-content:center;' +
                  'opacity:' + opacity + ';">' +
+                 pulse +
                  '<div style="position:absolute;inset:0;border-radius:50%;' +
                  'background:radial-gradient(circle closest-side, ' +
                  color + 'EE 0%, ' + color + 'AA 50%, ' + color + '00 100%);"></div>' +
@@ -2576,6 +3029,90 @@ FILTER_JS_TEMPLATE = r"""
                         iconSize: [size, size],
                         iconAnchor: [size / 2, size / 2]});
     }
+
+    // Ghost icon — stands in for a restaurant that's currently filtered out
+    // (or off-viewport from the cluster's perspective). Same blue pulse so
+    // the user can find it, but a flat gray halo with no emoji, so it reads
+    // as "not really on the map right now".
+    function makeGhostIcon() {
+      var size = 36;
+      var html = '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;">' +
+                 '<div class="mk-pulse-ring"></div>' +
+                 '<div style="position:absolute;inset:6px;border-radius:50%;' +
+                 'background:radial-gradient(circle closest-side, ' +
+                 '#9ca3afEE 0%, #9ca3afAA 50%, #9ca3af00 100%);"></div>' +
+                 '</div>';
+      return L.divIcon({className: '', html: html,
+                        iconSize: [size, size],
+                        iconAnchor: [size / 2, size / 2]});
+    }
+
+    // ---- Highlight state-machine ----
+    // setHighlight(d): mark d as the active result from the search box.
+    //   - If d passes the current filter and has a marker on the cluster:
+    //       repaint its icon with the highlighted halo.
+    //   - Otherwise: drop a ghost marker at d's coords and show the banner.
+    // clearHighlight(): undo everything (used when the sheet closes).
+    // syncHighlight(): recompute() calls this so the marker/ghost state
+    //   tracks live filter changes — toggling a cuisine off while the sheet
+    //   is open swaps the real marker → ghost, and vice versa.
+    var bsBanner = null;  // bound on initMap; null-safe everywhere.
+    function setHighlight(d) {
+      if (highlightedRow === d) { syncHighlight(); return; }
+      // Clear previous: repaint old marker (if still cached) to drop halo,
+      // tear down any ghost marker that was standing in for it.
+      var prev = highlightedRow;
+      highlightedRow = null;
+      if (prev && prev._m) prev._m.setIcon(makeIcon(prev));
+      removeGhostMarker();
+      highlightedRow = d;
+      syncHighlight();
+    }
+    function clearHighlight() {
+      if (!highlightedRow) return;
+      var prev = highlightedRow;
+      highlightedRow = null;
+      if (prev && prev._m) prev._m.setIcon(makeIcon(prev));
+      removeGhostMarker();
+      if (bsBanner) bsBanner.hidden = true;
+    }
+    function removeGhostMarker() {
+      if (ghostMarker) { map.removeLayer(ghostMarker); ghostMarker = null; }
+    }
+    function syncHighlight() {
+      if (!highlightedRow) {
+        removeGhostMarker();
+        if (bsBanner) bsBanner.hidden = true;
+        return;
+      }
+      var d = highlightedRow;
+      var visible = passesFilter(d);
+      if (visible) {
+        // Real marker exists (or will exist if d is in viewport). If
+        // already on the map, repaint with the highlighted variant.
+        removeGhostMarker();
+        if (d._m) d._m.setIcon(makeIcon(d));
+        if (bsBanner) bsBanner.hidden = true;
+      } else {
+        // Filtered out — surface a ghost at the coords so the user can see
+        // *where* the place is, plus a banner explaining why it's grayed.
+        if (!ghostMarker) {
+          ghostMarker = L.marker([d.lat, d.lon], {
+            icon: makeGhostIcon(),
+            interactive: false,
+            keyboard: false,
+          }).addTo(map);
+        } else {
+          ghostMarker.setLatLng([d.lat, d.lon]);
+        }
+        if (bsBanner) {
+          bsBanner.hidden = false;
+          bsBanner.textContent =
+            '🔍 此餐厅当前不在筛选范围内 — 调整左侧筛选条件可让它出现在地图上';
+        }
+      }
+    }
+
     function syncFavButton(btn, d) {
       var label = btn.querySelector('.ff-fav-label');
       if (!label) return;
@@ -2612,8 +3149,12 @@ FILTER_JS_TEMPLATE = r"""
     var bsContent  = document.getElementById('bs-content');
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
+    // Bind the banner element so the highlight helpers (declared earlier
+    // in this initMap closure) can toggle it.
+    bsBanner = document.getElementById('bs-banner');
 
     function openSheet(d) {
+      setHighlight(d);
       // Mutual exclusion with the filter sheet — both dock to the bottom.
       // ffSheet exists once the filter UI has booted; marker clicks can't
       // fire earlier, so the guard is for paranoia, not for races.
@@ -2672,6 +3213,7 @@ FILTER_JS_TEMPLATE = r"""
       bsBackdrop.classList.remove('bs-open');
       bsSheet.setAttribute('aria-hidden', 'true');
       bsActive = null;
+      clearHighlight();
       var ffbtn = document.getElementById('ff-fab');
       if (ffbtn) ffbtn.hidden = false;
     }
@@ -2848,6 +3390,7 @@ FILTER_JS_TEMPLATE = r"""
     // is the user-callable side: it refreshes the cache, then recomputes.
     var filterState = {
       minRating: 3.4, pSet: {}, gSet: {}, gAny: false,
+      aSet: {}, aAny: false,
       book: 'all', onlyFav: false, hideBlack: true, hideForeign: true
     };
     function readFilterInputs() {
@@ -2858,6 +3401,9 @@ FILTER_JS_TEMPLATE = r"""
       filterState.gSet = {};
       filterState.gAny = false;
       document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ filterState.gSet[c.value]=1; filterState.gAny=true; });
+      filterState.aSet = {};
+      filterState.aAny = false;
+      document.querySelectorAll('input[name=ff-award]:checked').forEach(function(c){ filterState.aSet[c.value]=1; filterState.aAny=true; });
       var bEl = document.querySelector('input[name=ff-bookable]:checked');
       filterState.book = bEl ? bEl.value : 'all';
       filterState.onlyFav = onlyFavEl.checked;
@@ -2895,6 +3441,17 @@ FILTER_JS_TEMPLATE = r"""
       if (fs.book === 'yes' && !d.bookable) return false;
       if (fs.book === 'no' && d.bookable) return false;
       if (fs.onlyFav && !isFav(d)) return false;
+      // Award filter: OR across checked tags. Inactive when nothing checked —
+      // that's the "any award status" state, not "show nothing".
+      if (fs.aAny) {
+        var awards = d.awards;
+        if (!awards || !awards.length) return false;
+        var hit = false;
+        for (var ai = 0; ai < awards.length; ai++) {
+          if (fs.aSet[awards[ai]]) { hit = true; break; }
+        }
+        if (!hit) return false;
+      }
       return true;
     }
 
@@ -2935,6 +3492,9 @@ FILTER_JS_TEMPLATE = r"""
       if (addLayers.length) cluster.addLayers(addLayers);
 
       setCountText('ff-count', desired.size);
+      // Filter/viewport changed — re-evaluate whether the active highlight
+      // should be the cluster marker (visible) or the gray ghost (hidden).
+      syncHighlight();
     }
 
     // rAF-coalesce moveend so a long pan with many fired events still maps
@@ -2968,11 +3528,14 @@ FILTER_JS_TEMPLATE = r"""
         document.querySelectorAll('input[name=ff-price]:checked').forEach(function(c){ prices.push(c.value); });
         var genres = [];
         document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ genres.push(c.value); });
+        var awards = [];
+        document.querySelectorAll('input[name=ff-award]:checked').forEach(function(c){ awards.push(c.value); });
         var bEl = document.querySelector('input[name=ff-bookable]:checked');
         localStorage.setItem(STATE_KEY_FILTER, JSON.stringify({
           rating: parseFloat(ratingSlider.value),
           prices: prices,
           genres: genres,
+          awards: awards,
           bookable: bEl ? bEl.value : 'all',
           onlyFav: onlyFavEl.checked,
           hideBlack: hideBlackEl.checked,
@@ -2995,6 +3558,11 @@ FILTER_JS_TEMPLATE = r"""
         var gSet = {};
         s.genres.forEach(function(v){ gSet[v] = 1; });
         document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = !!gSet[c.value]; });
+      }
+      if (Array.isArray(s.awards)) {
+        var aSet = {};
+        s.awards.forEach(function(v){ aSet[v] = 1; });
+        document.querySelectorAll('input[name=ff-award]').forEach(function(c){ c.checked = !!aSet[c.value]; });
       }
       if (typeof s.bookable === 'string') {
         var bEl = document.querySelector('input[name=ff-bookable][value="' + s.bookable + '"]');
@@ -3028,6 +3596,11 @@ FILTER_JS_TEMPLATE = r"""
     document.getElementById('ff-genre-none').addEventListener('click', function(e) {
       e.preventDefault();
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = false; });
+      apply();
+    });
+    document.getElementById('ff-award-none').addEventListener('click', function(e) {
+      e.preventDefault();
+      document.querySelectorAll('input[name=ff-award]').forEach(function(c){ c.checked = false; });
       apply();
     });
     document.querySelectorAll('[data-genre-group]').forEach(function(box) {
@@ -3113,6 +3686,7 @@ FILTER_JS_TEMPLATE = r"""
       ratingSlider.value = '3.4';
       document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = true; });
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
+      document.querySelectorAll('input[name=ff-award]').forEach(function(c){ c.checked = false; });
       document.querySelector('input[name=ff-bookable][value="all"]').checked = true;
       onlyFavEl.checked = false;
       hideBlackEl.checked = true;
@@ -3245,7 +3819,8 @@ def parse_bool(v) -> bool:
 def popup_data(row: dict) -> list:
     # Per-restaurant fields needed to render the popup card client-side.
     # Positional layout, matched in JS renderPopup():
-    #   [genre, dinner_upper, lunch_upper, seat, station, address, policy, photos]
+    #   [genre, dinner_upper, lunch_upper, seat, station, address, policy,
+    #    photos, ribbons_html]
     # name / rating / bucket / bookable / detail_url are NOT included — they
     # already live in restaurants.json, so the JS reader pulls them from there.
     # Dropping the duplicates + the static HTML scaffold takes popups.json
@@ -3263,6 +3838,7 @@ def popup_data(row: dict) -> list:
         row.get("address") or "",
         row.get("reservation_policy_chinese") or "",
         photos,
+        _award_ribbons_html(row.get("awards") or ""),
     ]
 
 
@@ -3280,6 +3856,53 @@ def _parse_latlon(row: dict) -> tuple[float, float] | None:
     except (TypeError, ValueError):
         return None
     return lat, lon
+
+
+def fan_out_coincident(
+    rows: list[dict],
+    *,
+    zoom: int = 19,
+    marker_px: int = 36,
+    margin_px: float = 6.0,
+    precision: int = 6,
+) -> int:
+    """Spread restaurants that share a single lat/lon into a small ring.
+
+    Some addresses (e.g. "東京駅" with no further detail) geocode to the same
+    point for many restaurants. At max zoom the 36-px icons stack into one
+    blob. Group by coords rounded to ~11 cm and, for each group of ≥2, lay
+    the icons out on a ring sized so they just don't overlap at `zoom`.
+
+    Returns the number of rows nudged (for the build log)."""
+    if not rows:
+        return 0
+    groups: dict[tuple[float, float], list[int]] = {}
+    for i, r in enumerate(rows):
+        groups.setdefault((round(r["lat"], precision),
+                           round(r["lon"], precision)), []).append(i)
+    nudged = 0
+    for (lat0, lon0), idxs in groups.items():
+        n = len(idxs)
+        if n < 2:
+            continue
+        # Pack n equal circles of diameter marker_px on a ring; chord between
+        # neighbors = 2R·sin(π/n) ≥ marker_px, so R ≥ marker_px / (2 sin π/n).
+        # The 18-px floor covers n=2, where the formula collapses to R=18.
+        r_px = max(18.0, marker_px / (2 * math.sin(math.pi / n))) + margin_px
+        mpp = 40075016.686 * math.cos(math.radians(lat0)) / (256 * 2 ** zoom)
+        r_m = r_px * mpp
+        dlat = r_m / 111320.0
+        dlon = r_m / (111320.0 * max(math.cos(math.radians(lat0)), 1e-6))
+        # Deterministic start angle keyed off the shared coord so rebuilds
+        # produce the same arrangement and same-coord groups in different
+        # cities don't all align identically.
+        start = ((lat0 * 1000.0 + lon0 * 1000.0) % 1.0) * 2 * math.pi
+        for k, idx in enumerate(idxs):
+            angle = start + 2 * math.pi * k / n
+            rows[idx]["lat"] = lat0 + dlat * math.sin(angle)
+            rows[idx]["lon"] = lon0 + dlon * math.cos(angle)
+        nudged += n
+    return nudged
 
 
 def write_csv_with_coords(rows: list[dict], fieldnames: list[str]) -> None:
@@ -3404,6 +4027,7 @@ def main(argv: list[str] | None = None) -> None:
     core_rows: list[dict] = []
     popups_map: dict[str, str] = {}
     cat_counts: dict[str, int] = {cat: 0 for cat in GENRE_CATEGORIES}
+    award_counts: dict[str, int] = {slug: 0 for slug, _, _ in AWARD_TAGS}
     unmapped_tokens: set[str] = set()
     for row, loc in geocoded:
         bkey, _blabel, _bcolor = price_bucket(row)
@@ -3420,10 +4044,13 @@ def main(argv: list[str] | None = None) -> None:
         for tok in (t.strip() for t in _GENRE_SPLIT_RE.split(row.get("genre") or "") if t.strip()):
             if tok not in _GENRE_TO_CAT:
                 unmapped_tokens.add(tok)
+        awards = parse_awards(row.get("awards") or "")
+        for tag in awards:
+            award_counts[tag] = award_counts.get(tag, 0) + 1
         # color, emoji and tooltip are derived in JS now: color from bucket
         # via BUCKET_COLOR lookup, emoji from categories[0] via GENRE_EMOJI,
         # and the tooltip was actually dead weight (never read by the JS).
-        core_rows.append({
+        entry = {
             "lat": loc["lat"],
             "lon": loc["lon"],
             "name": row.get("name") or "",
@@ -3434,7 +4061,19 @@ def main(argv: list[str] | None = None) -> None:
             "detail_url": url,
             "favorited": url in fav_set,
             "blacklisted": url in black_set,
-        })
+        }
+        # Keep payload lean: only attach `awards` when there is at least one
+        # tag. JS treats absent / undefined the same as an empty array.
+        if awards:
+            entry["awards"] = awards
+        # Pre-canonicalized location string (prefecture + city + ward) for
+        # the "name location" search syntax. Skipped when the address has no
+        # extractable admin prefix — JS treats absent as "won't match any
+        # location query," which is the correct behavior.
+        loc_norm = canon_str(parse_admin_prefix(row.get("address") or ""))
+        if loc_norm:
+            entry["loc_norm"] = loc_norm
+        core_rows.append(entry)
         if url:
             popups_map[url] = popup_data(row)
     if unmapped_tokens:
@@ -3442,6 +4081,10 @@ def main(argv: list[str] | None = None) -> None:
     n_fav = sum(1 for p in core_rows if p['favorited'])
     n_black = sum(1 for p in core_rows if p['blacklisted'])
     print(f"  favorites: {n_fav} from favorites.json, blacklist: {n_black} from blacklist.json")
+
+    nudged = fan_out_coincident(core_rows)
+    if nudged:
+        print(f"  fanned out {nudged} markers sharing identical coords")
 
     DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
     restaurants_bytes = json.dumps(
@@ -3457,19 +4100,31 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  popups.json:      {len(popups_bytes):,} bytes "
           f"({len(popups_map)} entries)")
 
-    panel_html = build_filter_panel_html(cat_counts)
+    panel_html = build_filter_panel_html(cat_counts, award_counts)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
     bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
     bucket_colors_json = json.dumps(
         {key: color for key, _label, color, _lo, _hi in PRICE_BUCKETS}
     )
     genre_emoji_json = json.dumps(GENRE_EMOJI, ensure_ascii=False)
+    # Variant → canonical (simplified Chinese) per-char table for the search
+    # box. Only includes variants of chars that actually appear in some
+    # restaurant name (canonical form), so the JSON stays compact.
+    canon_set: set[str] = set()
+    for row in core_rows:
+        for c in canon_str(row.get("name", "")):
+            canon_set.add(c)
+    han_variants = build_han_variants(canon_set)
+    han_variants_json = json.dumps(han_variants, ensure_ascii=False)
+    print(f"  han_variants:     {len(han_variants)} char mappings, "
+          f"{len(han_variants_json.encode('utf-8')):,} bytes")
     filter_js = (
         FILTER_JS_TEMPLATE
         .replace("__DEFAULT_OFF_GENRES__", default_off_json)
         .replace("__BOOKMARKS__", bookmarks_json)
         .replace("__BUCKET_COLORS__", bucket_colors_json)
         .replace("__GENRE_EMOJI__", genre_emoji_json)
+        .replace("__HAN_VARIANTS__", han_variants_json)
     )
     # Service worker — version-stamp the cache name so each redeploy
     # invalidates the previous one. Unix seconds is plenty granular for a
