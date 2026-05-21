@@ -97,6 +97,58 @@ def parse_admin_prefix(addr: str) -> str:
         addr = addr[m.end():]
     return "".join(parts)
 
+
+def extract_city(addr: str) -> str:
+    """City label shown in search rows: first non-郡 admin token after the
+    prefecture, stripped of its 市/区/町/村 suffix. '長野県松本市...' → 松本,
+    '東京都港区...' → 港, '北海道札幌市中央区...' → 札幌,
+    '長野県北佐久郡軽井沢町...' → 軽井沢 (skips 郡)."""
+    if not addr:
+        return ""
+    for p in _PREFECTURES:
+        if addr.startswith(p):
+            addr = addr[len(p):]
+            break
+    for _ in range(3):
+        m = _ADMIN_RE.match(addr)
+        if not m:
+            return ""
+        tok = m.group(1)
+        if tok.endswith("郡"):
+            addr = addr[m.end():]
+            continue
+        return tok[:-1]
+    return ""
+
+
+def admin_tokens_with_suffix(addr: str) -> list[str]:
+    """All admin tokens, in both full and stem form. Drives the KNOWN_LOCS
+    whitelist the search box uses to decide whether the trailing query token
+    is a location filter. '長野県松本市中央...' → ['長野県','長野','松本市','松本']."""
+    if not addr:
+        return []
+    out: list[str] = []
+    pref = None
+    for p in _PREFECTURES:
+        if addr.startswith(p):
+            pref = p
+            addr = addr[len(p):]
+            break
+    if pref:
+        out.append(pref)
+        if pref != "北海道":
+            out.append(pref[:-1])
+    for _ in range(3):
+        m = _ADMIN_RE.match(addr)
+        if not m:
+            break
+        tok = m.group(1)
+        addr = addr[m.end():]
+        out.append(tok)
+        if not tok.endswith("郡"):
+            out.append(tok[:-1])
+    return out
+
 GSI_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
 
 CSV_PATH = TABELOG_CSV
@@ -1064,6 +1116,14 @@ SEARCH_BOX_HTML = """
     color: #6b7280; background: #f3f4f6;
     text-transform: uppercase;
   }
+  /* Viewport-bias sub-header — visible only when zoomed in enough that
+     splitting "屏幕内 / 其他区域" inside the 餐厅库 section is useful. */
+  #ss-list .ss-subsection-head {
+    padding: 2px 18px;
+    font-size: 10px; font-weight: 600;
+    color: #9ca3af; background: #fafafa;
+    border-bottom: 1px solid #f3f4f6;
+  }
   #ss-list .ss-rating {
     flex-shrink: 0; font-size: 11px; font-weight: 600;
     color: #b45309; padding: 0 6px;
@@ -1351,13 +1411,15 @@ MOBILE_UX_ASSETS = """
      filter JS controls open/close. Default Leaflet popups got cut off at
      mobile viewport edges; this sheet always docks to the bottom and
      scrolls internally. */
+  /* Backdrop intentionally inert — Google-Maps-style sheet: the map stays
+     pannable / zoomable behind every sheet state. The element is kept so
+     legacy JS references (bsBackdrop.classList.add(...)) don't have to be
+     ripped out; the .bs-open class is now a no-op. */
   #bs-backdrop {
     position: fixed; inset: 0; z-index: 10001;
-    background: rgba(0,0,0,0.35);
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.22s ease-out;
+    pointer-events: none;
+    background: transparent;
   }
-  #bs-backdrop.bs-open { opacity: 1; pointer-events: auto; }
   #bs-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 10002;
@@ -1405,6 +1467,27 @@ MOBILE_UX_ASSETS = """
     flex: 1 1 auto;
     -webkit-overflow-scrolling: touch;
   }
+  /* Peek mode — entered when the sheet is opened from a search-result tap.
+     The sheet only shows the ribbons + title + rating + ⭐/🚫 actions, so
+     the highlighted marker on the map below stays visible. User swipes up
+     on the grip (or taps it) to reveal the rest. */
+  #bs-sheet.bs-peek .rst-photos,
+  #bs-sheet.bs-peek .rst-genre,
+  #bs-sheet.bs-peek .rst-info,
+  #bs-sheet.bs-peek .rst-policy,
+  #bs-sheet.bs-peek .rst-footer { display: none; }
+  #bs-sheet.bs-peek #bs-grip { padding-bottom: 2px; }
+  #bs-sheet.bs-peek #bs-grip::before { background: #9ca3af; }
+  #bs-sheet.bs-peek #bs-grip::after {
+    content: '上滑查看详情';
+    display: block; text-align: center;
+    font-size: 10px; color: #9ca3af;
+    margin-top: 3px; letter-spacing: 0.5px;
+  }
+  /* The whole peek card is a tap-to-expand surface (handled in JS). The
+     cursor hint is for desktop; buttons inside override it back to pointer
+     via the default UA stylesheet, links inherit their own. */
+  #bs-sheet.bs-peek #bs-content { cursor: pointer; }
   /* ===== Restaurant detail card (lives inside #bs-content) ===== */
   .rst-card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
               font-size: 13px; color: #1f2937; }
@@ -1619,6 +1702,14 @@ FILTER_JS_TEMPLATE = r"""
   // JP shinjitai 焼, etc. Restaurant names are canonicalized on demand
   // (lazily, cached on the row object) so the payload stays lean.
   var HAN_VARIANTS = __HAN_VARIANTS__;
+  // City / ward / prefecture stems (canonical form) harvested from the
+  // dataset's addresses. The search box uses this as a strict whitelist:
+  // the trailing token of a multi-word query is only treated as a location
+  // filter when it matches one of these exactly. Otherwise the whole query
+  // collapses into a single restaurant-name search. Keeps disambiguators
+  // like "炭火烧鸟 正" working as name search even though "正" looks like
+  // it could be a location token.
+  var KNOWN_LOCS = new Set(__KNOWN_LOCS__);
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -2452,6 +2543,11 @@ FILTER_JS_TEMPLATE = r"""
     // The dropdown scrolls internally; SS_RESTAURANT_LIMIT only kicks in
     // for pathologically broad queries ("の" etc.).
     var SS_RESTAURANT_LIMIT = 200;
+    // Above this zoom level the search results split into "屏幕内" and
+    // "其他区域" sub-sections so the user sees nearby matches first. Below
+    // it (regional / country-wide view) the bias is moot and we render a
+    // single flat list. 10 ≈ city-sized viewport.
+    var VIEWPORT_BIAS_ZOOM = 10;
     function relevanceSort(a, b) {
       if (a.idx !== b.idx) return a.idx - b.idx;
       if (a.len !== b.len) return a.len - b.len;
@@ -2462,13 +2558,22 @@ FILTER_JS_TEMPLATE = r"""
       // whitespace, so we'd lose the split point otherwise).
       var tokens = q.split(/\s+/).filter(function(t) { return t.length > 0; });
       if (tokens.length === 0) return {items: [], total: 0};
-      var nameQN, locQN;
-      if (tokens.length === 1) {
-        nameQN = normalizeForSearch(tokens[0]);
-        locQN  = '';
+      var nameQN = '', locQN = '';
+      if (tokens.length >= 2) {
+        // Location mode is opt-in: only entered when the trailing token is
+        // a known city/ward/prefecture stem. Otherwise the spaces are noise
+        // and we treat the whole input as one restaurant-name query — that
+        // way "炭火烧鸟 正" looks for the literal "炭火烧鸟正" in names and
+        // 炭火焼鳥正ざわ stays #1.
+        var lastCanon = normalizeForSearch(tokens[tokens.length - 1]);
+        if (lastCanon && KNOWN_LOCS.has(lastCanon)) {
+          locQN  = lastCanon;
+          nameQN = normalizeForSearch(tokens.slice(0, -1).join(''));
+        } else {
+          nameQN = normalizeForSearch(tokens.join(''));
+        }
       } else {
-        locQN  = normalizeForSearch(tokens[tokens.length - 1]);
-        nameQN = normalizeForSearch(tokens.slice(0, -1).join(''));
+        nameQN = normalizeForSearch(tokens[0]);
       }
       if (!nameQN) return {items: [], total: 0};
 
@@ -2488,23 +2593,49 @@ FILTER_JS_TEMPLATE = r"""
           var lv = candidates[j].d.loc_norm || '';
           (lv.indexOf(locQN) >= 0 ? hit : miss).push(candidates[j]);
         }
-        if (hit.length > 0) {
-          hit.sort(relevanceSort);
-          miss.sort(relevanceSort);
-          candidates = hit.concat(miss);
-        } else {
-          // Silent fallback: location didn't match anyone, ignore it.
-          candidates.sort(relevanceSort);
-        }
+        hit.sort(relevanceSort);
+        miss.sort(relevanceSort);
+        candidates = hit.length > 0 ? hit.concat(miss) : miss;
       } else {
         candidates.sort(relevanceSort);
+      }
+
+      // Viewport bias: at city-or-tighter zoom, partition the ordered list
+      // into rows currently inside the visible map bounds vs everywhere
+      // else. The split is stable, so each bucket keeps the relevance order
+      // from the tier sort above. Below the zoom threshold this is a no-op
+      // and inViewportCount stays null — the renderer falls back to one
+      // flat 餐厅库 list.
+      var inViewportCount = null;
+      if (map.getZoom() >= VIEWPORT_BIAS_ZOOM && candidates.length > 0) {
+        var b = map.getBounds().pad(0.1);
+        var W = b.getWest(), E = b.getEast(),
+            S = b.getSouth(), N = b.getNorth();
+        var inRows = [], outRows = [];
+        for (var p = 0; p < candidates.length; p++) {
+          var rd = candidates[p].d;
+          if (rd.lon >= W && rd.lon <= E && rd.lat >= S && rd.lat <= N) {
+            inRows.push(candidates[p]);
+          } else {
+            outRows.push(candidates[p]);
+          }
+        }
+        candidates = inRows.concat(outRows);
+        inViewportCount = inRows.length;
       }
 
       var items = [];
       for (var k = 0; k < Math.min(candidates.length, SS_RESTAURANT_LIMIT); k++) {
         items.push(candidates[k].d);
       }
-      return {items: items, total: candidates.length};
+      // Clip the in-viewport count to the items we actually emit so the
+      // renderer can use it as a contiguous-prefix length without
+      // overshooting when SS_RESTAURANT_LIMIT cuts in.
+      if (inViewportCount != null) {
+        inViewportCount = Math.min(inViewportCount, items.length);
+      }
+      return {items: items, total: candidates.length,
+              inViewportCount: inViewportCount};
     }
 
     // Two-section render. `localItems` are restaurant-library hits (row
@@ -2516,6 +2647,29 @@ FILTER_JS_TEMPLATE = r"""
       h.className = 'ss-section-head';
       h.textContent = label;
       ssList.appendChild(h);
+    }
+    function ssAppendSubSectionHead(label) {
+      var h = document.createElement('div');
+      h.className = 'ss-subsection-head';
+      h.textContent = label;
+      ssList.appendChild(h);
+    }
+    // Render the restaurant section, splitting into 屏幕内 / 其他区域 when
+    // ssMatchLocal flagged a viewport bias. Used by both ssRender (full
+    // dropdown) and ssShowError (Nominatim-unreachable variant).
+    function ssAppendRestaurantSection(items, ivc) {
+      if (ivc == null) {
+        items.forEach(ssAppendRestaurantRow);
+        return;
+      }
+      if (ivc > 0) {
+        ssAppendSubSectionHead('屏幕内 (' + ivc + ')');
+        for (var i = 0; i < ivc; i++) ssAppendRestaurantRow(items[i]);
+      }
+      if (ivc < items.length) {
+        ssAppendSubSectionHead('其他区域 (' + (items.length - ivc) + ')');
+        for (var j = ivc; j < items.length; j++) ssAppendRestaurantRow(items[j]);
+      }
     }
     function ssAppendRestaurantRow(d) {
       var row = document.createElement('div');
@@ -2532,7 +2686,10 @@ FILTER_JS_TEMPLATE = r"""
       n.className = 'ss-name'; n.textContent = d.name || '';
       var a = document.createElement('div');
       a.className = 'ss-addr';
-      a.textContent = cat || '';
+      var sub = '';
+      if (d.city) sub += d.city;
+      if (cat) sub += (sub ? ' | ' : '') + cat;
+      a.textContent = sub;
       text.appendChild(n); text.appendChild(a);
       var rating = document.createElement('span');
       rating.className = 'ss-rating';
@@ -2592,7 +2749,7 @@ FILTER_JS_TEMPLATE = r"""
       }
       if (hasLocal) {
         ssAppendSectionHead('餐厅库');
-        items.forEach(ssAppendRestaurantRow);
+        ssAppendRestaurantSection(items, localMatch.inViewportCount);
         if (total > items.length) {
           var more = document.createElement('div');
           more.className = 'ss-row ss-empty';
@@ -2621,9 +2778,10 @@ FILTER_JS_TEMPLATE = r"""
       ssList.innerHTML = '';
       var items = (localMatch && localMatch.items) || [];
       var total = (localMatch && localMatch.total) || 0;
+      var ivc = localMatch ? localMatch.inViewportCount : null;
       if (items.length > 0) {
         ssAppendSectionHead('餐厅库');
-        items.forEach(ssAppendRestaurantRow);
+        ssAppendRestaurantSection(items, ivc);
         if (total > items.length) {
           var more = document.createElement('div');
           more.className = 'ss-row ss-empty';
@@ -2651,8 +2809,43 @@ FILTER_JS_TEMPLATE = r"""
       ssWrap.classList.add('has-text');
       ssInput.blur();
       ssRemoveTempMarker();
-      map.flyTo([d.lat, d.lon], Math.max(map.getZoom(), 16), {duration: 0.8});
-      openSheet(d);
+
+      // The hit can be anywhere in Japan, possibly far outside the current
+      // viewport — the grid-based recompute() only materializes markers
+      // for visible rows, so we need to poke this one into the cluster
+      // manually before cluster.zoomToShowLayer can find it.
+      var marker = ensureMarker(d);
+      if (!onMap.has(d)) {
+        cluster.addLayer(marker);
+        onMap.add(d);
+      }
+      // Pin so the intermediate moveend recomputes (zoomToShowLayer
+      // animates through several zoom levels on long flights) don't
+      // reap the marker before the cluster has spiderfied it.
+      if (pinnedRow && pinnedRow !== d) pinnedRow = null;
+      pinnedRow = d;
+
+      function reveal() {
+        if (pinnedRow === d) pinnedRow = null;
+        // Peek mode: only the header + ribbons are shown so the highlighted
+        // marker on the map stays visible. User swipes up on the grip to
+        // promote the sheet to its full height. setHighlight inside
+        // openSheet repaints the icon — by now the marker is individual
+        // (not buried under a child-count badge), so the blue halo +
+        // pulse-ring actually render.
+        openSheet(d, {peek: true});
+      }
+
+      // zoomToShowLayer pans + zooms until the marker is no longer inside
+      // a cluster (and spiderfies if necessary), then fires the callback.
+      // Falls back to a plain flyTo if the cluster API is missing for any
+      // reason (older MarkerCluster versions, marker not yet registered).
+      if (cluster.zoomToShowLayer) {
+        cluster.zoomToShowLayer(marker, reveal);
+      } else {
+        map.flyTo([d.lat, d.lon], Math.max(map.getZoom(), 16), {duration: 0.8});
+        reveal();
+      }
     }
     function ssGoto(it) {
       ssCloseDropdown();
@@ -2811,7 +3004,15 @@ FILTER_JS_TEMPLATE = r"""
     // handler runs — otherwise on desktop the blur fires first, strips the
     // 'searching' class, and the × button vanishes mid-tap.
     ssClear.addEventListener('mousedown', function(e) { e.preventDefault(); });
-    ssClear.addEventListener('click', ssExitSearch);
+    // × is the user's universal "back out" button: if a restaurant is
+    // selected (sheet open in either peek or full), it deselects first;
+    // then the regular ssExitSearch tears down any leftover search UI
+    // state (busy spinner, dropdown, mobile keyboard). When nothing's
+    // selected, behavior is identical to before.
+    ssClear.addEventListener('click', function() {
+      if (bsActive) closeSheet();
+      ssExitSearch();
+    });
     // Click outside the search box closes the dropdown AND drops the
     // 'searching' state so the × button hides once the user is back on the
     // map. (Text, if any, is kept so they can refine on re-focus.)
@@ -3153,7 +3354,8 @@ FILTER_JS_TEMPLATE = r"""
     // in this initMap closure) can toggle it.
     bsBanner = document.getElementById('bs-banner');
 
-    function openSheet(d) {
+    function openSheet(d, opts) {
+      var peek = !!(opts && opts.peek);
       setHighlight(d);
       // Mutual exclusion with the filter sheet — both dock to the bottom.
       // ffSheet exists once the filter UI has booted; marker clicks can't
@@ -3166,7 +3368,16 @@ FILTER_JS_TEMPLATE = r"""
         var ffb = document.getElementById('ff-fab');
         if (ffb) ffb.hidden = false;
       }
+      bsSheet.classList.toggle('bs-peek', peek);
       bsActive = d;
+      // Reflect the selection in the top search box. The × button stays
+      // visible (via .has-text) regardless of whether the dropdown is
+      // open, so the user has a one-click "deselect" affordance even when
+      // the sheet is collapsed to peek and they've panned the map around.
+      if (ssInput) {
+        ssInput.value = d.name || '';
+        ssWrap.classList.add('has-text');
+      }
       // Hide the filter FAB so the bottom-left corner stays clean while
       // the restaurant card occupies the bottom slot.
       var ffbtn = document.getElementById('ff-fab');
@@ -3210,19 +3421,47 @@ FILTER_JS_TEMPLATE = r"""
     }
     function closeSheet() {
       bsSheet.classList.remove('bs-open');
+      // Leave .bs-peek in place during the slide-out so the photos/info
+      // section doesn't flash into view mid-animation. The next openSheet
+      // call resets the class explicitly via toggle(.., peek).
       bsBackdrop.classList.remove('bs-open');
       bsSheet.setAttribute('aria-hidden', 'true');
       bsActive = null;
+      // Release the search-nav pin so the next pan can reap the marker.
+      pinnedRow = null;
       clearHighlight();
+      // Drop the selected-restaurant name from the top search box. The
+      // input may be holding either that name (if the user opened the
+      // sheet then never touched the box) or a typed query (if they were
+      // mid-search) — both should clear when the selection goes away.
+      if (ssInput) {
+        ssInput.value = '';
+        ssWrap.classList.remove('has-text');
+      }
       var ffbtn = document.getElementById('ff-fab');
       if (ffbtn) ffbtn.hidden = false;
     }
+    function expandSheet() {
+      if (bsSheet.classList.contains('bs-peek')) {
+        bsSheet.classList.remove('bs-peek');
+      }
+    }
+    // Backdrop is inert (no pointer events) — this listener is dead in
+    // practice, kept only because tearing out the wiring is more risk than
+    // benefit. The actual "tap outside the sheet" path runs through
+    // map.on('click') below.
     bsBackdrop.addEventListener('click', closeSheet);
     document.addEventListener('keydown', function(e){
-      if (e.key === 'Escape' && bsActive) closeSheet();
+      // Same staged dismiss as the swipe-down gesture: Full → Peek → Closed.
+      if (e.key !== 'Escape' || !bsActive) return;
+      if (bsSheet.classList.contains('bs-peek')) closeSheet();
+      else bsSheet.classList.add('bs-peek');
     });
 
-    // Swipe-down on the grip to dismiss. Threshold 80px or fast flick.
+    // Grip drag handler. Downward swipe always dismisses the sheet (80px or
+    // fast flick). When the sheet is in peek mode, upward swipe expands it
+    // (smaller threshold so a small tug already promotes), and a near-zero
+    // movement is treated as a tap-to-expand.
     var bsDrag = null;
     function bsDragStart(e) {
       var p = e.touches ? e.touches[0] : e;
@@ -3232,8 +3471,14 @@ FILTER_JS_TEMPLATE = r"""
     function bsDragMove(e) {
       if (!bsDrag) return;
       var p = e.touches ? e.touches[0] : e;
-      var dy = Math.max(0, p.clientY - bsDrag.y0);
-      // Match the desktop centered transform so the sheet doesn't snap left.
+      var raw = p.clientY - bsDrag.y0;
+      // In peek mode the sheet can pull upward (negative dy) with a rubber-
+      // band feel; otherwise only downward motion is visualized.
+      var peek = bsSheet.classList.contains('bs-peek');
+      var dy;
+      if (raw >= 0) dy = raw;
+      else if (peek) dy = Math.max(raw / 2, -40);
+      else dy = 0;
       var prefix = window.innerWidth >= 700 ? 'translate(-50%, ' + dy + 'px)'
                                             : 'translateY(' + dy + 'px)';
       bsSheet.style.transform = prefix;
@@ -3245,7 +3490,21 @@ FILTER_JS_TEMPLATE = r"""
       var dt = Date.now() - bsDrag.t0;
       bsSheet.style.transition = '';
       bsSheet.style.transform = '';
-      if (dy > 80 || (dy > 30 && dt < 200)) closeSheet();
+      var peek = bsSheet.classList.contains('bs-peek');
+      var downward = (dy > 80 || (dy > 30 && dt < 200));
+      var upward   = (dy < -20 || (dy < -5 && dt < 250));
+      if (downward) {
+        // Two-stage dismiss, Google-Maps-style. First swipe collapses to
+        // peek and keeps the restaurant selected (marker stays highlighted,
+        // map stays pannable); second swipe deselects + closes.
+        if (peek) closeSheet();
+        else bsSheet.classList.add('bs-peek');
+      } else if (peek && upward) {
+        expandSheet();
+      } else if (peek && Math.abs(dy) < 5 && dt < 250) {
+        // Tap on the grip with no real drag — expand.
+        expandSheet();
+      }
       bsDrag = null;
     }
     bsGrip.addEventListener('touchstart', bsDragStart, { passive: true });
@@ -3255,8 +3514,27 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('mousemove', bsDragMove);
     document.addEventListener('mouseup',   bsDragEnd);
 
-    // Tap on empty map area closes the sheet (mirrors Leaflet popup behavior).
-    map.on('click', function(){ if (bsActive) closeSheet(); });
+    // Whole-peek-card tap to expand. Clicks on the grip have already been
+    // handled by bsDragEnd (which removes .bs-peek before this fires), so
+    // we'd skip via the `peek` guard anyway. Buttons / links inside the
+    // card get the bubbled event too — we let them do their own work and
+    // only expand for "neutral" clicks (title text, ribbons, blank area).
+    bsSheet.addEventListener('click', function(e) {
+      if (!bsSheet.classList.contains('bs-peek')) return;
+      if (e.target.closest('button, a, input, #bs-grip')) return;
+      expandSheet();
+    });
+
+    // Tap on the map area:
+    //   - in Full state → demote to Peek (restaurant stays selected, marker
+    //     stays highlighted, just like Google Maps);
+    //   - in Peek state → no-op (user explicitly swipes down on the grip
+    //     to actually deselect).
+    map.on('click', function(){
+      if (!bsActive) return;
+      if (bsSheet.classList.contains('bs-peek')) return;
+      bsSheet.classList.add('bs-peek');
+    });
 
     // ===== Viewport-driven marker construction =====
     // We no longer build all 8000+ L.marker objects up front (that allocated
@@ -3283,6 +3561,12 @@ FILTER_JS_TEMPLATE = r"""
       cell.push(d);
     }
     var onMap = new Set();  // rows currently added to the cluster
+    // Row whose marker is being held in the cluster across an in-flight
+    // cluster.zoomToShowLayer animation. Without this, recompute() (which
+    // fires on every moveend the zoom-to-show animation steps through) can
+    // yank the marker before the cluster has a chance to spiderfy it, and
+    // the search "fly to result" path silently fails.
+    var pinnedRow = null;
 
     function visibleRows() {
       var b = map.getBounds().pad(0.25);
@@ -3308,6 +3592,10 @@ FILTER_JS_TEMPLATE = r"""
       if (d._m) return d._m;
       var m = L.marker([d.lat, d.lon], {icon: makeIcon(d)});
       m._d = d;
+      // Marker tap opens the full detail card directly — a deliberate tap
+      // on a marker means "I want to read about this place". The peek
+      // entry point is reserved for the search-result flow, where the
+      // user is still browsing across results.
       m.on('click', function() { openSheet(d); });
       d._m = m;
       return m;
@@ -3467,6 +3755,7 @@ FILTER_JS_TEMPLATE = r"""
       // cheaper than clearLayers + rebuild on every pan.
       var removeLayers = [];
       onMap.forEach(function(d) {
+        if (d === pinnedRow) return;
         if (!desired.has(d) && d._m) removeLayers.push(d._m);
       });
       if (removeLayers.length) {
@@ -3480,7 +3769,10 @@ FILTER_JS_TEMPLATE = r"""
           if (removeLayers[ri]._d) removeLayers[ri]._d._m = null;
         }
       }
-      onMap.forEach(function(d) { if (!desired.has(d)) onMap.delete(d); });
+      onMap.forEach(function(d) {
+        if (d === pinnedRow) return;
+        if (!desired.has(d)) onMap.delete(d);
+      });
 
       var addLayers = [];
       desired.forEach(function(d) {
@@ -4070,9 +4362,13 @@ def main(argv: list[str] | None = None) -> None:
         # the "name location" search syntax. Skipped when the address has no
         # extractable admin prefix — JS treats absent as "won't match any
         # location query," which is the correct behavior.
-        loc_norm = canon_str(parse_admin_prefix(row.get("address") or ""))
+        addr_raw = row.get("address") or ""
+        loc_norm = canon_str(parse_admin_prefix(addr_raw))
         if loc_norm:
             entry["loc_norm"] = loc_norm
+        city = extract_city(addr_raw)
+        if city:
+            entry["city"] = city
         core_rows.append(entry)
         if url:
             popups_map[url] = popup_data(row)
@@ -4118,6 +4414,18 @@ def main(argv: list[str] | None = None) -> None:
     han_variants_json = json.dumps(han_variants, ensure_ascii=False)
     print(f"  han_variants:     {len(han_variants)} char mappings, "
           f"{len(han_variants_json.encode('utf-8')):,} bytes")
+    # Known location whitelist for the search box. The trailing query token
+    # is only treated as a location filter when it canonicalizes into this
+    # set — otherwise the whole query stays a single restaurant-name match.
+    known_locs: set[str] = set()
+    for row, _loc in geocoded:
+        for tok in admin_tokens_with_suffix(row.get("address") or ""):
+            cn = canon_str(tok)
+            if cn:
+                known_locs.add(cn)
+    known_locs_json = json.dumps(sorted(known_locs), ensure_ascii=False)
+    print(f"  known_locs:       {len(known_locs)} tokens, "
+          f"{len(known_locs_json.encode('utf-8')):,} bytes")
     filter_js = (
         FILTER_JS_TEMPLATE
         .replace("__DEFAULT_OFF_GENRES__", default_off_json)
@@ -4125,6 +4433,7 @@ def main(argv: list[str] | None = None) -> None:
         .replace("__BUCKET_COLORS__", bucket_colors_json)
         .replace("__GENRE_EMOJI__", genre_emoji_json)
         .replace("__HAN_VARIANTS__", han_variants_json)
+        .replace("__KNOWN_LOCS__", known_locs_json)
     )
     # Service worker — version-stamp the cache name so each redeploy
     # invalidates the previous one. Unix seconds is plenty granular for a
