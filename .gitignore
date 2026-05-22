@@ -36,6 +36,7 @@ run_batch.py
 batch.txt
 preview.ps1
 preview.ps1.tmp.*
+scripts/
 
 # Audit / probe tools — they read the dataset but don't produce anything
 # the map depends on. The pipeline code that does affect output

@@ -39,6 +39,9 @@ from tabelog.paths import (
     MAP_HTML,
     RESTAURANTS_JSON,
     POPUPS_JSON,
+    POPUPS_TW_JSON,
+    POPUPS_EN_JSON,
+    POLICY_EN_JSON,
     SW_JS,
     DOCS_DATA_DIR,
     FAVORITES_JSON,
@@ -46,6 +49,7 @@ from tabelog.paths import (
     BOOKMARKS_JSON,
     OUTPUT_DIR,
     CACHE_DIR,
+    I18N_EN_JSON,
 )
 from tabelog.scrape.map_data import (
     ATTRACTIONS,
@@ -55,6 +59,100 @@ from tabelog.scrape.map_data import (
     MEAL_GROUPS,
 )
 from tabelog.scrape.search_norm import build_han_variants, canon_str
+
+from opencc import OpenCC
+
+# Build-time Simplified -> Traditional pass. We use the full OpenCC s2t
+# config (with its multi-char phrase rules) so context-sensitive cases
+# like 拉面->拉麵 / 内脏->內臟 come out right — char-level mapping picks
+# the wrong default for ambiguous chars (面 can be 面 or 麵, 后 can be
+# 後 or 后, etc.). The trade-off: we can't ship the full OpenCC engine
+# to the browser (~hundreds of KB), so we precompute every CJK run that
+# appears on the rendered page and ship the {simp:trad} lookup table.
+_S2T = OpenCC("s2t")
+# Matches a maximal contiguous run of CJK ideographs (BMP + Ext A + the
+# compatibility block). Excludes kana / punctuation / latin so the runs
+# we look up at build time match exactly what the JS regex finds at run
+# time inside text nodes.
+_CJK_RUN_RE = re.compile(r"[㐀-鿿豈-﫿]+")
+
+
+# The HAN_VARIANTS dict and the KNOWN_LOCS array are JS data tables used
+# only by the search canonicalizer — they hold thousands of CJK chars
+# that never enter a text node. Strip them before scanning so the map
+# doesn't fill up with entries we'll never use.
+_HAN_VARIANTS_LITERAL_RE = re.compile(r"var HAN_VARIANTS\s*=\s*[^;]+;")
+_KNOWN_LOCS_LITERAL_RE = re.compile(r"var KNOWN_LOCS\s*=\s*[^;]+;")
+
+
+def _scan_cjk_runs(html: str) -> set[str]:
+    scanned = _HAN_VARIANTS_LITERAL_RE.sub("", html)
+    scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
+    return set(_CJK_RUN_RE.findall(scanned))
+
+
+def build_text_trad_map(html: str) -> dict[str, str]:
+    """Scan the rendered page for every distinct CJK run, run each one
+    through full OpenCC s2t, and keep only the runs whose translation
+    differs from the source. Keys / values are unicode strings."""
+    out: dict[str, str] = {}
+    for run in _scan_cjk_runs(html):
+        conv = _S2T.convert(run)
+        if conv != run:
+            out[run] = conv
+    return out
+
+
+def build_text_en_map(html: str) -> tuple[dict[str, str], list[str]]:
+    """Intersect the hand-curated data/i18n/en.json with the CJK runs
+    that actually appear on the page. Returns (map, missing) where
+    missing is the sorted list of runs the page needs but en.json
+    doesn't translate yet — printed during the build so untranslated
+    bits show up as a punch list."""
+    if not I18N_EN_JSON.exists():
+        return {}, []
+    raw = json.loads(I18N_EN_JSON.read_text(encoding="utf-8"))
+    en = {k: v for k, v in raw.items() if not k.startswith("__")}
+    runs = _scan_cjk_runs(html)
+    out = {run: en[run] for run in runs if run in en}
+    missing = sorted(r for r in runs if r not in en)
+    return out, missing
+
+
+def trad_popup_array(arr: list) -> list:
+    """popups.json positional layout — only index 6 (Chinese reservation
+    policy) and index 8 (award ribbon HTML, also Chinese) need trad
+    conversion. Japanese fields (genre / station / address) are
+    passed through unchanged."""
+    a = list(arr)
+    if len(a) > 6 and isinstance(a[6], str) and a[6]:
+        a[6] = _S2T.convert(a[6])
+    if len(a) > 8 and isinstance(a[8], str) and a[8]:
+        a[8] = _S2T.convert(a[8])
+    return a
+
+
+def en_popup_array(arr: list, policy_en: str | None) -> list:
+    """Same shape as the simp popup row, with the policy field swapped
+    for the English translation when one is available. Ribbons (index 8)
+    are left in Chinese — the runtime localizer rewrites their few CJK
+    runs (百名店, 受賞店, etc.) via TEXT_EN_MAP at insertion time, so we
+    don't need to pre-process them here."""
+    a = list(arr)
+    if policy_en and len(a) > 6:
+        a[6] = policy_en
+    return a
+
+
+def load_policy_en() -> dict[str, str]:
+    if not POLICY_EN_JSON.exists():
+        return {}
+    try:
+        return json.loads(POLICY_EN_JSON.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"  WARN: {POLICY_EN_JSON} is invalid JSON ({e}); "
+              f"treating as empty")
+        return {}
 
 # Japan's 47 都道府県. Used as a whitelist for parse_admin_prefix because the
 # regex approach trips on 都/府/県 also appearing INSIDE prefecture names
@@ -1518,6 +1616,11 @@ MOBILE_UX_ASSETS = """
   .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
                line-height: 1.3; }
   .rst-title .rst-rating { color: #c33; margin-left: 4px; font-weight: 700; }
+  .rst-gmaps { display: inline-block; margin-left: 6px;
+               font-size: 0.85em; text-decoration: none;
+               vertical-align: 1px; opacity: 0.75;
+               transition: opacity 0.15s, transform 0.15s; }
+  .rst-gmaps:hover { opacity: 1; transform: scale(1.15); }
   .rst-actions { display: flex; gap: 6px; flex-shrink: 0; }
   .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
                 gap: 6px; margin-bottom: 10px; }
@@ -1710,6 +1813,19 @@ FILTER_JS_TEMPLATE = r"""
   // like "炭火烧鸟 正" working as name search even though "正" looks like
   // it could be a location token.
   var KNOWN_LOCS = new Set(__KNOWN_LOCS__);
+  // Build-time Simplified -> Traditional lookup. Keys are exact CJK
+  // runs that appear anywhere on the rendered page; values are their
+  // OpenCC s2t conversion (full multi-char rules applied at build, so
+  // 拉面->拉麵 and 内脏->內臟 land correctly). localizeTree() walks text
+  // nodes and runs the CJK-run regex over each, replacing matched runs
+  // via this table; runs without an entry are passed through unchanged.
+  // Subtrees marked lang="ja" are skipped wholesale so Japanese names,
+  // addresses and shinjitai genre tokens stay in their source form.
+  var TEXT_TRAD_MAP = __TEXT_TRAD_MAP__;
+  // English lookup, same shape — keys are CJK runs in the rendered
+  // page, values come from data/i18n/en.json. Runs without an entry
+  // stay in Chinese at runtime (the build log lists what's missing).
+  var TEXT_EN_MAP = __TEXT_EN_MAP__;
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -1750,7 +1866,19 @@ FILTER_JS_TEMPLATE = r"""
   function loadPopups() {
     if (popupsMap) return Promise.resolve(popupsMap);
     if (popupsPromise) return popupsPromise;
-    popupsPromise = fetch('data/popups.json', {cache: 'force-cache'})
+    // Each UI language gets its own popups file:
+    //   zh-TW -> popups-tw.json (policy + ribbons via OpenCC s2t)
+    //   en    -> popups-en.json (policy overlaid from policy_en.json,
+    //            falls back to Chinese for untranslated entries)
+    //   zh-CN -> popups.json (the default)
+    // Japanese fields (genre/station/address) are byte-identical across
+    // all three variants — the picker only swaps the Chinese parts.
+    var popupsUrl = 'data/popups.json';
+    if (typeof activeLang !== 'undefined') {
+      if (activeLang === 'zh-TW') popupsUrl = 'data/popups-tw.json';
+      else if (activeLang === 'en') popupsUrl = 'data/popups-en.json';
+    }
+    popupsPromise = fetch(popupsUrl, {cache: 'force-cache'})
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -1847,6 +1975,124 @@ FILTER_JS_TEMPLATE = r"""
     startEmojiObserver();
   }
 
+  // ===== Runtime Simplified -> Traditional conversion =====
+  // Page is authored in Simplified Chinese. When the user opts into 繁體
+  // (via ?lang=tw or the picker), tradifyTree() walks text nodes and
+  // applies S2T_MAP per character. Subtrees with lang="ja" are skipped
+  // wholesale — that's how restaurant names / addresses / Japanese genre
+  // strings stay in shinjitai instead of getting mangled into kyūjitai.
+  //
+  // langActive is set once on boot from URL+localStorage and never flips
+  // mid-session — the picker triggers a reload so the page boots fresh
+  // in the new language.
+  var LANG_KEY = 'tabelog.lang';
+  function readLangParam() {
+    try {
+      var p = new URLSearchParams(window.location.search).get('lang');
+      if (p === 'tw' || p === 'zh-TW') return 'zh-TW';
+      if (p === 'cn' || p === 'zh-CN') return 'zh-CN';
+      if (p === 'en') return 'en';
+    } catch (_) {}
+    return null;
+  }
+  var urlLang = readLangParam();
+  var storedLang = null;
+  try { storedLang = localStorage.getItem(LANG_KEY); } catch (_) {}
+  var activeLang = urlLang || storedLang || 'zh-CN';
+  // If the URL pinned a lang, persist it so subsequent visits without the
+  // param keep the same setting.
+  if (urlLang) {
+    try { localStorage.setItem(LANG_KEY, urlLang); } catch (_) {}
+  }
+  // Pick the active translation table. zh-CN (or anything unknown) gets
+  // no map -> the localization pass is a no-op.
+  var I18N_MAP = null;
+  if (activeLang === 'zh-TW' && Object.keys(TEXT_TRAD_MAP).length) {
+    I18N_MAP = TEXT_TRAD_MAP;
+  } else if (activeLang === 'en' && Object.keys(TEXT_EN_MAP).length) {
+    I18N_MAP = TEXT_EN_MAP;
+  }
+
+  // Matches a maximal CJK ideograph run — BMP unified ideographs +
+  // Extension A + the compatibility block. Mirrors the Python-side
+  // _CJK_RUN_RE so build-time and runtime tokenize identically.
+  var CJK_RUN_RE = /[㐀-鿿豈-﫿]+/g;
+  function localizeText(s) {
+    if (!s || !I18N_MAP) return s;
+    return s.replace(CJK_RUN_RE, function(m) {
+      var t = I18N_MAP[m];
+      return t === undefined ? m : t;
+    });
+  }
+  function localizeTree(root) {
+    if (!root || !I18N_MAP) return;
+    if (root.nodeType !== 1) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) {
+        var p = n.parentNode;
+        while (p && p.nodeType === 1) {
+          var t = p.tagName;
+          if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEXTAREA' || t === 'INPUT') {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (p.getAttribute && p.getAttribute('lang') === 'ja') {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentNode;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [], n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function(tn) {
+      var v = tn.nodeValue;
+      if (!v) return;
+      var out = localizeText(v);
+      if (out !== v) tn.nodeValue = out;
+    });
+  }
+  function observeForI18n(root) {
+    if (!root || !I18N_MAP) return;
+    new MutationObserver(function(muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var nd = added[j];
+          if (nd.nodeType === 1) localizeTree(nd);
+          else if (nd.nodeType === 3 && nd.parentNode) localizeTree(nd.parentNode);
+        }
+      }
+    }).observe(root, {childList: true, subtree: true});
+  }
+  function startI18nObserver() {
+    if (!I18N_MAP) return;
+    localizeTree(document.body);
+    observeForI18n(document.getElementById('bs-content'));
+    observeForI18n(document.getElementById('bm-modal'));
+    observeForI18n(document.getElementById('ss-list'));
+    // Filter sheet has dynamic textContent rewrites (cuisine summary
+    // "全部"/"无"/"已选 N / M", live count chips). Without an observer
+    // here those flip back to Chinese after every filter change.
+    observeForI18n(document.getElementById('ff-sheet-content'));
+    // Sync-settings modal (#ff-modal-bg) lives outside #ff-sheet and
+    // mutates its own status line (cfgMsg) — "测试中…", "已清除", etc.
+    observeForI18n(document.getElementById('ff-modal-bg'));
+    // Reflect onto <html lang> — browsers use it for hyphenation and
+    // accessibility (screen readers, especially).
+    try { document.documentElement.lang = activeLang; } catch (_) {}
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startI18nObserver);
+  } else {
+    startI18nObserver();
+  }
+  // Exposed so initMap() can hook the Leaflet popup pane the same way
+  // emojify does, once Leaflet has built its panes.
+  window.__observeForI18n = observeForI18n;
+  window.__localizeTree = localizeTree;
+  window.__activeLang = activeLang;
+
   // ===== GitHub Gist sync layer =====
   //
   // Config (Gist ID + PAT) is per-device, stored in localStorage. The state
@@ -1927,7 +2173,12 @@ FILTER_JS_TEMPLATE = r"""
     // marker and the right-click "加入收藏" popup both inject HTML into
     // .leaflet-popup-pane, which only exists after the map initializes.
     var popupPane = map.getPane && map.getPane('popupPane');
-    if (popupPane) observeForEmoji(popupPane);
+    if (popupPane) {
+      observeForEmoji(popupPane);
+      if (window.__observeForI18n) {
+        window.__observeForI18n(popupPane);
+      }
+    }
 
     // ===== Persisted map view =====
     // Restore last center+zoom before any tiles render, then track every
@@ -2201,10 +2452,25 @@ FILTER_JS_TEMPLATE = r"""
       var chip = d.bookable
         ? '<span class="rst-chip">可Tabelog预约</span>'
         : '<span class="rst-chip rst-chip-off">不可Tabelog预约</span>';
+      // Quick-jump to a Google Maps search for "<name> <address>". The
+      // search URL avoids needing a place_id — Google's `?api=1&query=`
+      // form is documented + stable, and lands on the search results
+      // page so the user can pick the right pin if there are dupes.
+      // Title stays English (emoji's universal) so the build-time CJK
+      // scan doesn't pick up phantom runs from JS string literals.
+      var gmapsQ = encodeURIComponent(
+        ((d.name || '') + ' ' + (addr || '')).trim()
+      );
+      var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + gmapsQ;
+      var gmapsBtn = '<a class="rst-gmaps" href="' + gmapsUrl
+                   + '" target="_blank" rel="noopener" '
+                   + 'aria-label="Open in Google Maps" '
+                   + 'title="Open in Google Maps">🗺️</a>';
       return '<div class="rst-card">'
         + ribbons
         + '<div class="rst-header">'
-          + '<div class="rst-title">' + name
+          + '<div class="rst-title"><span lang="ja">' + name + '</span>'
+            + gmapsBtn
             + '<span class="rst-rating">★' + rating + '</span></div>'
           + '<div class="rst-actions">'
             + '<button class="ff-fav-btn rst-btn" data-url="' + url + '">'
@@ -2214,13 +2480,13 @@ FILTER_JS_TEMPLATE = r"""
           + '</div>'
         + '</div>'
         + photoHtml
-        + '<div class="rst-genre">' + escapeHtml(genre) + ' / ' + escapeHtml(bucket) + '</div>'
+        + '<div class="rst-genre"><span lang="ja">' + escapeHtml(genre) + '</span> / ' + escapeHtml(bucket) + '</div>'
         + '<div class="rst-info">'
           + '<div class="rst-info-row"><span class="rst-label">晚</span><span class="rst-value">' + escapeHtml(dinnerS) + '</span></div>'
-          + '<div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 ' + escapeHtml(station) + '</span></div>'
+          + '<div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 <span lang="ja">' + escapeHtml(station) + '</span></span></div>'
           + '<div class="rst-info-row"><span class="rst-label">午</span><span class="rst-value">' + escapeHtml(lunchS) + '</span></div>'
           + '<div class="rst-info-row"><span class="rst-label">座位</span><span class="rst-value">' + (seat ? escapeHtml(seat) : '—') + '</span></div>'
-          + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value">' + escapeHtml(addr) + '</span></div>'
+          + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value" lang="ja">' + escapeHtml(addr) + '</span></div>'
         + '</div>'
         + (policy ? '<div class="rst-policy">' + escapeHtml(policy) + '</div>' : '')
         + '<div class="rst-footer">'
@@ -2683,13 +2949,24 @@ FILTER_JS_TEMPLATE = r"""
       var text = document.createElement('div');
       text.className = 'ss-text';
       var n = document.createElement('div');
-      n.className = 'ss-name'; n.textContent = d.name || '';
+      n.className = 'ss-name';
+      n.setAttribute('lang', 'ja');
+      n.textContent = d.name || '';
       var a = document.createElement('div');
       a.className = 'ss-addr';
-      var sub = '';
-      if (d.city) sub += d.city;
-      if (cat) sub += (sub ? ' | ' : '') + cat;
-      a.textContent = sub;
+      // d.city is parsed from a Japanese address — keep it in lang="ja"
+      // so the trad converter leaves it alone; cat is the Chinese bucket
+      // label and *does* want conversion, so it sits in a bare text node.
+      if (d.city) {
+        var citySpan = document.createElement('span');
+        citySpan.setAttribute('lang', 'ja');
+        citySpan.textContent = d.city;
+        a.appendChild(citySpan);
+      }
+      if (cat) {
+        if (a.childNodes.length) a.appendChild(document.createTextNode(' | '));
+        a.appendChild(document.createTextNode(cat));
+      }
       text.appendChild(n); text.appendChild(a);
       var rating = document.createElement('span');
       rating.className = 'ss-rating';
@@ -2710,9 +2987,16 @@ FILTER_JS_TEMPLATE = r"""
       var text = document.createElement('div');
       text.className = 'ss-text';
       var n = document.createElement('div');
-      n.className = 'ss-name'; n.textContent = it.name;
+      n.className = 'ss-name';
+      // Nominatim returns the name in zh/ja preference order — could be
+      // either form. Mark it lang="ja" so trad mode doesn't try to
+      // s2t-convert what might already be Japanese.
+      n.setAttribute('lang', 'ja');
+      n.textContent = it.name;
       var a = document.createElement('div');
-      a.className = 'ss-addr'; a.textContent = it.address;
+      a.className = 'ss-addr';
+      a.setAttribute('lang', 'ja');
+      a.textContent = it.address;
       text.appendChild(n); text.appendChild(a);
       var favBtn = document.createElement('button');
       favBtn.className = 'ss-fav';
@@ -2836,16 +3120,25 @@ FILTER_JS_TEMPLATE = r"""
         openSheet(d, {peek: true});
       }
 
-      // zoomToShowLayer pans + zooms until the marker is no longer inside
-      // a cluster (and spiderfies if necessary), then fires the callback.
-      // Falls back to a plain flyTo if the cluster API is missing for any
-      // reason (older MarkerCluster versions, marker not yet registered).
-      if (cluster.zoomToShowLayer) {
-        cluster.zoomToShowLayer(marker, reveal);
-      } else {
-        map.flyTo([d.lat, d.lon], Math.max(map.getZoom(), 16), {duration: 0.8});
+      // We *don't* use cluster.zoomToShowLayer here: its panTo-only branch
+      // fires whenever the marker is already rendered as an individual
+      // icon at the current zoom, which happens immediately for any
+      // restaurant in a sparse area (no nearby markers in the cluster
+      // group means addLayer plops it down as a free icon, not a cluster
+      // child). The user's expectation is "zoom in on the result", so
+      // we flyTo a guaranteed-uncluster zoom unconditionally. 17 matches
+      // the cluster's disableClusteringAtZoom, so the marker is sure to
+      // render as a standalone icon when we land. Math.max preserves a
+      // deeper zoom if the user is already zoomed in further.
+      var TARGET_ZOOM = 17;
+      var latlng = L.latLng(d.lat, d.lon);
+      var targetZoom = Math.max(map.getZoom(), TARGET_ZOOM);
+      function onArrive() {
+        map.off('moveend', onArrive);
         reveal();
       }
+      map.on('moveend', onArrive);
+      map.flyTo(latlng, targetZoom, {duration: 0.8});
     }
     function ssGoto(it) {
       ssCloseDropdown();
@@ -3402,15 +3695,15 @@ FILTER_JS_TEMPLATE = r"""
           return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
         });
         paint('<div class="rst-card"><div class="rst-header">' +
-              '<div class="rst-title">' + name +
+              '<div class="rst-title"><span lang="ja">' + name + '</span>' +
               '<span class="rst-rating">★' + (d.rating == null ? '–' : d.rating) +
               '</span></div></div>' +
               '<div style="margin-top:10px;color:#6b7280;font-size:13px;">加载中…</div>' +
               '</div>');
         loadPopups().then(function(map) { paint(renderPopup(d, map[d.detail_url])); })
                     .catch(function() {
-                      paint('<div class="rst-card"><div class="rst-title">' + name +
-                            '</div><div style="margin-top:10px;color:#dc2626;">加载失败,请检查网络</div></div>');
+                      paint('<div class="rst-card"><div class="rst-title"><span lang="ja">' + name +
+                            '</span></div><div style="margin-top:10px;color:#dc2626;">加载失败,请检查网络</div></div>');
                     });
       }
       // Force reflow so the transition runs even on rapid reopen.
@@ -4052,17 +4345,24 @@ FILTER_JS_TEMPLATE = r"""
       setStatus('本地模式', '');
     });
 
-    // Language picker — placeholder. Records the user's choice; the actual
-    // translation pass is not implemented yet so changing this only updates
-    // localStorage. Key follows the `tabelog.*` namespace.
+    // Language picker. activeLang was resolved on boot from ?lang= and
+    // localStorage; reflect it into the dropdown so the UI matches state.
+    // On change: persist, update the URL (?lang=tw is sticky, default
+    // simplified drops the param) so deep links carry the language, then
+    // reload so the page reboots in the new language. We reload rather
+    // than live-convert because keeping every text node's pre-conversion
+    // value cached just to support a rare toggle isn't worth the memory.
     var langEl = document.getElementById('ff-lang');
     if (langEl) {
-      try {
-        var savedLang = localStorage.getItem('tabelog.lang');
-        if (savedLang) langEl.value = savedLang;
-      } catch (e) {}
+      langEl.value = activeLang;
       langEl.addEventListener('change', function() {
-        try { localStorage.setItem('tabelog.lang', langEl.value); } catch (e) {}
+        var v = langEl.value;
+        try { localStorage.setItem(LANG_KEY, v); } catch (_) {}
+        var url = new URL(window.location.href);
+        if (v === 'zh-TW') url.searchParams.set('lang', 'tw');
+        else if (v === 'en') url.searchParams.set('lang', 'en');
+        else url.searchParams.delete('lang');
+        window.location.assign(url.toString());
       });
     }
 
@@ -4391,10 +4691,30 @@ def main(argv: list[str] | None = None) -> None:
     ).encode("utf-8")
     RESTAURANTS_JSON.write_bytes(restaurants_bytes)
     POPUPS_JSON.write_bytes(popups_bytes)
+    popups_tw_map = {url: trad_popup_array(arr) for url, arr in popups_map.items()}
+    popups_tw_bytes = json.dumps(
+        popups_tw_map, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    POPUPS_TW_JSON.write_bytes(popups_tw_bytes)
+    policy_en = load_policy_en()
+    popups_en_map = {
+        url: en_popup_array(arr, policy_en.get(url))
+        for url, arr in popups_map.items()
+    }
+    popups_en_bytes = json.dumps(
+        popups_en_map, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    POPUPS_EN_JSON.write_bytes(popups_en_bytes)
+    translated_count = sum(
+        1 for url in popups_map if policy_en.get(url, "").strip()
+    )
     print(f"  restaurants.json: {len(restaurants_bytes):,} bytes "
           f"({len(core_rows)} rows)")
     print(f"  popups.json:      {len(popups_bytes):,} bytes "
           f"({len(popups_map)} entries)")
+    print(f"  popups-tw.json:   {len(popups_tw_bytes):,} bytes")
+    print(f"  popups-en.json:   {len(popups_en_bytes):,} bytes "
+          f"({translated_count}/{len(popups_map)} policies translated)")
 
     panel_html = build_filter_panel_html(cat_counts, award_counts)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
@@ -4454,8 +4774,44 @@ def main(argv: list[str] | None = None) -> None:
     m.get_root().html.add_child(folium.Element(filter_js))
 
     m.save(str(OUT_HTML))
+    # Second pass over the saved file: scan every CJK run that ended up
+    # on the page (static UI, bucket names, attraction labels, AND the
+    # Chinese string literals inside the inlined <script> blocks — those
+    # produce text nodes too once the JS that builds them runs), feed
+    # each to full OpenCC s2t, and inject the {simp: trad} map. The JS
+    # side reads this at runtime to do precise per-segment conversion;
+    # we ship the precomputed answers instead of a converter so the
+    # browser doesn't need to load OpenCC's dictionaries.
+    saved_html = OUT_HTML.read_text(encoding="utf-8")
+    text_trad_map = build_text_trad_map(saved_html)
+    text_trad_map_json = json.dumps(
+        text_trad_map, ensure_ascii=False, separators=(",", ":")
+    )
+    text_en_map, missing_en = build_text_en_map(saved_html)
+    text_en_map_json = json.dumps(
+        text_en_map, ensure_ascii=False, separators=(",", ":")
+    )
+    saved_html = (
+        saved_html
+        .replace("__TEXT_TRAD_MAP__", text_trad_map_json)
+        .replace("__TEXT_EN_MAP__", text_en_map_json)
+    )
+    OUT_HTML.write_text(saved_html, encoding="utf-8")
     print(f"\nMap written to {OUT_HTML}")
     print(f"  {len(core_rows)} restaurants in payload (fetched at runtime)")
+    print(f"  text_trad_map:    {len(text_trad_map)} CJK runs, "
+          f"{len(text_trad_map_json.encode('utf-8')):,} bytes")
+    print(f"  text_en_map:      {len(text_en_map)} CJK runs, "
+          f"{len(text_en_map_json.encode('utf-8')):,} bytes")
+    if missing_en:
+        print(f"  missing EN translations: {len(missing_en)} runs "
+              f"(stay in Chinese at runtime)")
+        # Cap the printed list so a fresh i18n dir doesn't drown the log.
+        preview = missing_en[:30]
+        for run in preview:
+            print(f"    - {run!r}")
+        if len(missing_en) > len(preview):
+            print(f"    ... and {len(missing_en) - len(preview)} more")
 
 
 if __name__ == "__main__":
