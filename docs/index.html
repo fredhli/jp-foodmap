@@ -4,6 +4,9 @@
     
     <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
     
+<title>Japan Foodmap</title>
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
+    
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css"/>
@@ -265,7 +268,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_e9e169b420be3e38e912e9b7a056b290 {
+                #map_383a98e24aff485e7118e06d9334bde2 {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -343,6 +346,20 @@
   .map-fab.active { background: #2563eb; color: #fff;
                     border-color: #2563eb; }
   .map-fab.active:hover { background: #1d4ed8; }
+  /* Third state for fab-attractions only — "show all including hidden".
+     Amber/orange signals "extra/special mode" without alarming like red. */
+  .map-fab.show-all { background: #f59e0b; color: #fff;
+                      border-color: #f59e0b; }
+  .map-fab.show-all:hover { background: #d97706; }
+  /* Built-in landmarks the user has hidden via the popup. Default state:
+     hidden entirely. When the body carries .attr-show-all (fab-attractions
+     in its third state) they re-appear ghosted so they can be un-hidden. */
+  .leaflet-marker-icon.bm-mk-hidden { display: none; }
+  body.attr-show-all .leaflet-marker-icon.bm-mk-hidden {
+    display: block;
+    opacity: 0.45;
+    filter: grayscale(1);
+  }
   .map-fab-ic { font-size: 15px; line-height: 1; }
   /* Locate button is icon-only on every viewport — round, no label. The
      SVG keeps it visually distinct from the pill-shaped layer toggles. */
@@ -1221,14 +1238,14 @@
   // via this table; runs without an entry are passed through unchanged.
   // Subtrees marked lang="ja" are skipped wholesale so Japanese names,
   // addresses and shinjitai genre tokens stay in their source form.
-  var TEXT_TRAD_MAP = {"烤鸡":"烤雞","苗场山":"苗場山","下滩站":"下灘站","小樽运河":"小樽運河","鳴子温泉":"鳴子溫泉","熱海温泉":"熱海溫泉","只读模式":"只讀模式","渡月桥":"渡月橋","类型":"類型","涩谷路口":"澀谷路口","乳头温泉乡":"乳頭溫泉鄉","新倉山浅間公園":"新倉山淺間公園","白川乡":"白川鄉","当前位置在地图范围之外":"當前位置在地圖範圍之外","已弃用":"已棄用","龙安寺":"龍安寺","哥拉巴园":"哥拉巴園","市内":"市內","会津若松":"會津若松","多选取并集":"多選取並集","显示我的位置":"顯示我的位置","只显示已收藏":"只顯示已收藏","龙泉洞":"龍泉洞","韩":"韓","桂滨":"桂濱","横浜中華街":"橫浜中華街","有馬温泉":"有馬溫泉","冈山城":"岡山城","会津若松市":"會津若松市","地狱谷野猿公苑":"地獄谷野猿公苑","鸟羽水族馆":"鳥羽水族館","选择器":"選擇器","名称":"名稱","不勾则不限制":"不勾則不限制","鸭川海洋世界":"鴨川海洋世界","搜索餐厅":"搜索餐廳","寿司":"壽司","札幌市钟楼":"札幌市鐘樓","大吊桥":"大吊橋","通天阁":"通天閣","南纪白滨温泉":"南紀白濱溫泉","田泽湖":"田澤湖","阿波舞会馆":"阿波舞會館","乌冬":"烏冬","删除景点":"刪除景點","串烧":"串燒","炭火烧鸟":"炭火燒鳥","成田山新胜寺":"成田山新勝寺","蔓桥":"蔓橋","小吃":"小喫","隐藏":"隱藏","已复制":"已複製","范围内":"範圍內","金泽":"金澤","语言":"語言","交差点":"交差點","海鲜":"海鮮","兼六园":"兼六園","渲染失败":"渲染失敗","改动未同步到":"改動未同步到","武雄温泉":"武雄溫泉","青岛神社":"青島神社","銀山温泉":"銀山溫泉","日光东照宫":"日光東照宮","樱岛":"櫻島","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","餐厅库":"餐廳庫","中东":"中東","保存失败":"保存失敗","延历寺":"延歷寺","同步失败":"同步失敗","偕乐园":"偕樂園","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","不会配":"不會配","门司港怀旧":"門司港懷舊","富田农场":"富田農場","国营常陆海滨公园":"國營常陸海濱公園","梦":"夢","地铁":"地鐵","乡土":"鄉土","眺遊楼":"眺遊樓","加载中":"加載中","轻井泽":"輕井澤","伏见稻荷大社":"伏見稻荷大社","搜索失败":"搜索失敗","地图搜索":"地圖搜索","仙岩园":"仙岩園","道後温泉":"道後溫泉","烧":"燒","佐渡岛":"佐渡島","二条城":"二條城","屋久岛":"屋久島","筑地市场":"築地市場","东京国际机场":"東京國際機場","明治神宫":"明治神宮","御好烧":"御好燒","输入更多字以缩小范围":"輸入更多字以縮小範圍","海游馆":"海遊館","越后汤泽温泉":"越後湯澤溫泉","道顿堀":"道頓堀","角岛大橋":"角島大橋","热田神宫":"熱田神宮","出云大社":"出雲大社","铁板烧":"鐵板燒","荞麦":"蕎麥","道后温泉":"道後溫泉","景点":"景點","私铁":"私鐵","福井县立恐龙博物馆":"福井縣立恐龍博物館","小豆岛":"小豆島","删除收藏":"刪除收藏","面类":"面類","首里城":"首裏城","价格":"價格","净土滨":"淨土濱","知床国立公園":"知牀國立公園","银山温泉":"銀山溫泉","草津温泉":"草津溫泉","内脏":"內臟","严岛神社":"嚴島神社","黑川温泉":"黑川溫泉","用户自添景点":"用戶自添景點","指宿温泉":"指宿溫泉","广岛和平纪念公园":"廣島和平紀念公園","大须":"大須","其他区域":"其他區域","点击查看":"點擊查看","热门餐厅":"熱門餐廳","亲子丼":"親子丼","没有写权限":"沒有寫權限","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","炭火烧鸟正":"炭火燒鳥正","白须神社":"白鬚神社","心斋桥":"心齋橋","没有匹配的结果":"沒有匹配的結果","东京塔":"東京塔","关闭":"關閉","筛选":"篩選","足立美术馆":"足立美術館","阿苏山":"阿蘇山","倉敷美観地区":"倉敷美観地區","由布院温泉":"由布院溫泉","金刀比罗宫":"金刀比羅宮","打开筛选":"打開篩選","机车博物馆":"機車博物館","横滨中华街":"橫濱中華街","无法加载":"無法加載","会館":"會館","严美溪":"嚴美溪","御台场":"御臺場","里歴史公園":"裏歴史公園","个其他匹配":"個其他匹配","改动未同步":"改動未同步","古宇利岛":"古宇利島","重置筛选":"重置篩選","详情":"詳情","眺游楼":"眺遊樓","按钮里的选择器":"按鈕裏的選擇器","四万十川":"四萬十川","已选":"已選","国営":"國営","中禅寺湖":"中禪寺湖","猎奇":"獵奇","东京迪士尼乐园":"東京迪士尼樂園","弥彦神社":"彌彥神社","中国料理":"中國料理","长瀞町":"長瀞町","后乐园":"後樂園","显示":"顯示","长途线路":"長途線路","鹈户神宫":"鵜戶神宮","弃用":"棄用","勾选后只看对应获奖店":"勾選後只看對應獲獎店","晚餐价格":"晚餐價格","江之岛":"江之島","世纪美术馆":"世紀美術館","正在重试上次失败的同步":"正在重試上次失敗的同步","夫妇岩":"夫婦巖","関西国際空港":"関西國際空港","华严瀑布":"華嚴瀑布","点心":"點心","新干线":"新幹線","评分":"評分","奈良公园":"奈良公園","黑部峡谷":"黑部峽谷","可粘贴任意":"可粘貼任意","鹤冈八幡宫":"鶴岡八幡宮","国际通":"國際通","东京晴空塔":"東京晴空塔","越後湯沢温泉":"越後湯沢溫泉","乳頭温泉郷":"乳頭溫泉郷","伊势神宫":"伊勢神宮","屏幕内":"屏幕內","大内宿":"大內宿","横浜":"橫浜","检查网络":"檢查網絡","已连接":"已連接","锦带桥":"錦帶橋","石见银山":"石見銀山","石垣岛":"石垣島","祇园":"祇園","长途":"長途","神户港塔":"神戶港塔","富冈制纱厂":"富岡制紗廠","养老溪谷":"養老溪谷","栗林公园":"慄林公園","函馆山":"函館山","简体":"簡體","同步设置":"同步設置","东寻坊":"東尋坊","你在约":"你在約","南紀白浜温泉":"南紀白浜溫泉","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","港未来町":"港未來町","南亚":"南亞","将在下次成功推送时同步":"將在下次成功推送時同步","隐藏外国料理":"隱藏外國料理","三朝温泉":"三朝溫泉","无":"無","雾凇":"霧凇","秋叶原":"秋葉原","弃用名单":"棄用名單","韩国料理":"韓國料理","成田国际机场":"成田國際機場","加入景点":"加入景點","无效":"無效","冲绳美丽海水族馆":"沖繩美麗海水族館","名称不能为空":"名稱不能爲空","全选":"全選","黒部峡谷":"黒部峽谷","彦根城":"彥根城","天妇罗":"天婦羅","关西国际机场":"關西國際機場","鸣子温泉":"鳴子溫泉","万座毛":"萬座毛","下吕温泉":"下呂溫泉","伴手礼":"伴手禮","点这里看图文教程":"點這裏看圖文教程","景点锚点":"景點錨點","城市轨道":"城市軌道","吉野里遗址":"吉野裏遺址","锅物":"鍋物","中国料理眺游楼":"中國料理眺遊樓","打开完整":"打開完整","鬼怒川温泉":"鬼怒川溫泉","札幌時計台":"札幌時計臺","知床国立公园":"知牀國立公園","兴福寺":"興福寺","会津若松城":"會津若松城","大三岛":"大三島","车站":"車站","下呂温泉":"下呂溫泉","男鹿半岛":"男鹿半島","旭川市旭山动物园":"旭川市旭山動物園","获奖":"獲獎","预约":"預約","如何注册":"如何註冊","复制":"複製","上野公园":"上野公園","奥入瀬":"奧入瀬","试试":"試試","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","请检查网络":"請檢查網絡","太宰府天满宫":"太宰府天滿宮","银座":"銀座","国際通":"國際通","鸣门漩涡":"鳴門漩渦","浅草寺":"淺草寺","福冈塔":"福岡塔","新仓山浅间公园":"新倉山淺間公園","上滑查看详情":"上滑查看詳情","淡路岛":"淡路島","外国料理":"外國料理","西点":"西點","饺子":"餃子","大通公园":"大通公園","台場":"臺場","拉面":"拉麪","东大寺":"東大寺","伊香保温泉":"伊香保溫泉","夫婦岩":"夫婦巖","图层切换":"圖層切換","有马温泉":"有馬溫泉","鸟取砂丘":"鳥取砂丘","日本环球影城":"日本環球影城","请填":"請填","箱根温泉":"箱根溫泉","东南亚料理":"東南亞料理","仓敷美观地区":"倉敷美觀地區","盖饭":"蓋飯","东山东":"東山東","久能山东照宫":"久能山東照宮","热海温泉":"熱海溫泉","下次操作会写入":"下次操作會寫入","丰洲市场":"豐洲市場","测试中":"測試中","关东煮":"關東煮","高千穂峡":"高千穂峽","长崎和平公园":"長崎和平公園","栗林公園":"慄林公園","谷川岳":"谷川嶽","加载失败":"加載失敗","翻译":"翻譯","保存并测试":"保存並測試","隐藏弃用名单":"隱藏棄用名單","图标必须是":"圖標必須是","端岛":"端島","那须高原":"那須高原","松岛":"松島","伊豆半岛":"伊豆半島","黒川温泉":"黒川溫泉","大濠公园":"大濠公園"};
+  var TEXT_TRAD_MAP = {"按钮里的选择器":"按鈕裏的選擇器","内脏":"內臟","南纪白滨温泉":"南紀白濱溫泉","中国料理":"中國料理","检查网络":"檢查網絡","交差点":"交差點","重置筛选":"重置篩選","国营常陆海滨公园":"國營常陸海濱公園","长途线路":"長途線路","弥彦神社":"彌彥神社","冈山城":"岡山城","成田国际机场":"成田國際機場","银山温泉":"銀山溫泉","广岛和平纪念公园":"廣島和平紀念公園","港未来町":"港未來町","小吃":"小喫","已弃用":"已棄用","地狱谷野猿公苑":"地獄谷野猿公苑","名称不能为空":"名稱不能爲空","车站":"車站","串烧":"串燒","点击查看":"點擊查看","筑地市场":"築地市場","乳头温泉乡":"乳頭溫泉鄉","角岛大橋":"角島大橋","长瀞町":"長瀞町","请填":"請填","同步设置":"同步設置","关西国际机场":"關西國際機場","复制":"複製","输入更多字以缩小范围":"輸入更多字以縮小範圍","越後湯沢温泉":"越後湯沢溫泉","机车博物馆":"機車博物館","屏幕内":"屏幕內","苗场山":"苗場山","江之岛":"江之島","地铁":"地鐵","出云大社":"出雲大社","热海温泉":"熱海溫泉","日本环球影城":"日本環球影城","福冈塔":"福岡塔","私铁":"私鐵","富田农场":"富田農場","伊势神宫":"伊勢神宮","热田神宫":"熱田神宮","彦根城":"彥根城","函馆山":"函館山","市内":"市內","加载失败":"加載失敗","那须高原":"那須高原","获奖":"獲獎","可粘贴任意":"可粘貼任意","鸟羽水族馆":"鳥羽水族館","无":"無","二条城":"二條城","国営":"國営","长途":"長途","没有匹配的结果":"沒有匹配的結果","其他区域":"其他區域","三朝温泉":"三朝溫泉","详情":"詳情","吉野里遗址":"吉野裏遺址","养老溪谷":"養老溪谷","道顿堀":"道頓堀","弃用":"棄用","韩国料理":"韓國料理","淡路岛":"淡路島","青岛神社":"青島神社","成田山新胜寺":"成田山新勝寺","铁板烧":"鐵板燒","仙岩园":"仙岩園","无效":"無效","渡月桥":"渡月橋","伊豆半岛":"伊豆半島","上滑查看详情":"上滑查看詳情","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","石见银山":"石見銀山","没有写权限":"沒有寫權限","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","横滨中华街":"橫濱中華街","打开筛选":"打開篩選","下呂温泉":"下呂溫泉","外国料理":"外國料理","世纪美术馆":"世紀美術館","延历寺":"延歷寺","选择器":"選擇器","保存并测试":"保存並測試","明治神宫":"明治神宮","哥拉巴园":"哥拉巴園","华严瀑布":"華嚴瀑布","你在约":"你在約","太宰府天满宫":"太宰府天滿宮","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","会津若松":"會津若松","图标必须是":"圖標必須是","门司港怀旧":"門司港懷舊","改动未同步到":"改動未同步到","大濠公园":"大濠公園","删除收藏":"刪除收藏","炭火烧鸟正":"炭火燒鳥正","栗林公園":"慄林公園","足立美术馆":"足立美術館","地图搜索":"地圖搜索","显示我的位置":"顯示我的位置","已选":"已選","眺游楼":"眺遊樓","阿波舞会馆":"阿波舞會館","伊香保温泉":"伊香保溫泉","大三岛":"大三島","锅物":"鍋物","心斋桥":"心齋橋","关东煮":"關東煮","石垣岛":"石垣島","猎奇":"獵奇","净土滨":"淨土濱","小豆岛":"小豆島","荞麦":"蕎麥","乳頭温泉郷":"乳頭溫泉郷","测试中":"測試中","韩":"韓","轻井泽":"輕井澤","鹈户神宫":"鵜戶神宮","黒部峡谷":"黒部峽谷","道后温泉":"道後溫泉","浅草寺":"淺草寺","试试":"試試","隐藏弃用名单":"隱藏棄用名單","个其他匹配":"個其他匹配","会津若松城":"會津若松城","草津温泉":"草津溫泉","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","银座":"銀座","下滩站":"下灘站","龙泉洞":"龍泉洞","御好烧":"御好燒","同步失败":"同步失敗","旭川市旭山动物园":"旭川市旭山動物園","删除景点":"刪除景點","横浜":"橫浜","天妇罗":"天婦羅","小樽运河":"小樽運河","新仓山浅间公园":"新倉山淺間公園","烤鸡":"烤雞","隐藏":"隱藏","渲染失败":"渲染失敗","高千穂峡":"高千穂峽","翻译":"翻譯","乡土":"鄉土","仓敷美观地区":"倉敷美觀地區","由布院温泉":"由布院溫泉","古宇利岛":"古宇利島","东京迪士尼乐园":"東京迪士尼樂園","已连接":"已連接","鸭川海洋世界":"鴨川海洋世界","大内宿":"大內宿","面类":"面類","名称":"名稱","熱海温泉":"熱海溫泉","万座毛":"萬座毛","鳴子温泉":"鳴子溫泉","倉敷美観地区":"倉敷美観地區","梦":"夢","栗林公园":"慄林公園","箱根温泉":"箱根溫泉","下次操作会写入":"下次操作會寫入","点心":"點心","景点":"景點","无法加载":"無法加載","寿司":"壽司","札幌時計台":"札幌時計臺","道後温泉":"道後溫泉","夫婦岩":"夫婦巖","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","新干线":"新幹線","富冈制纱厂":"富岡制紗廠","已复制":"已複製","严岛神社":"嚴島神社","佐渡岛":"佐渡島","武雄温泉":"武雄溫泉","国際通":"國際通","保存失败":"保存失敗","樱岛":"櫻島","有馬温泉":"有馬溫泉","上野公园":"上野公園","黑川温泉":"黑川溫泉","南亚":"南亞","不勾则不限制":"不勾則不限制","白川乡":"白川鄉","新倉山浅間公園":"新倉山淺間公園","不会配":"不會配","秋叶原":"秋葉原","景点锚点":"景點錨點","正在重试上次失败的同步":"正在重試上次失敗的同步","関西国際空港":"関西國際空港","后乐园":"後樂園","男鹿半岛":"男鹿半島","只读模式":"只讀模式","拉面":"拉麪","恢复显示":"恢復顯示","删除":"刪除","鹤冈八幡宫":"鶴岡八幡宮","炭火烧鸟":"炭火燒鳥","西点":"西點","乌冬":"烏冬","台場":"臺場","亲子丼":"親子丼","松岛":"松島","将在下次成功推送时同步":"將在下次成功推送時同步","加载中":"加載中","札幌市钟楼":"札幌市鐘樓","田泽湖":"田澤湖","餐厅库":"餐廳庫","东京国际机场":"東京國際機場","范围内":"範圍內","筛选":"篩選","类型":"類型","知床国立公園":"知牀國立公園","价格":"價格","横浜中華街":"橫浜中華街","东南亚料理":"東南亞料理","祇园":"祇園","用户自添景点":"用戶自添景點","神户港塔":"神戶港塔","会津若松市":"會津若松市","图层切换":"圖層切換","盖饭":"蓋飯","雾凇":"霧凇","日光东照宫":"日光東照宮","有马温泉":"有馬溫泉","打开完整":"打開完整","鸣子温泉":"鳴子溫泉","东山东":"東山東","搜索餐厅":"搜索餐廳","海鲜":"海鮮","里歴史公園":"裏歴史公園","阿苏山":"阿蘇山","城市轨道":"城市軌道","语言":"語言","晚餐价格":"晚餐價格","通天阁":"通天閣","兴福寺":"興福寺","兼六园":"兼六園","东寻坊":"東尋坊","请检查网络":"請檢查網絡","御台场":"御臺場","改动未同步":"改動未同步","黑部峡谷":"黑部峽谷","全选":"全選","冲绳美丽海水族馆":"沖繩美麗海水族館","福井县立恐龙博物馆":"福井縣立恐龍博物館","奥入瀬":"奧入瀬","鸣门漩涡":"鳴門漩渦","首里城":"首裏城","屋久岛":"屋久島","关闭":"關閉","东京晴空塔":"東京晴空塔","东大寺":"東大寺","蔓桥":"蔓橋","黒川温泉":"黒川溫泉","越后汤泽温泉":"越後湯澤溫泉","弃用名单":"棄用名單","鸟取砂丘":"鳥取砂丘","伏见稻荷大社":"伏見稻荷大社","海游馆":"海遊館","中禅寺湖":"中禪寺湖","当前位置在地图范围之外":"當前位置在地圖範圍之外","点这里看图文教程":"點這裏看圖文教程","夫妇岩":"夫婦巖","中东":"中東","鬼怒川温泉":"鬼怒川溫泉","金泽":"金澤","端岛":"端島","指宿温泉":"指宿溫泉","下吕温泉":"下呂溫泉","大吊桥":"大吊橋","勾选后只看对应获奖店":"勾選後只看對應獲獎店","涩谷路口":"澀谷路口","评分":"評分","隐藏外国料理":"隱藏外國料理","搜索失败":"搜索失敗","锦带桥":"錦帶橋","只显示已收藏":"只顯示已收藏","热门餐厅":"熱門餐廳","严美溪":"嚴美溪","丰洲市场":"豐洲市場","烧":"燒","伴手礼":"伴手禮","金刀比罗宫":"金刀比羅宮","谷川岳":"谷川嶽","长崎和平公园":"長崎和平公園","白须神社":"白鬚神社","会館":"會館","南紀白浜温泉":"南紀白浜溫泉","简体":"簡體","多选取并集":"多選取並集","四万十川":"四萬十川","久能山东照宫":"久能山東照宮","国际通":"國際通","奈良公园":"奈良公園","偕乐园":"偕樂園","中国料理眺游楼":"中國料理眺遊樓","显示":"顯示","眺遊楼":"眺遊樓","知床国立公园":"知牀國立公園","大通公园":"大通公園","如何注册":"如何註冊","銀山温泉":"銀山溫泉","饺子":"餃子","桂滨":"桂濱","东京塔":"東京塔","预约":"預約","龙安寺":"龍安寺","加入景点":"加入景點","大须":"大須"};
   // English lookup, same shape — keys are CJK runs in the rendered
   // page, values come from data/i18n/en.json. Runs without an entry
   // stay in Chinese at runtime (the build log lists what's missing).
-  var TEXT_EN_MAP = {"烤鸡":"Yakitori","西式料理":"Western cuisine","只读模式":"Read-only mode","秋葉原":"Akihabara","类型":"Type","翻譯":"Translate","已清除":"Cleared","松江城":"Matsue Castle","当前位置在地图范围之外":"Current location is outside the map","咖啡":"Cafe","已弃用":"Hidden","市内":"In-city","內臟":"Offal","多选取并集":"Multi-select = union","冰品":"Ice cream","显示我的位置":"Show my location","只显示已收藏":"Saved only","韩":"Korean","搜尋餐廳":"Search restaurants","冈山城":"Okayama Castle","三朝溫泉":"Misasa Onsen","百名店":"Hyakumeiten","上野公園":"Ueno Park","岡山城":"Okayama Castle","选择器":"Picker","定位到我的位置":"Locate me","名称":"Name","不勾则不限制":"Leave unchecked for no filter","同步教程":"Sync setup guide","例如":"e.g.","築地場外市場":"Tsukiji Outer Market","搜索餐厅":"Search restaurants","寿司":"Sushi","通天阁":"Tsutenkaku","乌冬":"Udon","删除景点":"Remove Sight","串烧":"Skewers","六本木新城":"Roppongi Hills","炭火烧鸟":"Charcoal yakitori","中餐":"Chinese","小吃":"Snacks","隐藏":"Hide","已复制":"Copied","范围内":"In range","出雲大社":"Izumo Taisha","全部":"All","语言":"Language","海鲜":"Seafood","日本環球影城":"Universal Studios Japan","渲染失败":"Render failed","改动未同步到":"Changes not synced to","繁體":"Traditional","源文件":"Source","教程文件缺失":"Guide file missing","调整左侧筛选条件可让它出现在地图上":"Adjust filters to bring it onto the map","道頓堀":"Dotonbori","餐厅库":"Restaurant library","正餐":"Mains","中东":"Middle East","拉麵":"Ramen","晚":"Dinner","早餐":"Breakfast","保存失败":"Save failed","銀座":"Ginza","同步失败":"Sync failed","通天閣":"Tsutenkaku","不会配":"Need help?","地铁":"Subway","乡土":"Regional","同步中":"Syncing","眺遊楼":"Tiao You Lou","加载中":"Loading","去":"Go","搜索失败":"Search failed","我的收藏":"My Saved","日本料理":"Japanese cuisine","地图搜索":"Map search","烧":"Grilled","淺草寺":"Senso-ji","烘焙":"Bakery","烤肉":"Yakiniku","明治神宮":"Meiji Shrine","明治神宫":"Meiji Shrine","東京迪士尼樂園":"Tokyo Disneyland","御好烧":"Okonomiyaki","输入更多字以缩小范围":"Type more to narrow the search","酒吧":"Bar","海游馆":"Kaiyukan Aquarium","道顿堀":"Dotonbori","中":"Chinese","正在拉取":"Fetching","出云大社":"Izumo Taisha","铁板烧":"Teppanyaki","荞麦":"Soba","景点":"Sights","私铁":"Private rail","删除收藏":"Remove","面类":"Noodles","价格":"Price","已存本地":"Saved locally","炭火焼鳥正":"Sumibi Yakitori Sho","内脏":"Offal","西":"Western","焼":"Grilled","用户自添景点":"Custom Sights","珍味":"Delicacies","西餐":"Western","其他区域":"Other regions","点击查看":"click for details","沾面":"Tsukemen","热门餐厅":"Hot restaurants","東京塔":"Tokyo Tower","亲子丼":"Oyakodon","未命名":"Unnamed","没有写权限":"Read-only access","炭火烧鸟正":"Charcoal yakitori","没有匹配的结果":"No results","东京塔":"Tokyo Tower","关闭":"Close","倉敷美觀地區":"Kurashiki Bikan","筛选":"Filter","新世界":"Shinsekai","足立美术馆":"Adachi Museum of Art","打开筛选":"Open filters","其他":"Other","无法加载":"Failed to load","海遊館":"Kaiyukan Aquarium","个其他匹配":"more matches","甜品":"Desserts","改动未同步":"Changes not synced","重置筛选":"Reset filters","详情":"Details","眺游楼":"Tiao You Lou","按钮里的选择器":"Picker in the button","已选":"Selected","足立美術館":"Adachi Museum of Art","猎奇":"Adventurous","东京迪士尼乐园":"Tokyo Disneyland","中国料理":"Chinese cuisine","菜系":"Cuisine","显示":"Show","新宿御苑":"Shinjuku Gyoen","长途线路":"Long-haul lines","炸物":"Fried","弃用":"Hide","勾选后只看对应获奖店":"Check to filter to award winners only","晚餐价格":"Dinner price","正在重试上次失败的同步":"Retrying last failed sync","点心":"Confectionery","新干线":"Shinkansen","评分":"Rating","大阪城":"Osaka Castle","座位":"Seats","可粘贴任意":"Paste any","东京晴空塔":"Tokyo Skytree","清空":"Clear","保存中":"Saving","屏幕内":"On screen","横浜":"Yokohama","東京晴空塔":"Tokyo Skytree","检查网络":"check your network","已连接":"Connected","长途":"Long-haul","保存":"Save","简体":"Simplified","同步设置":"Sync settings","你在约":"You booked","收藏":"Saved","此餐厅当前不在筛选范围内":"This restaurant is outside the current filter","南亚":"South Asian","原文":"Original","将在下次成功推送时同步":"Will sync on next successful push","是空的":"is empty","搜索中":"Searching","可貼上任意":"Paste any","隐藏外国料理":"Hide foreign","三朝温泉":"Misasa Onsen","无":"None","皇居":"Imperial Palace","秋叶原":"Akihabara","弃用名单":"Discarded","韩国料理":"Korean","午":"Lunch","加入景点":"Add as Sight","无效":"Invalid","本地模式":"Local mode","名称不能为空":"Name cannot be empty","全选":"All","配置成功":"Configured","天妇罗":"Tempura","景點":"Sights","伴手礼":"Gift food","点这里看图文教程":"Click for a step-by-step guide","景点锚点":"Tourist Sights","城市轨道":"Urban rail","锅物":"Hot pot","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","打开完整":"Open full","和":"&","车站":"Station","三明治":"Sandwich","居酒屋":"Izakaya","获奖":"Awards","预约":"Booking","如何注册":"How to set up","复制":"Copy","上野公园":"Ueno Park","试试":"Try","日式咖喱":"Japanese curry","地址":"Address","请检查网络":"Check your network","银座":"Ginza","非洲":"Africa","浅草寺":"Senso-ji","已收藏":"Saved","上滑查看详情":"Swipe up for details","外国料理":"Foreign cuisine","鳥取砂丘":"Tottori Sand Dunes","西点":"Pastry","饺子":"Gyoza","改":"Change","拉面":"Ramen","加入收藏":"Save","图层切换":"Layers","鸟取砂丘":"Tottori Sand Dunes","日本环球影城":"Universal Studios Japan","请填":"Enter","东南亚料理":"Southeast Asian","仓敷美观地区":"Kurashiki Bikan","可":"Available","盖饭":"Donburi","已同步":"Synced","下次操作会写入":"Next change will write","丰洲市场":"Toyosu Market","测试中":"Testing","关东煮":"Oden","豐洲市場":"Toyosu Market","常用":"Common","加载失败":"Load failed","翻译":"Translate","保存并测试":"Save & test","隐藏弃用名单":"Hide discarded","图标必须是":"Icon must be","正":"Sho","全清":"None","取消":"Cancel","不可":"Not available","找不到":"Not found"};
+  var TEXT_EN_MAP = {"配置成功":"Configured","按钮里的选择器":"Picker in the button","内脏":"Offal","通天閣":"Tsutenkaku","中国料理":"Chinese cuisine","检查网络":"check your network","重置筛选":"Reset filters","长途线路":"Long-haul lines","冈山城":"Okayama Castle","小吃":"Snacks","已弃用":"Hidden","日本料理":"Japanese cuisine","名称不能为空":"Name cannot be empty","车站":"Station","串烧":"Skewers","点击查看":"click for details","倉敷美觀地區":"Kurashiki Bikan","已同步":"Synced","请填":"Enter","皇居":"Imperial Palace","同步设置":"Sync settings","全清":"None","复制":"Copy","道頓堀":"Dotonbori","输入更多字以缩小范围":"Type more to narrow the search","屏幕内":"On screen","地铁":"Subway","出云大社":"Izumo Taisha","大阪城":"Osaka Castle","日本环球影城":"Universal Studios Japan","私铁":"Private rail","非洲":"Africa","座位":"Seats","市内":"In-city","加载失败":"Load failed","获奖":"Awards","可粘贴任意":"Paste any","搜尋餐廳":"Search restaurants","繁體":"Traditional","原文":"Original","无":"None","长途":"Long-haul","没有匹配的结果":"No results","其他区域":"Other regions","三朝温泉":"Misasa Onsen","去":"Go","详情":"Details","上野公園":"Ueno Park","築地場外市場":"Tsukiji Outer Market","中":"Chinese","百名店":"Hyakumeiten","道顿堀":"Dotonbori","弃用":"Hide","和":"&","保存中":"Saving","韩国料理":"Korean","找不到":"Not found","全部":"All","炭火焼鳥正":"Sumibi Yakitori Sho","铁板烧":"Teppanyaki","无效":"Invalid","新世界":"Shinsekai","上滑查看详情":"Swipe up for details","此餐厅当前不在筛选范围内":"This restaurant is outside the current filter","取消":"Cancel","没有写权限":"Read-only access","打开筛选":"Open filters","同步中":"Syncing","外国料理":"Foreign cuisine","西餐":"Western","是空的":"is empty","选择器":"Picker","保存并测试":"Save & test","足立美術館":"Adachi Museum of Art","明治神宫":"Meiji Shrine","你在约":"You booked","调整左侧筛选条件可让它出现在地图上":"Adjust filters to bring it onto the map","图标必须是":"Icon must be","晚":"Dinner","改动未同步到":"Changes not synced to","東京迪士尼樂園":"Tokyo Disneyland","删除收藏":"Remove","炭火烧鸟正":"Charcoal yakitori","足立美术馆":"Adachi Museum of Art","同步教程":"Sync setup guide","地图搜索":"Map search","新宿御苑":"Shinjuku Gyoen","显示我的位置":"Show my location","秋葉原":"Akihabara","六本木新城":"Roppongi Hills","我的收藏":"My Saved","已选":"Selected","眺游楼":"Tiao You Lou","出雲大社":"Izumo Taisha","锅物":"Hot pot","炸物":"Fried","未命名":"Unnamed","关东煮":"Oden","猎奇":"Adventurous","正在拉取":"Fetching","荞麦":"Soba","测试中":"Testing","韩":"Korean","景點":"Sights","岡山城":"Okayama Castle","午":"Lunch","浅草寺":"Senso-ji","试试":"Try","隐藏弃用名单":"Hide discarded","个其他匹配":"more matches","银座":"Ginza","正":"Sho","御好烧":"Okonomiyaki","本地模式":"Local mode","同步失败":"Sync failed","删除景点":"Remove Sight","横浜":"Yokohama","天妇罗":"Tempura","烤鸡":"Yakitori","隐藏":"Hide","渲染失败":"Render failed","珍味":"Delicacies","東京晴空塔":"Tokyo Skytree","翻译":"Translate","乡土":"Regional","仓敷美观地区":"Kurashiki Bikan","已清除":"Cleared","保存":"Save","东京迪士尼乐园":"Tokyo Disneyland","已连接":"Connected","面类":"Noodles","名称":"Name","下次操作会写入":"Next change will write","点心":"Confectionery","景点":"Sights","无法加载":"Failed to load","寿司":"Sushi","改":"Change","新干线":"Shinkansen","已复制":"Copied","冰品":"Ice cream","常用":"Common","保存失败":"Save failed","上野公园":"Ueno Park","南亚":"South Asian","居酒屋":"Izakaya","可":"Available","不勾则不限制":"Leave unchecked for no filter","內臟":"Offal","不会配":"Need help?","秋叶原":"Akihabara","景点锚点":"Tourist Sights","正在重试上次失败的同步":"Retrying last failed sync","只读模式":"Read-only mode","拉面":"Ramen","西":"Western","已存本地":"Saved locally","炭火烧鸟":"Charcoal yakitori","西点":"Pastry","乌冬":"Udon","可貼上任意":"Paste any","亲子丼":"Oyakodon","将在下次成功推送时同步":"Will sync on next successful push","加载中":"Loading","餐厅库":"Restaurant library","明治神宮":"Meiji Shrine","范围内":"In range","筛选":"Filter","类型":"Type","豐洲市場":"Toyosu Market","价格":"Price","烤肉":"Yakiniku","日本環球影城":"Universal Studios Japan","东南亚料理":"Southeast Asian","用户自添景点":"Custom Sights","沾面":"Tsukemen","图层切换":"Layers","盖饭":"Donburi","松江城":"Matsue Castle","地址":"Address","定位到我的位置":"Locate me","打开完整":"Open full","咖啡":"Cafe","搜索中":"Searching","早餐":"Breakfast","搜索餐厅":"Search restaurants","海鲜":"Seafood","中餐":"Chinese","城市轨道":"Urban rail","收藏":"Saved","语言":"Language","其他":"Other","晚餐价格":"Dinner price","三明治":"Sandwich","通天阁":"Tsutenkaku","教程文件缺失":"Guide file missing","酒吧":"Bar","请检查网络":"Check your network","改动未同步":"Changes not synced","例如":"e.g.","全选":"All","已收藏":"Saved","清空":"Clear","关闭":"Close","鳥取砂丘":"Tottori Sand Dunes","东京晴空塔":"Tokyo Skytree","源文件":"Source","翻譯":"Translate","弃用名单":"Discarded","鸟取砂丘":"Tottori Sand Dunes","海游馆":"Kaiyukan Aquarium","当前位置在地图范围之外":"Current location is outside the map","点这里看图文教程":"Click for a step-by-step guide","中东":"Middle East","勾选后只看对应获奖店":"Check to filter to award winners only","评分":"Rating","隐藏外国料理":"Hide foreign","搜索失败":"Search failed","只显示已收藏":"Saved only","热门餐厅":"Hot restaurants","丰洲市场":"Toyosu Market","烧":"Grilled","正餐":"Mains","伴手礼":"Gift food","菜系":"Cuisine","拉麵":"Ramen","西式料理":"Western cuisine","烘焙":"Bakery","简体":"Simplified","多选取并集":"Multi-select = union","甜品":"Desserts","銀座":"Ginza","焼":"Grilled","加入收藏":"Save","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","显示":"Show","眺遊楼":"Tiao You Lou","如何注册":"How to set up","東京塔":"Tokyo Tower","饺子":"Gyoza","海遊館":"Kaiyukan Aquarium","三朝溫泉":"Misasa Onsen","东京塔":"Tokyo Tower","预约":"Booking","日式咖喱":"Japanese curry","不可":"Not available","加入景点":"Add as Sight","淺草寺":"Senso-ji"};
   // Japanese lookup, same shape. Values come from data/i18n/ja.json.
   // Runs without an entry stay in Chinese at runtime.
-  var TEXT_JA_MAP = {"烤鸡":"焼鳥","西式料理":"西洋料理","只读模式":"読み取り専用モード","秋葉原":"秋葉原","类型":"種類","翻譯":"翻訳","已清除":"クリア済み","松江城":"松江城","当前位置在地图范围之外":"現在地は地図の範囲外です","咖啡":"カフェ","已弃用":"非表示中","市内":"市内","內臟":"ホルモン","多选取并集":"複数選択 = 和集合","冰品":"アイス","显示我的位置":"現在地を表示","只显示已收藏":"お気に入りのみ","韩":"韓","搜尋餐廳":"レストラン検索","冈山城":"岡山城","三朝溫泉":"三朝温泉","百名店":"百名店","上野公園":"上野公園","岡山城":"岡山城","选择器":"ピッカー","定位到我的位置":"現在地に移動","名称":"名称","不勾则不限制":"未チェックで制限なし","同步教程":"同期設定ガイド","例如":"例:","築地場外市場":"築地場外市場","搜索餐厅":"レストラン検索","寿司":"寿司","通天阁":"通天閣","乌冬":"うどん","删除景点":"スポット削除","串烧":"串焼き","六本木新城":"六本木ヒルズ","炭火烧鸟":"炭火焼鳥","中餐":"中華","小吃":"軽食","隐藏":"非表示","已复制":"コピー済み","范围内":"範囲内","出雲大社":"出雲大社","全部":"すべて","语言":"言語","海鲜":"海鮮","日本環球影城":"ユニバーサル・スタジオ・ジャパン","渲染失败":"レンダリング失敗","改动未同步到":"変更未同期:","繁體":"繁体字","源文件":"ソース","教程文件缺失":"ガイドファイルが見つかりません","调整左侧筛选条件可让它出现在地图上":"左のフィルターを調整して地図に表示できます","道頓堀":"道頓堀","餐厅库":"レストラン一覧","正餐":"メイン","中东":"中東","拉麵":"ラーメン","晚":"ディナー","早餐":"朝食","保存失败":"保存失敗","銀座":"銀座","同步失败":"同期失敗","通天閣":"通天閣","不会配":"設定が分からない?","地铁":"地下鉄","乡土":"郷土","同步中":"同期中","眺遊楼":"眺遊楼","加载中":"読み込み中","去":"行く","搜索失败":"検索失敗","我的收藏":"マイお気に入り","日本料理":"日本料理","地图搜索":"マップ検索","烧":"焼","淺草寺":"浅草寺","烘焙":"ベーカリー","烤肉":"焼肉","明治神宮":"明治神宮","明治神宫":"明治神宮","東京迪士尼樂園":"東京ディズニーランド","御好烧":"お好み焼き","输入更多字以缩小范围":"もっと入力して絞り込む","酒吧":"バー","海游馆":"海遊館","道顿堀":"道頓堀","中":"中華","正在拉取":"取得中","出云大社":"出雲大社","铁板烧":"鉄板焼き","荞麦":"そば","景点":"観光スポット","私铁":"私鉄","删除收藏":"削除","面类":"麺類","价格":"価格","已存本地":"ローカル保存済み","炭火焼鳥正":"炭火焼鳥 正","内脏":"ホルモン","西":"西洋","焼":"焼","用户自添景点":"カスタムスポット","珍味":"珍味","西餐":"西洋料理","其他区域":"他の地域","点击查看":"詳細を見る","沾面":"つけ麺","热门餐厅":"人気店","東京塔":"東京タワー","亲子丼":"親子丼","未命名":"無題","没有写权限":"書き込み権限なし","炭火烧鸟正":"炭火焼鳥 正","没有匹配的结果":"結果なし","东京塔":"東京タワー","关闭":"閉じる","倉敷美觀地區":"倉敷美観地区","筛选":"フィルター","新世界":"新世界","足立美术馆":"足立美術館","打开筛选":"フィルターを開く","其他":"その他","无法加载":"読み込めません","海遊館":"海遊館","个其他匹配":"件の他の一致","甜品":"スイーツ","改动未同步":"変更未同期","重置筛选":"フィルターをリセット","详情":"詳細","眺游楼":"眺遊楼","按钮里的选择器":"ボタン内のピッカー","已选":"選択中","足立美術館":"足立美術館","猎奇":"ゲテモノ","东京迪士尼乐园":"東京ディズニーランド","中国料理":"中国料理","菜系":"ジャンル","显示":"表示","新宿御苑":"新宿御苑","长途线路":"長距離路線","炸物":"揚げ物","弃用":"非表示","勾选后只看对应获奖店":"チェックで受賞店のみ表示","晚餐价格":"ディナー価格","正在重试上次失败的同步":"前回失敗した同期を再試行中","点心":"和菓子","新干线":"新幹線","评分":"評価","大阪城":"大阪城","座位":"席数","可粘贴任意":"任意の絵文字を貼り付け可","东京晴空塔":"東京スカイツリー","清空":"クリア","保存中":"保存中","屏幕内":"画面内","横浜":"横浜","東京晴空塔":"東京スカイツリー","检查网络":"ネットワークを確認","已连接":"接続済み","长途":"長距離","保存":"保存","简体":"簡体字","同步设置":"同期設定","你在约":"予約済","收藏":"お気に入り","此餐厅当前不在筛选范围内":"この店は現在のフィルター範囲外です","南亚":"南アジア","原文":"原文","将在下次成功推送时同步":"次回成功時に同期されます","是空的":"は空です","搜索中":"検索中","可貼上任意":"任意の絵文字を貼り付け可","隐藏外国料理":"外国料理を隠す","三朝温泉":"三朝温泉","无":"なし","皇居":"皇居","秋叶原":"秋葉原","弃用名单":"非表示リスト","韩国料理":"韓国料理","午":"ランチ","加入景点":"スポットとして追加","无效":"無効","本地模式":"ローカルモード","名称不能为空":"名称は必須です","全选":"全選択","配置成功":"設定完了","天妇罗":"天ぷら","景點":"観光スポット","伴手礼":"お土産","点这里看图文教程":"ステップバイステップガイド","景点锚点":"観光スポット","城市轨道":"都市鉄道","锅物":"鍋物","中国料理眺游楼":"中国料理 眺遊楼","打开完整":"全画面で開く","和":"&","车站":"駅","三明治":"サンドイッチ","居酒屋":"居酒屋","获奖":"受賞","预约":"予約","如何注册":"設定方法","复制":"コピー","上野公园":"上野公園","试试":"試す","日式咖喱":"日本式カレー","地址":"住所","请检查网络":"ネットワークを確認してください","银座":"銀座","非洲":"アフリカ","浅草寺":"浅草寺","已收藏":"登録済み","上滑查看详情":"上にスワイプで詳細","外国料理":"外国料理","鳥取砂丘":"鳥取砂丘","西点":"洋菓子","饺子":"餃子","改":"変更","拉面":"ラーメン","加入收藏":"保存","图层切换":"レイヤー切替","鸟取砂丘":"鳥取砂丘","日本环球影城":"ユニバーサル・スタジオ・ジャパン","请填":"入力してください","东南亚料理":"東南アジア料理","仓敷美观地区":"倉敷美観地区","可":"可","盖饭":"丼物","已同步":"同期済み","下次操作会写入":"次の操作で書き込みます","丰洲市场":"豊洲市場","测试中":"テスト中","关东煮":"おでん","豐洲市場":"豊洲市場","常用":"よく使う","加载失败":"読み込み失敗","翻译":"翻訳","保存并测试":"保存してテスト","隐藏弃用名单":"非表示リストを隠す","图标必须是":"アイコンは","正":"正","全清":"クリア","取消":"キャンセル","不可":"不可","找不到":"見つかりません"};
+  var TEXT_JA_MAP = {"配置成功":"設定完了","按钮里的选择器":"ボタン内のピッカー","内脏":"ホルモン","通天閣":"通天閣","中国料理":"中国料理","检查网络":"ネットワークを確認","重置筛选":"フィルターをリセット","长途线路":"長距離路線","冈山城":"岡山城","小吃":"軽食","已弃用":"非表示中","日本料理":"日本料理","名称不能为空":"名称は必須です","车站":"駅","串烧":"串焼き","点击查看":"詳細を見る","倉敷美觀地區":"倉敷美観地区","已同步":"同期済み","请填":"入力してください","皇居":"皇居","同步设置":"同期設定","全清":"クリア","复制":"コピー","道頓堀":"道頓堀","输入更多字以缩小范围":"もっと入力して絞り込む","屏幕内":"画面内","地铁":"地下鉄","出云大社":"出雲大社","大阪城":"大阪城","日本环球影城":"ユニバーサル・スタジオ・ジャパン","私铁":"私鉄","非洲":"アフリカ","座位":"席数","市内":"市内","加载失败":"読み込み失敗","获奖":"受賞","可粘贴任意":"任意の絵文字を貼り付け可","搜尋餐廳":"レストラン検索","繁體":"繁体字","原文":"原文","无":"なし","长途":"長距離","没有匹配的结果":"結果なし","其他区域":"他の地域","三朝温泉":"三朝温泉","去":"行く","详情":"詳細","上野公園":"上野公園","築地場外市場":"築地場外市場","中":"中華","百名店":"百名店","道顿堀":"道頓堀","弃用":"非表示","和":"&","保存中":"保存中","韩国料理":"韓国料理","找不到":"見つかりません","全部":"すべて","炭火焼鳥正":"炭火焼鳥 正","铁板烧":"鉄板焼き","无效":"無効","新世界":"新世界","上滑查看详情":"上にスワイプで詳細","此餐厅当前不在筛选范围内":"この店は現在のフィルター範囲外です","取消":"キャンセル","没有写权限":"書き込み権限なし","打开筛选":"フィルターを開く","同步中":"同期中","外国料理":"外国料理","西餐":"西洋料理","是空的":"は空です","选择器":"ピッカー","保存并测试":"保存してテスト","足立美術館":"足立美術館","明治神宫":"明治神宮","你在约":"予約済","调整左侧筛选条件可让它出现在地图上":"左のフィルターを調整して地図に表示できます","图标必须是":"アイコンは","晚":"ディナー","改动未同步到":"変更未同期:","東京迪士尼樂園":"東京ディズニーランド","删除收藏":"削除","炭火烧鸟正":"炭火焼鳥 正","足立美术馆":"足立美術館","同步教程":"同期設定ガイド","地图搜索":"マップ検索","新宿御苑":"新宿御苑","显示我的位置":"現在地を表示","秋葉原":"秋葉原","六本木新城":"六本木ヒルズ","我的收藏":"マイお気に入り","已选":"選択中","眺游楼":"眺遊楼","出雲大社":"出雲大社","锅物":"鍋物","炸物":"揚げ物","未命名":"無題","关东煮":"おでん","猎奇":"ゲテモノ","正在拉取":"取得中","荞麦":"そば","测试中":"テスト中","韩":"韓","景點":"観光スポット","岡山城":"岡山城","午":"ランチ","浅草寺":"浅草寺","试试":"試す","隐藏弃用名单":"非表示リストを隠す","个其他匹配":"件の他の一致","银座":"銀座","正":"正","御好烧":"お好み焼き","本地模式":"ローカルモード","同步失败":"同期失敗","删除景点":"スポット削除","横浜":"横浜","天妇罗":"天ぷら","烤鸡":"焼鳥","隐藏":"非表示","渲染失败":"レンダリング失敗","珍味":"珍味","東京晴空塔":"東京スカイツリー","翻译":"翻訳","乡土":"郷土","仓敷美观地区":"倉敷美観地区","已清除":"クリア済み","保存":"保存","东京迪士尼乐园":"東京ディズニーランド","已连接":"接続済み","面类":"麺類","名称":"名称","下次操作会写入":"次の操作で書き込みます","点心":"和菓子","景点":"観光スポット","无法加载":"読み込めません","寿司":"寿司","改":"変更","新干线":"新幹線","已复制":"コピー済み","冰品":"アイス","常用":"よく使う","保存失败":"保存失敗","上野公园":"上野公園","南亚":"南アジア","居酒屋":"居酒屋","可":"可","不勾则不限制":"未チェックで制限なし","內臟":"ホルモン","不会配":"設定が分からない?","秋叶原":"秋葉原","景点锚点":"観光スポット","正在重试上次失败的同步":"前回失敗した同期を再試行中","只读模式":"読み取り専用モード","拉面":"ラーメン","西":"西洋","已存本地":"ローカル保存済み","炭火烧鸟":"炭火焼鳥","西点":"洋菓子","乌冬":"うどん","可貼上任意":"任意の絵文字を貼り付け可","亲子丼":"親子丼","将在下次成功推送时同步":"次回成功時に同期されます","加载中":"読み込み中","餐厅库":"レストラン一覧","明治神宮":"明治神宮","范围内":"範囲内","筛选":"フィルター","类型":"種類","豐洲市場":"豊洲市場","价格":"価格","烤肉":"焼肉","日本環球影城":"ユニバーサル・スタジオ・ジャパン","东南亚料理":"東南アジア料理","用户自添景点":"カスタムスポット","沾面":"つけ麺","图层切换":"レイヤー切替","盖饭":"丼物","松江城":"松江城","地址":"住所","定位到我的位置":"現在地に移動","打开完整":"全画面で開く","咖啡":"カフェ","搜索中":"検索中","早餐":"朝食","搜索餐厅":"レストラン検索","海鲜":"海鮮","中餐":"中華","城市轨道":"都市鉄道","收藏":"お気に入り","语言":"言語","其他":"その他","晚餐价格":"ディナー価格","三明治":"サンドイッチ","通天阁":"通天閣","教程文件缺失":"ガイドファイルが見つかりません","酒吧":"バー","请检查网络":"ネットワークを確認してください","改动未同步":"変更未同期","例如":"例:","全选":"全選択","已收藏":"登録済み","清空":"クリア","关闭":"閉じる","鳥取砂丘":"鳥取砂丘","东京晴空塔":"東京スカイツリー","源文件":"ソース","翻譯":"翻訳","弃用名单":"非表示リスト","鸟取砂丘":"鳥取砂丘","海游馆":"海遊館","当前位置在地图范围之外":"現在地は地図の範囲外です","点这里看图文教程":"ステップバイステップガイド","中东":"中東","勾选后只看对应获奖店":"チェックで受賞店のみ表示","评分":"評価","隐藏外国料理":"外国料理を隠す","搜索失败":"検索失敗","只显示已收藏":"お気に入りのみ","热门餐厅":"人気店","丰洲市场":"豊洲市場","烧":"焼","正餐":"メイン","伴手礼":"お土産","菜系":"ジャンル","拉麵":"ラーメン","西式料理":"西洋料理","烘焙":"ベーカリー","简体":"簡体字","多选取并集":"複数選択 = 和集合","甜品":"スイーツ","銀座":"銀座","焼":"焼","加入收藏":"保存","中国料理眺游楼":"中国料理 眺遊楼","显示":"表示","眺遊楼":"眺遊楼","如何注册":"設定方法","東京塔":"東京タワー","饺子":"餃子","海遊館":"海遊館","三朝溫泉":"三朝温泉","东京塔":"東京タワー","预约":"予約","日式咖喱":"日本式カレー","不可":"不可","加入景点":"スポットとして追加","淺草寺":"浅草寺"};
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -1785,6 +1802,22 @@
     // re-checking the entry's category (which the user could have changed
     // by deleting + re-adding, etc.).
     var bmMarkerById = {};
+    // Built-in landmarks the user has hidden. Lives as { id, category:
+    // "hidden" } entries inside the bookmarks array so it rides the same
+    // Gist sync as personal pins — no extra file or storage key. Only
+    // builtin IDs (fb-*) ever land in here; personal pins have their own
+    // delete flow.
+    var hiddenBuiltinIds = new Set();
+    function rebuildHiddenIds() {
+      hiddenBuiltinIds.clear();
+      bookmarks.forEach(function(bm) {
+        if (bm && bm.category === 'hidden'
+            && typeof bm.id === 'string'
+            && bm.id.indexOf('fb-') === 0) {
+          hiddenBuiltinIds.add(bm.id);
+        }
+      });
+    }
 
     function saveBookmarks() {
       try { localStorage.setItem(BM_KEY, JSON.stringify(bookmarks)); } catch (_) {}
@@ -1940,10 +1973,23 @@
       + '</div>';
     }
     function renderBookmark(bm) {
+      // Metadata-only entries (category: "hidden") carry just an id —
+      // they're a flag telling us a builtin should not render, not a pin
+      // of their own. Same defensive check for entries missing coords.
+      if (!bm || bm.category === 'hidden') return;
+      if (typeof bm.lat !== 'number' || typeof bm.lon !== 'number') return;
       var isAttraction = bm.category === 'attraction';
       var targetLayer = isAttraction ? userAttractionsLayer : bookmarksLayer;
+      // CSS hooks on the wrapper div Leaflet creates around the divIcon:
+      //   bm-mk          — every bookmark/attraction marker
+      //   bm-mk-builtin  — repo-shipped landmark (read-only source)
+      //   bm-mk-hidden   — user hid this builtin (display:none unless the
+      //                    body carries .attr-show-all)
+      var cls = 'empty bm-mk';
+      if (bm._builtin) cls += ' bm-mk-builtin';
+      if (bm._hidden)  cls += ' bm-mk-hidden';
       var icon = L.divIcon({
-        className: 'empty',
+        className: cls,
         iconSize: [0, 0],
         iconAnchor: [0, 0],
         html: bookmarkIconHtml(bm.emoji, bmDisplayName(bm),
@@ -1963,6 +2009,7 @@
         delete bmMarkerById[bm.id];
       }
     }
+    rebuildHiddenIds();
     bookmarks.forEach(renderBookmark);
     // Repo-shipped landmarks render alongside the personal layer but live
     // outside the localStorage/Gist sync — so a Gist push doesn't carry
@@ -1977,6 +2024,7 @@
       EMBEDDED_FAVORITES_BUILTIN.forEach(function(bm) {
         if (bmMarkerById[bm.id]) return;
         bm._builtin = true;
+        bm._hidden  = hiddenBuiltinIds.has(bm.id);
         renderBookmark(bm);
       });
     }
@@ -1984,21 +2032,41 @@
 
     function openBookmarkPopup(bm, marker) {
       var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
-      var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除收藏';
       // Larger popup offset for attractions because they render at 30px
       // instead of 22px — keeps the speech bubble tip from overlapping
       // the emoji.
       var offY = (bm.category === 'attraction') ? -30 : -22;
-      // Repo-shipped landmarks are read-only from the page — the source
-      // of truth is favorites_builtin.json in the repo. Hide the del
-      // button so a stray click can't half-delete (would clear it for
-      // the session only and reappear on next load).
-      var delBtn = bm._builtin ? '' :
-          '<button id="bm-del" ' +
-                  'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
-                         'border:1px solid #fecaca;border-radius:4px;' +
-                         'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
-                  delLabel + '</button>';
+      // Action button varies by entry type:
+      //   personal pin       → 删除  (one-shot, removes from bookmarks)
+      //   built-in (visible) → 隐藏  (adds metadata entry to bookmarks)
+      //   built-in (hidden)  → 恢复显示 (removes metadata entry)
+      // Built-ins themselves are never edited — the metadata flag in
+      // bookmarks is the only thing that changes, so a redeploy of
+      // favorites_builtin.json can still update names/coords and the
+      // user's hide list survives.
+      var actionBtn = '';
+      if (bm._builtin) {
+        if (bm._hidden) {
+          actionBtn = '<button id="bm-unhide" ' +
+              'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                     'border:1px solid #bfdbfe;border-radius:4px;' +
+                     'background:#eff6ff;color:#1d4ed8;font-weight:600;">' +
+              '恢复显示</button>';
+        } else {
+          actionBtn = '<button id="bm-hide" ' +
+              'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                     'border:1px solid #e5e7eb;border-radius:4px;' +
+                     'background:#f9fafb;color:#374151;font-weight:600;">' +
+              '隐藏</button>';
+        }
+      } else {
+        var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除收藏';
+        actionBtn = '<button id="bm-del" ' +
+            'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                   'border:1px solid #fecaca;border-radius:4px;' +
+                   'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
+            delLabel + '</button>';
+      }
       var html =
         '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
           '<div style="font-weight:700;margin-bottom:4px;">' +
@@ -2006,14 +2074,46 @@
           '</div>' +
           '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
                       'margin-bottom:8px;">' + coord + '</div>' +
-          delBtn +
+          actionBtn +
         '</div>';
       L.popup({offset: [0, offY]})
         .setLatLng([bm.lat, bm.lon])
         .setContent(html)
         .openOn(map);
-      if (bm._builtin) return;
+      // Wire whichever button ended up in the popup. setTimeout(0) gives
+      // Leaflet a frame to actually insert the popup HTML into the DOM.
       setTimeout(function() {
+        if (bm._builtin) {
+          var hideBtn = document.getElementById('bm-hide');
+          if (hideBtn) hideBtn.addEventListener('click', function() {
+            bookmarks.push({id: bm.id, category: 'hidden'});
+            hiddenBuiltinIds.add(bm.id);
+            bm._hidden = true;
+            // Re-render so the new bm-mk-hidden class lands on the
+            // wrapper; the user sees the marker either vanish (state '1')
+            // or ghost-out (state '2') without a page reload.
+            removeBookmarkMarker(bm);
+            renderBookmark(bm);
+            saveBookmarks();
+            schedulePush();
+            map.closePopup();
+          });
+          var unhideBtn = document.getElementById('bm-unhide');
+          if (unhideBtn) unhideBtn.addEventListener('click', function() {
+            var i = bookmarks.findIndex(function(x) {
+              return x && x.id === bm.id && x.category === 'hidden';
+            });
+            if (i >= 0) bookmarks.splice(i, 1);
+            hiddenBuiltinIds.delete(bm.id);
+            bm._hidden = false;
+            removeBookmarkMarker(bm);
+            renderBookmark(bm);
+            saveBookmarks();
+            schedulePush();
+            map.closePopup();
+          });
+          return;
+        }
         var del = document.getElementById('bm-del');
         if (!del) return;
         del.addEventListener('click', function() {
@@ -2027,8 +2127,44 @@
       }, 0);
     }
 
-    wireFab('fab-attractions', userAttractionsLayer,
-            'tabelog.showAttractions', true);
+    // fab-attractions is a tri-state: off / on (blue) / show-all (orange).
+    // The third state reveals built-ins the user has hidden, ghost-styled,
+    // so they can be un-hidden via the popup. CSS does the heavy lifting
+    // — we just toggle a body class for show-all and an .active vs
+    // .show-all class on the FAB itself.
+    (function wireAttractionsFab() {
+      var btn = document.getElementById('fab-attractions');
+      if (!btn) return;
+      var KEY = 'tabelog.showAttractions';
+      var state = '1';   // off / on / show-all
+      try {
+        var v = localStorage.getItem(KEY);
+        if (v === '0' || v === '1' || v === '2') state = v;
+      } catch (_) {}
+      function apply(s) {
+        if (s === '0') {
+          if (map.hasLayer(userAttractionsLayer)) {
+            map.removeLayer(userAttractionsLayer);
+          }
+          btn.classList.remove('active', 'show-all');
+          btn.setAttribute('aria-pressed', 'false');
+        } else {
+          if (!map.hasLayer(userAttractionsLayer)) {
+            map.addLayer(userAttractionsLayer);
+          }
+          btn.classList.toggle('active',   s === '1');
+          btn.classList.toggle('show-all', s === '2');
+          btn.setAttribute('aria-pressed', 'true');
+        }
+        document.body.classList.toggle('attr-show-all', s === '2');
+      }
+      apply(state);
+      btn.addEventListener('click', function() {
+        state = (state === '0') ? '1' : (state === '1') ? '2' : '0';
+        apply(state);
+        try { localStorage.setItem(KEY, state); } catch (_) {}
+      });
+    })();
     wireFab('fab-bookmarks',   bookmarksLayer,
             'tabelog.showBookmarks',   true);
 
@@ -2955,8 +3091,12 @@
               bmMarkerById = {};
               remote.bookmarks.forEach(function(bm) {
                 bookmarks.push(bm);
-                renderBookmark(bm);
+                renderBookmark(bm);   // early-returns on hidden / no-coord
               });
+              // Recompute the hidden-builtin set from the freshly-pulled
+              // bookmarks before re-rendering builtins, so any hide flag
+              // the user set on another device takes effect now.
+              rebuildHiddenIds();
               renderFavoritesBuiltin();
               saveBookmarks();
             }
@@ -4229,14 +4369,14 @@
 })();
 </script>
     
-            <div class="folium-map" id="map_e9e169b420be3e38e912e9b7a056b290" ></div>
+            <div class="folium-map" id="map_383a98e24aff485e7118e06d9334bde2" ></div>
         
 </body>
 <script>
     
     
-            var map_e9e169b420be3e38e912e9b7a056b290 = L.map(
-                "map_e9e169b420be3e38e912e9b7a056b290",
+            var map_383a98e24aff485e7118e06d9334bde2 = L.map(
+                "map_383a98e24aff485e7118e06d9334bde2",
                 {
                     center: [36.2048, 138.2529],
                     crs: L.CRS.EPSG3857,
@@ -4253,7 +4393,7 @@
 
         
     
-            var tile_layer_106334f10ffc70a394c10ea9f36482f9 = L.tileLayer(
+            var tile_layer_3198142a42d882068e9b177c4b6c1f15 = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
                 {
   "minZoom": 0,
@@ -4270,16 +4410,16 @@
             );
         
     
-            tile_layer_106334f10ffc70a394c10ea9f36482f9.addTo(map_e9e169b420be3e38e912e9b7a056b290);
+            tile_layer_3198142a42d882068e9b177c4b6c1f15.addTo(map_383a98e24aff485e7118e06d9334bde2);
         
     
-            var marker_cluster_0306663d48dc285f542c387d8a0b52ec = L.markerClusterGroup(
+            var marker_cluster_c904f8315c4dcf1c8011dd8a01e52968 = L.markerClusterGroup(
                 {
 }
             );
         
     
-            marker_cluster_0306663d48dc285f542c387d8a0b52ec.addTo(map_e9e169b420be3e38e912e9b7a056b290);
+            marker_cluster_c904f8315c4dcf1c8011dd8a01e52968.addTo(map_383a98e24aff485e7118e06d9334bde2);
         
 </script>
 </html>

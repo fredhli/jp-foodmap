@@ -1284,6 +1284,18 @@ def build_filter_panel_html(
 """
 
 
+# Page title + favicon. SVG-emoji favicon is a one-liner that avoids
+# shipping a binary asset and renders consistently on every modern browser
+# (Chrome / Safari / Firefox all accept utf-8 SVG data URLs). 🗾 = Japan
+# silhouette — most thematic for the project. Tab icons always render with
+# the system emoji font; the emojicdn Apple-PNG swap covers page content
+# only, not tab/bookmark/window-title icons (browser security limit).
+HEAD_BRANDING = """
+<title>Japan Foodmap</title>
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
+"""
+
+
 LOCATE_ASSETS = """
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet">
@@ -1343,6 +1355,20 @@ MAP_FAB_HTML = """
   .map-fab.active { background: #2563eb; color: #fff;
                     border-color: #2563eb; }
   .map-fab.active:hover { background: #1d4ed8; }
+  /* Third state for fab-attractions only — "show all including hidden".
+     Amber/orange signals "extra/special mode" without alarming like red. */
+  .map-fab.show-all { background: #f59e0b; color: #fff;
+                      border-color: #f59e0b; }
+  .map-fab.show-all:hover { background: #d97706; }
+  /* Built-in landmarks the user has hidden via the popup. Default state:
+     hidden entirely. When the body carries .attr-show-all (fab-attractions
+     in its third state) they re-appear ghosted so they can be un-hidden. */
+  .leaflet-marker-icon.bm-mk-hidden { display: none; }
+  body.attr-show-all .leaflet-marker-icon.bm-mk-hidden {
+    display: block;
+    opacity: 0.45;
+    filter: grayscale(1);
+  }
   .map-fab-ic { font-size: 15px; line-height: 1; }
   /* Locate button is icon-only on every viewport — round, no label. The
      SVG keeps it visually distinct from the pill-shaped layer toggles. */
@@ -2713,6 +2739,22 @@ FILTER_JS_TEMPLATE = r"""
     // re-checking the entry's category (which the user could have changed
     // by deleting + re-adding, etc.).
     var bmMarkerById = {};
+    // Built-in landmarks the user has hidden. Lives as { id, category:
+    // "hidden" } entries inside the bookmarks array so it rides the same
+    // Gist sync as personal pins — no extra file or storage key. Only
+    // builtin IDs (fb-*) ever land in here; personal pins have their own
+    // delete flow.
+    var hiddenBuiltinIds = new Set();
+    function rebuildHiddenIds() {
+      hiddenBuiltinIds.clear();
+      bookmarks.forEach(function(bm) {
+        if (bm && bm.category === 'hidden'
+            && typeof bm.id === 'string'
+            && bm.id.indexOf('fb-') === 0) {
+          hiddenBuiltinIds.add(bm.id);
+        }
+      });
+    }
 
     function saveBookmarks() {
       try { localStorage.setItem(BM_KEY, JSON.stringify(bookmarks)); } catch (_) {}
@@ -2868,10 +2910,23 @@ FILTER_JS_TEMPLATE = r"""
       + '</div>';
     }
     function renderBookmark(bm) {
+      // Metadata-only entries (category: "hidden") carry just an id —
+      // they're a flag telling us a builtin should not render, not a pin
+      // of their own. Same defensive check for entries missing coords.
+      if (!bm || bm.category === 'hidden') return;
+      if (typeof bm.lat !== 'number' || typeof bm.lon !== 'number') return;
       var isAttraction = bm.category === 'attraction';
       var targetLayer = isAttraction ? userAttractionsLayer : bookmarksLayer;
+      // CSS hooks on the wrapper div Leaflet creates around the divIcon:
+      //   bm-mk          — every bookmark/attraction marker
+      //   bm-mk-builtin  — repo-shipped landmark (read-only source)
+      //   bm-mk-hidden   — user hid this builtin (display:none unless the
+      //                    body carries .attr-show-all)
+      var cls = 'empty bm-mk';
+      if (bm._builtin) cls += ' bm-mk-builtin';
+      if (bm._hidden)  cls += ' bm-mk-hidden';
       var icon = L.divIcon({
-        className: 'empty',
+        className: cls,
         iconSize: [0, 0],
         iconAnchor: [0, 0],
         html: bookmarkIconHtml(bm.emoji, bmDisplayName(bm),
@@ -2891,6 +2946,7 @@ FILTER_JS_TEMPLATE = r"""
         delete bmMarkerById[bm.id];
       }
     }
+    rebuildHiddenIds();
     bookmarks.forEach(renderBookmark);
     // Repo-shipped landmarks render alongside the personal layer but live
     // outside the localStorage/Gist sync — so a Gist push doesn't carry
@@ -2905,6 +2961,7 @@ FILTER_JS_TEMPLATE = r"""
       EMBEDDED_FAVORITES_BUILTIN.forEach(function(bm) {
         if (bmMarkerById[bm.id]) return;
         bm._builtin = true;
+        bm._hidden  = hiddenBuiltinIds.has(bm.id);
         renderBookmark(bm);
       });
     }
@@ -2912,21 +2969,41 @@ FILTER_JS_TEMPLATE = r"""
 
     function openBookmarkPopup(bm, marker) {
       var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
-      var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除收藏';
       // Larger popup offset for attractions because they render at 30px
       // instead of 22px — keeps the speech bubble tip from overlapping
       // the emoji.
       var offY = (bm.category === 'attraction') ? -30 : -22;
-      // Repo-shipped landmarks are read-only from the page — the source
-      // of truth is favorites_builtin.json in the repo. Hide the del
-      // button so a stray click can't half-delete (would clear it for
-      // the session only and reappear on next load).
-      var delBtn = bm._builtin ? '' :
-          '<button id="bm-del" ' +
-                  'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
-                         'border:1px solid #fecaca;border-radius:4px;' +
-                         'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
-                  delLabel + '</button>';
+      // Action button varies by entry type:
+      //   personal pin       → 删除  (one-shot, removes from bookmarks)
+      //   built-in (visible) → 隐藏  (adds metadata entry to bookmarks)
+      //   built-in (hidden)  → 恢复显示 (removes metadata entry)
+      // Built-ins themselves are never edited — the metadata flag in
+      // bookmarks is the only thing that changes, so a redeploy of
+      // favorites_builtin.json can still update names/coords and the
+      // user's hide list survives.
+      var actionBtn = '';
+      if (bm._builtin) {
+        if (bm._hidden) {
+          actionBtn = '<button id="bm-unhide" ' +
+              'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                     'border:1px solid #bfdbfe;border-radius:4px;' +
+                     'background:#eff6ff;color:#1d4ed8;font-weight:600;">' +
+              '恢复显示</button>';
+        } else {
+          actionBtn = '<button id="bm-hide" ' +
+              'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                     'border:1px solid #e5e7eb;border-radius:4px;' +
+                     'background:#f9fafb;color:#374151;font-weight:600;">' +
+              '隐藏</button>';
+        }
+      } else {
+        var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除收藏';
+        actionBtn = '<button id="bm-del" ' +
+            'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
+                   'border:1px solid #fecaca;border-radius:4px;' +
+                   'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
+            delLabel + '</button>';
+      }
       var html =
         '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
           '<div style="font-weight:700;margin-bottom:4px;">' +
@@ -2934,14 +3011,46 @@ FILTER_JS_TEMPLATE = r"""
           '</div>' +
           '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
                       'margin-bottom:8px;">' + coord + '</div>' +
-          delBtn +
+          actionBtn +
         '</div>';
       L.popup({offset: [0, offY]})
         .setLatLng([bm.lat, bm.lon])
         .setContent(html)
         .openOn(map);
-      if (bm._builtin) return;
+      // Wire whichever button ended up in the popup. setTimeout(0) gives
+      // Leaflet a frame to actually insert the popup HTML into the DOM.
       setTimeout(function() {
+        if (bm._builtin) {
+          var hideBtn = document.getElementById('bm-hide');
+          if (hideBtn) hideBtn.addEventListener('click', function() {
+            bookmarks.push({id: bm.id, category: 'hidden'});
+            hiddenBuiltinIds.add(bm.id);
+            bm._hidden = true;
+            // Re-render so the new bm-mk-hidden class lands on the
+            // wrapper; the user sees the marker either vanish (state '1')
+            // or ghost-out (state '2') without a page reload.
+            removeBookmarkMarker(bm);
+            renderBookmark(bm);
+            saveBookmarks();
+            schedulePush();
+            map.closePopup();
+          });
+          var unhideBtn = document.getElementById('bm-unhide');
+          if (unhideBtn) unhideBtn.addEventListener('click', function() {
+            var i = bookmarks.findIndex(function(x) {
+              return x && x.id === bm.id && x.category === 'hidden';
+            });
+            if (i >= 0) bookmarks.splice(i, 1);
+            hiddenBuiltinIds.delete(bm.id);
+            bm._hidden = false;
+            removeBookmarkMarker(bm);
+            renderBookmark(bm);
+            saveBookmarks();
+            schedulePush();
+            map.closePopup();
+          });
+          return;
+        }
         var del = document.getElementById('bm-del');
         if (!del) return;
         del.addEventListener('click', function() {
@@ -2955,8 +3064,44 @@ FILTER_JS_TEMPLATE = r"""
       }, 0);
     }
 
-    wireFab('fab-attractions', userAttractionsLayer,
-            'tabelog.showAttractions', true);
+    // fab-attractions is a tri-state: off / on (blue) / show-all (orange).
+    // The third state reveals built-ins the user has hidden, ghost-styled,
+    // so they can be un-hidden via the popup. CSS does the heavy lifting
+    // — we just toggle a body class for show-all and an .active vs
+    // .show-all class on the FAB itself.
+    (function wireAttractionsFab() {
+      var btn = document.getElementById('fab-attractions');
+      if (!btn) return;
+      var KEY = 'tabelog.showAttractions';
+      var state = '1';   // off / on / show-all
+      try {
+        var v = localStorage.getItem(KEY);
+        if (v === '0' || v === '1' || v === '2') state = v;
+      } catch (_) {}
+      function apply(s) {
+        if (s === '0') {
+          if (map.hasLayer(userAttractionsLayer)) {
+            map.removeLayer(userAttractionsLayer);
+          }
+          btn.classList.remove('active', 'show-all');
+          btn.setAttribute('aria-pressed', 'false');
+        } else {
+          if (!map.hasLayer(userAttractionsLayer)) {
+            map.addLayer(userAttractionsLayer);
+          }
+          btn.classList.toggle('active',   s === '1');
+          btn.classList.toggle('show-all', s === '2');
+          btn.setAttribute('aria-pressed', 'true');
+        }
+        document.body.classList.toggle('attr-show-all', s === '2');
+      }
+      apply(state);
+      btn.addEventListener('click', function() {
+        state = (state === '0') ? '1' : (state === '1') ? '2' : '0';
+        apply(state);
+        try { localStorage.setItem(KEY, state); } catch (_) {}
+      });
+    })();
     wireFab('fab-bookmarks',   bookmarksLayer,
             'tabelog.showBookmarks',   true);
 
@@ -3883,8 +4028,12 @@ FILTER_JS_TEMPLATE = r"""
               bmMarkerById = {};
               remote.bookmarks.forEach(function(bm) {
                 bookmarks.push(bm);
-                renderBookmark(bm);
+                renderBookmark(bm);   // early-returns on hidden / no-coord
               });
+              // Recompute the hidden-builtin set from the freshly-pulled
+              // bookmarks before re-rendering builtins, so any hide flag
+              // the user set on another device takes effect now.
+              rebuildHiddenIds();
               renderFavoritesBuiltin();
               saveBookmarks();
             }
@@ -5540,6 +5689,7 @@ def main(argv: list[str] | None = None) -> None:
         encoding="utf-8",
     )
     print(f"  sw.js:            build {build_version}")
+    m.get_root().header.add_child(folium.Element(HEAD_BRANDING))
     m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
     m.get_root().header.add_child(folium.Element(MOBILE_UX_ASSETS))
     m.get_root().html.add_child(folium.Element(BOTTOM_SHEET_HTML))
