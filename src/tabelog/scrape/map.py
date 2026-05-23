@@ -977,8 +977,14 @@ def build_filter_panel_html(
   #ff-fab .ff-fab-ic {{ font-size: 15px; }}
   #ff-fab .ff-fab-count {{ font-variant-numeric: tabular-nums; }}
   #ff-fab .ff-fab-count b {{ color: #2563eb; }}
-  /* Unsynced-changes alert: pulse red so the user notices their
-     favorites/blacklist/bookmark edits haven't been pushed to Gist. */
+  /* Unsynced-changes alerts. Two flavours so the colour matches the
+     user's actual situation:
+       .needs-sync         — red. No Gist configured (or Gist forgotten),
+                              so edits won't survive a reload. Urgent.
+       .needs-sync-pending — blue. Gist is configured; the push just
+                              hasn't landed yet (or last attempt failed,
+                              but the status text covers that channel).
+                              Informational, not alarming. */
   @keyframes ff-fab-pulse {{
     0%   {{ background: #fee2e2; box-shadow: 0 2px 6px rgba(220,38,38,0.35); }}
     50%  {{ background: #dc2626; box-shadow: 0 4px 14px rgba(220,38,38,0.55); }}
@@ -992,6 +998,19 @@ def build_filter_panel_html(
                               background: #dc2626; }}
   #ff-fab.needs-sync .ff-fab-count b {{ color: #fff; }}
   #ff-fab.needs-sync .ff-fab-count {{ color: #fff; }}
+  @keyframes ff-fab-pulse-pending {{
+    0%   {{ background: #dbeafe; box-shadow: 0 2px 6px rgba(37,99,235,0.35); }}
+    50%  {{ background: #2563eb; box-shadow: 0 4px 14px rgba(37,99,235,0.55); }}
+    100% {{ background: #dbeafe; box-shadow: 0 2px 6px rgba(37,99,235,0.35); }}
+  }}
+  #ff-fab.needs-sync-pending {{
+    color: #fff; border-color: #2563eb;
+    animation: ff-fab-pulse-pending 1.4s ease-in-out infinite;
+  }}
+  #ff-fab.needs-sync-pending:hover {{ animation-play-state: paused;
+                                      background: #2563eb; }}
+  #ff-fab.needs-sync-pending .ff-fab-count b {{ color: #fff; }}
+  #ff-fab.needs-sync-pending .ff-fab-count {{ color: #fff; }}
 </style>
 <button id="ff-fab" type="button" aria-label="打开筛选" title="筛选">
   <span class="ff-fab-ic">🎛</span>
@@ -3966,14 +3985,22 @@ FILTER_JS_TEMPLATE = r"""
     var etag = null, dirty = cache.dirty || false;
     var pushTimer = null, pollTimer = null;
 
-    // Flash the filter FAB red when there are local changes that haven't
-    // landed in Gist — covers both "Gist not configured" and "push failed"
-    // cases, so a user who's favoriting without sync set up actually notices.
+    // Flash the filter FAB when there are local changes that haven't
+    // landed in Gist. Colour depends on whether Gist sync is configured:
+    //   no Gist  → red pulse (urgent — edits will be lost on reload)
+    //   has Gist → blue pulse (just informational — push will arrive)
     var fabEl = document.getElementById('ff-fab');
     function updateNeedsSyncIndicator() {
       if (!fabEl) return;
-      fabEl.classList.toggle('needs-sync', !!dirty);
-      fabEl.title = dirty ? '收藏 / 弃用 / 景点 改动未同步到 Gist，点击查看' : '筛选';
+      var hasGist = !!configured();
+      var d = !!dirty;
+      fabEl.classList.toggle('needs-sync',         d && !hasGist);
+      fabEl.classList.toggle('needs-sync-pending', d &&  hasGist);
+      fabEl.title = d
+        ? (hasGist
+            ? '改动待同步到 Gist…'
+            : '收藏 / 弃用 / 景点 改动未同步到 Gist，点击查看')
+        : '筛选';
     }
 
     function configured() {
