@@ -7,5 +7,6 @@ dependencies = [
     "folium>=0.20.0",
     "httpx>=0.28.1",
     "opencc-python-reimplemented>=0.1.7",
+    "osmium>=4.3.1",
     "playwright>=1.59.0",
 ]

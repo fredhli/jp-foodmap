@@ -56,12 +56,22 @@ POPUPS_TW_JSON = DOCS_DATA_DIR / "popups-tw.json"
 # pass). Restaurants the translator hasn't covered yet keep the Chinese
 # policy as a fallback so the popup never goes blank.
 POPUPS_EN_JSON = DOCS_DATA_DIR / "popups-en.json"
+# Japanese variant. Same structure as popups.json with the policy field
+# overlaid from the original `reservation_policy` column of tabelog.csv —
+# i.e. the literal Japanese text Tabelog publishes. Restaurants whose CSV
+# row has no policy fall back to the Chinese popup row.
+POPUPS_JA_JSON = DOCS_DATA_DIR / "popups-ja.json"
 # Service worker — caches the big JSON / GeoJSON / tile assets so repeat
 # visits skip the network round-trip. Built fresh per run with a version
 # stamp so an older SW can't keep serving stale data after a redeploy.
 SW_JS = DOCS_DIR / "sw.js"
 GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
-ATTRACTIONS_CSV = DATA / "attractions.csv"
+# Repo-shipped landmark set: always rendered on the map regardless of
+# whether the visitor has Gist sync configured, so friends opening the
+# deployed page get a populated map out of the box. Same i18n schema as
+# bookmarks (name_src/sc/tc/jp/en + emoji + lat/lon + category). Edit the
+# JSON directly; there's no separate build step.
+FAVORITES_BUILTIN_JSON = DATA / "favorites_builtin.json"
 
 # UI translation tables. en.json is hand-edited Chinese-to-English
 # {cn_run: en_text} pairs covering every CJK run that appears as a text
@@ -70,6 +80,21 @@ ATTRACTIONS_CSV = DATA / "attractions.csv"
 # as TEXT_EN_MAP. Runs without an entry stay in Chinese at runtime.
 I18N_DIR = DATA / "i18n"
 I18N_EN_JSON = I18N_DIR / "en.json"
+# Japanese variant of the UI translation table. Same shape as en.json,
+# {cn_run: ja_text}. Place names use natural Japanese forms (東京タワー,
+# 渋谷スクランブル交差点) rather than re-romanising.
+I18N_JA_JSON = I18N_DIR / "ja.json"
+
+# In-page help content. Authored as plain markdown so screenshots can be
+# dropped in with normal ![](...) syntax; map.py embeds the raw text into
+# the page and a small marked.js bundle renders it inside a modal. One
+# file per active language — map.py builds a {lang: markdown} dispatch
+# table so the modal picks the right one based on activeLang at runtime.
+HELP_DIR = DOCS_DIR / "help"
+HELP_GIST_MD = HELP_DIR / "gist-setup.md"
+HELP_GIST_MD_TW = HELP_DIR / "gist-setup-tw.md"
+HELP_GIST_MD_EN = HELP_DIR / "gist-setup-en.md"
+HELP_GIST_MD_JA = HELP_DIR / "gist-setup-ja.md"
 
 
 def _ensure_dirs() -> None:

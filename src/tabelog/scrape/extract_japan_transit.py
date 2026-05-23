@@ -13,24 +13,26 @@ The relation usually carries the official line colour. We pull both, then
 join: way.route_colour := its parent route relation's colour.
 
 Pipeline:
-  1. osmium tags-filter PBF -> japan-rail.osm.pbf      (ways/stations only)
-  2. osmium tags-filter PBF -> japan-routes.osm.pbf    (route relations only)
-  3. osmium cat .pbf       -> japan-routes.opl         (text for relations)
-  4. osmium export .pbf    -> japan-rail.geojson       (with way IDs)
-  5. python                 - parse OPL into way_id -> route info
-                            - walk GeoJSON, augment, slim, round coords
-                            - write docs/transit/japan.geojson
+  1. pyosmium tags-filter PBF -> japan-rail.osm.pbf    (ways/stations only)
+  2. pyosmium tags-filter PBF -> japan-routes.osm.pbf  (route relations only)
+  3. pyosmium cat .pbf        -> japan-routes.opl      (text for relations)
+  4. pyosmium export .pbf     -> japan-rail.geojson    (with way IDs)
+  5. python                    - parse OPL into way_id -> route info
+                               - walk GeoJSON, augment, slim, round coords
+                               - write docs/transit/japan.geojson
 
-Requires: osmium-tool (brew install osmium-tool).
+All four PBF/OPL/GeoJSON steps run through pyosmium (the Python binding to
+libosmium). No system osmium-tool needed — wheels include libosmium itself,
+so a plain `uv sync` is enough on every platform.
 """
 
 import argparse
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+import osmium
 
 REPO = Path(__file__).resolve().parents[3]
 OSM_DIR = REPO / "data" / "osm"
@@ -63,68 +65,125 @@ SIMPLIFY_TOL_DEG = 1.0e-5
 SIMPLIFY_TOL_SQ = SIMPLIFY_TOL_DEG ** 2
 
 
-def run(cmd: list[str]) -> None:
-    print(f"$ {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
-
-
-def ensure_osmium() -> None:
-    if shutil.which("osmium") is None:
-        sys.exit("osmium-tool not found in PATH. Install with `brew install osmium-tool`.")
-
-
 def step_filter_ways() -> None:
+    """Strip the raw PBF down to railway ways + station/halt/tram_stop nodes.
+    BackReferenceWriter pulls in the nodes referenced by each kept way so the
+    geometry survives — matches what `osmium tags-filter` does by default."""
     if FILTERED_PBF.exists() and FILTERED_PBF.stat().st_mtime > RAW_PBF.stat().st_mtime:
         print(f"  (skip) {FILTERED_PBF.name} up to date")
         return
-    run([
-        "osmium", "tags-filter", str(RAW_PBF),
-        "w/railway=" + ",".join(KEEP_WAY_RAILWAY),
-        "n/railway=" + ",".join(KEEP_NODE_RAILWAY),
-        "-o", str(FILTERED_PBF),
-        "--overwrite",
-    ])
+    print(f"  filtering {RAW_PBF.name} -> {FILTERED_PBF.name}")
+    OSM_DIR.mkdir(parents=True, exist_ok=True)
+    src = str(RAW_PBF)
+    n_ways = 0
+    n_nodes = 0
+    with osmium.BackReferenceWriter(
+            str(FILTERED_PBF), ref_src=src, overwrite=True) as writer:
+        for obj in osmium.FileProcessor(src):
+            if obj.is_way():
+                if obj.tags.get("railway") in KEEP_WAY_RAILWAY:
+                    writer.add(obj)
+                    n_ways += 1
+            elif obj.is_node():
+                if obj.tags.get("railway") in KEEP_NODE_RAILWAY:
+                    writer.add(obj)
+                    n_nodes += 1
+    print(f"  kept {n_ways} ways + {n_nodes} stations "
+          f"(+ ways' referenced nodes via back-ref)")
 
 
 def step_filter_routes() -> None:
-    """Keep only route relations themselves — no referenced members.
-    We only need their tags + member-id lists, which OPL gives us."""
+    """Keep only route relations themselves — no referenced members. We
+    only need their tags + member-id lists, which OPL gives us."""
     if ROUTES_PBF.exists() and ROUTES_PBF.stat().st_mtime > RAW_PBF.stat().st_mtime:
         print(f"  (skip) {ROUTES_PBF.name} up to date")
         return
-    run([
-        "osmium", "tags-filter", str(RAW_PBF),
-        "--omit-referenced",
-        "r/route=" + ",".join(KEEP_ROUTE_TYPES),
-        "-o", str(ROUTES_PBF),
-        "--overwrite",
-    ])
+    print(f"  filtering {RAW_PBF.name} -> {ROUTES_PBF.name}")
+    OSM_DIR.mkdir(parents=True, exist_ok=True)
+    n_rels = 0
+    with osmium.SimpleWriter(str(ROUTES_PBF), overwrite=True) as writer:
+        for obj in osmium.FileProcessor(str(RAW_PBF)):
+            if not obj.is_relation():
+                continue
+            if obj.tags.get("type") != "route":
+                continue
+            if obj.tags.get("route") not in KEEP_ROUTE_TYPES:
+                continue
+            writer.add(obj)
+            n_rels += 1
+    print(f"  kept {n_rels} route relations")
 
 
 def step_dump_routes_opl() -> None:
+    """SimpleWriter dispatches output format from the file extension —
+    `.opl` here, vs `.osm.pbf` for the filter steps."""
     if ROUTES_OPL.exists() and ROUTES_OPL.stat().st_mtime > ROUTES_PBF.stat().st_mtime:
         print(f"  (skip) {ROUTES_OPL.name} up to date")
         return
-    run([
-        "osmium", "cat", str(ROUTES_PBF),
-        "--output-format=opl",
-        "-o", str(ROUTES_OPL),
-        "--overwrite",
-    ])
+    print(f"  dumping {ROUTES_PBF.name} -> {ROUTES_OPL.name}")
+    with osmium.SimpleWriter(str(ROUTES_OPL), overwrite=True) as writer:
+        for obj in osmium.FileProcessor(str(ROUTES_PBF)):
+            writer.add(obj)
 
 
 def step_export() -> None:
+    """FILTERED_PBF -> GeoJSON. with_locations() caches node coords so way
+    iteration materializes a LineString geometry; for the ~12MB filtered
+    railway PBF that's only a few MB of RAM. Feature IDs match what
+    `osmium export --add-unique-id=type_id` would emit: "n12345" for
+    nodes, "w12345" for ways — the downstream postprocess parses that
+    prefix to recover the way ID."""
     if RAW_GEOJSON.exists() and RAW_GEOJSON.stat().st_mtime > FILTERED_PBF.stat().st_mtime:
         print(f"  (skip) {RAW_GEOJSON.name} up to date")
         return
-    run([
-        "osmium", "export", str(FILTERED_PBF),
-        "-f", "geojson",
-        "-o", str(RAW_GEOJSON),
-        "--overwrite",
-        "--geometry-types=point,linestring",
-        "--add-unique-id=type_id",
-    ])
+    print(f"  exporting {FILTERED_PBF.name} -> {RAW_GEOJSON.name}")
+    factory = osmium.geom.GeoJSONFactory()
+    fp = osmium.FileProcessor(str(FILTERED_PBF)).with_locations()
+    n_points = 0
+    n_lines = 0
+    n_skipped = 0
+    with RAW_GEOJSON.open("w", encoding="utf-8") as fh:
+        fh.write('{"type":"FeatureCollection","features":[\n')
+        first = True
+        for obj in fp:
+            if obj.is_node():
+                # Back-ref nodes (added by the filter step so ways have
+                # vertices) carry no tags themselves — skip them so the
+                # geojson only holds stations + line geometry.
+                if not obj.tags:
+                    continue
+                try:
+                    geom_str = factory.create_point(obj.location)
+                except osmium.InvalidLocationError:
+                    n_skipped += 1
+                    continue
+                fid = f"n{obj.id}"
+                n_points += 1
+            elif obj.is_way():
+                try:
+                    geom_str = factory.create_linestring(obj)
+                except (osmium.InvalidLocationError, RuntimeError):
+                    n_skipped += 1
+                    continue
+                fid = f"w{obj.id}"
+                n_lines += 1
+            else:
+                continue
+            props = {k: v for k, v in obj.tags}
+            props["@id"] = fid
+            ftr = {
+                "type": "Feature",
+                "id": fid,
+                "geometry": json.loads(geom_str),
+                "properties": props,
+            }
+            if not first:
+                fh.write(",\n")
+            json.dump(ftr, fh, ensure_ascii=False)
+            first = False
+        fh.write("\n]}\n")
+    skip_note = f", skipped {n_skipped} with invalid geometry" if n_skipped else ""
+    print(f"  wrote {n_points} points + {n_lines} lines{skip_note}")
 
 
 _OPL_ESCAPE = re.compile(r"%([0-9a-fA-F]{1,6})%")
@@ -189,6 +248,12 @@ def build_way_route_map(opl_path: Path) -> dict[int, dict]:
             n_with_colour += 1
         if v := tags.get("name"):
             info["route_name"] = v
+        # English name on the route relation, when OSM has it. Stored
+        # alongside route_name so transit-layer.js can pick the right
+        # one based on the user's active language; not used as a fallback
+        # for route_name itself.
+        if v := tags.get("name:en"):
+            info["route_name_en"] = v
         if v := tags.get("ref"):
             info["route_ref"] = v
         if v := tags.get("operator"):
@@ -223,7 +288,12 @@ def slim_way_props(props: dict, route_info: dict | None) -> dict | None:
     out: dict[str, str] = {
         "kind": "line",
         "railway": rw,
+        # `name` keeps the existing JP-with-EN-fallback semantics so any
+        # consumer that only reads `name` keeps working. `name_en` is a
+        # separate strict-English slot — empty when OSM has no name:en,
+        # at which point the runtime falls back to `name`.
         "name": props.get("name") or props.get("name:en"),
+        "name_en": props.get("name:en"),
         "operator": props.get("operator"),
         "ref": props.get("ref"),
     }
@@ -239,6 +309,8 @@ def slim_way_props(props: dict, route_info: dict | None) -> dict | None:
         # Prefer route_name over noisy per-segment name when route_name is cleaner.
         if route_info.get("route_name"):
             out["route_name"] = route_info["route_name"]
+        if route_info.get("route_name_en"):
+            out["route_name_en"] = route_info["route_name_en"]
         if route_info.get("route_ref"):
             out["route_ref"] = route_info["route_ref"]
         # If way has no operator, fall back to the route's
@@ -254,7 +326,11 @@ def slim_node_props(props: dict) -> dict | None:
     return {k: v for k, v in {
         "kind": "station",
         "railway": rw,
+        # `name` keeps the JP-with-EN-fallback so the dedupe key works
+        # whether or not the station has a Japanese tag. `name_en` is a
+        # separate strict slot for runtime language switching.
         "name": props.get("name") or props.get("name:en"),
+        "name_en": props.get("name:en"),
         "operator": props.get("operator"),
     }.items() if v is not None}
 
@@ -346,12 +422,21 @@ def dedupe_stations(stations: list) -> list:
             cy = round(sum(ys) / len(ys), 5)
             operators = set()
             railways = set()
+            name_en = None
             for m in cluster:
                 if m["properties"].get("operator"):
                     operators.add(m["properties"]["operator"])
                 railways.add(m["properties"].get("railway") or "station")
+                # First non-empty name_en wins. Same Japanese name across
+                # JR/Toei/Tokyo Metro contributions almost always points
+                # to the same English name when any of them tag it, so a
+                # vote-by-frequency would be overkill.
+                if name_en is None and m["properties"].get("name_en"):
+                    name_en = m["properties"]["name_en"]
             railway = "station" if "station" in railways else next(iter(railways))
             merged_props = {"kind": "station", "railway": railway, "name": nm}
+            if name_en:
+                merged_props["name_en"] = name_en
             if operators:
                 merged_props["operator"] = "; ".join(sorted(operators))
             out.append({
@@ -473,7 +558,6 @@ def main() -> None:
                     help="don't delete japan-rail.geojson / japan-routes.opl after success")
     args = ap.parse_args()
 
-    ensure_osmium()
     if not RAW_PBF.exists():
         sys.exit(f"missing {RAW_PBF}. Download japan-latest.osm.pbf from Geofabrik first.")
 

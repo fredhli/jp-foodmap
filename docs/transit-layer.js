@@ -19,6 +19,43 @@
     return;
   }
 
+  // ---- Language detection ------------------------------------------------
+  // Mirrors the dispatch in map.py: ?lang= URL param beats localStorage,
+  // and zh-CN is the silent default. The transit layer is standalone JS so
+  // it can't import the value from there; resolved once at module load.
+  // Picks name_en / route_name_en when active lang is 'en'; falls back to
+  // the Japanese fields when OSM has no English tag (coverage is partial,
+  // especially outside major metros). Line classification regexes still
+  // see the Japanese name so 新幹線 etc. keep matching.
+  var ACTIVE_LANG = (function() {
+    var p = null;
+    try {
+      var u = new URL(window.location.href).searchParams.get('lang');
+      if (u) p = u.toLowerCase();
+    } catch (_) {}
+    if (p === 'tw' || p === 'zh-tw') return 'zh-TW';
+    if (p === 'cn' || p === 'zh-cn') return 'zh-CN';
+    if (p === 'en') return 'en';
+    try {
+      var s = localStorage.getItem('tabelog.lang');
+      if (s === 'zh-TW' || s === 'zh-CN' || s === 'en') return s;
+    } catch (_) {}
+    return 'zh-CN';
+  })();
+  var LINES_SUFFIX = ACTIVE_LANG === 'en' ? ' lines'
+                   : ACTIVE_LANG === 'zh-TW' ? '線' : '线';
+  function pickLineLabel(props) {
+    if (ACTIVE_LANG === 'en') {
+      return props.route_name_en || props.name_en
+          || props.route_name    || props.name;
+    }
+    return props.route_name || props.name;
+  }
+  function pickStationName(props) {
+    if (ACTIVE_LANG === 'en') return props.name_en || props.name;
+    return props.name;
+  }
+
   // Inject tooltip styles once.
   if (!document.getElementById('transit-layer-styles')) {
     var style = document.createElement('style');
@@ -471,7 +508,7 @@
         opacity: 0, lineCap: 'round', lineJoin: 'round',
         bubblingMouseEvents: false
       });
-      var label = f.properties.route_name || f.properties.name;
+      var label = pickLineLabel(f.properties);
       if (label) {
         f._pl_hit.bindTooltip(label, {
           sticky: true, direction: 'top', offset: [0, -8],
@@ -604,7 +641,7 @@
             fillOpacity: this.options.opacity,
             opacity: this.options.opacity
           });
-          var nm = stn.properties.name;
+          var nm = pickStationName(stn.properties);
           if (nm) {
             var opts = { className: 'transit-station-label' };
             if (showLabel) {
@@ -613,7 +650,7 @@
               opts.offset = [0, -4];
             }
             var label = nm;
-            if (lc >= 3) label = nm + '  (' + lc + '线)';
+            if (lc >= 3) label = nm + '  (' + lc + LINES_SUFFIX + ')';
             dot.bindTooltip(label, opts);
           }
           this._stationsLayer.addLayer(dot);

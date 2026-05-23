@@ -1,33 +1,7 @@
-"""Hand-curated data for map.py: cuisine buckets, marker emojis, and
-tourist anchors. Split out so it can be edited without touching
-rendering code.
-
-ATTRACTIONS is loaded from data/attractions.csv — edit that file (or
-run fetch_attractions.py to fill in coords for new rows) instead of
-pasting tuples here."""
-
-import csv
-
-from tabelog.paths import ATTRACTIONS_CSV
-
-
-def _load_attractions() -> list[tuple[str, str, float, float]]:
-    """(name_cn, emoji, lat, lon) for every CSV row whose lon and lat are
-    both filled. Blank-coord rows are skipped silently — run
-    fetch_attractions.py to resolve them."""
-    rows: list[tuple[str, str, float, float]] = []
-    if not ATTRACTIONS_CSV.exists():
-        return rows
-    with ATTRACTIONS_CSV.open(encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            lon, lat = r.get("lon", "").strip(), r.get("lat", "").strip()
-            if not lon or not lat:
-                continue
-            rows.append((r["name_cn"], r["emoji"], float(lat), float(lon)))
-    return rows
-
-
-ATTRACTIONS = _load_attractions()
+"""Hand-curated data for map.py: cuisine buckets and marker emojis.
+Tourist anchors used to live here as ATTRACTIONS (loaded from
+data/attractions.csv); they now live in data/favorites_builtin.json
+and render through the bookmarks layer."""
 
 
 # Maps Tabelog's JP genre tokens to 20 broad cuisine categories. Dict order

@@ -16,6 +16,7 @@ __pycache__/
 # silently swallows nested re-includes.
 data/*
 !data/attractions.csv
+!data/favorites_builtin.json
 
 # Editor / tool state
 .claude/

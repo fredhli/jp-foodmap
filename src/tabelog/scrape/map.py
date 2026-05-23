@@ -41,18 +41,25 @@ from tabelog.paths import (
     POPUPS_JSON,
     POPUPS_TW_JSON,
     POPUPS_EN_JSON,
+    POPUPS_JA_JSON,
     POLICY_EN_JSON,
+    TABELOG_CSV,
     SW_JS,
     DOCS_DATA_DIR,
     FAVORITES_JSON,
     BLACKLIST_JSON,
     BOOKMARKS_JSON,
+    FAVORITES_BUILTIN_JSON,
     OUTPUT_DIR,
     CACHE_DIR,
     I18N_EN_JSON,
+    I18N_JA_JSON,
+    HELP_GIST_MD,
+    HELP_GIST_MD_TW,
+    HELP_GIST_MD_EN,
+    HELP_GIST_MD_JA,
 )
 from tabelog.scrape.map_data import (
-    ATTRACTIONS,
     DEFAULT_OFF_GENRES,
     GENRE_CATEGORIES,
     GENRE_EMOJI,
@@ -83,11 +90,29 @@ _CJK_RUN_RE = re.compile(r"[㐀-鿿豈-﫿]+")
 # doesn't fill up with entries we'll never use.
 _HAN_VARIANTS_LITERAL_RE = re.compile(r"var HAN_VARIANTS\s*=\s*[^;]+;")
 _KNOWN_LOCS_LITERAL_RE = re.compile(r"var KNOWN_LOCS\s*=\s*[^;]+;")
+# Help markdown is embedded as four quoted JSON strings, one per
+# language (HELP_MD_CN / HELP_MD_TW / HELP_MD_EN / HELP_MD_JA). Match each
+# as a proper JSON token so any future `;` inside the MD prose doesn't trip
+# us up — the [^;] shortcut used above isn't safe for free-form text.
+_HELP_MD_LITERAL_RE = re.compile(
+    r'var HELP_MD_(?:CN|TW|EN|JA)\s*=\s*"(?:\\.|[^"\\])*"\s*;'
+)
+# The runtime tokenizer regex `/[㐀-鿿豈-﫿]+/g` literally contains the four
+# CJK boundary characters that define its character class — U+3400, U+9FFF,
+# U+F900, U+FAFF. Spelled with explicit \u escapes so the source character
+# encoding can't substitute a visually-identical sibling (e.g. the basic
+# 豈 U+8C48 vs the compatibility 豈 U+F900, which renders the same but
+# fails to match).
+_CJK_RUN_RE_LITERAL_RE = re.compile(
+    r"/\[㐀-鿿豈-﫿\]\+/g"
+)
 
 
 def _scan_cjk_runs(html: str) -> set[str]:
     scanned = _HAN_VARIANTS_LITERAL_RE.sub("", html)
     scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
+    scanned = _HELP_MD_LITERAL_RE.sub("", scanned)
+    scanned = _CJK_RUN_RE_LITERAL_RE.sub("", scanned)
     return set(_CJK_RUN_RE.findall(scanned))
 
 
@@ -119,6 +144,21 @@ def build_text_en_map(html: str) -> tuple[dict[str, str], list[str]]:
     return out, missing
 
 
+def build_text_ja_map(html: str) -> tuple[dict[str, str], list[str]]:
+    """Same shape as build_text_en_map but reads data/i18n/ja.json. JA
+    translations are mostly natural Japanese forms (東京タワー, ラーメン,
+    お気に入り). Reservation policy strings are intentionally not in this
+    table — those come from data/tabelog/tabelog.csv via popups-ja.json."""
+    if not I18N_JA_JSON.exists():
+        return {}, []
+    raw = json.loads(I18N_JA_JSON.read_text(encoding="utf-8"))
+    ja = {k: v for k, v in raw.items() if not k.startswith("__")}
+    runs = _scan_cjk_runs(html)
+    out = {run: ja[run] for run in runs if run in ja}
+    missing = sorted(r for r in runs if r not in ja)
+    return out, missing
+
+
 def trad_popup_array(arr: list) -> list:
     """popups.json positional layout — only index 6 (Chinese reservation
     policy) and index 8 (award ribbon HTML, also Chinese) need trad
@@ -144,6 +184,49 @@ def en_popup_array(arr: list, policy_en: str | None) -> list:
     return a
 
 
+def ja_popup_array(arr: list, policy_ja: str | None) -> list:
+    """JA variant — overlay the policy field with the original Japanese
+    text from data/tabelog/tabelog.csv `reservation_policy`. Same fallback
+    convention as en_popup_array."""
+    a = list(arr)
+    if policy_ja and len(a) > 6:
+        a[6] = policy_ja
+    return a
+
+
+# Relative image refs in the help markdown — `![](foo.png)` — without a
+# scheme or a leading slash. Rewritten at build time to `help/foo.png` so
+# they resolve correctly against docs/index.html (the help/ dir sits next
+# to the rendered HTML at deploy time). External / absolute paths are
+# passed through untouched.
+_HELP_MD_REL_IMG_RE = re.compile(
+    r"(!\[[^\]]*\])\((?!https?://|/|help/)([^)\s]+)\)"
+)
+
+
+def _load_one_help_md(path: Path) -> str:
+    """Read a help markdown file and prefix bare image paths with `help/`
+    so screenshots dropped into docs/help/ render correctly at runtime.
+    Returns '' if the file isn't present — the help button then opens an
+    empty modal, which is loud enough to notice."""
+    if not path.exists():
+        return ""
+    md = path.read_text(encoding="utf-8")
+    return _HELP_MD_REL_IMG_RE.sub(r"\1(help/\2)", md)
+
+
+def load_help_md_by_lang() -> dict[str, str]:
+    """Return a {lang_code: rendered_md} map covering every language the
+    UI exposes. Missing language files fall back to an empty string at
+    that slot — the runtime then falls back to zh-CN."""
+    return {
+        "zh-CN": _load_one_help_md(HELP_GIST_MD),
+        "zh-TW": _load_one_help_md(HELP_GIST_MD_TW),
+        "en":    _load_one_help_md(HELP_GIST_MD_EN),
+        "ja":    _load_one_help_md(HELP_GIST_MD_JA),
+    }
+
+
 def load_policy_en() -> dict[str, str]:
     if not POLICY_EN_JSON.exists():
         return {}
@@ -153,6 +236,28 @@ def load_policy_en() -> dict[str, str]:
         print(f"  WARN: {POLICY_EN_JSON} is invalid JSON ({e}); "
               f"treating as empty")
         return {}
+
+
+def load_policy_ja() -> dict[str, str]:
+    """Read the original Japanese reservation_policy column from tabelog.csv,
+    keyed by detail_url. This is the literal text Tabelog publishes — no
+    translation pass. Used to overlay popups-ja.json so JA users see the
+    same wording they'd see on Tabelog itself."""
+    if not TABELOG_CSV.exists():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        with TABELOG_CSV.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                url = (row.get("detail_url") or "").strip()
+                policy = (row.get("reservation_policy") or "").strip()
+                if url and policy:
+                    out[url] = policy
+    except OSError as e:
+        print(f"  WARN: could not read {TABELOG_CSV} ({e}); JA policies empty")
+        return {}
+    return out
 
 # Japan's 47 都道府県. Used as a whitelist for parse_admin_prefix because the
 # regex approach trips on 都/府/県 also appearing INSIDE prefecture names
@@ -278,12 +383,15 @@ def load_blacklist() -> set[str]:
 
 
 def load_bookmarks() -> list[dict]:
-    """User-named map pins. Each entry: {id, name, emoji, lat, lon, category}.
-    Category is 'bookmark' (under the ⭐收藏 FAB) or 'attraction' (under the
-    🗾景点 FAB, alongside the curated data/attractions.csv entries). Missing
-    or unknown category falls back to 'bookmark' for backwards compat. Rows
-    missing required coords are dropped silently — the in-browser editor is
-    the source of truth, the file is just the build-time seed."""
+    """User-named map pins. Two name schemas coexist:
+      - new (post i18n): {name_src, name_sc, name_en} — the browser's save
+        path translates the user's input to zh-CN + en at commit time.
+        zh-TW is derived at runtime via the existing localizer.
+      - legacy: {name} — single string, pre-i18n entries.
+    Both shapes round-trip through this loader unchanged; the JS picks the
+    right field for the active UI language. Rows missing coords are dropped
+    silently — the in-browser editor is the source of truth, this file is
+    just the build-time seed."""
     if not BOOKMARKS_JSON.exists():
         return []
     try:
@@ -304,14 +412,83 @@ def load_bookmarks() -> list[dict]:
         cat = str(item.get("category") or "bookmark")
         if cat not in ("bookmark", "attraction"):
             cat = "bookmark"
-        out.append({
+        entry: dict = {
             "id": str(item.get("id") or f"{lat:.6f},{lon:.6f}"),
-            "name": str(item.get("name") or "").strip() or "未命名",
             "emoji": str(item.get("emoji") or "📍"),
             "lat": lat,
             "lon": lon,
             "category": cat,
-        })
+        }
+        has_new = any(k in item for k in
+                      ("name_src", "name_sc", "name_tc", "name_en", "name_jp"))
+        if has_new:
+            src = str(item.get("name_src") or "").strip()
+            sc  = str(item.get("name_sc")  or "").strip()
+            tc  = str(item.get("name_tc")  or "").strip()
+            en  = str(item.get("name_en")  or "").strip()
+            jp  = str(item.get("name_jp")  or "").strip()
+            if not (src or sc or tc or en or jp):
+                src = "未命名"
+            entry["name_src"] = src
+            entry["name_sc"]  = sc
+            entry["name_en"]  = en
+            if tc:
+                entry["name_tc"] = tc
+            if jp:
+                entry["name_jp"] = jp
+        else:
+            entry["name"] = str(item.get("name") or "").strip() or "未命名"
+        out.append(entry)
+    return out
+
+
+def load_favorites_builtin() -> list[dict]:
+    """Repo-shipped landmark set — read every page load (no localStorage
+    hydration), so updating the JSON file + redeploying immediately
+    reflects on every visitor's map regardless of their sync state. Same
+    parser as load_bookmarks(); the only difference is the file path."""
+    if not FAVORITES_BUILTIN_JSON.exists():
+        return []
+    try:
+        raw = json.loads(FAVORITES_BUILTIN_JSON.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            lat = float(item["lat"])
+            lon = float(item["lon"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        cat = str(item.get("category") or "bookmark")
+        if cat not in ("bookmark", "attraction"):
+            cat = "bookmark"
+        src = str(item.get("name_src") or "").strip()
+        sc  = str(item.get("name_sc")  or "").strip()
+        tc  = str(item.get("name_tc")  or "").strip()
+        en  = str(item.get("name_en")  or "").strip()
+        jp  = str(item.get("name_jp")  or "").strip()
+        if not (src or sc or tc or en or jp):
+            src = "未命名"
+        entry: dict = {
+            "id":       str(item.get("id") or f"{lat:.6f},{lon:.6f}"),
+            "emoji":    str(item.get("emoji") or "📍"),
+            "lat":      lat,
+            "lon":      lon,
+            "category": cat,
+            "name_src": src,
+            "name_sc":  sc,
+            "name_en":  en,
+        }
+        if tc:
+            entry["name_tc"] = tc
+        if jp:
+            entry["name_jp"] = jp
+        out.append(entry)
     return out
 
 JAPAN_CENTER = (36.2048, 138.2529)
@@ -936,6 +1113,7 @@ def build_filter_panel_html(
       <option value="zh-CN">🌐 简体</option>
       <option value="zh-TW">🌐 繁體</option>
       <option value="en">🌐 EN</option>
+      <option value="ja">🌐 日本語</option>
     </select>
   </div>
   <div id="ff-sync-status" style="font-size:10px;color:#6b7280;text-align:center;
@@ -954,13 +1132,19 @@ def build_filter_panel_html(
   <div style="background:#fff;border-radius:10px;padding:18px 20px;width:340px;
        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
        font-size:13px;color:#111827;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
-    <div style="font-weight:700;font-size:15px;margin-bottom:4px;">同步设置</div>
-    <div style="color:#6b7280;font-size:11px;margin-bottom:12px;line-height:1.5;">
-      把收藏/弃用名单实时同步到 GitHub Gist。<br>
-      仅保存在你这台设备的浏览器里，不会上传到代码仓库。
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+      <span style="font-weight:700;font-size:15px;">同步设置</span>
+      <button type="button" id="ff-cfg-help"
+              aria-label="如何注册 Gist 和 PAT"
+              title="不会配？点这里看图文教程"
+              style="display:inline-flex;align-items:center;justify-content:center;
+                     width:18px;height:18px;border-radius:50%;
+                     background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;
+                     font-size:11px;font-weight:700;line-height:1;
+                     cursor:help;padding:0;">?</button>
     </div>
 
-    <label style="display:block;font-weight:600;margin-bottom:3px;">Gist ID</label>
+    <label style="display:block;font-weight:600;margin-bottom:3px;margin-top:12px;">Gist ID</label>
     <input id="ff-cfg-gist" type="text" placeholder="例如 a1b2c3d4e5f6..."
            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;
                   border-radius:4px;font-family:monospace;font-size:12px;
@@ -968,17 +1152,11 @@ def build_filter_panel_html(
 
     <label style="display:block;font-weight:600;margin-bottom:3px;">
       Personal Access Token
-      <span style="font-weight:400;color:#6b7280;font-size:11px;">（只看不改可留空）</span>
     </label>
     <input id="ff-cfg-pat" type="password" placeholder="ghp_..."
            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;
                   border-radius:4px;font-family:monospace;font-size:12px;
-                  box-sizing:border-box;margin-bottom:6px;">
-    <div style="font-size:10px;color:#6b7280;margin-bottom:12px;line-height:1.5;">
-      创建：<a href="https://github.com/settings/tokens?type=beta" target="_blank"
-      style="color:#2563eb;">github.com/settings/tokens</a>
-      → Fine-grained → 只勾 <code>Gists</code> 权限。
-    </div>
+                  box-sizing:border-box;margin-bottom:12px;">
 
     <div id="ff-cfg-msg" style="font-size:11px;min-height:14px;margin-bottom:8px;"></div>
 
@@ -986,12 +1164,120 @@ def build_filter_panel_html(
       <button id="ff-cfg-save" style="flex:1;padding:6px;border:1px solid #2563eb;
               background:#2563eb;color:#fff;border-radius:4px;cursor:pointer;
               font-size:12px;font-weight:600;">保存并测试</button>
-      <button id="ff-cfg-clear" style="padding:6px 10px;border:1px solid #d1d5db;
-              background:#f9fafb;color:#374151;border-radius:4px;cursor:pointer;
-              font-size:12px;">清除</button>
       <button id="ff-cfg-cancel" style="padding:6px 10px;border:1px solid #d1d5db;
               background:#f9fafb;color:#374151;border-radius:4px;cursor:pointer;
               font-size:12px;">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- In-page help modal. Source is docs/help/gist-setup.md, embedded as a
+     JS string in FILTER_JS_TEMPLATE and rendered with marked.js on first
+     open. z-index sits above the settings modal (10020) since this opens
+     from inside it. -->
+<style>
+  #help-modal-bg {{
+    display: none; position: fixed; inset: 0; z-index: 10030;
+    background: rgba(0, 0, 0, 0.5);
+    align-items: center; justify-content: center;
+    padding: 16px;
+  }}
+  #help-modal-bg.help-open {{ display: flex; }}
+  #help-modal {{
+    background: #fff;
+    width: min(720px, 100%);
+    max-height: min(90vh, 90dvh);
+    border-radius: 12px;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
+    display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden;
+  }}
+  #help-modal-head {{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }}
+  #help-modal-head .help-title {{
+    font-weight: 700; font-size: 14px; color: #111827;
+  }}
+  #help-modal-head .help-close {{
+    border: none; background: transparent;
+    font-size: 22px; line-height: 1; color: #6b7280;
+    cursor: pointer; padding: 4px 8px; border-radius: 4px;
+  }}
+  #help-modal-head .help-close:hover {{ background: #f3f4f6; color: #111827; }}
+  #help-modal-body {{
+    flex: 1 1 auto; overflow-y: auto;
+    padding: 14px 22px 20px;
+    -webkit-overflow-scrolling: touch;
+    font-size: 13.5px; line-height: 1.65; color: #1f2937;
+  }}
+  #help-modal-body h1 {{ font-size: 19px; margin: 14px 0 10px;
+                        border-bottom: 1px solid #e5e7eb;
+                        padding-bottom: 6px; color: #111827; }}
+  #help-modal-body h1:first-child {{ margin-top: 0; }}
+  #help-modal-body h2 {{ font-size: 16px; margin: 18px 0 8px; color: #111827; }}
+  #help-modal-body h3 {{ font-size: 14px; margin: 14px 0 6px; color: #111827; }}
+  #help-modal-body p  {{ margin: 8px 0; }}
+  #help-modal-body ul, #help-modal-body ol {{ margin: 6px 0 10px;
+                                              padding-left: 22px; }}
+  #help-modal-body li {{ margin: 3px 0; }}
+  #help-modal-body a  {{ color: #2563eb; text-decoration: none; }}
+  #help-modal-body a:hover {{ text-decoration: underline; }}
+  #help-modal-body code {{
+    background: #f3f4f6; color: #b91c1c;
+    padding: 1px 5px; border-radius: 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }}
+  #help-modal-body pre {{
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto; margin: 8px 0;
+  }}
+  #help-modal-body pre code {{ background: transparent; color: #1f2937;
+                              padding: 0; font-size: 12.5px; }}
+  #help-modal-body blockquote {{
+    border-left: 3px solid #fbbf24; background: #fffbeb;
+    margin: 8px 0; padding: 6px 12px; color: #78350f;
+    border-radius: 0 4px 4px 0;
+  }}
+  #help-modal-body img {{
+    max-width: 100%; height: auto;
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    display: block; margin: 8px auto;
+    background: #f9fafb;
+  }}
+  #help-modal-body table {{
+    border-collapse: collapse; width: 100%; margin: 10px 0;
+    font-size: 12.5px;
+  }}
+  #help-modal-body th, #help-modal-body td {{
+    border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left;
+  }}
+  #help-modal-body th {{ background: #f9fafb; font-weight: 600; }}
+  #help-modal-body hr {{ border: 0; border-top: 1px solid #e5e7eb;
+                        margin: 16px 0; }}
+  #help-modal-foot {{
+    padding: 8px 16px; border-top: 1px solid #e5e7eb;
+    font-size: 11px; color: #6b7280; text-align: right;
+    flex-shrink: 0;
+  }}
+  #help-modal-foot a {{ color: #2563eb; text-decoration: none; }}
+  #help-modal-foot a:hover {{ text-decoration: underline; }}
+</style>
+<div id="help-modal-bg" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+  <div id="help-modal">
+    <div id="help-modal-head">
+      <span id="help-modal-title" class="help-title">📖 Gist 同步教程</span>
+      <button type="button" class="help-close" aria-label="关闭">×</button>
+    </div>
+    <div id="help-modal-body">
+      <div style="color:#9ca3af;text-align:center;padding:30px 0;">加载中…</div>
+    </div>
+    <div id="help-modal-foot">
+      源文件：<a href="https://github.com/fredhli/jp-foodmap/blob/main/docs/help/gist-setup.md"
+                target="_blank" rel="noopener">docs/help/gist-setup.md</a>
     </div>
   </div>
 </div>
@@ -1631,14 +1917,17 @@ MOBILE_UX_ASSETS = """
   .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
                line-height: 1.3; }
   .rst-title .rst-rating { color: #c33; margin-left: 4px; font-weight: 700; }
+  /* Match .rst-btn exactly so the trio (gmaps / 收藏 / 弃用) renders at one
+     consistent height; gmaps is the square sibling. */
   .rst-gmaps { display: inline-flex; align-items: center; justify-content: center;
+               box-sizing: border-box;
                width: 28px; height: 28px;
-               font-size: 16px; text-decoration: none;
+               text-decoration: none;
                border: 1px solid #d1d5db; border-radius: 5px;
-               background: #f9fafb; color: #1f2937;
-               opacity: 0.85;
-               transition: opacity 0.15s, transform 0.15s, background 0.15s; }
-  .rst-gmaps:hover { opacity: 1; background: #f3f4f6; transform: scale(1.05); }
+               background: #f9fafb;
+               transition: background 0.15s; }
+  .rst-gmaps:hover { background: #f3f4f6; }
+  .rst-gmaps img { width: 18px; height: 18px; display: block; }
   .rst-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
   .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
                 gap: 6px; margin-bottom: 10px; }
@@ -1654,6 +1943,13 @@ MOBILE_UX_ASSETS = """
                              font-size: 12px; min-width: 38px; }
   .rst-info-row .rst-value { color: #1f2937; min-width: 0;
                              overflow-wrap: anywhere; }
+  .rst-tx-btn { background: none; border: none; padding: 0;
+                margin-left: 6px; color: #2563eb; cursor: pointer;
+                font-family: inherit; font-size: 12px; line-height: 1.45;
+                flex-shrink: 0; }
+  .rst-tx-btn:hover { color: #1d4ed8; text-decoration: underline; }
+  .rst-tx-btn:disabled { color: #9ca3af; cursor: default;
+                         text-decoration: none; }
   .rst-policy { font-size: 12px; color: #6b7280; line-height: 1.5;
                 margin-bottom: 8px; }
   .rst-footer { display: flex; justify-content: space-between;
@@ -1811,6 +2107,11 @@ FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
   var EMBEDDED_BOOKMARKS = __BOOKMARKS__;
+  // Repo-shipped landmarks. Rendered fresh on every page load (not stored
+  // in localStorage), so an updated favorites_builtin.json + redeploy
+  // immediately reaches every visitor regardless of their sync state.
+  // Read-only from the UI — the per-pin popup omits the delete button.
+  var EMBEDDED_FAVORITES_BUILTIN = __FAVORITES_BUILTIN__;
   // bucket → marker halo color, and bucket name → emoji glyph. Inlined from
   // PRICE_BUCKETS / GENRE_EMOJI in map_data.py so each restaurants.json row
   // only needs to carry the small keys (bucket / categories[0]), not the
@@ -1831,6 +2132,15 @@ FILTER_JS_TEMPLATE = r"""
   // like "炭火烧鸟 正" working as name search even though "正" looks like
   // it could be a location token.
   var KNOWN_LOCS = new Set(__KNOWN_LOCS__);
+  // Raw markdown for the in-page Gist setup guide — one variable per
+  // language so the build-time strip in _scan_cjk_runs can match each
+  // literal as a self-contained JSON string (object literals don't have
+  // a regex-friendly terminator). Picked by activeLang at render time.
+  var HELP_MD_CN = __HELP_MD_CN_JSON__;
+  var HELP_MD_TW = __HELP_MD_TW_JSON__;
+  var HELP_MD_EN = __HELP_MD_EN_JSON__;
+  var HELP_MD_JA = __HELP_MD_JA_JSON__;
+  var HELP_MD = {'zh-CN': HELP_MD_CN, 'zh-TW': HELP_MD_TW, 'en': HELP_MD_EN, 'ja': HELP_MD_JA};
   // Build-time Simplified -> Traditional lookup. Keys are exact CJK
   // runs that appear anywhere on the rendered page; values are their
   // OpenCC s2t conversion (full multi-char rules applied at build, so
@@ -1844,6 +2154,9 @@ FILTER_JS_TEMPLATE = r"""
   // page, values come from data/i18n/en.json. Runs without an entry
   // stay in Chinese at runtime (the build log lists what's missing).
   var TEXT_EN_MAP = __TEXT_EN_MAP__;
+  // Japanese lookup, same shape. Values come from data/i18n/ja.json.
+  // Runs without an entry stay in Chinese at runtime.
+  var TEXT_JA_MAP = __TEXT_JA_MAP__;
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -1895,6 +2208,7 @@ FILTER_JS_TEMPLATE = r"""
     if (typeof activeLang !== 'undefined') {
       if (activeLang === 'zh-TW') popupsUrl = 'data/popups-tw.json';
       else if (activeLang === 'en') popupsUrl = 'data/popups-en.json';
+      else if (activeLang === 'ja') popupsUrl = 'data/popups-ja.json';
     }
     popupsPromise = fetch(popupsUrl, {cache: 'force-cache'})
       .then(function(r) {
@@ -2010,6 +2324,7 @@ FILTER_JS_TEMPLATE = r"""
       if (p === 'tw' || p === 'zh-TW') return 'zh-TW';
       if (p === 'cn' || p === 'zh-CN') return 'zh-CN';
       if (p === 'en') return 'en';
+      if (p === 'ja' || p === 'jp') return 'ja';
     } catch (_) {}
     return null;
   }
@@ -2029,6 +2344,8 @@ FILTER_JS_TEMPLATE = r"""
     I18N_MAP = TEXT_TRAD_MAP;
   } else if (activeLang === 'en' && Object.keys(TEXT_EN_MAP).length) {
     I18N_MAP = TEXT_EN_MAP;
+  } else if (activeLang === 'ja' && Object.keys(TEXT_JA_MAP).length) {
+    I18N_MAP = TEXT_JA_MAP;
   }
 
   // Matches a maximal CJK ideograph run — BMP unified ideographs +
@@ -2128,7 +2445,6 @@ FILTER_JS_TEMPLATE = r"""
     catch (_) { return {}; }
   }
   function saveConfig(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
-  function clearConfig() { localStorage.removeItem(CFG_KEY); }
 
   function loadCache() {
     try {
@@ -2329,21 +2645,6 @@ FILTER_JS_TEMPLATE = r"""
     wireTransitFab('fab-transit-long', 'long', 'tabelog.showTransitLong', false);
     wireTransitFab('fab-transit-city', 'city', 'tabelog.showTransitCity', false);
 
-    // Find the attractions FeatureGroup among map._layers. Duck-type rather
-    // than `instanceof L.MarkerClusterGroup` because that class symbol can
-    // throw if the plugin hasn't fully exposed it yet — and any throw here
-    // would skip the FAB wiring below. A MarkerClusterGroup has the
-    // `refreshClusters` method; a plain FeatureGroup doesn't.
-    var attractionsLayer = null;
-    for (var lid in map._layers) {
-      var lyr = map._layers[lid];
-      if (typeof lyr.eachLayer !== 'function') continue;          // not a layer group
-      if (typeof lyr.refreshClusters === 'function') continue;    // is a cluster
-      if (!lyr._layers || Object.keys(lyr._layers).length === 0) continue;
-      attractionsLayer = lyr;
-      break;
-    }
-
     function applyToggle(btn, layers, on) {
       if (!btn) return;
       var arr = Array.isArray(layers) ? layers : [layers];
@@ -2364,8 +2665,10 @@ FILTER_JS_TEMPLATE = r"""
       }
     }
 
-    // `layers` can be a single layer or an array — used by fab-attractions to
-    // co-toggle the folium-curated layer + the user-added attractions layer.
+    // `layers` can be a single layer or an array. Historically used to
+    // co-toggle a folium-built static attractions FeatureGroup alongside
+    // the user-added layer; now there's only one layer per FAB but the
+    // array shape stays so re-introducing a second layer later is cheap.
     function wireFab(btnId, layers, storageKey, defaultOn) {
       var btn = document.getElementById(btnId);
       var arr = Array.isArray(layers) ? layers : [layers];
@@ -2413,6 +2716,31 @@ FILTER_JS_TEMPLATE = r"""
 
     function saveBookmarks() {
       try { localStorage.setItem(BM_KEY, JSON.stringify(bookmarks)); } catch (_) {}
+    }
+    // Pick the right name field for the active UI language.
+    //   full schema: { name_src, name_sc, name_tc, name_jp, name_en, ... }
+    //   legacy:      { name, ... }                          — pre-i18n entries
+    // For zh-TW, an explicit name_tc wins. Without it we fall back through
+    // localizeText (the runtime CJK localizer used for static page text),
+    // which only covers runs already in TEXT_TRAD_MAP — chars outside the
+    // map stay simplified. That's the accepted tradeoff for not shipping a
+    // full OpenCC pass to the browser.
+    function bmDisplayName(bm) {
+      if (!bm) return '';
+      if (bm.name && !bm.name_src && !bm.name_sc && !bm.name_tc
+                  && !bm.name_en  && !bm.name_jp) {
+        return bm.name;  // legacy single-name entry
+      }
+      var sc  = bm.name_sc  || '';
+      var tc  = bm.name_tc  || '';
+      var en  = bm.name_en  || '';
+      var src = bm.name_src || '';
+      var jp  = bm.name_jp  || '';
+      if (activeLang === 'zh-CN') return sc  || src || jp  || tc || en;
+      if (activeLang === 'zh-TW') return tc  || localizeText(sc || src || jp || en);
+      if (activeLang === 'en')    return en  || sc  || src || jp || tc;
+      if (activeLang === 'ja')    return jp  || src || sc  || tc || en;
+      return src || sc || jp || tc || en;
     }
     function bookmarkIconHtml(emoji, name, emojiSize, labelSize) {
       // 22px / 10px for 收藏, 30px / 11px for user-added 景点 — the latter
@@ -2467,9 +2795,30 @@ FILTER_JS_TEMPLATE = r"""
                + 'onerror="this.parentElement.style.display=\'none\'"></a>';
         }).join('') + '</div>';
       }
-      var chip = d.bookable
-        ? '<span class="rst-chip">可Tabelog预约</span>'
-        : '<span class="rst-chip rst-chip-off">不可Tabelog预约</span>';
+      // EN gets a hand-tuned phrase ("Bookable via Tabelog") so the chip
+      // doesn't read as a literal word-for-word join from the localizer
+      // ("AvailableTabelogBooking"). zh-CN is the source string; zh-TW
+      // and ja still flow through the runtime localizer.
+      var chipText = d.bookable ? '可Tabelog预约' : '不可Tabelog预约';
+      if (_lang === 'en') {
+        chipText = d.bookable ? 'Bookable via Tabelog' : 'Not bookable via Tabelog';
+      }
+      var chipCls = d.bookable ? 'rst-chip' : 'rst-chip rst-chip-off';
+      var chip = '<span class="' + chipCls + '">' + chipText + '</span>';
+      // Per-field translate button. Hidden on the Japanese UI (source
+      // text is already Japanese). The Chinese UIs (zh-CN / zh-TW) only
+      // show the button for `seat` — station and address are mostly
+      // kanji Chinese readers can read directly, so the affordance is
+      // visual noise there. English shows all three. The label "翻译"
+      // rides the CJK localizer: zh-TW gets 翻譯 via OpenCC, en gets
+      // "Translate" via TEXT_EN_MAP.
+      var _lang = (typeof activeLang === 'undefined') ? 'zh-CN' : activeLang;
+      function txBtn(field, val) {
+        if (!val || val === '—') return '';
+        if (_lang === 'ja') return '';
+        if ((_lang === 'zh-CN' || _lang === 'zh-TW') && field !== 'seat') return '';
+        return '<button type="button" class="rst-tx-btn" data-tx="' + field + '">翻译</button>';
+      }
       // Quick-jump to a Google Maps search for "<name> <address>". The
       // search URL avoids needing a place_id — Google's `?api=1&query=`
       // form is documented + stable, and lands on the search results
@@ -2483,7 +2832,9 @@ FILTER_JS_TEMPLATE = r"""
       var gmapsBtn = '<a class="rst-gmaps" href="' + gmapsUrl
                    + '" target="_blank" rel="noopener" '
                    + 'aria-label="Open in Google Maps" '
-                   + 'title="Open in Google Maps">🗺️</a>';
+                   + 'title="Open in Google Maps">'
+                   + '<img src="img/google-maps.png" alt="Google Maps" '
+                   + 'width="18" height="18" loading="lazy"></a>';
       return '<div class="rst-card">'
         + ribbons
         + '<div class="rst-header">'
@@ -2501,10 +2852,10 @@ FILTER_JS_TEMPLATE = r"""
         + '<div class="rst-genre"><span lang="ja">' + escapeHtml(genre) + '</span> / ' + escapeHtml(bucket) + '</div>'
         + '<div class="rst-info">'
           + '<div class="rst-info-row"><span class="rst-label">晚</span><span class="rst-value">' + escapeHtml(dinnerS) + '</span></div>'
-          + '<div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 <span lang="ja">' + escapeHtml(station) + '</span></span></div>'
+          + '<div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 <span lang="ja">' + escapeHtml(station) + '</span></span>' + txBtn('station', station) + '</div>'
           + '<div class="rst-info-row"><span class="rst-label">午</span><span class="rst-value">' + escapeHtml(lunchS) + '</span></div>'
-          + '<div class="rst-info-row"><span class="rst-label">座位</span><span class="rst-value">' + (seat ? escapeHtml(seat) : '—') + '</span></div>'
-          + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value" lang="ja">' + escapeHtml(addr) + '</span></div>'
+          + '<div class="rst-info-row"><span class="rst-label">座位</span><span class="rst-value">' + (seat ? escapeHtml(seat) : '—') + '</span>' + txBtn('seat', seat) + '</div>'
+          + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value" lang="ja">' + escapeHtml(addr) + '</span>' + txBtn('addr', addr) + '</div>'
         + '</div>'
         + (policy ? '<div class="rst-policy">' + escapeHtml(policy) + '</div>' : '')
         + '<div class="rst-footer">'
@@ -2520,12 +2871,12 @@ FILTER_JS_TEMPLATE = r"""
         className: 'empty',
         iconSize: [0, 0],
         iconAnchor: [0, 0],
-        html: bookmarkIconHtml(bm.emoji, bm.name,
+        html: bookmarkIconHtml(bm.emoji, bmDisplayName(bm),
                                isAttraction ? 30 : 22,
                                isAttraction ? 11 : 10)
       });
       var m = L.marker([bm.lat, bm.lon], {icon: icon});
-      m.bindTooltip(bm.name || '', {sticky: true});
+      m.bindTooltip(bmDisplayName(bm), {sticky: true});
       m.on('click', function() { openBookmarkPopup(bm, m); });
       m.addTo(targetLayer);
       bmMarkerById[bm.id] = {marker: m, layer: targetLayer};
@@ -2538,6 +2889,23 @@ FILTER_JS_TEMPLATE = r"""
       }
     }
     bookmarks.forEach(renderBookmark);
+    // Repo-shipped landmarks render alongside the personal layer but live
+    // outside the localStorage/Gist sync — so a Gist push doesn't carry
+    // them, and a redeploy with an updated favorites_builtin.json shows
+    // up immediately on every visitor's next reload. Pulled out as a
+    // function because the Gist-pull path wipes both leaflet layers
+    // before re-rendering personal bookmarks; that wipe also kills our
+    // builtin markers, so we re-run this after each pull. ID collision
+    // with a personal pin (unlikely; builtin IDs use the 'fb-' prefix)
+    // is resolved by letting the personal entry win.
+    function renderFavoritesBuiltin() {
+      EMBEDDED_FAVORITES_BUILTIN.forEach(function(bm) {
+        if (bmMarkerById[bm.id]) return;
+        bm._builtin = true;
+        renderBookmark(bm);
+      });
+    }
+    renderFavoritesBuiltin();
 
     function openBookmarkPopup(bm, marker) {
       var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
@@ -2546,23 +2914,30 @@ FILTER_JS_TEMPLATE = r"""
       // instead of 22px — keeps the speech bubble tip from overlapping
       // the emoji.
       var offY = (bm.category === 'attraction') ? -30 : -22;
-      var html =
-        '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
-          '<div style="font-weight:700;margin-bottom:4px;">' +
-            (bm.emoji || '📍') + ' ' + escapeHtml(bm.name || '') +
-          '</div>' +
-          '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
-                      'margin-bottom:8px;">' + coord + '</div>' +
+      // Repo-shipped landmarks are read-only from the page — the source
+      // of truth is favorites_builtin.json in the repo. Hide the del
+      // button so a stray click can't half-delete (would clear it for
+      // the session only and reappear on next load).
+      var delBtn = bm._builtin ? '' :
           '<button id="bm-del" ' +
                   'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
                          'border:1px solid #fecaca;border-radius:4px;' +
                          'background:#fef2f2;color:#b91c1c;font-weight:600;">' +
-                  delLabel + '</button>' +
+                  delLabel + '</button>';
+      var html =
+        '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
+          '<div style="font-weight:700;margin-bottom:4px;">' +
+            (bm.emoji || '📍') + ' ' + escapeHtml(bmDisplayName(bm)) +
+          '</div>' +
+          '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
+                      'margin-bottom:8px;">' + coord + '</div>' +
+          delBtn +
         '</div>';
       L.popup({offset: [0, offY]})
         .setLatLng([bm.lat, bm.lon])
         .setContent(html)
         .openOn(map);
+      if (bm._builtin) return;
       setTimeout(function() {
         var del = document.getElementById('bm-del');
         if (!del) return;
@@ -2577,10 +2952,10 @@ FILTER_JS_TEMPLATE = r"""
       }, 0);
     }
 
-    wireFab('fab-attractions',
-            [attractionsLayer, userAttractionsLayer],
+    wireFab('fab-attractions', userAttractionsLayer,
             'tabelog.showAttractions', true);
-    wireFab('fab-bookmarks', bookmarksLayer, 'tabelog.showBookmarks', true);
+    wireFab('fab-bookmarks',   bookmarksLayer,
+            'tabelog.showBookmarks',   true);
 
     // ----- 加入收藏 modal -----
     var bmModal      = document.getElementById('bm-modal');
@@ -2660,6 +3035,21 @@ FILTER_JS_TEMPLATE = r"""
       bmShowError('');
       bmPending = null;
     }
+    function setBmModalBusy(busy) {
+      var saveBtn   = bmModal.querySelector('.bm-save');
+      var cancelBtn = bmModal.querySelector('.bm-cancel');
+      var closeBtn  = bmModal.querySelector('.bm-close');
+      if (busy) {
+        saveBtn.dataset.origLabel = saveBtn.textContent;
+        saveBtn.textContent = '…';
+      } else if (saveBtn.dataset.origLabel) {
+        saveBtn.textContent = saveBtn.dataset.origLabel;
+        delete saveBtn.dataset.origLabel;
+      }
+      saveBtn.disabled = busy;
+      cancelBtn.disabled = busy;
+      closeBtn.disabled = busy;
+    }
     function commitBookmark() {
       if (!bmPending) return;
       var name = (bmNameInput.value || '').trim();
@@ -2676,36 +3066,55 @@ FILTER_JS_TEMPLATE = r"""
       }
       var emoji = emojiRaw || '📍';
       bmShowError('');
-      var bm = {
-        id: 'bm-' + Date.now().toString(36) + '-' +
-            Math.random().toString(36).slice(2, 7),
-        name: name,
-        emoji: emoji,
-        lat: bmPending.lat,
-        lon: bmPending.lng,
-        category: bmKind
-      };
-      bookmarks.push(bm);
-      renderBookmark(bm);
-      saveBookmarks();
-      schedulePush();
-      // If a search-temp 📍 sits at this exact spot it's the one being
-      // bookmarked — drop it so the bookmark emoji doesn't stack on top.
-      // Coord match instead of a "source" flag keeps the right-click path
-      // from accidentally clearing an unrelated search pin elsewhere.
-      if (ssTempMarker) {
-        var t = ssTempMarker.getLatLng();
-        if (Math.abs(t.lat - bm.lat) < 1e-7 && Math.abs(t.lng - bm.lon) < 1e-7) {
-          ssRemoveTempMarker();
+      // Capture coords + category now so a click on a different pin while
+      // we're awaiting the translate fetch can't redirect the save.
+      var pendingLat = bmPending.lat;
+      var pendingLng = bmPending.lng;
+      var pendingCat = bmKind;
+      setBmModalBusy(true);
+      // Wikidata lookup: hit fills sc/tc/jp/en with community-curated
+      // labels, miss leaves them empty — display falls back to name_src
+      // via bmDisplayName. We deliberately don't fall back to MT here;
+      // honest empty fields beat literal translations of proper nouns
+      // ("新世界" → "new world" was the cautionary example).
+      wikidataLookup(name, pendingLat, pendingLng).then(function(wd) {
+        var bm = {
+          id: 'bm-' + Date.now().toString(36) + '-' +
+              Math.random().toString(36).slice(2, 7),
+          name_src: name,
+          name_sc: (wd && wd.sc) || '',
+          name_tc: (wd && wd.tc) || '',
+          name_jp: (wd && wd.jp) || '',
+          name_en: (wd && wd.en) || '',
+          emoji: emoji,
+          lat: pendingLat,
+          lon: pendingLng,
+          category: pendingCat
+        };
+        bookmarks.push(bm);
+        renderBookmark(bm);
+        saveBookmarks();
+        schedulePush();
+        // If a search-temp 📍 sits at this exact spot it's the one being
+        // bookmarked — drop it so the bookmark emoji doesn't stack on top.
+        // Coord match instead of a "source" flag keeps the right-click path
+        // from accidentally clearing an unrelated search pin elsewhere.
+        if (ssTempMarker) {
+          var t = ssTempMarker.getLatLng();
+          if (Math.abs(t.lat - bm.lat) < 1e-7 && Math.abs(t.lng - bm.lon) < 1e-7) {
+            ssRemoveTempMarker();
+          }
         }
-      }
-      // Make sure the right layer is visible after adding — if the user
-      // has the corresponding FAB toggled off, surface the pin by
-      // re-enabling it.
-      var fabId = (bm.category === 'attraction') ? 'fab-attractions' : 'fab-bookmarks';
-      var fab = document.getElementById(fabId);
-      if (fab && fab.getAttribute('aria-pressed') !== 'true') fab.click();
-      closeBookmarkModal();
+        // Make sure the right layer is visible after adding — if the user
+        // has the corresponding FAB toggled off, surface the pin by
+        // re-enabling it.
+        var fabId = (bm.category === 'attraction') ? 'fab-attractions' : 'fab-bookmarks';
+        var fab = document.getElementById(fabId);
+        if (fab && fab.getAttribute('aria-pressed') !== 'true') fab.click();
+      }).then(function() {
+        setBmModalBusy(false);
+        closeBookmarkModal();
+      });
     }
     bmBackdrop.addEventListener('click', closeBookmarkModal);
     bmModal.querySelector('.bm-close').addEventListener('click', closeBookmarkModal);
@@ -2805,6 +3214,44 @@ FILTER_JS_TEMPLATE = r"""
     var ssInput   = document.getElementById('ss-input');
     var ssClear   = document.getElementById('ss-clear');
     var ssList    = document.getElementById('ss-list');
+
+    // Placeholders are attributes, not text nodes, so localizeTree never
+    // touches them — dispatch each one here on activeLang. zh-CN is the
+    // canonical fallback for any language we haven't translated yet.
+    // Centralized so adding a new translated input is one entry, not a
+    // sprinkle of dispatch code near each input declaration.
+    var PLACEHOLDER_L10N = {
+      'ss-input': {
+        'zh-CN': '搜索餐厅 / 景点 / 地址 ...',
+        'zh-TW': '搜尋餐廳 / 景點 / 地址 ...',
+        'en':    'Search restaurants / sights / address ...',
+        'ja':    'レストラン / スポット / 住所を検索 ...'
+      },
+      'ff-cfg-gist': {
+        'zh-CN': '例如 a1b2c3d4e5f6...',
+        'zh-TW': '例如 a1b2c3d4e5f6...',
+        'en':    'e.g. a1b2c3d4e5f6...',
+        'ja':    '例: a1b2c3d4e5f6...'
+      },
+      'bm-name': {
+        'zh-CN': '例如：东京塔',
+        'zh-TW': '例如：東京塔',
+        'en':    'e.g. Tokyo Tower',
+        'ja':    '例: 東京タワー'
+      },
+      'bm-emoji': {
+        'zh-CN': '可粘贴任意 emoji',
+        'zh-TW': '可貼上任意 emoji',
+        'en':    'Paste any emoji',
+        'ja':    '任意の絵文字を貼り付け可'
+      }
+    };
+    Object.keys(PLACEHOLDER_L10N).forEach(function(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var by_lang = PLACEHOLDER_L10N[id];
+      el.placeholder = by_lang[activeLang] || by_lang['zh-CN'];
+    });
     var ssDebounce = null;
     var ssReqSeq  = 0;
     var ssTempMarker = null;
@@ -3424,7 +3871,9 @@ FILTER_JS_TEMPLATE = r"""
               // Wipe + re-render in place — closures hold the same array
               // reference, so we mutate rather than reassign. Both layers
               // (bookmarks + user-added attractions) get cleared so the
-              // pull rebuild starts from a clean slate.
+              // pull rebuild starts from a clean slate. The builtin
+              // landmarks share the same layers, so the wipe takes them
+              // out too — renderFavoritesBuiltin puts them back.
               bookmarks.length = 0;
               bookmarksLayer.clearLayers();
               userAttractionsLayer.clearLayers();
@@ -3433,6 +3882,7 @@ FILTER_JS_TEMPLATE = r"""
                 bookmarks.push(bm);
                 renderBookmark(bm);
               });
+              renderFavoritesBuiltin();
               saveBookmarks();
             }
             saveCache(state, false);
@@ -3693,6 +4143,168 @@ FILTER_JS_TEMPLATE = r"""
     var bsContent  = document.getElementById('bs-content');
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
+
+    // Per-field translate buttons in the detail card. Uses the unofficial
+    // translate.googleapis.com "gtx" endpoint — CORS-open, no key, returns
+    // a nested-array form whose first element is the segment list.
+    function txTargetLangCode() {
+      if (activeLang === 'zh-TW') return 'zh-TW';
+      if (activeLang === 'en')    return 'en';
+      return 'zh-CN';
+    }
+    function googleTranslate(text, sl, tl) {
+      var url = 'https://translate.googleapis.com/translate_a/single' +
+                '?client=gtx&sl=' + encodeURIComponent(sl || 'auto') +
+                '&tl=' + encodeURIComponent(tl) +
+                '&dt=t&q=' + encodeURIComponent(text);
+      return fetch(url).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function(j) {
+        var segs = (j && j[0]) || [];
+        return segs.map(function(s) { return s && s[0] ? s[0] : ''; }).join('');
+      });
+    }
+    function googleTranslateJa(text) {
+      return googleTranslate(text, 'ja', txTargetLangCode());
+    }
+    // ----- Wikidata lookup for bookmark/attraction names -----
+    // Mirror of src/tabelog/scrape/enhance_bookmarks_via_wikidata.py: try
+    // ja → en → zh Wikipedia for the user's name string, resolve to a
+    // wikibase_item Q-ID, then pull the multilingual labels from Wikidata.
+    // Returns null on miss (no Wikipedia page, disambig page, or coord
+    // drift > 5 km from the pin); on hit returns {sc, tc, jp, en} where
+    // any field may be ''. Both Wikipedia and Wikidata are CORS-open with
+    // origin=* in the query string, so no proxy needed.
+    function bmHaversineM(lat1, lon1, lat2, lon2) {
+      var R = 6371000;
+      var p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+      var dphi = (lat2 - lat1) * Math.PI / 180;
+      var dlam = (lon2 - lon1) * Math.PI / 180;
+      var a = Math.sin(dphi / 2) * Math.sin(dphi / 2) +
+              Math.cos(p1) * Math.cos(p2) *
+              Math.sin(dlam / 2) * Math.sin(dlam / 2);
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
+    function wikipediaToQid(title, lang) {
+      var url = 'https://' + lang + '.wikipedia.org/w/api.php' +
+                '?action=query&titles=' + encodeURIComponent(title) +
+                '&prop=pageprops%7Ccoordinates' +
+                '&redirects=1&formatversion=2&format=json&origin=*';
+      return fetch(url).then(function(r) {
+        if (!r.ok) throw new Error('wiki HTTP ' + r.status);
+        return r.json();
+      }).then(function(j) {
+        var pages = (j && j.query && j.query.pages) || [];
+        if (!pages.length) return null;
+        var p = pages[0];
+        if (p.missing) return null;
+        var pp = p.pageprops || {};
+        if ('disambiguation' in pp) return null;
+        var qid = pp.wikibase_item;
+        if (!qid) return null;
+        var c = (p.coordinates && p.coordinates[0]) || null;
+        return {qid: qid, lat: c ? c.lat : null, lon: c ? c.lon : null};
+      });
+    }
+    function wikidataLabels(qid) {
+      var url = 'https://www.wikidata.org/w/api.php' +
+                '?action=wbgetentities&ids=' + encodeURIComponent(qid) +
+                '&props=labels&format=json&origin=*';
+      return fetch(url).then(function(r) {
+        if (!r.ok) throw new Error('wikidata HTTP ' + r.status);
+        return r.json();
+      }).then(function(j) {
+        var ent = (j && j.entities && j.entities[qid]) || {};
+        var raw = ent.labels || {};
+        function lab(k) { return (raw[k] && raw[k].value) || ''; }
+        return {
+          sc: lab('zh-hans') || lab('zh-cn') || '',
+          tc: lab('zh-hant') || lab('zh-tw') || lab('zh-hk') || '',
+          jp: lab('ja'),
+          en: lab('en')
+        };
+      });
+    }
+    function wikidataLookup(name, lat, lon) {
+      // Returns Promise<null | {sc, tc, jp, en}>. Never rejects — all
+      // network errors fold into null so commitBookmark can save with
+      // empty translation fields (display falls back to name_src).
+      if (!name) return Promise.resolve(null);
+      var langs = ['ja', 'en', 'zh'];
+      var i = 0;
+      function tryNext() {
+        if (i >= langs.length) return Promise.resolve(null);
+        var lang = langs[i++];
+        return wikipediaToQid(name, lang)
+          .catch(function() { return null; })
+          .then(function(r) { return r || tryNext(); });
+      }
+      return tryNext().then(function(qinfo) {
+        if (!qinfo) return null;
+        if (qinfo.lat != null && qinfo.lon != null
+            && lat != null && lon != null) {
+          if (bmHaversineM(lat, lon, qinfo.lat, qinfo.lon) > 5000) {
+            return null;
+          }
+        }
+        return wikidataLabels(qinfo.qid).catch(function() { return null; });
+      });
+    }
+    // Helper: button labels go through the runtime localizer so they
+    // pick up the active language without us hardcoding 翻譯 / Translate /
+    // 翻訳 / 原文 / Original / 原文. localizeText is a no-op when there's
+    // no I18N_MAP (i.e. zh-CN), which is exactly what we want there.
+    function setTxBtnLabel(btn, label) {
+      btn.textContent = (typeof localizeText === 'function')
+        ? localizeText(label)
+        : label;
+    }
+    bsContent.addEventListener('click', function(e) {
+      var btn = e.target.closest && e.target.closest('.rst-tx-btn');
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var row = btn.parentNode;
+      var valueEl = row && row.querySelector('.rst-value');
+      if (!valueEl) return;
+      var jaEl = valueEl.querySelector('[lang="ja"]');
+      var target = jaEl || (valueEl.getAttribute('lang') === 'ja' ? valueEl : valueEl);
+
+      // Toggle back to original if this button is already in translated state
+      if (btn.dataset.state === 'translated') {
+        var orig = btn.dataset.origText;
+        if (orig !== undefined) {
+          target.textContent = orig;
+          if (btn.dataset.origLang) target.setAttribute('lang', btn.dataset.origLang);
+        }
+        btn.dataset.state = '';
+        setTxBtnLabel(btn, '翻译');
+        return;
+      }
+
+      // First click on this button — fetch translation
+      var text = (target.textContent || '').trim();
+      if (!text || text === '—') return;
+      btn.disabled = true;
+      btn.textContent = '…';
+      googleTranslateJa(text).then(function(out) {
+        if (!out) throw new Error('empty');
+        // Cache so the next click restores cleanly.
+        btn.dataset.origText = text;
+        btn.dataset.origLang = target.getAttribute('lang') || '';
+        target.textContent = out;
+        if (target.getAttribute('lang') === 'ja') target.removeAttribute('lang');
+        btn.disabled = false;
+        btn.dataset.state = 'translated';
+        setTxBtnLabel(btn, '原文');
+      }).catch(function(err) {
+        console.warn('[tabelog] translate failed:', err);
+        btn.disabled = false;
+        setTxBtnLabel(btn, '翻译');
+      });
+    });
+
     // Bind the banner element so the highlight helpers (declared earlier
     // in this initMap closure) can toggle it.
     bsBanner = document.getElementById('bs-banner');
@@ -4349,6 +4961,115 @@ FILTER_JS_TEMPLATE = r"""
       if (e.target === modalBg) closeModal();
     });
 
+    // ----- Help modal: in-page render of docs/help/gist-setup.md.
+    // marked.js is lazy-loaded the first time the modal opens so the cold
+    // page load doesn't pay for a parser the user might never need.
+    var helpBg   = document.getElementById('help-modal-bg');
+    var helpBody = document.getElementById('help-modal-body');
+    var helpRendered = false;          // first-open guard
+    var markedPromise = null;          // shared across re-opens
+
+    function loadMarked() {
+      if (window.marked) return Promise.resolve(window.marked);
+      if (markedPromise) return markedPromise;
+      markedPromise = new Promise(function(resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js';
+        s.onload  = function() { resolve(window.marked); };
+        s.onerror = function() {
+          markedPromise = null;
+          reject(new Error('无法加载 marked.js（检查网络）'));
+        };
+        document.head.appendChild(s);
+      });
+      return markedPromise;
+    }
+
+    // Per-language source-of-truth links shown in the modal footer, so a
+    // reader can hop from the rendered view to the editable .md.
+    var HELP_MD_FILE = {
+      'zh-CN': 'gist-setup.md',
+      'zh-TW': 'gist-setup-tw.md',
+      'en':    'gist-setup-en.md',
+      'ja':    'gist-setup-ja.md'
+    };
+
+    function renderHelp() {
+      if (helpRendered) return;
+      // Pick the variant for the active language with a zh-CN fallback,
+      // and a sturdier fallback to any non-empty entry in case the
+      // canonical zh-CN was missing at build time.
+      var md = HELP_MD[activeLang] || HELP_MD['zh-CN']
+            || HELP_MD['zh-TW'] || HELP_MD['en'] || '';
+      if (!md) {
+        helpBody.innerHTML = '<div style="color:#b91c1c;text-align:center;' +
+                             'padding:30px 0;">教程文件缺失</div>';
+        helpRendered = true;
+        return;
+      }
+      loadMarked()
+        .then(function(marked) {
+          // marked 12 emits semantic HTML by default; gfm + breaks make the
+          // line-break behavior match what the source MD looks like in a
+          // text editor (single newline inside a paragraph → <br>).
+          var html = marked.parse(md, { gfm: true, breaks: false });
+          helpBody.innerHTML = html;
+          // External links open in a new tab; the source MD doesn't have
+          // to repeat target="_blank" on every <a>.
+          helpBody.querySelectorAll('a[href^="http"]').forEach(function(a) {
+            a.target = '_blank';
+            a.rel = 'noopener';
+          });
+          // Match the rest of the UI's emoji rendering — system glyphs on
+          // Windows are missing flags etc., so swap to Apple PNGs.
+          emojify(helpBody);
+          helpRendered = true;
+        })
+        .catch(function(e) {
+          var f = HELP_MD_FILE[activeLang] || HELP_MD_FILE['zh-CN'];
+          helpBody.innerHTML = '<div style="color:#b91c1c;text-align:center;' +
+                               'padding:30px 0;">渲染失败：' +
+                               escapeHtml(e.message) + '<br>' +
+                               '<a href="https://github.com/fredhli/jp-foodmap/' +
+                               'blob/main/docs/help/' + f + '" target="_blank" ' +
+                               'rel="noopener" style="color:#2563eb;">' +
+                               'Open on GitHub →</a></div>';
+        });
+    }
+
+    // Repoint the modal footer link to the active language's source file
+    // each time the modal opens — the static HTML defaults to gist-setup.md.
+    var helpFootLink = helpBg.querySelector('#help-modal-foot a');
+    function updateHelpFootLink() {
+      if (!helpFootLink) return;
+      var f = HELP_MD_FILE[activeLang] || HELP_MD_FILE['zh-CN'];
+      helpFootLink.href =
+        'https://github.com/fredhli/jp-foodmap/blob/main/docs/help/' + f;
+      helpFootLink.textContent = 'docs/help/' + f;
+    }
+
+    function openHelp()  {
+      updateHelpFootLink();
+      renderHelp();
+      helpBg.classList.add('help-open');
+      // Reset scroll to the top each open so returning users always start
+      // from the intro rather than wherever they left off mid-read.
+      if (helpBody) helpBody.scrollTop = 0;
+    }
+    function closeHelp() { helpBg.classList.remove('help-open'); }
+
+    var helpBtn = document.getElementById('ff-cfg-help');
+    if (helpBtn) helpBtn.addEventListener('click', openHelp);
+    helpBg.addEventListener('click', function(e) {
+      if (e.target === helpBg) closeHelp();
+    });
+    helpBg.querySelector('.help-close').addEventListener('click', closeHelp);
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && helpBg.classList.contains('help-open')) {
+        closeHelp();
+      }
+    });
+
     document.getElementById('ff-cfg-save').addEventListener('click', function() {
       var gistId = cfgGist.value.trim();
       var pat = cfgPat.value.trim();
@@ -4381,18 +5102,6 @@ FILTER_JS_TEMPLATE = r"""
           cfgMsg.style.color = '#dc2626';
           cfgMsg.textContent = '✗ ' + e.message;
         });
-    });
-
-    document.getElementById('ff-cfg-clear').addEventListener('click', function() {
-      if (!confirm('清除本地 Gist 配置?后续修改不会同步到云端。')) return;
-      clearConfig();
-      etag = null;
-      clearInterval(pollTimer);
-      cfgGist.value = '';
-      cfgPat.value = '';
-      cfgMsg.style.color = '#6b7280';
-      cfgMsg.textContent = '已清除';
-      setStatus('本地模式', '');
     });
 
     // Language picker. activeLang was resolved on boot from ?lang= and
@@ -4632,28 +5341,11 @@ def main(argv: list[str] | None = None) -> None:
     # client-side in JS so the filter panel can re-cluster on the fly.
     MarkerCluster(name="_assets", control=False).add_to(m)
 
-    # Tourist attraction anchors — separate togglable layer, large emoji+label.
-    attr_layer = folium.FeatureGroup(name="景点锚点", show=True).add_to(m)
-    for name, emoji, lat, lon in ATTRACTIONS:
-        icon_html = f"""
-        <div style="position: relative; transform: translate(-50%, -100%);
-                    text-align: center; width: max-content;">
-          <div style="font-size: 30px; line-height: 1;
-                      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));">{emoji}</div>
-          <div style="font-size: 11px; font-weight: 700; color: #1f2937;
-                      background: rgba(255,255,255,0.92);
-                      padding: 1px 6px; border-radius: 4px;
-                      margin-top: 1px; white-space: nowrap;
-                      box-shadow: 0 1px 2px rgba(0,0,0,0.2);">{name}</div>
-        </div>
-        """
-        folium.Marker(
-            location=[lat, lon],
-            tooltip=name,
-            icon=folium.features.DivIcon(
-                icon_size=(0, 0), icon_anchor=(0, 0), html=icon_html
-            ),
-        ).add_to(attr_layer)
+    # Landmark layer is rendered client-side from EMBEDDED_FAVORITES_BUILTIN
+    # (baked from data/favorites_builtin.json) plus any user pins from
+    # localStorage / Gist — see the bookmarks block in FILTER_JS_TEMPLATE.
+    # No folium-side FeatureGroup any more, so the FAB has only the JS
+    # layers to toggle.
 
     # No LayerControl — replaced by the floating FAB stack (FAB_HTML).
 
@@ -4758,6 +5450,18 @@ def main(argv: list[str] | None = None) -> None:
     translated_count = sum(
         1 for url in popups_map if policy_en.get(url, "").strip()
     )
+    policy_ja = load_policy_ja()
+    popups_ja_map = {
+        url: ja_popup_array(arr, policy_ja.get(url))
+        for url, arr in popups_map.items()
+    }
+    popups_ja_bytes = json.dumps(
+        popups_ja_map, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    POPUPS_JA_JSON.write_bytes(popups_ja_bytes)
+    ja_policy_count = sum(
+        1 for url in popups_map if policy_ja.get(url, "").strip()
+    )
     print(f"  restaurants.json: {len(restaurants_bytes):,} bytes "
           f"({len(core_rows)} rows)")
     print(f"  popups.json:      {len(popups_bytes):,} bytes "
@@ -4765,10 +5469,13 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  popups-tw.json:   {len(popups_tw_bytes):,} bytes")
     print(f"  popups-en.json:   {len(popups_en_bytes):,} bytes "
           f"({translated_count}/{len(popups_map)} policies translated)")
+    print(f"  popups-ja.json:   {len(popups_ja_bytes):,} bytes "
+          f"({ja_policy_count}/{len(popups_map)} original JA policies)")
 
     panel_html = build_filter_panel_html(cat_counts, award_counts)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
     bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
+    favorites_builtin_json = json.dumps(load_favorites_builtin(), ensure_ascii=False)
     bucket_colors_json = json.dumps(
         {key: color for key, _label, color, _lo, _hi in PRICE_BUCKETS}
     )
@@ -4796,14 +5503,30 @@ def main(argv: list[str] | None = None) -> None:
     known_locs_json = json.dumps(sorted(known_locs), ensure_ascii=False)
     print(f"  known_locs:       {len(known_locs)} tokens, "
           f"{len(known_locs_json.encode('utf-8')):,} bytes")
+    # Help markdown gets embedded as one JSON-string literal per language
+    # inside an inline <script>. `</` is escaped to `<\/` so the JSON
+    # literal can't accidentally close the parent <script> tag if a future
+    # edit to one of the MDs introduces one.
+    help_md_by_lang = load_help_md_by_lang()
+    def _encode_help_md(md: str) -> str:
+        return json.dumps(md, ensure_ascii=False).replace("</", "<\\/")
+    help_md_cn_json = _encode_help_md(help_md_by_lang["zh-CN"])
+    help_md_tw_json = _encode_help_md(help_md_by_lang["zh-TW"])
+    help_md_en_json = _encode_help_md(help_md_by_lang["en"])
+    help_md_ja_json = _encode_help_md(help_md_by_lang["ja"])
     filter_js = (
         FILTER_JS_TEMPLATE
         .replace("__DEFAULT_OFF_GENRES__", default_off_json)
         .replace("__BOOKMARKS__", bookmarks_json)
+        .replace("__FAVORITES_BUILTIN__", favorites_builtin_json)
         .replace("__BUCKET_COLORS__", bucket_colors_json)
         .replace("__GENRE_EMOJI__", genre_emoji_json)
         .replace("__HAN_VARIANTS__", han_variants_json)
         .replace("__KNOWN_LOCS__", known_locs_json)
+        .replace("__HELP_MD_CN_JSON__", help_md_cn_json)
+        .replace("__HELP_MD_TW_JSON__", help_md_tw_json)
+        .replace("__HELP_MD_EN_JSON__", help_md_en_json)
+        .replace("__HELP_MD_JA_JSON__", help_md_ja_json)
     )
     # Service worker — version-stamp the cache name so each redeploy
     # invalidates the previous one. Unix seconds is plenty granular for a
@@ -4841,10 +5564,15 @@ def main(argv: list[str] | None = None) -> None:
     text_en_map_json = json.dumps(
         text_en_map, ensure_ascii=False, separators=(",", ":")
     )
+    text_ja_map, missing_ja = build_text_ja_map(saved_html)
+    text_ja_map_json = json.dumps(
+        text_ja_map, ensure_ascii=False, separators=(",", ":")
+    )
     saved_html = (
         saved_html
         .replace("__TEXT_TRAD_MAP__", text_trad_map_json)
         .replace("__TEXT_EN_MAP__", text_en_map_json)
+        .replace("__TEXT_JA_MAP__", text_ja_map_json)
     )
     OUT_HTML.write_text(saved_html, encoding="utf-8")
     print(f"\nMap written to {OUT_HTML}")
@@ -4862,6 +5590,16 @@ def main(argv: list[str] | None = None) -> None:
             print(f"    - {run!r}")
         if len(missing_en) > len(preview):
             print(f"    ... and {len(missing_en) - len(preview)} more")
+    print(f"  text_ja_map:      {len(text_ja_map)} CJK runs, "
+          f"{len(text_ja_map_json.encode('utf-8')):,} bytes")
+    if missing_ja:
+        print(f"  missing JA translations: {len(missing_ja)} runs "
+              f"(stay in Chinese at runtime)")
+        preview = missing_ja[:30]
+        for run in preview:
+            print(f"    - {run!r}")
+        if len(missing_ja) > len(preview):
+            print(f"    ... and {len(missing_ja) - len(preview)} more")
 
 
 if __name__ == "__main__":

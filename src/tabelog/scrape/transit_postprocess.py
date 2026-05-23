@@ -31,6 +31,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+# Force UTF-8 stdout — Windows console defaults to cp1252 and chokes on
+# the arrow / CJK chars used in the progress prints below.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 _SRC_DIR = str(Path(__file__).resolve().parents[2])
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
@@ -621,6 +626,11 @@ def _cross_merge_stations(stations, threshold_m):
         operators = set()
         railways = set()
         all_names = set()
+        # Pair name_en with the JP name from the same cluster member so a
+        # "渋谷 / 渋谷駅東口" cluster doesn't end up labelled "渋谷" in JP
+        # but "Shibuya East Exit" in EN. Only members whose JP name matches
+        # the chosen_name contribute their name_en.
+        chosen_name_en = None
         for i in members:
             mp = stations[i]["properties"]
             if mp.get("operator"):
@@ -628,10 +638,15 @@ def _cross_merge_stations(stations, threshold_m):
             railways.add(mp.get("railway") or "station")
             if mp.get("name"):
                 all_names.add(mp["name"])
+            if (chosen_name_en is None and chosen_name and
+                    mp.get("name") == chosen_name and mp.get("name_en")):
+                chosen_name_en = mp["name_en"]
         railway = "station" if "station" in railways else next(iter(railways))
         merged_props = {"kind": "station", "railway": railway}
         if chosen_name:
             merged_props["name"] = chosen_name
+        if chosen_name_en:
+            merged_props["name_en"] = chosen_name_en
         if len(all_names) > 1:
             # Stash the merged-away names so the hover tooltip can show the
             # alternates if the chosen one is unfamiliar to the user.
