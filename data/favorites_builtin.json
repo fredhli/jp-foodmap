@@ -463,8 +463,8 @@
     "name_jp": "箱根温泉",
     "name_en": "Hakone Onsen",
     "emoji": "♨️",
-    "lat": 35.0681099,
-    "lon": 132.3510009,
+    "lat": 35.2287271,
+    "lon": 139.0946744,
     "category": "attraction"
   },
   {
@@ -473,8 +473,8 @@
     "name_jp": "小町通り",
     "name_en": "Komachi Street",
     "emoji": "🍡",
-    "lat": 35.6829098,
-    "lon": 139.8162483,
+    "lat": 35.4451624,
+    "lon": 139.362979,
     "category": "attraction"
   },
   {
@@ -581,8 +581,8 @@
     "name_jp": "大須商店街",
     "name_en": "Ōsu",
     "emoji": "🛍️",
-    "lat": 34.7239854,
-    "lon": 135.5528417,
+    "lat": 35.158854,
+    "lon": 136.903741,
     "category": "attraction"
   },
   {
@@ -713,8 +713,8 @@
     "name_jp": "札幌時計台",
     "name_en": "Sapporo Clock Tower",
     "emoji": "🕰️",
-    "lat": 36.8077065,
-    "lon": 139.7118865,
+    "lat": 43.0625537,
+    "lon": 141.3536448,
     "category": "attraction"
   },
   {
@@ -833,8 +833,8 @@
     "name_jp": "国際通り",
     "name_en": "Kokusai-dōri",
     "emoji": "🛍️",
-    "lat": 35.7108515,
-    "lon": 139.7917322,
+    "lat": 26.2144788,
+    "lon": 127.6828091,
     "category": "attraction"
   },
   {
@@ -1251,8 +1251,8 @@
     "name_jp": "伊勢神宮",
     "name_en": "Ise Jingū",
     "emoji": "⛩️",
-    "lat": 33.5119494,
-    "lon": 133.4859746,
+    "lat": 34.4568901,
+    "lon": 136.722978,
     "category": "attraction"
   },
   {
@@ -1275,8 +1275,8 @@
     "name_jp": "夫婦岩",
     "name_en": "Meoto Iwa",
     "emoji": "🪨",
-    "lat": 36.2411127,
-    "lon": 136.1305888,
+    "lat": 34.3016234,
+    "lon": 136.8511441,
     "category": "attraction"
   },
   {
@@ -1287,8 +1287,8 @@
     "name_jp": "熊野古道",
     "name_en": "Kumano Kodō",
     "emoji": "🥾",
-    "lat": 34.4253327,
-    "lon": 135.3454189,
+    "lat": 33.9483471,
+    "lon": 136.1886085,
     "category": "attraction"
   },
   {
@@ -1323,8 +1323,8 @@
     "name_jp": "那智の滝",
     "name_en": "Nachi Falls",
     "emoji": "💦",
-    "lat": 37.1229316,
-    "lon": 139.9989342,
+    "lat": 33.672,
+    "lon": 135.891,
     "category": "attraction"
   },
   {
@@ -1477,8 +1477,8 @@
     "name_jp": "近江町市場",
     "name_en": "Ōmichō Market",
     "emoji": "🐟",
-    "lat": 35.114207,
-    "lon": 136.1958936,
+    "lat": 36.5706905,
+    "lon": 136.6569553,
     "category": "attraction"
   },
   {
@@ -1561,8 +1561,8 @@
     "name_jp": "東尋坊",
     "name_en": "Tōjinbō",
     "emoji": "🪨",
-    "lat": 35.7107939,
-    "lon": 139.7751562,
+    "lat": 36.2378867,
+    "lon": 136.1256526,
     "category": "attraction"
   },
   {
@@ -1726,8 +1726,8 @@
     "name_jp": "龍泉洞",
     "name_en": "Ryusendo Cave",
     "emoji": "🕳️",
-    "lat": 42.7800528,
-    "lon": 129.3259895,
+    "lat": 39.8601483,
+    "lon": 141.7970366,
     "category": "attraction"
   },
   {
@@ -1810,8 +1810,8 @@
     "name_jp": "男鹿半島",
     "name_en": "Oga Peninsula",
     "emoji": "🌊",
-    "lat": 35.8624194,
-    "lon": 127.045161,
+    "lat": 39.9422815,
+    "lon": 139.7044531,
     "category": "attraction"
   },
   {
@@ -1834,8 +1834,8 @@
     "name_jp": "立石寺",
     "name_en": "Yama-dera Temple",
     "emoji": "⛩️",
-    "lat": 35.4321163,
-    "lon": 137.7843838,
+    "lat": 38.3125626,
+    "lon": 140.4373997,
     "category": "attraction"
   },
   {
@@ -1858,8 +1858,8 @@
     "name_jp": "樹氷",
     "name_en": "rime ice",
     "emoji": "🌲",
-    "lat": 35.7120155,
-    "lon": 139.7653776,
+    "lat": 38.2150393,
+    "lon": 140.3203674,
     "category": "attraction"
   },
   {
@@ -1882,8 +1882,8 @@
     "name_jp": "若松城",
     "name_en": "Aizuwakamatsu Castle",
     "emoji": "🏯",
-    "lat": 38.6875869,
-    "lon": 141.1863679,
+    "lat": 37.4877353,
+    "lon": 139.9297661,
     "category": "attraction"
   },
   {
@@ -2177,8 +2177,8 @@
     "name_jp": "石見銀山",
     "name_en": "Iwami Ginzan Silver Mine",
     "emoji": "⛏️",
-    "lat": 35.1271043,
-    "lon": 133.3316445,
+    "lat": 35.113757,
+    "lon": 132.445335,
     "category": "attraction"
   },
   {
@@ -2225,8 +2225,8 @@
     "name_jp": "後楽園",
     "name_en": "Kōraku-en",
     "emoji": "🌳",
-    "lat": 35.7073128,
-    "lon": 139.7511534,
+    "lat": 34.66633,
+    "lon": 133.9373948,
     "category": "attraction"
   },
   {
@@ -2451,8 +2451,8 @@
     "name_jp": "草千里",
     "name_en": "Kusa-Senrigahama",
     "emoji": "🐄",
-    "lat": 45.5554334,
-    "lon": 126.9513916,
+    "lat": 32.8849693,
+    "lon": 131.0503018,
     "category": "attraction"
   },
   {
