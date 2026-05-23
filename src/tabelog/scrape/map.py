@@ -2746,13 +2746,16 @@ FILTER_JS_TEMPLATE = r"""
       // 22px / 10px for 收藏, 30px / 11px for user-added 景点 — the latter
       // matches the build-time curated attractions so user additions blend
       // visually with the existing tourist anchors.
+      // Emoji goes through emojiImg() so the marker uses an Apple-style PNG;
+      // marker divIcons aren't covered by the MutationObserver, so the pre-
+      // swap has to happen here at construction (same pattern as makeIcon).
       var es = emojiSize || 22;
       var ls = labelSize || 10;
       return '<div style="position:relative;transform:translate(-50%,-100%);' +
                        'text-align:center;width:max-content;">' +
                '<div style="font-size:' + es + 'px;line-height:1;' +
                           'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">' +
-                 (emoji || '📍') +
+                 emojiImg(emoji || '📍', 'vertical-align:top;') +
                '</div>' +
                '<div style="font-size:' + ls + 'px;font-weight:700;color:#1f2937;' +
                           'background:rgba(255,255,255,0.92);' +
