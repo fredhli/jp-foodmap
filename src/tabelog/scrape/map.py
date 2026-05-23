@@ -1388,6 +1388,26 @@ MAP_FAB_HTML = """
     opacity: 0.45;
     filter: grayscale(1);
   }
+  /* Low-zoom collapsed marker. At zoom < ZOOM_LOW_THRESHOLD (Python side,
+     mirrored in JS), the full emoji+label hides and a small coloured dot
+     shows in its place — like Google Maps' POI dots. Keeps the screen
+     readable at Japan-wide zoom where 200+ markers would otherwise fight
+     for space. Category drives the dot colour:
+       .bm-mk-attraction → purple (sightseeing — built-ins + user景点)
+       .bm-mk-bookmark   → gold   (personal pins, matches ⭐ FAB)  */
+  .bm-mk-dot {
+    display: none;
+    position: relative;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    border: 1.5px solid #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.45);
+    transform: translate(-50%, -50%);
+  }
+  .bm-mk-attraction .bm-mk-dot { background: #a855f7; }
+  .bm-mk-bookmark   .bm-mk-dot { background: #eab308; }
+  body.zoom-low .bm-mk .bm-mk-full { display: none; }
+  body.zoom-low .bm-mk .bm-mk-dot  { display: block; }
   .map-fab-ic { font-size: 15px; line-height: 1; }
   /* Locate button is icon-only on every viewport — round, no label. The
      SVG keeps it visually distinct from the pill-shaped layer toggles. */
@@ -2810,10 +2830,16 @@ FILTER_JS_TEMPLATE = r"""
       // Emoji goes through emojiImg() so the marker uses an Apple-style PNG;
       // marker divIcons aren't covered by the MutationObserver, so the pre-
       // swap has to happen here at construction (same pattern as makeIcon).
+      // The .bm-mk-dot sibling stays display:none by default; CSS flips it
+      // in/out vs .bm-mk-full when body.zoom-low toggles (see zoomend
+      // listener). Two siblings cohabit the same Leaflet wrapper without
+      // affecting each other since both use position:relative + transform.
       var es = emojiSize || 22;
       var ls = labelSize || 10;
-      return '<div style="position:relative;transform:translate(-50%,-100%);' +
-                       'text-align:center;width:max-content;">' +
+      return '<div class="bm-mk-dot"></div>' +
+             '<div class="bm-mk-full" ' +
+                  'style="position:relative;transform:translate(-50%,-100%);' +
+                         'text-align:center;width:max-content;">' +
                '<div style="font-size:' + es + 'px;line-height:1;' +
                           'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">' +
                  emojiImg(emoji || '📍', 'vertical-align:top;') +
@@ -2937,11 +2963,14 @@ FILTER_JS_TEMPLATE = r"""
       var isAttraction = bm.category === 'attraction';
       var targetLayer = isAttraction ? userAttractionsLayer : bookmarksLayer;
       // CSS hooks on the wrapper div Leaflet creates around the divIcon:
-      //   bm-mk          — every bookmark/attraction marker
-      //   bm-mk-builtin  — repo-shipped landmark (read-only source)
-      //   bm-mk-hidden   — user hid this builtin (display:none unless the
-      //                    body carries .attr-show-all)
+      //   bm-mk             — every bookmark/attraction marker
+      //   bm-mk-attraction  — category=attraction (built-ins + user景点)
+      //   bm-mk-bookmark    — category=bookmark   (personal pins)
+      //   bm-mk-builtin     — repo-shipped landmark (read-only source)
+      //   bm-mk-hidden      — user hid this builtin (display:none unless
+      //                       the body carries .attr-show-all)
       var cls = 'empty bm-mk';
+      cls += isAttraction ? ' bm-mk-attraction' : ' bm-mk-bookmark';
       if (bm._builtin) cls += ' bm-mk-builtin';
       if (bm._hidden)  cls += ' bm-mk-hidden';
       var icon = L.divIcon({
@@ -2988,10 +3017,13 @@ FILTER_JS_TEMPLATE = r"""
 
     function openBookmarkPopup(bm, marker) {
       var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
-      // Larger popup offset for attractions because they render at 30px
-      // instead of 22px — keeps the speech bubble tip from overlapping
-      // the emoji.
-      var offY = (bm.category === 'attraction') ? -30 : -22;
+      // Popup offset depends on what's actually showing:
+      //   dot mode (low zoom) → tiny offset to clear the 9px dot
+      //   full marker         → bigger so the speech bubble tip sits above
+      //                          the emoji (30px for 景点, 22px for 收藏)
+      var inDotMode = (typeof map !== 'undefined') && map.getZoom() < 11;
+      var offY = inDotMode ? -8
+                : (bm.category === 'attraction') ? -30 : -22;
       // Action button varies by entry type:
       //   personal pin       → 删除  (one-shot, removes from bookmarks)
       //   built-in (visible) → 隐藏  (adds metadata entry to bookmarks)
@@ -3082,6 +3114,18 @@ FILTER_JS_TEMPLATE = r"""
         });
       }, 0);
     }
+
+    // Low-zoom dot collapse for bookmarks + attractions. At zoom < 11 the
+    // full emoji+label hides and a coloured dot stands in (CSS in the
+    // page <style>). Threshold mirrors the JS check in openBookmarkPopup
+    // so popup offset and visible marker stay in sync.
+    var ZOOM_LOW_THRESHOLD = 11;
+    function syncZoomBucket() {
+      var low = map.getZoom() < ZOOM_LOW_THRESHOLD;
+      document.body.classList.toggle('zoom-low', low);
+    }
+    map.on('zoomend', syncZoomBucket);
+    syncZoomBucket();
 
     // fab-attractions is a tri-state: off / on (blue) / show-all (orange).
     // The third state reveals built-ins the user has hidden, ghost-styled,
