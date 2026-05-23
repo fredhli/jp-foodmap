@@ -800,6 +800,21 @@ def build_filter_panel_html(
   #ff-fab .ff-fab-ic {{ font-size: 15px; }}
   #ff-fab .ff-fab-count {{ font-variant-numeric: tabular-nums; }}
   #ff-fab .ff-fab-count b {{ color: #2563eb; }}
+  /* Unsynced-changes alert: pulse red so the user notices their
+     favorites/blacklist/bookmark edits haven't been pushed to Gist. */
+  @keyframes ff-fab-pulse {{
+    0%   {{ background: #fee2e2; box-shadow: 0 2px 6px rgba(220,38,38,0.35); }}
+    50%  {{ background: #dc2626; box-shadow: 0 4px 14px rgba(220,38,38,0.55); }}
+    100% {{ background: #fee2e2; box-shadow: 0 2px 6px rgba(220,38,38,0.35); }}
+  }}
+  #ff-fab.needs-sync {{
+    color: #fff; border-color: #dc2626;
+    animation: ff-fab-pulse 1.4s ease-in-out infinite;
+  }}
+  #ff-fab.needs-sync:hover {{ animation-play-state: paused;
+                              background: #dc2626; }}
+  #ff-fab.needs-sync .ff-fab-count b {{ color: #fff; }}
+  #ff-fab.needs-sync .ff-fab-count {{ color: #fff; }}
 </style>
 <button id="ff-fab" type="button" aria-label="打开筛选" title="筛选">
   <span class="ff-fab-ic">🎛</span>
@@ -1616,12 +1631,15 @@ MOBILE_UX_ASSETS = """
   .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
                line-height: 1.3; }
   .rst-title .rst-rating { color: #c33; margin-left: 4px; font-weight: 700; }
-  .rst-gmaps { display: inline-block; margin-left: 6px;
-               font-size: 0.85em; text-decoration: none;
-               vertical-align: 1px; opacity: 0.75;
-               transition: opacity 0.15s, transform 0.15s; }
-  .rst-gmaps:hover { opacity: 1; transform: scale(1.15); }
-  .rst-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .rst-gmaps { display: inline-flex; align-items: center; justify-content: center;
+               width: 28px; height: 28px;
+               font-size: 16px; text-decoration: none;
+               border: 1px solid #d1d5db; border-radius: 5px;
+               background: #f9fafb; color: #1f2937;
+               opacity: 0.85;
+               transition: opacity 0.15s, transform 0.15s, background 0.15s; }
+  .rst-gmaps:hover { opacity: 1; background: #f3f4f6; transform: scale(1.05); }
+  .rst-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
   .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
                 gap: 6px; margin-bottom: 10px; }
   .rst-photos a { display: block; min-width: 0; }
@@ -2470,9 +2488,9 @@ FILTER_JS_TEMPLATE = r"""
         + ribbons
         + '<div class="rst-header">'
           + '<div class="rst-title"><span lang="ja">' + name + '</span>'
-            + gmapsBtn
             + '<span class="rst-rating">★' + rating + '</span></div>'
           + '<div class="rst-actions">'
+            + gmapsBtn
             + '<button class="ff-fav-btn rst-btn" data-url="' + url + '">'
               + '<span class="ff-fav-label">☆ 收藏</span></button>'
             + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
@@ -3353,6 +3371,16 @@ FILTER_JS_TEMPLATE = r"""
     var etag = null, dirty = cache.dirty || false;
     var pushTimer = null, pollTimer = null;
 
+    // Flash the filter FAB red when there are local changes that haven't
+    // landed in Gist — covers both "Gist not configured" and "push failed"
+    // cases, so a user who's favoriting without sync set up actually notices.
+    var fabEl = document.getElementById('ff-fab');
+    function updateNeedsSyncIndicator() {
+      if (!fabEl) return;
+      fabEl.classList.toggle('needs-sync', !!dirty);
+      fabEl.title = dirty ? '收藏 / 弃用 / 景点 改动未同步到 Gist，点击查看' : '筛选';
+    }
+
     function configured() {
       var c = loadConfig();
       return c.gistId ? c : null;
@@ -3372,9 +3400,14 @@ FILTER_JS_TEMPLATE = r"""
     }
     function pull() {
       var c = configured();
-      if (!c) { setStatus('本地模式', ''); return; }
+      if (!c) {
+        setStatus(dirty ? '本地模式（改动未同步）' : '本地模式',
+                  dirty ? 'err' : '');
+        updateNeedsSyncIndicator();
+        return;
+      }
       // Don't clobber unsent local edits with a stale remote.
-      if (dirty) return;
+      if (dirty) { updateNeedsSyncIndicator(); return; }
       setStatus('同步中…', 'busy');
       var headers = gistHeaders(c.pat);
       if (etag) headers['If-None-Match'] = etag;
@@ -3407,15 +3440,27 @@ FILTER_JS_TEMPLATE = r"""
             setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
           });
         })
-        .catch(function(e) { setStatus('同步失败: ' + e.message, 'err'); });
+        .catch(function(e) { setStatus('同步失败: ' + e.message, 'err'); })
+        .finally(function() { updateNeedsSyncIndicator(); });
     }
     function push() {
       var c = configured();
-      if (!c) { dirty = false; saveCache(state, false); return; }
+      // Local mode (no Gist configured): nothing to push, but keep dirty=true
+      // so the FAB keeps flashing — the whole point is for the user to notice
+      // they haven't enabled sync. Indicator clears once they set up Gist
+      // and a real push succeeds.
+      if (!c) {
+        saveCache(state, dirty);
+        setStatus(dirty ? '本地模式（改动未同步）' : '本地模式',
+                  dirty ? 'err' : '');
+        updateNeedsSyncIndicator();
+        return;
+      }
       if (!c.pat) {                // read-only mode
-        dirty = false;
-        saveCache(state, false);
-        setStatus('只读模式（无 PAT，无法保存）', '');
+        saveCache(state, dirty);
+        setStatus('只读模式（无 PAT，改动未同步）',
+                  dirty ? 'err' : '');
+        updateNeedsSyncIndicator();
         return;
       }
       setStatus('保存中…', 'busy');
@@ -3448,15 +3493,20 @@ FILTER_JS_TEMPLATE = r"""
             ? '（PAT 没有写权限，去 settings → Gists 改 Read and write）'
             : '（已存本地，将在下次成功推送时同步）';
           setStatus('保存失败: ' + e.message + ' ' + hint, 'err');
-        });
+        })
+        .finally(function() { updateNeedsSyncIndicator(); });
     }
     function schedulePush() {
       dirty = true;
       saveCache(state, true);
+      updateNeedsSyncIndicator();
       clearTimeout(pushTimer);
       pushTimer = setTimeout(push, 500);
     }
     function startSync() {
+      // Paint the dirty indicator on first load so a flag restored from
+      // localStorage shows up before the first push/pull lands.
+      updateNeedsSyncIndicator();
       // If a previous session left an unpushed change, retry pushing it
       // *before* pulling; otherwise pull would just confirm the remote
       // state (which still lacks the change) and the user would see "已同步"
