@@ -1011,6 +1011,29 @@ def build_filter_panel_html(
                                       background: #2563eb; }}
   #ff-fab.needs-sync-pending .ff-fab-count b {{ color: #fff; }}
   #ff-fab.needs-sync-pending .ff-fab-count {{ color: #fff; }}
+  /* Small "?" badge next to bold subtitles inside the filter sheet.
+     Inline-flex centers the glyph; cursor:help advertises that nothing
+     destructive is going to happen on click. */
+  .ff-help-trigger {{
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    width: 15px; height: 15px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #e5e7eb;
+    color: #6b7280;
+    font: 700 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: help;
+    user-select: none;
+    margin-left: 5px;
+    vertical-align: 1px;
+    transition: background 0.12s ease-out, color 0.12s ease-out;
+  }}
+  .ff-help-trigger:hover,
+  .ff-help-trigger:focus-visible {{
+    background: #d1d5db; color: #111827; outline: none;
+  }}
 </style>
 <button id="ff-fab" type="button" aria-label="打开筛选" title="筛选">
   <span class="ff-fab-ic">🎛</span>
@@ -1097,7 +1120,8 @@ def build_filter_panel_html(
   </label>
 
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">弃用名单</span>
+    <span style="font-weight:600;">弃用名单<button type="button" class="ff-help-trigger"
+            data-help-for="blacklist" aria-label="说明" aria-haspopup="dialog">?</button></span>
     <span style="font-size:11px;color:#6b7280;">🚫 <b id="ff-black-count">0</b></span>
   </div>
   <label style="display:block;margin-bottom:6px;">
@@ -1520,6 +1544,52 @@ SEARCH_BOX_HTML = """
 # that swaps emoji glyphs for Apple-CDN images can't reach inside it —
 # the picker renders system glyphs natively, which is exactly what its
 # search index expects.
+# Help popover for the "?" badges that sit next to subtitles inside the
+# filter sheet. The element lives at body level (not inside #ff-sheet) so
+# position:fixed isn't trapped by the sheet's transform context. Help
+# copy for each subject lives as a sibling <div data-help-for="...">; the
+# JS just toggles which section is visible and where the popover floats.
+# Keeping the text inline (rather than templated / fetched) makes sure
+# the boot-time localizeTree pass picks up the CJK runs and translates
+# them via TEXT_EN_MAP / TEXT_JA_MAP / TEXT_TRAD_MAP without us having
+# to wire anything language-specific into the popover JS.
+HELP_POPOVER_HTML = """
+<style>
+  #ff-help-pop {
+    position: fixed;
+    z-index: 10030;
+    max-width: 260px;
+    background: #1f2937; color: #f3f4f6;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12px; line-height: 1.55;
+    padding: 9px 11px;
+    border-radius: 7px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.32);
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity 0.13s ease-out, transform 0.13s ease-out;
+  }
+  #ff-help-pop[hidden] { display: none; }
+  #ff-help-pop.ff-help-show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  #ff-help-pop::before {
+    content: '';
+    position: absolute;
+    top: -5px; left: 14px;
+    border-style: solid;
+    border-width: 0 5px 5px 5px;
+    border-color: transparent transparent #1f2937 transparent;
+  }
+  .ff-help-section[hidden] { display: none; }
+</style>
+<div id="ff-help-pop" role="tooltip" aria-live="polite" hidden>
+  <div class="ff-help-section" data-help-for="blacklist" hidden>弃用名单 = 你研究后决定不会去的餐厅，会从地图上自动隐藏；和收藏一起通过你的 Google 账号跨设备同步。</div>
+</div>
+"""
+
+
 BOOKMARKS_MODAL_HTML = """
 <script type="module"
         src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
@@ -5389,6 +5459,72 @@ FILTER_JS_TEMPLATE = r"""
       signOut();
     });
 
+    // ===== Help popovers ("?" badges next to filter subtitles) =====
+    // Triggers carry data-help-for="<key>"; sections inside #ff-help-pop
+    // carry the matching data-help-for. One popover element handles every
+    // trigger — on each open we unhide the right section and reposition
+    // anchored below the clicked badge.
+    (function wireHelpTriggers() {
+      var pop = document.getElementById('ff-help-pop');
+      if (!pop) return;
+      var sections = pop.querySelectorAll('.ff-help-section');
+      var openFor = null;
+      function place(trigger) {
+        var r = trigger.getBoundingClientRect();
+        // Keep at least 8px off the left edge; cap so the right edge
+        // doesn't overflow the viewport on narrow phones.
+        var max_w = 260;
+        var left = Math.max(8,
+                            Math.min(window.innerWidth - max_w - 8, r.left - 4));
+        pop.style.left = left + 'px';
+        pop.style.top  = (r.bottom + 8) + 'px';
+      }
+      function hide() {
+        pop.classList.remove('ff-help-show');
+        pop.hidden = true;
+        openFor = null;
+      }
+      function show(key, trigger) {
+        sections.forEach(function(s) {
+          s.hidden = s.getAttribute('data-help-for') !== key;
+        });
+        place(trigger);
+        pop.hidden = false;
+        // Read offsetWidth to flush the [hidden] removal before the
+        // transition class lands — otherwise the fade-in skips.
+        void pop.offsetWidth;
+        pop.classList.add('ff-help-show');
+        openFor = trigger;
+      }
+      document.querySelectorAll('.ff-help-trigger').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var key = btn.getAttribute('data-help-for');
+          if (openFor === btn) { hide(); return; }
+          show(key, btn);
+        });
+      });
+      // Tap anywhere else dismisses the popover. We listen on the
+      // capture phase so the trigger's own stopPropagation still works
+      // for its toggle handler above.
+      document.addEventListener('click', function(e) {
+        if (!openFor) return;
+        if (pop.contains(e.target)) return;
+        if (e.target === openFor) return;
+        hide();
+      });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && openFor) hide();
+      });
+      // The filter sheet scrolls internally; if the user scrolls or the
+      // viewport resizes, the absolute pixel anchor we computed is stale.
+      // Easiest is to hide on either signal.
+      var sheetContent = document.getElementById('ff-sheet-content');
+      if (sheetContent) sheetContent.addEventListener('scroll', hide);
+      window.addEventListener('resize', hide);
+    })();
+
     // Language picker. activeLang was resolved on boot from ?lang= and
     // localStorage; reflect it into the dropdown so the UI matches state.
     // On change: persist, update the URL (?lang=tw is sticky, default
@@ -5853,6 +5989,7 @@ def main(argv: list[str] | None = None) -> None:
     m.get_root().html.add_child(folium.Element(MAP_FAB_HTML))
     m.get_root().html.add_child(folium.Element(SEARCH_BOX_HTML))
     m.get_root().html.add_child(folium.Element(BOOKMARKS_MODAL_HTML))
+    m.get_root().html.add_child(folium.Element(HELP_POPOVER_HTML))
     m.get_root().html.add_child(folium.Element(panel_html))
     m.get_root().html.add_child(folium.Element(filter_js))
 
