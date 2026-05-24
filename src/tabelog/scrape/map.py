@@ -1083,7 +1083,8 @@ def build_filter_panel_html(
 {award_rows}
   </div>
 
-  <label style="display:block;margin-top:6px;margin-bottom:6px;">
+  <div style="font-weight:600;margin-top:6px;margin-bottom:2px;">Tabelog 预约</div>
+  <label style="display:block;margin-bottom:6px;">
     <input type="checkbox" id="ff-bookable-only"> 只显示可以通过 Tabelog 预约
   </label>
 
@@ -1148,22 +1149,14 @@ def build_filter_panel_html(
        font-size:13px;color:#111827;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
     <div style="font-weight:700;font-size:15px;margin-bottom:10px;">云同步</div>
 
-    <!-- Signed-out state: a single Google sign-in button. -->
+    <!-- Signed-out state: Google's officially-rendered sign-in button.
+         We mount it into #ff-signin-btn via google.accounts.id.renderButton,
+         which gives the proper "popup window → choose account" flow that
+         works on iOS / Android browsers (the older One Tap / id.prompt()
+         path was unreliable on mobile and on desktop just auto-picked the
+         already-logged-in account in a top-right toast). -->
     <div id="ff-auth-out" style="display:none;text-align:center;padding:6px 0;">
-      <button id="ff-signin"
-              style="padding:8px 18px;border:1px solid #d1d5db;background:#fff;
-                     color:#3c4043;border-radius:6px;cursor:pointer;
-                     font-size:13px;font-weight:600;display:inline-flex;
-                     align-items:center;gap:8px;
-                     box-shadow:0 1px 2px rgba(0,0,0,0.08);">
-        <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
-          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
-          <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
-          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
-        </svg>
-        Google 登录
-      </button>
+      <div id="ff-signin-btn" style="display:inline-block;min-height:40px;"></div>
       <div style="font-size:11px;color:#6b7280;margin-top:10px;line-height:1.5;">
         登录后，收藏 / 弃用 / 景点 会跨设备同步。<br>
         未登录则只存在当前浏览器。
@@ -5066,7 +5059,88 @@ FILTER_JS_TEMPLATE = r"""
     var authPic = document.getElementById('ff-auth-pic');
     var authName= document.getElementById('ff-auth-name');
     var authEmail = document.getElementById('ff-auth-email');
+    var signinBtnContainer = document.getElementById('ff-signin-btn');
     var cfgMsg  = document.getElementById('ff-cfg-msg');
+
+    // GIS callback — same for every render of the official button. Decodes
+    // the ID token payload locally just for the email/name/picture display;
+    // the Worker re-verifies the token via Google tokeninfo independently.
+    function onGoogleCredential(resp) {
+      if (!resp || !resp.credential) {
+        cfgMsg.style.color = '#dc2626';
+        cfgMsg.textContent = '登录被取消';
+        return;
+      }
+      try {
+        var parts = resp.credential.split('.');
+        var pad = '='.repeat((4 - parts[1].length % 4) % 4);
+        var b64 = (parts[1] + pad).replace(/-/g, '+').replace(/_/g, '/');
+        var payload = JSON.parse(decodeURIComponent(
+          atob(b64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join('')));
+        saveAuth({
+          id_token: resp.credential,
+          email: payload.email || '',
+          name:  payload.name  || '',
+          picture: payload.picture || '',
+          exp: (payload.exp || 0) * 1000
+        });
+        cfgMsg.style.color = '#16a34a';
+        cfgMsg.textContent = '✓ 登录成功，重新加载…';
+        setTimeout(function() { location.reload(); }, 600);
+      } catch (e) {
+        cfgMsg.style.color = '#dc2626';
+        cfgMsg.textContent = '登录处理失败：' + e.message;
+      }
+    }
+
+    // Lazy-render Google's official sign-in button into the modal. Called on
+    // every openModal so we tolerate the GIS script still loading on first
+    // open — if it isn't ready yet, retry up to ~3s before giving up.
+    var gisRendered = false;
+    var gisRetryTimer = null;
+    function renderSignInButton(attempt) {
+      attempt = attempt || 0;
+      if (gisRendered) return;
+      if (!window.google || !google.accounts || !google.accounts.id) {
+        if (attempt > 30) {
+          cfgMsg.style.color = '#dc2626';
+          cfgMsg.textContent = 'Google 登录脚本未加载（检查网络）';
+          return;
+        }
+        clearTimeout(gisRetryTimer);
+        gisRetryTimer = setTimeout(function() { renderSignInButton(attempt + 1); }, 100);
+        return;
+      }
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: onGoogleCredential,
+        // ux_mode: 'popup' is the default; explicit for clarity. iOS Safari
+        // sometimes downgrades to a redirect under stricter privacy settings,
+        // which is fine — the callback still fires once we're back.
+        ux_mode: 'popup',
+        // Allow the GIS lib to remember our consent grant across sessions so
+        // we don't have to re-prompt every time the token expires.
+        auto_select: false
+      });
+      // Map our activeLang to Google's locale codes.
+      var loc = (activeLang === 'zh-TW') ? 'zh_TW'
+              : (activeLang === 'en')    ? 'en'
+              : (activeLang === 'ja')    ? 'ja'
+              : 'zh_CN';
+      // Button text variant: "signin_with" = "Sign in with Google" / 等价物.
+      google.accounts.id.renderButton(signinBtnContainer, {
+        theme: 'outline',
+        size: 'large',
+        type: 'standard',
+        text: 'signin_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        locale: loc
+      });
+      gisRendered = true;
+    }
 
     function refreshAuthUI() {
       var a = configured();
@@ -5079,6 +5153,7 @@ FILTER_JS_TEMPLATE = r"""
       } else {
         authOut.style.display = 'block';
         authIn.style.display  = 'none';
+        renderSignInButton();
       }
     }
 
@@ -5093,53 +5168,6 @@ FILTER_JS_TEMPLATE = r"""
     document.getElementById('ff-cfg-cancel').addEventListener('click', closeModal);
     modalBg.addEventListener('click', function(e) {
       if (e.target === modalBg) closeModal();
-    });
-
-    document.getElementById('ff-signin').addEventListener('click', function() {
-      if (!window.google || !google.accounts || !google.accounts.id) {
-        cfgMsg.style.color = '#dc2626';
-        cfgMsg.textContent = 'Google 登录脚本未加载（检查网络）';
-        return;
-      }
-      cfgMsg.style.color = '#2563eb';
-      cfgMsg.textContent = '正在打开 Google 登录…';
-      google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: function(resp) {
-          if (!resp || !resp.credential) {
-            cfgMsg.style.color = '#dc2626';
-            cfgMsg.textContent = '登录被取消';
-            return;
-          }
-          // ID token (JWT). Decode the payload — middle base64 segment — to
-          // pull profile fields for UI display. Worker re-verifies the token
-          // independently via Google tokeninfo, so trusting this payload for
-          // display only is fine.
-          try {
-            var parts = resp.credential.split('.');
-            var pad = '='.repeat((4 - parts[1].length % 4) % 4);
-            var b64 = (parts[1] + pad).replace(/-/g, '+').replace(/_/g, '/');
-            var payload = JSON.parse(decodeURIComponent(
-              atob(b64).split('').map(function(c) {
-                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-              }).join('')));
-            saveAuth({
-              id_token: resp.credential,
-              email: payload.email || '',
-              name:  payload.name  || '',
-              picture: payload.picture || '',
-              exp: (payload.exp || 0) * 1000
-            });
-            cfgMsg.style.color = '#16a34a';
-            cfgMsg.textContent = '✓ 登录成功，重新加载…';
-            setTimeout(function() { location.reload(); }, 600);
-          } catch (e) {
-            cfgMsg.style.color = '#dc2626';
-            cfgMsg.textContent = '登录处理失败：' + e.message;
-          }
-        }
-      });
-      google.accounts.id.prompt();
     });
 
     document.getElementById('ff-signout').addEventListener('click', function() {
