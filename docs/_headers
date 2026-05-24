@@ -1,0 +1,10 @@
+# Cloudflare Pages headers config.
+# /emoji/* PNGs are content-addressed (hex codepoint filenames) and rebuilt
+# only when the source emoji changes, so the URL changing implies the bytes
+# changing. Safe to cache forever at the browser.
+/emoji/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Service worker must never be stale or rollouts get stuck on old code.
+/sw.js
+  Cache-Control: no-cache

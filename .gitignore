@@ -48,4 +48,9 @@ src/tabelog/scrape/transit_audit.py
 
 # Local rollback snapshots (e.g. map.py.bak before a big refactor)
 *.bak
+
+# Transit GeoJSON moved to Cloudflare R2 (assets.jpfoodmap.com). Stale
+# region-specific extracts (okayama, etc.) likewise stay local — none are
+# referenced by the build.
 docs/transit/japan*.geojson
+docs/transit/okayama.geojson

@@ -45,6 +45,7 @@ from tabelog.paths import (
     POLICY_EN_JSON,
     TABELOG_CSV,
     SW_JS,
+    DOCS_DIR,
     DOCS_DATA_DIR,
     FAVORITES_JSON,
     BLACKLIST_JSON,
@@ -1350,6 +1351,11 @@ def build_filter_panel_html(
 HEAD_BRANDING = """
 <title>Japan Foodmap</title>
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
+<!-- Pre-warm TCP/TLS to the two cross-origin hosts the page hits early:
+     jsDelivr serves Leaflet locatecontrol + emoji-picker-element synchronously;
+     emojicdn is the fallback for any emoji not in our local /emoji/ cache. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://emojicdn.elk.sh" crossorigin>
 """
 
 
@@ -2323,16 +2329,23 @@ FILTER_JS_TEMPLATE = r"""
     return popupsPromise;
   }
 
-  // ===== Apple-style emoji rendering via emojicdn =====
-  // Windows ships no flag glyphs in its system font, so we swap every emoji
-  // on the page for an <img> from emojicdn.elk.sh (?style=apple). The genre
-  // marker emoji is baked in directly via emojiImg(); everything else
-  // (popups, button labels, attraction divIcons) is caught by a
-  // MutationObserver that scans subtrees as they're inserted.
+  // ===== Apple-style emoji rendering \u2014 local PNGs with emojicdn fallback ====
+  // Windows ships no flag glyphs and Linux/Android render emoji inconsistently,
+  // so we serve everything as Apple-style PNGs. The glyphs we know about
+  // upfront (genre buckets, attraction pins, UI labels) are pre-downloaded to
+  // docs/emoji/<hex>.png by build_emoji_cache.py and looked up via EMOJI_MAP.
+  // Anything not pre-cached (e.g. a user typing an arbitrary emoji into a
+  // bookmark name) falls back to emojicdn.elk.sh, so visuals stay Apple-style
+  // either way \u2014 same PNG source, just one-shot at build time vs per-visitor
+  // at runtime for the bulk of marker glyphs.
   var EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}][\u{1F1E6}-\u{1F1FF}]|\p{Emoji_Presentation}|\p{Emoji}\uFE0F/gu;
+  var EMOJI_MAP = __EMOJI_MANIFEST__;
   function emojiImg(m, extraStyle) {
-    return '<img src="https://emojicdn.elk.sh/' + encodeURIComponent(m) +
-           '?style=apple" alt="' + m + '" draggable="false" ' +
+    var key = EMOJI_MAP[m];
+    var src = key
+      ? 'emoji/' + key + '.png'
+      : 'https://emojicdn.elk.sh/' + encodeURIComponent(m) + '?style=apple';
+    return '<img src="' + src + '" alt="' + m + '" draggable="false" ' +
            'style="height:1em;width:1em;vertical-align:-0.15em;' +
            'display:inline-block;' + (extraStyle || '') + '">';
   }
@@ -5763,6 +5776,17 @@ def main(argv: list[str] | None = None) -> None:
         {key: color for key, _label, color, _lo, _hi in PRICE_BUCKETS}
     )
     genre_emoji_json = json.dumps(GENRE_EMOJI, ensure_ascii=False)
+    # Apple-style PNG cache built by build_emoji_cache.py. Inlined as the
+    # EMOJI_MAP lookup the JS uses to decide local-path vs. emojicdn fallback.
+    # Missing manifest is non-fatal: every emoji falls back to the runtime CDN,
+    # which is the pre-cache behaviour.
+    emoji_manifest_path = DOCS_DIR / "emoji" / "_manifest.json"
+    if emoji_manifest_path.exists():
+        emoji_manifest_json = emoji_manifest_path.read_text(encoding="utf-8")
+    else:
+        emoji_manifest_json = "{}"
+        print("  ⚠ docs/emoji/_manifest.json missing — "
+              "run build_emoji_cache.py to pre-cache emoji PNGs")
     # Variant → canonical (simplified Chinese) per-char table for the search
     # box. Only includes variants of chars that actually appear in some
     # restaurant name (canonical form), so the JSON stays compact.
@@ -5809,6 +5833,7 @@ def main(argv: list[str] | None = None) -> None:
         .replace("__FAVORITES_BUILTIN__", favorites_builtin_json)
         .replace("__BUCKET_COLORS__", bucket_colors_json)
         .replace("__GENRE_EMOJI__", genre_emoji_json)
+        .replace("__EMOJI_MANIFEST__", emoji_manifest_json)
         .replace("__HAN_VARIANTS__", han_variants_json)
         .replace("__KNOWN_LOCS__", known_locs_json)
         .replace("__HELP_MD_CN_JSON__", help_md_cn_json)
