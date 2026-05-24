@@ -3953,6 +3953,10 @@ FILTER_JS_TEMPLATE = r"""
       updateBlackCount();
       apply();
     }
+    // True for the single retry that follows a successful silentReAuth.
+    // Prevents an infinite loop in the (rare) case the Worker rejects a
+    // freshly-minted token too.
+    var pullRetriedAfterSilent = false;
     function pull() {
       var headers = authHeaders();
       if (!headers) {
@@ -3967,13 +3971,35 @@ FILTER_JS_TEMPLATE = r"""
       fetch(API, {headers: headers})
         .then(function(r) {
           if (r.status === 401) {
-            // Token rejected by Worker — most likely expired between cached
-            // exp check and request. Drop to local mode; reload triggers
-            // sign-in flow.
-            setStatus('登录已过期，请重新登录', 'err');
-            localStorage.removeItem(AUTH_KEY);
+            // If we already retried after a silent refresh and STILL got
+            // 401, the Worker is rejecting fresh tokens — don't loop;
+            // bail to the manual sign-in flow.
+            if (pullRetriedAfterSilent) {
+              pullRetriedAfterSilent = false;
+              setStatus('登录已过期，请重新登录', 'err');
+              localStorage.removeItem(AUTH_KEY);
+              updateNeedsSyncIndicator();
+              return null;
+            }
+            // Token rejected by Worker — expired between our cached exp
+            // check and the request. Try silent re-auth; on success the
+            // next pull picks up the fresh token. Only clear stored auth
+            // (forcing the user to re-sign-in) if silent re-auth also
+            // fails — that's the genuine "Google session is gone" case.
+            setStatus('重新连接中…', 'busy');
+            silentReAuth(function(ok) {
+              if (ok) {
+                pullRetriedAfterSilent = true;
+                setTimeout(pull, 100);
+                return;
+              }
+              setStatus('登录已过期，请重新登录', 'err');
+              localStorage.removeItem(AUTH_KEY);
+              updateNeedsSyncIndicator();
+            });
             return null;
           }
+          pullRetriedAfterSilent = false;
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
         })
@@ -4012,6 +4038,7 @@ FILTER_JS_TEMPLATE = r"""
         .catch(function(e) { setStatus('同步失败: ' + e.message, 'err'); })
         .finally(function() { updateNeedsSyncIndicator(); });
     }
+    var pushRetriedAfterSilent = false;
     function push() {
       var headers = authHeaders();
       // Local mode (not signed in): nothing to push, but keep dirty=true so
@@ -4035,12 +4062,32 @@ FILTER_JS_TEMPLATE = r"""
       fetch(API, {method: 'PUT', headers: headers, body: body})
         .then(function(r) {
           if (r.status === 401) {
-            setStatus('登录已过期，请重新登录', 'err');
-            localStorage.removeItem(AUTH_KEY);
+            if (pushRetriedAfterSilent) {
+              pushRetriedAfterSilent = false;
+              setStatus('登录已过期，请重新登录', 'err');
+              localStorage.removeItem(AUTH_KEY);
+              updateNeedsSyncIndicator();
+              return;
+            }
+            // Same recovery as pull(): try silent re-auth before clearing
+            // the stored token. dirty stays true so the retried push (or
+            // the next user edit) actually flushes our pending changes.
+            setStatus('重新连接中…', 'busy');
             saveCache(state, true);
+            silentReAuth(function(ok) {
+              if (ok) {
+                pushRetriedAfterSilent = true;
+                setTimeout(push, 100);
+                return;
+              }
+              setStatus('登录已过期，请重新登录', 'err');
+              localStorage.removeItem(AUTH_KEY);
+              updateNeedsSyncIndicator();
+            });
             return;
           }
           if (!r.ok) throw new Error('HTTP ' + r.status);
+          pushRetriedAfterSilent = false;
           dirty = false;
           saveCache(state, false);
           setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
@@ -5061,17 +5108,13 @@ FILTER_JS_TEMPLATE = r"""
     var signinBtnContainer = document.getElementById('ff-signin-btn');
     var cfgMsg  = document.getElementById('ff-cfg-msg');
 
-    // GIS callback — same for every render of the official button. Decodes
-    // the ID token payload locally just for the email/name/picture display;
-    // the Worker re-verifies the token via Google tokeninfo independently.
-    function onGoogleCredential(resp) {
-      if (!resp || !resp.credential) {
-        cfgMsg.style.color = '#dc2626';
-        cfgMsg.textContent = '登录被取消';
-        return;
-      }
+    // Decode a Google ID token (JWT) and persist {id_token, email, name,
+    // picture, exp} via saveAuth(). Pure data — no UI side effects, no
+    // page reload — so both the interactive sign-in callback and the
+    // silent re-auth path can reuse it. Returns true on success.
+    function saveAuthFromCredential(credential) {
       try {
-        var parts = resp.credential.split('.');
+        var parts = credential.split('.');
         var pad = '='.repeat((4 - parts[1].length % 4) % 4);
         var b64 = (parts[1] + pad).replace(/-/g, '+').replace(/_/g, '/');
         var payload = JSON.parse(decodeURIComponent(
@@ -5079,19 +5122,132 @@ FILTER_JS_TEMPLATE = r"""
             return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
           }).join('')));
         saveAuth({
-          id_token: resp.credential,
+          id_token: credential,
           email: payload.email || '',
           name:  payload.name  || '',
           picture: payload.picture || '',
           exp: (payload.exp || 0) * 1000
         });
-        cfgMsg.style.color = '#16a34a';
-        cfgMsg.textContent = '✓ 登录成功，重新加载…';
-        setTimeout(function() { location.reload(); }, 600);
+        return true;
       } catch (e) {
-        cfgMsg.style.color = '#dc2626';
-        cfgMsg.textContent = '登录处理失败：' + e.message;
+        return false;
       }
+    }
+
+    // GIS callback for the visible sign-in button. Saves the new token and
+    // reloads so the rest of the page boots into the signed-in state.
+    function onGoogleCredential(resp) {
+      if (!resp || !resp.credential) {
+        cfgMsg.style.color = '#dc2626';
+        cfgMsg.textContent = '登录被取消';
+        return;
+      }
+      if (!saveAuthFromCredential(resp.credential)) {
+        cfgMsg.style.color = '#dc2626';
+        cfgMsg.textContent = '登录处理失败';
+        return;
+      }
+      cfgMsg.style.color = '#16a34a';
+      cfgMsg.textContent = '✓ 登录成功，重新加载…';
+      setTimeout(function() { location.reload(); }, 600);
+    }
+
+    // Silent re-auth via Google One Tap with auto_select. Google ID tokens
+    // have a fixed 1h TTL (Google-side, can't extend); without this the
+    // user gets bumped to the sign-in button every hour, which on mobile
+    // (where the browser eagerly evicts background tabs) feels like
+    // "closing the app logs me out". With auto_select + an active Google
+    // session in the browser, this completes with no UI at all. Multi-
+    // account users see a single One Tap chooser — one click to refresh.
+    // FedCM is opted in (use_fedcm_for_prompt) so the flow survives
+    // Chrome's third-party cookie phaseout.
+    // Queue of callbacks waiting on the current in-flight attempt. null
+    // means no attempt is running. Coalescing matters because pull and
+    // push can 401 concurrently — without it the second caller would see
+    // silentInFlight, bail with cb(false), and clear the AUTH_KEY that
+    // the first caller is about to refresh.
+    var silentWaiters = null;
+    function silentReAuth(cb) {
+      cb = cb || function(){};
+      if (!window.google || !google.accounts || !google.accounts.id) {
+        cb(false); return;
+      }
+      if (silentWaiters) { silentWaiters.push(cb); return; }
+      silentWaiters = [cb];
+      var done = false;
+      function finish(ok) {
+        if (done) return;
+        done = true;
+        var waiters = silentWaiters;
+        silentWaiters = null;
+        waiters.forEach(function(c) { c(ok); });
+      }
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: function(resp) {
+          if (resp && resp.credential && saveAuthFromCredential(resp.credential)) {
+            finish(true);
+          } else {
+            finish(false);
+          }
+        },
+        auto_select: true,
+        use_fedcm_for_prompt: true,
+        cancel_on_tap_outside: false
+      });
+      try {
+        google.accounts.id.prompt(function(notification) {
+          // momentHandler — if the prompt was suppressed (no eligible
+          // session, user dismissed, FedCM gate failed), the main callback
+          // will never fire. Report failure so the caller can fall back.
+          if (notification && (notification.isNotDisplayed
+                ? (notification.isNotDisplayed() || notification.isSkippedMoment())
+                : false)) {
+            finish(false);
+          }
+        });
+      } catch (e) {
+        finish(false);
+      }
+      // Hard timeout so a hung prompt doesn't block forever.
+      setTimeout(function() { finish(false); }, 4000);
+    }
+
+    // Called on page load (after GIS loads) and on sync 401. Attempts to
+    // refresh the id_token silently; on success the new token is in
+    // localStorage and any in-page UI that re-checks configured() will
+    // see it as signed-in again.
+    function tryRestoreSession(cb) {
+      cb = cb || function(){};
+      var raw = loadAuth();
+      if (!raw.id_token) { cb(false); return; }
+      // Token still valid → nothing to do.
+      if (raw.exp && Date.now() < raw.exp - 60000) { cb(true); return; }
+      silentReAuth(function(ok) {
+        if (ok) refreshAuthUI();
+        cb(ok);
+      });
+    }
+
+    // Boot-time silent re-auth. Waits for GIS to load (same retry budget
+    // as renderSignInButton — ~3 s), then attempts to refresh. Mostly
+    // invisible: succeeds silently on single-account browsers, no-ops if
+    // the token is still fresh, and triggers the One Tap chooser only
+    // for multi-account users with an expired token.
+    var bootSilentAttempt = 0;
+    function bootSilentReAuth() {
+      if (!window.google || !google.accounts || !google.accounts.id) {
+        if (bootSilentAttempt > 30) return;
+        bootSilentAttempt++;
+        setTimeout(bootSilentReAuth, 100);
+        return;
+      }
+      tryRestoreSession();
+    }
+    // Only attempt if we previously had a session; first-time visitors
+    // shouldn't see an unsolicited One Tap toast on page load.
+    if (loadAuth().id_token) {
+      setTimeout(bootSilentReAuth, 0);
     }
 
     // Lazy-render Google's official sign-in button into the modal. Called on
