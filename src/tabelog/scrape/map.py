@@ -1589,7 +1589,7 @@ HELP_POPOVER_HTML = """
   <div class="ff-help-section" data-help-for="blacklist" hidden>弃用名单 = 你研究后决定不会去的餐厅，会从地图上自动隐藏；和收藏一起通过你的 Google 账号跨设备同步。</div>
   <div class="ff-help-section" data-help-for="kind-bookmark" hidden>收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
   <div class="ff-help-section" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。</div>
-  <div class="ff-help-section" data-help-for="price-curation" hidden>评分基于 Tabelog。本站只收录每个区域评分前 1% 的餐厅；其中高价位 fine-dining 进一步压到 0.1%；和果子、咖啡厅、面包店等非正餐也按比例控量。让你在旅途中看到的多数店都能随时预订甚至 walk-in。</div>
+  <div class="ff-help-section" data-help-for="price-curation" hidden>本站只收录每个区域评分前 1% 的餐厅；其中高价位 fine-dining 进一步压到 0.1%；和果子、咖啡厅、面包店等非正餐也按比例控量。让你在旅途中看到的多数店都能随时预订甚至 walk-in。</div>
 </div>
 """
 
