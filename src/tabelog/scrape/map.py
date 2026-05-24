@@ -2214,6 +2214,23 @@ FILTER_JS_TEMPLATE = r"""
   function setEmojiHtml(el, text) {
     if (el) el.innerHTML = emojiHtml(text);
   }
+  // DOM-building twin of emojiImg(). emojify() needs real <img> elements
+  // rather than HTML strings — a text node's nodeValue holds decoded
+  // characters (literal '<', '&', etc.), so going back through innerHTML
+  // would reparse them as markup and turn previously-escaped user content
+  // like "&lt;img onerror=...&gt;" into a live tag.
+  function emojiImgNode(m) {
+    var key = EMOJI_MAP[m];
+    var src = key
+      ? 'emoji/' + key + '.png'
+      : 'https://emojicdn.elk.sh/' + encodeURIComponent(m) + '?style=apple';
+    var img = document.createElement('img');
+    img.src = src;
+    img.alt = m;
+    img.draggable = false;
+    img.style.cssText = 'height:1em;width:1em;vertical-align:-0.15em;display:inline-block;';
+    return img;
+  }
   function emojify(root) {
     if (!root || root.nodeType !== 1) return;
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -2232,10 +2249,22 @@ FILTER_JS_TEMPLATE = r"""
     nodes.forEach(function(tn) {
       var v = tn.nodeValue;
       if (!v) return;
-      var html = v.replace(EMOJI_RE, function(m) { return emojiImg(m); });
-      if (html === v) return;
+      EMOJI_RE.lastIndex = 0;
+      if (!EMOJI_RE.test(v)) return;
       var span = document.createElement('span');
-      span.innerHTML = html;
+      var last = 0;
+      EMOJI_RE.lastIndex = 0;
+      var m;
+      while ((m = EMOJI_RE.exec(v)) !== null) {
+        if (m.index > last) {
+          span.appendChild(document.createTextNode(v.slice(last, m.index)));
+        }
+        span.appendChild(emojiImgNode(m[0]));
+        last = m.index + m[0].length;
+      }
+      if (last < v.length) {
+        span.appendChild(document.createTextNode(v.slice(last)));
+      }
       tn.replaceWith(span);
     });
   }
@@ -2650,6 +2679,22 @@ FILTER_JS_TEMPLATE = r"""
     // curated data/attractions.csv set). The 景点 FAB toggles both layers
     // together; the 收藏 FAB toggles only the bookmarks layer.
     var BM_KEY = 'tabelog.bookmarks';
+    // The bookmark modal validates emoji input via isPureEmoji, but the
+    // field can still arrive as arbitrary data via direct localStorage
+    // edits, a cloud blob authored before that validator existed, or any
+    // future shape drift. Normalize at every ingress so the raw emoji
+    // string never reaches an HTML-string concat site (openBookmarkPopup
+    // / emojiImg's alt attribute / bookmarkIconHtml).
+    function sanitizeBookmarkEmoji(bm) {
+      if (bm && bm.emoji && !isPureEmoji(bm.emoji)) {
+        bm.emoji = '📍';
+      }
+      return bm;
+    }
+    function sanitizeBookmarkArray(arr) {
+      if (Array.isArray(arr)) arr.forEach(sanitizeBookmarkEmoji);
+      return arr;
+    }
     var bookmarks = (function() {
       try {
         var raw = localStorage.getItem(BM_KEY);
@@ -2658,11 +2703,11 @@ FILTER_JS_TEMPLATE = r"""
           // and persist it so subsequent edits anchor against that copy.
           var seed = EMBEDDED_BOOKMARKS.slice();
           localStorage.setItem(BM_KEY, JSON.stringify(seed));
-          return seed;
+          return sanitizeBookmarkArray(seed);
         }
         var arr = JSON.parse(raw);
-        return Array.isArray(arr) ? arr : [];
-      } catch (_) { return EMBEDDED_BOOKMARKS.slice(); }
+        return sanitizeBookmarkArray(Array.isArray(arr) ? arr : []);
+      } catch (_) { return sanitizeBookmarkArray(EMBEDDED_BOOKMARKS.slice()); }
     })();
 
     var bookmarksLayer = L.featureGroup();        // category === 'bookmark'
@@ -2880,7 +2925,12 @@ FILTER_JS_TEMPLATE = r"""
                                isAttraction ? 11 : 10)
       });
       var m = L.marker([bm.lat, bm.lon], {icon: icon});
-      m.bindTooltip(bmDisplayName(bm), {sticky: true});
+      // bindTooltip with a string sets the tooltip content via innerHTML
+      // (Leaflet 1.9.3 Popup/Tooltip share _updateContent: node.innerHTML
+      // = content when typeof string). Escape the name before it lands
+      // there — Wikidata labels can carry literal HTML if a vandal edits
+      // the label of a popular Q-ID while a user adds it as a bookmark.
+      m.bindTooltip(escapeHtml(bmDisplayName(bm)), {sticky: true});
       m.on('click', function() { openBookmarkPopup(bm, m); });
       m.addTo(targetLayer);
       bmMarkerById[bm.id] = {marker: m, layer: targetLayer};
@@ -2906,6 +2956,7 @@ FILTER_JS_TEMPLATE = r"""
     function renderFavoritesBuiltin() {
       EMBEDDED_FAVORITES_BUILTIN.forEach(function(bm) {
         if (bmMarkerById[bm.id]) return;
+        sanitizeBookmarkEmoji(bm);
         bm._builtin = true;
         bm._hidden  = hiddenBuiltinIds.has(bm.id);
         renderBookmark(bm);
@@ -4021,6 +4072,7 @@ FILTER_JS_TEMPLATE = r"""
             userAttractionsLayer.clearLayers();
             bmMarkerById = {};
             remote.bookmarks.forEach(function(bm) {
+              sanitizeBookmarkEmoji(bm);
               bookmarks.push(bm);
               renderBookmark(bm);   // early-returns on hidden / no-coord
             });
@@ -5224,7 +5276,14 @@ FILTER_JS_TEMPLATE = r"""
       // Token still valid → nothing to do.
       if (raw.exp && Date.now() < raw.exp - 60000) { cb(true); return; }
       silentReAuth(function(ok) {
-        if (ok) refreshAuthUI();
+        if (ok) {
+          refreshAuthUI();
+          // startSync already ran in local-mode (token had expired by the
+          // time it checked). Now that we have a fresh token, kick a
+          // sync — push if there's a pending local change, pull otherwise
+          // — so the user doesn't sit in "本地模式" until the 60s poll.
+          if (dirty) push(); else pull();
+        }
         cb(ok);
       });
     }

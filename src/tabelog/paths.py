@@ -14,7 +14,7 @@ CACHE_DIR = DATA / "cache"
 INTERMEDIATE_DIR = DATA / "intermediate"
 ARCHIVE_DIR = DATA / "archive"
 
-# GitHub Pages serves from this directory.
+# Cloudflare Pages serves from this directory.
 DOCS_DIR = PROJECT_ROOT / "docs"
 
 PROFILE_DIR = PROJECT_ROOT / ".chrome_profile"
@@ -40,7 +40,7 @@ BLACKLIST_JSON = USER_DIR / "blacklist.json"
 # stores Tabelog restaurant URLs; this one stores user-named map pins.
 BOOKMARKS_JSON = USER_DIR / "bookmarks.json"
 
-# Rendered artifacts — committed to docs/ so GitHub Pages picks them up.
+# Rendered artifacts — committed to docs/ so Cloudflare Pages picks them up.
 # Core fields (lat/lon, filterable bits, tooltip) fetched on boot; popup HTML
 # split out so it can be fetched lazily on first marker click.
 MAP_HTML = DOCS_DIR / "index.html"

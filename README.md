@@ -2,7 +2,7 @@
 
 A personal interactive map of restaurants across Japan, live at
 [jpfoodmap.com](https://jpfoodmap.com). The static page lives in `docs/`
-and is served via GitHub Pages.
+and is served via Cloudflare Pages.
 
 Per-user favorites, dismissals, and bookmarks sync through a small
 Cloudflare Worker (`worker/`) backed by Google Sign-In. Visitors who skip
@@ -24,7 +24,8 @@ The build pulls geocodes via GSI AddressSearch (cached locally in
 
 ## Deploy
 
-The repo is wired up to GitHub Pages serving from `main` / `/docs`.
+The repo is wired up to Cloudflare Pages serving from `main` / `/docs`.
+`docs/_headers` sets cache rules (immutable emoji PNGs, no-cache sw.js).
 
 ```bash
 uv run python src/tabelog/scrape/map.py  # regenerate after data changes
