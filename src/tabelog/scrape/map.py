@@ -865,7 +865,7 @@ def build_filter_panel_html(
     )
 
     # DEFAULT_OFF_GENRES (中/韩/西/南亚/中东·非洲) are not shown in the
-    # cuisine filter — they're controlled by the standalone "隐藏外国料理"
+    # cuisine filter — they're controlled by the standalone "隐藏非日本料理"
     # toggle below. Remaining buckets are grouped by MEAL_GROUPS with a
     # section header above each cluster.
     def _genre_section(group: str, buckets: list[str]) -> str:
@@ -1083,12 +1083,9 @@ def build_filter_panel_html(
 {award_rows}
   </div>
 
-  <div style="font-weight:600;margin-top:6px;margin-bottom:2px;">Tabelog 预约</div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 4px;margin-bottom:6px;">
-    <label><input type="radio" name="ff-bookable" value="all" checked> 全部</label>
-    <label><input type="radio" name="ff-bookable" value="yes"> 可</label>
-    <label><input type="radio" name="ff-bookable" value="no"> 不可</label>
-  </div>
+  <label style="display:block;margin-top:6px;margin-bottom:6px;">
+    <input type="checkbox" id="ff-bookable-only"> 只显示可以通过 Tabelog 预约
+  </label>
 
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
     <span style="font-weight:600;">收藏</span>
@@ -1107,11 +1104,11 @@ def build_filter_panel_html(
   </label>
 
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">外国料理</span>
+    <span style="font-weight:600;">非日本料理</span>
     <span style="font-size:11px;color:#6b7280;">🌏 <b>{foreign_count}</b></span>
   </div>
   <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-hide-foreign" checked> 隐藏外国料理 (🇨🇳🇹🇼🇰🇷🇫🇷🇮🇹🇺🇸🇮🇳🇹🇭🇱🇧)
+    <input type="checkbox" id="ff-hide-foreign" checked> 隐藏非日本料理（中餐、韩餐、西餐、南亚、中东菜等）
   </label>
 
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px;">
@@ -2790,13 +2787,17 @@ FILTER_JS_TEMPLATE = r"""
                + 'onerror="this.parentElement.style.display=\'none\'"></a>';
         }).join('') + '</div>';
       }
-      // EN gets a hand-tuned phrase ("Bookable via Tabelog") so the chip
-      // doesn't read as a literal word-for-word join from the localizer
-      // ("AvailableTabelogBooking"). zh-CN is the source string; zh-TW
-      // and ja still flow through the runtime localizer.
+      // Locale used for chip text + per-field translate-button gating below.
+      // Declared up front because EN / JA both need a hand-tuned chip phrase
+      // — relying on the runtime CJK localizer would split "可Tabelog预约"
+      // into independent runs and produce "AvailableTabelogBooking", which
+      // is what we're avoiding.
+      var _lang = (typeof activeLang === 'undefined') ? 'zh-CN' : activeLang;
       var chipText = d.bookable ? '可Tabelog预约' : '不可Tabelog预约';
       if (_lang === 'en') {
         chipText = d.bookable ? 'Bookable via Tabelog' : 'Not bookable via Tabelog';
+      } else if (_lang === 'ja') {
+        chipText = d.bookable ? 'Tabelog 予約可' : 'Tabelog 予約不可';
       }
       var chipCls = d.bookable ? 'rst-chip' : 'rst-chip rst-chip-off';
       var chip = '<span class="' + chipCls + '">' + chipText + '</span>';
@@ -2807,7 +2808,6 @@ FILTER_JS_TEMPLATE = r"""
       // visual noise there. English shows all three. The label "翻译"
       // rides the CJK localizer: zh-TW gets 翻譯 via OpenCC, en gets
       // "Translate" via TEXT_EN_MAP.
-      var _lang = (typeof activeLang === 'undefined') ? 'zh-CN' : activeLang;
       function txBtn(field, val) {
         if (!val || val === '—') return '';
         if (_lang === 'ja') return '';
@@ -4750,7 +4750,7 @@ FILTER_JS_TEMPLATE = r"""
     var filterState = {
       minRating: 3.4, pSet: {}, gSet: {}, gAny: false,
       aSet: {}, aAny: false,
-      book: 'all', onlyFav: false, hideBlack: true, hideForeign: true
+      bookableOnly: false, onlyFav: false, hideBlack: true, hideForeign: true
     };
     function readFilterInputs() {
       filterState.minRating = parseFloat(ratingSlider.value);
@@ -4763,8 +4763,8 @@ FILTER_JS_TEMPLATE = r"""
       filterState.aSet = {};
       filterState.aAny = false;
       document.querySelectorAll('input[name=ff-award]:checked').forEach(function(c){ filterState.aSet[c.value]=1; filterState.aAny=true; });
-      var bEl = document.querySelector('input[name=ff-bookable]:checked');
-      filterState.book = bEl ? bEl.value : 'all';
+      var bEl = document.getElementById('ff-bookable-only');
+      filterState.bookableOnly = bEl ? bEl.checked : false;
       filterState.onlyFav = onlyFavEl.checked;
       filterState.hideBlack = hideBlackEl.checked;
       filterState.hideForeign = hideForeignEl.checked;
@@ -4797,8 +4797,7 @@ FILTER_JS_TEMPLATE = r"""
         }
         if (!ok) return false;
       }
-      if (fs.book === 'yes' && !d.bookable) return false;
-      if (fs.book === 'no' && d.bookable) return false;
+      if (fs.bookableOnly && !d.bookable) return false;
       if (fs.onlyFav && !isFav(d)) return false;
       // Award filter: OR across checked tags. Inactive when nothing checked —
       // that's the "any award status" state, not "show nothing".
@@ -4893,13 +4892,13 @@ FILTER_JS_TEMPLATE = r"""
         document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ genres.push(c.value); });
         var awards = [];
         document.querySelectorAll('input[name=ff-award]:checked').forEach(function(c){ awards.push(c.value); });
-        var bEl = document.querySelector('input[name=ff-bookable]:checked');
+        var bEl = document.getElementById('ff-bookable-only');
         localStorage.setItem(STATE_KEY_FILTER, JSON.stringify({
           rating: parseFloat(ratingSlider.value),
           prices: prices,
           genres: genres,
           awards: awards,
-          bookable: bEl ? bEl.value : 'all',
+          bookableOnly: bEl ? bEl.checked : false,
           onlyFav: onlyFavEl.checked,
           hideBlack: hideBlackEl.checked,
           hideForeign: hideForeignEl.checked
@@ -4927,9 +4926,11 @@ FILTER_JS_TEMPLATE = r"""
         s.awards.forEach(function(v){ aSet[v] = 1; });
         document.querySelectorAll('input[name=ff-award]').forEach(function(c){ c.checked = !!aSet[c.value]; });
       }
-      if (typeof s.bookable === 'string') {
-        var bEl = document.querySelector('input[name=ff-bookable][value="' + s.bookable + '"]');
-        if (bEl) bEl.checked = true;
+      var bEl = document.getElementById('ff-bookable-only');
+      if (bEl) {
+        // Forward-compat with the older 3-radio shape that stored 'yes'/'no'/'all'.
+        if (typeof s.bookableOnly === 'boolean') bEl.checked = s.bookableOnly;
+        else if (typeof s.bookable === 'string') bEl.checked = (s.bookable === 'yes');
       }
       if (typeof s.onlyFav === 'boolean') onlyFavEl.checked = s.onlyFav;
       if (typeof s.hideBlack === 'boolean') hideBlackEl.checked = s.hideBlack;
@@ -5050,7 +5051,8 @@ FILTER_JS_TEMPLATE = r"""
       document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = true; });
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
       document.querySelectorAll('input[name=ff-award]').forEach(function(c){ c.checked = false; });
-      document.querySelector('input[name=ff-bookable][value="all"]').checked = true;
+      var resetBookable = document.getElementById('ff-bookable-only');
+      if (resetBookable) resetBookable.checked = false;
       onlyFavEl.checked = false;
       hideBlackEl.checked = true;
       hideForeignEl.checked = true;
