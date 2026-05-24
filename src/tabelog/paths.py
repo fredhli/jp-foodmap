@@ -85,16 +85,10 @@ I18N_EN_JSON = I18N_DIR / "en.json"
 # 渋谷スクランブル交差点) rather than re-romanising.
 I18N_JA_JSON = I18N_DIR / "ja.json"
 
-# In-page help content. Authored as plain markdown so screenshots can be
-# dropped in with normal ![](...) syntax; map.py embeds the raw text into
-# the page and a small marked.js bundle renders it inside a modal. One
-# file per active language — map.py builds a {lang: markdown} dispatch
-# table so the modal picks the right one based on activeLang at runtime.
+# In-page help content directory. Currently unused — was authored for the
+# old Gist sync flow, which got replaced by Google OAuth. Kept around as a
+# parking spot for future help docs.
 HELP_DIR = DOCS_DIR / "help"
-HELP_GIST_MD = HELP_DIR / "gist-setup.md"
-HELP_GIST_MD_TW = HELP_DIR / "gist-setup-tw.md"
-HELP_GIST_MD_EN = HELP_DIR / "gist-setup-en.md"
-HELP_GIST_MD_JA = HELP_DIR / "gist-setup-ja.md"
 
 
 def _ensure_dirs() -> None:

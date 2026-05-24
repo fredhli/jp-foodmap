@@ -1,0 +1,15 @@
+name = "jpfoodmap-api"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+routes = [
+  { pattern = "api.jpfoodmap.com", custom_domain = true }
+]
+
+[[kv_namespaces]]
+binding = "KV"
+id = "7d6e7c510aec41e6a309d060e40565a7"
+
+[vars]
+GOOGLE_CLIENT_ID = "536198170238-me7dpu2og75tseuekl3pu8rjjgo2ig2p.apps.googleusercontent.com"
+ALLOWED_ORIGINS = "https://jpfoodmap.com,https://www.jpfoodmap.com,http://localhost:8000"

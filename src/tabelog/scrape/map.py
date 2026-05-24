@@ -55,10 +55,6 @@ from tabelog.paths import (
     CACHE_DIR,
     I18N_EN_JSON,
     I18N_JA_JSON,
-    HELP_GIST_MD,
-    HELP_GIST_MD_TW,
-    HELP_GIST_MD_EN,
-    HELP_GIST_MD_JA,
 )
 from tabelog.scrape.map_data import (
     DEFAULT_OFF_GENRES,
@@ -91,13 +87,6 @@ _CJK_RUN_RE = re.compile(r"[㐀-鿿豈-﫿]+")
 # doesn't fill up with entries we'll never use.
 _HAN_VARIANTS_LITERAL_RE = re.compile(r"var HAN_VARIANTS\s*=\s*[^;]+;")
 _KNOWN_LOCS_LITERAL_RE = re.compile(r"var KNOWN_LOCS\s*=\s*[^;]+;")
-# Help markdown is embedded as four quoted JSON strings, one per
-# language (HELP_MD_CN / HELP_MD_TW / HELP_MD_EN / HELP_MD_JA). Match each
-# as a proper JSON token so any future `;` inside the MD prose doesn't trip
-# us up — the [^;] shortcut used above isn't safe for free-form text.
-_HELP_MD_LITERAL_RE = re.compile(
-    r'var HELP_MD_(?:CN|TW|EN|JA)\s*=\s*"(?:\\.|[^"\\])*"\s*;'
-)
 # The runtime tokenizer regex `/[㐀-鿿豈-﫿]+/g` literally contains the four
 # CJK boundary characters that define its character class — U+3400, U+9FFF,
 # U+F900, U+FAFF. Spelled with explicit \u escapes so the source character
@@ -110,7 +99,6 @@ _CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 def _scan_cjk_runs(html: str) -> set[str]:
     scanned = _HAN_VARIANTS_LITERAL_RE.sub("", html)
     scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
-    scanned = _HELP_MD_LITERAL_RE.sub("", scanned)
     scanned = _CJK_RUN_RE_LITERAL_RE.sub("", scanned)
     return set(_CJK_RUN_RE.findall(scanned))
 
@@ -198,32 +186,6 @@ def ja_popup_array(arr: list, policy_ja: str | None) -> list:
 # they resolve correctly against docs/index.html (the help/ dir sits next
 # to the rendered HTML at deploy time). External / absolute paths are
 # passed through untouched.
-_HELP_MD_REL_IMG_RE = re.compile(r"(!\[[^\]]*\])\((?!https?://|/|help/)([^)\s]+)\)")
-
-
-def _load_one_help_md(path: Path) -> str:
-    """Read a help markdown file and prefix bare image paths with `help/`
-    so screenshots dropped into docs/help/ render correctly at runtime.
-    Returns '' if the file isn't present — the help button then opens an
-    empty modal, which is loud enough to notice."""
-    if not path.exists():
-        return ""
-    md = path.read_text(encoding="utf-8")
-    return _HELP_MD_REL_IMG_RE.sub(r"\1(help/\2)", md)
-
-
-def load_help_md_by_lang() -> dict[str, str]:
-    """Return a {lang_code: rendered_md} map covering every language the
-    UI exposes. Missing language files fall back to an empty string at
-    that slot — the runtime then falls back to zh-CN."""
-    return {
-        "zh-CN": _load_one_help_md(HELP_GIST_MD),
-        "zh-TW": _load_one_help_md(HELP_GIST_MD_TW),
-        "en": _load_one_help_md(HELP_GIST_MD_EN),
-        "ja": _load_one_help_md(HELP_GIST_MD_JA),
-    }
-
-
 def load_policy_en() -> dict[str, str]:
     if not POLICY_EN_JSON.exists():
         return {}
@@ -1018,12 +980,11 @@ def build_filter_panel_html(
   #ff-fab .ff-fab-count b {{ color: #2563eb; }}
   /* Unsynced-changes alerts. Two flavours so the colour matches the
      user's actual situation:
-       .needs-sync         — red. No Gist configured (or Gist forgotten),
-                              so edits won't survive a reload. Urgent.
-       .needs-sync-pending — blue. Gist is configured; the push just
-                              hasn't landed yet (or last attempt failed,
-                              but the status text covers that channel).
-                              Informational, not alarming. */
+       .needs-sync         — red. Not signed in, so edits live only in
+                              this browser. Urgent.
+       .needs-sync-pending — blue. Signed in; the push just hasn't landed
+                              yet (or last attempt failed, but the status
+                              text covers that channel). Informational. */
   @keyframes ff-fab-pulse {{
     0%   {{ background: #fee2e2; box-shadow: 0 2px 6px rgba(220,38,38,0.35); }}
     50%  {{ background: #dc2626; box-shadow: 0 4px 14px rgba(220,38,38,0.55); }}
@@ -1179,166 +1140,71 @@ def build_filter_panel_html(
   </div>
 </div>
 
-<!-- Settings modal (Gist ID + PAT). Hidden by default. -->
-<!-- Lives outside #ff-sheet so opening it doesn't have to fight the sheet's
-     own transform / overflow. Still owned by the filter UI for wiring. -->
-<!-- z-index must beat ff-sheet (10002) and bm-modal (10011) — this modal is
-     spawned from inside the filter sheet, so it has to render on top of it.
-     Otherwise opening 同步设置 looks like nothing happened. -->
+<!-- Cloud sync settings modal. One Google sign-in button is the entire UX —
+     no Gist ID, no PAT, no help docs. Two states: signed-out (just the
+     button) and signed-in (email + sign-out). z-index beats ff-sheet
+     (10002) and bm-modal (10011) since this opens from the filter sheet. -->
 <div id="ff-modal-bg" style="display:none;position:fixed;inset:0;z-index:10020;
      background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;padding:18px 20px;width:340px;
        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
        font-size:13px;color:#111827;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-      <span style="font-weight:700;font-size:15px;">同步设置</span>
-      <button type="button" id="ff-cfg-help"
-              aria-label="如何注册 Gist 和 PAT"
-              title="不会配？点这里看图文教程"
-              style="display:inline-flex;align-items:center;justify-content:center;
-                     width:18px;height:18px;border-radius:50%;
-                     background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;
-                     font-size:11px;font-weight:700;line-height:1;
-                     cursor:help;padding:0;">?</button>
+    <div style="font-weight:700;font-size:15px;margin-bottom:10px;">云同步</div>
+
+    <!-- Signed-out state: a single Google sign-in button. -->
+    <div id="ff-auth-out" style="display:none;text-align:center;padding:6px 0;">
+      <button id="ff-signin"
+              style="padding:8px 18px;border:1px solid #d1d5db;background:#fff;
+                     color:#3c4043;border-radius:6px;cursor:pointer;
+                     font-size:13px;font-weight:600;display:inline-flex;
+                     align-items:center;gap:8px;
+                     box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+        <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+          <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+        </svg>
+        用 Google 登录
+      </button>
+      <div style="font-size:11px;color:#6b7280;margin-top:10px;line-height:1.5;">
+        登录后，收藏 / 弃用 / 景点 会跨设备同步。<br>
+        未登录则只存在当前浏览器。
+      </div>
     </div>
 
-    <label style="display:block;font-weight:600;margin-bottom:3px;margin-top:12px;">Gist ID</label>
-    <input id="ff-cfg-gist" type="text" placeholder="例如 a1b2c3d4e5f6..."
-           style="width:100%;padding:6px 8px;border:1px solid #d1d5db;
-                  border-radius:4px;font-family:monospace;font-size:12px;
-                  box-sizing:border-box;margin-bottom:10px;">
+    <!-- Signed-in state: avatar + email + sign-out. -->
+    <div id="ff-auth-in" style="display:none;">
+      <div style="display:flex;align-items:center;gap:10px;
+                  padding:8px 10px;background:#f9fafb;border-radius:6px;
+                  margin-bottom:8px;">
+        <img id="ff-auth-pic" src="" alt=""
+             style="width:32px;height:32px;border-radius:50%;
+                    background:#e5e7eb;flex-shrink:0;">
+        <div style="flex:1;min-width:0;">
+          <div id="ff-auth-name" style="font-weight:600;font-size:12px;
+                  color:#111827;overflow:hidden;text-overflow:ellipsis;
+                  white-space:nowrap;"></div>
+          <div id="ff-auth-email" style="font-size:11px;color:#6b7280;
+                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+        </div>
+      </div>
+      <button id="ff-signout"
+              style="width:100%;padding:6px;border:1px solid #d1d5db;
+                     background:#f9fafb;color:#374151;border-radius:4px;
+                     cursor:pointer;font-size:12px;">退出登录</button>
+    </div>
 
-    <label style="display:block;font-weight:600;margin-bottom:3px;">
-      Personal Access Token
-    </label>
-    <input id="ff-cfg-pat" type="password" placeholder="ghp_..."
-           style="width:100%;padding:6px 8px;border:1px solid #d1d5db;
-                  border-radius:4px;font-family:monospace;font-size:12px;
-                  box-sizing:border-box;margin-bottom:12px;">
-
-    <div id="ff-cfg-msg" style="font-size:11px;min-height:14px;margin-bottom:8px;"></div>
+    <div id="ff-cfg-msg" style="font-size:11px;min-height:14px;margin:10px 0 4px;"></div>
 
     <div style="display:flex;gap:6px;">
-      <button id="ff-cfg-save" style="flex:1;padding:6px;border:1px solid #2563eb;
-              background:#2563eb;color:#fff;border-radius:4px;cursor:pointer;
-              font-size:12px;font-weight:600;">保存并测试</button>
-      <button id="ff-cfg-cancel" style="padding:6px 10px;border:1px solid #d1d5db;
+      <button id="ff-cfg-cancel" style="flex:1;padding:6px;border:1px solid #d1d5db;
               background:#f9fafb;color:#374151;border-radius:4px;cursor:pointer;
-              font-size:12px;">取消</button>
+              font-size:12px;">关闭</button>
     </div>
   </div>
 </div>
 
-<!-- In-page help modal. Source is docs/help/gist-setup.md, embedded as a
-     JS string in FILTER_JS_TEMPLATE and rendered with marked.js on first
-     open. z-index sits above the settings modal (10020) since this opens
-     from inside it. -->
-<style>
-  #help-modal-bg {{
-    display: none; position: fixed; inset: 0; z-index: 10030;
-    background: rgba(0, 0, 0, 0.5);
-    align-items: center; justify-content: center;
-    padding: 16px;
-  }}
-  #help-modal-bg.help-open {{ display: flex; }}
-  #help-modal {{
-    background: #fff;
-    width: min(720px, 100%);
-    max-height: min(90vh, 90dvh);
-    border-radius: 12px;
-    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
-    display: flex; flex-direction: column;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    overflow: hidden;
-  }}
-  #help-modal-head {{
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px; border-bottom: 1px solid #e5e7eb;
-    flex-shrink: 0;
-  }}
-  #help-modal-head .help-title {{
-    font-weight: 700; font-size: 14px; color: #111827;
-  }}
-  #help-modal-head .help-close {{
-    border: none; background: transparent;
-    font-size: 22px; line-height: 1; color: #6b7280;
-    cursor: pointer; padding: 4px 8px; border-radius: 4px;
-  }}
-  #help-modal-head .help-close:hover {{ background: #f3f4f6; color: #111827; }}
-  #help-modal-body {{
-    flex: 1 1 auto; overflow-y: auto;
-    padding: 14px 22px 20px;
-    -webkit-overflow-scrolling: touch;
-    font-size: 13.5px; line-height: 1.65; color: #1f2937;
-  }}
-  #help-modal-body h1 {{ font-size: 19px; margin: 14px 0 10px;
-                        border-bottom: 1px solid #e5e7eb;
-                        padding-bottom: 6px; color: #111827; }}
-  #help-modal-body h1:first-child {{ margin-top: 0; }}
-  #help-modal-body h2 {{ font-size: 16px; margin: 18px 0 8px; color: #111827; }}
-  #help-modal-body h3 {{ font-size: 14px; margin: 14px 0 6px; color: #111827; }}
-  #help-modal-body p  {{ margin: 8px 0; }}
-  #help-modal-body ul, #help-modal-body ol {{ margin: 6px 0 10px;
-                                              padding-left: 22px; }}
-  #help-modal-body li {{ margin: 3px 0; }}
-  #help-modal-body a  {{ color: #2563eb; text-decoration: none; }}
-  #help-modal-body a:hover {{ text-decoration: underline; }}
-  #help-modal-body code {{
-    background: #f3f4f6; color: #b91c1c;
-    padding: 1px 5px; border-radius: 3px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12.5px;
-  }}
-  #help-modal-body pre {{
-    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
-    padding: 10px 12px; overflow-x: auto; margin: 8px 0;
-  }}
-  #help-modal-body pre code {{ background: transparent; color: #1f2937;
-                              padding: 0; font-size: 12.5px; }}
-  #help-modal-body blockquote {{
-    border-left: 3px solid #fbbf24; background: #fffbeb;
-    margin: 8px 0; padding: 6px 12px; color: #78350f;
-    border-radius: 0 4px 4px 0;
-  }}
-  #help-modal-body img {{
-    max-width: 100%; height: auto;
-    border: 1px solid #e5e7eb; border-radius: 6px;
-    display: block; margin: 8px auto;
-    background: #f9fafb;
-  }}
-  #help-modal-body table {{
-    border-collapse: collapse; width: 100%; margin: 10px 0;
-    font-size: 12.5px;
-  }}
-  #help-modal-body th, #help-modal-body td {{
-    border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left;
-  }}
-  #help-modal-body th {{ background: #f9fafb; font-weight: 600; }}
-  #help-modal-body hr {{ border: 0; border-top: 1px solid #e5e7eb;
-                        margin: 16px 0; }}
-  #help-modal-foot {{
-    padding: 8px 16px; border-top: 1px solid #e5e7eb;
-    font-size: 11px; color: #6b7280; text-align: right;
-    flex-shrink: 0;
-  }}
-  #help-modal-foot a {{ color: #2563eb; text-decoration: none; }}
-  #help-modal-foot a:hover {{ text-decoration: underline; }}
-</style>
-<div id="help-modal-bg" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
-  <div id="help-modal">
-    <div id="help-modal-head">
-      <span id="help-modal-title" class="help-title">📖 Gist 同步教程</span>
-      <button type="button" class="help-close" aria-label="关闭">×</button>
-    </div>
-    <div id="help-modal-body">
-      <div style="color:#9ca3af;text-align:center;padding:30px 0;">加载中…</div>
-    </div>
-    <div id="help-modal-foot">
-      源文件：<a href="https://github.com/fredhli/jp-foodmap/blob/main/docs/help/gist-setup.md"
-                target="_blank" rel="noopener">docs/help/gist-setup.md</a>
-    </div>
-  </div>
-</div>
 """
 
 
@@ -1356,7 +1222,15 @@ HEAD_BRANDING = """
      emojicdn is the fallback for any emoji not in our local /emoji/ cache. -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://emojicdn.elk.sh" crossorigin>
+<link rel="preconnect" href="https://accounts.google.com" crossorigin>
+<link rel="preconnect" href="https://api.jpfoodmap.com" crossorigin>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 """
+
+# Web OAuth client ID for jpfoodmap (Google Cloud project: tabelog-map).
+# Public by design — gets inlined into the page JS so the GIS library knows
+# which app is asking for a sign-in. Not a secret; safe in git.
+GOOGLE_CLIENT_ID = "536198170238-me7dpu2og75tseuekl3pu8rjjgo2ig2p.apps.googleusercontent.com"
 
 
 LOCATE_ASSETS = """
@@ -2123,7 +1997,7 @@ BOTTOM_SHEET_HTML = """
 #   same-origin HTML / nav    → network-first   (so redeploys land quickly)
 #   same-origin JSON / GeoJSON / JS → cache-first   (busted by version bump)
 #   third-party tiles / CDN   → stale-while-revalidate
-#   anything else (Nominatim, Gist API) → not intercepted, browser default
+#   anything else (Nominatim, jpfoodmap API) → not intercepted, browser default
 # Each build bumps the cache name via VERSION, so activate() purges the old
 # cache and the next fetch repopulates with fresh data.
 SW_JS_TEMPLATE = r"""// Auto-generated by src/tabelog/scrape/map.py — do not edit by hand.
@@ -2158,8 +2032,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Tiles + CDN assets we serve from cache on revisit but refresh in the
-  // background. Anything outside this list (Nominatim search, GitHub Gist
-  // sync) passes straight through to the browser default.
+  // background. Anything outside this list (Nominatim search, jpfoodmap
+  // sync API) passes straight through to the browser default.
   if (/(\.tile\.openstreetmap\.org$)|(^[a-c]\.tile\.)/i.test(url.hostname) ||
       url.hostname === 'emojicdn.elk.sh' ||
       url.hostname === 'cdn.jsdelivr.net' ||
@@ -2237,15 +2111,9 @@ FILTER_JS_TEMPLATE = r"""
   // like "炭火烧鸟 正" working as name search even though "正" looks like
   // it could be a location token.
   var KNOWN_LOCS = new Set(__KNOWN_LOCS__);
-  // Raw markdown for the in-page Gist setup guide — one variable per
-  // language so the build-time strip in _scan_cjk_runs can match each
-  // literal as a self-contained JSON string (object literals don't have
-  // a regex-friendly terminator). Picked by activeLang at render time.
-  var HELP_MD_CN = __HELP_MD_CN_JSON__;
-  var HELP_MD_TW = __HELP_MD_TW_JSON__;
-  var HELP_MD_EN = __HELP_MD_EN_JSON__;
-  var HELP_MD_JA = __HELP_MD_JA_JSON__;
-  var HELP_MD = {'zh-CN': HELP_MD_CN, 'zh-TW': HELP_MD_TW, 'en': HELP_MD_EN, 'ja': HELP_MD_JA};
+  // Google OAuth Web Client ID — inlined at build time. Public by design;
+  // the GIS library uses it to know which app is asking for sign-in.
+  var GOOGLE_CLIENT_ID = '__GOOGLE_CLIENT_ID__';
   // Build-time Simplified -> Traditional lookup. Keys are exact CJK
   // runs that appear anywhere on the rendered page; values are their
   // OpenCC s2t conversion (full multi-char rules applied at build, so
@@ -2540,23 +2408,26 @@ FILTER_JS_TEMPLATE = r"""
   window.__localizeTree = localizeTree;
   window.__activeLang = activeLang;
 
-  // ===== GitHub Gist sync layer =====
+  // ===== Cloud sync layer (Google OAuth + Cloudflare Worker + KV) =====
   //
-  // Config (Gist ID + PAT) is per-device, stored in localStorage. The state
-  // (favorites/blacklist sets) is also cached locally so the page works
-  // offline / before the first sync. With Gist configured, the page pulls
-  // on load + tab-focus + every 60s, and pushes (debounced 500ms) on toggle.
-  // Last-writer-wins: we don't merge concurrent edits, but for a small
-  // group this is fine — the next pull catches it.
-  var CFG_KEY = 'omakase_gist_config';
+  // Auth (Google ID token + cached profile) is per-device, stored in
+  // localStorage. The state (favorites/blacklist sets + bookmarks) is also
+  // cached locally so the page works offline / before the first pull.
+  // When signed in, the page pulls on load + tab-focus + every 60s, and
+  // pushes (debounced 500ms) on every edit. Last-writer-wins: no merge.
+  var AUTH_KEY = 'tabelog.auth';
   var CACHE_KEY = 'omakase_state_cache_v2';
-  var GIST_API = 'https://api.github.com/gists/';
+  var API = 'https://api.jpfoodmap.com/api/state';
 
-  function loadConfig() {
-    try { return JSON.parse(localStorage.getItem(CFG_KEY) || '{}'); }
+  function loadAuth() {
+    try { return JSON.parse(localStorage.getItem(AUTH_KEY) || '{}'); }
     catch (_) { return {}; }
   }
-  function saveConfig(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+  function saveAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
+  function signOut() {
+    localStorage.removeItem(AUTH_KEY);
+    location.reload();
+  }
 
   function loadCache() {
     try {
@@ -2575,34 +2446,19 @@ FILTER_JS_TEMPLATE = r"""
     }));
   }
 
-  function gistHeaders(pat) {
-    var h = {'Accept': 'application/vnd.github+json'};
-    if (pat) h['Authorization'] = 'Bearer ' + pat;
-    return h;
+  // Single source of truth for "are we currently signed in with a token
+  // that hasn't expired yet". exp is stored in ms on saveAuth(). Returns
+  // the full auth object (including id_token, email, name, picture) when
+  // valid, null otherwise — callers use truthiness.
+  function configured() {
+    var a = loadAuth();
+    if (!a.id_token) return null;
+    if (a.exp && Date.now() >= a.exp) return null;   // expired
+    return a;
   }
-  function parseGistFiles(json) {
-    function setFromFile(f) {
-      if (!f || typeof f.content !== 'string') return null;
-      try {
-        var arr = JSON.parse(f.content);
-        return Array.isArray(arr) ? new Set(arr) : null;
-      } catch (_) { return null; }
-    }
-    function arrayFromFile(f) {
-      if (!f || typeof f.content !== 'string') return null;
-      try {
-        var arr = JSON.parse(f.content);
-        return Array.isArray(arr) ? arr : null;
-      } catch (_) { return null; }
-    }
-    var files = json.files || {};
-    return {
-      fav: setFromFile(files['favorites.json']),
-      black: setFromFile(files['blacklist.json']),
-      // null when the gist doesn't have this file yet — preserves local
-      // edits the first time a device starts syncing.
-      bookmarks: arrayFromFile(files['bookmarks.json']),
-    };
+  function authHeaders() {
+    var a = configured();
+    return a ? {'Authorization': 'Bearer ' + a.id_token} : null;
   }
 
   function initMap(data) {
@@ -2798,8 +2654,8 @@ FILTER_JS_TEMPLATE = r"""
       });
     }
     // ===== 我的收藏 + 用户自添景点 (user-pinned places) =====
-    // One JSON store (tabelog.bookmarks / bookmarks.json on the Gist) for
-    // both kinds; each entry carries a `category` field — 'bookmark' (under
+    // One JSON store (tabelog.bookmarks locally, `bookmarks` field on the
+    // server) for both kinds; each entry carries a `category` field — 'bookmark' (under
     // the ⭐收藏 FAB) or 'attraction' (under the 🗾景点 FAB, alongside the
     // curated data/attractions.csv set). The 景点 FAB toggles both layers
     // together; the 收藏 FAB toggles only the bookmarks layer.
@@ -2827,7 +2683,7 @@ FILTER_JS_TEMPLATE = r"""
     var bmMarkerById = {};
     // Built-in landmarks the user has hidden. Lives as { id, category:
     // "hidden" } entries inside the bookmarks array so it rides the same
-    // Gist sync as personal pins — no extra file or storage key. Only
+    // cloud sync as personal pins — no extra file or storage key. Only
     // builtin IDs (fb-*) ever land in here; personal pins have their own
     // delete flow.
     var hiddenBuiltinIds = new Set();
@@ -3046,14 +2902,14 @@ FILTER_JS_TEMPLATE = r"""
     rebuildHiddenIds();
     bookmarks.forEach(renderBookmark);
     // Repo-shipped landmarks render alongside the personal layer but live
-    // outside the localStorage/Gist sync — so a Gist push doesn't carry
-    // them, and a redeploy with an updated favorites_builtin.json shows
-    // up immediately on every visitor's next reload. Pulled out as a
-    // function because the Gist-pull path wipes both leaflet layers
-    // before re-rendering personal bookmarks; that wipe also kills our
-    // builtin markers, so we re-run this after each pull. ID collision
-    // with a personal pin (unlikely; builtin IDs use the 'fb-' prefix)
-    // is resolved by letting the personal entry win.
+    // outside the localStorage/cloud sync — so a push doesn't carry them,
+    // and a redeploy with an updated favorites_builtin.json shows up
+    // immediately on every visitor's next reload. Pulled out as a function
+    // because the cloud-pull path wipes both leaflet layers before
+    // re-rendering personal bookmarks; that wipe also kills our builtin
+    // markers, so we re-run this after each pull. ID collision with a
+    // personal pin (unlikely; builtin IDs use the 'fb-' prefix) is resolved
+    // by letting the personal entry win.
     function renderFavoritesBuiltin() {
       EMBEDDED_FAVORITES_BUILTIN.forEach(function(bm) {
         if (bmMarkerById[bm.id]) return;
@@ -3487,12 +3343,6 @@ FILTER_JS_TEMPLATE = r"""
         'zh-TW': '搜尋餐廳 / 景點 / 地址 ...',
         'en':    'Search restaurants / sights / address ...',
         'ja':    'レストラン / スポット / 住所を検索 ...'
-      },
-      'ff-cfg-gist': {
-        'zh-CN': '例如 a1b2c3d4e5f6...',
-        'zh-TW': '例如 a1b2c3d4e5f6...',
-        'en':    'e.g. a1b2c3d4e5f6...',
-        'ja':    '例: a1b2c3d4e5f6...'
       },
       'bm-name': {
         'zh-CN': '例如：东京塔',
@@ -4053,7 +3903,7 @@ FILTER_JS_TEMPLATE = r"""
 
     // ----- Build initial state. Baked-in baseline (from the JSON files at
     // build time) is the floor; localStorage cache overrides it (last known
-    // state on this device); the Gist pull (if configured) overrides both.
+    // state on this device); the cloud pull (if signed in) overrides both.
     var state = {fav: new Set(), black: new Set()};
     data.forEach(function(d) {
       if (d.favorited) state.fav.add(d.detail_url);
@@ -4076,31 +3926,27 @@ FILTER_JS_TEMPLATE = r"""
                            : kind === 'busy'? '#2563eb' : '#6b7280';
     }
     // dirty is restored from cache so an unpushed change survives a refresh.
-    var etag = null, dirty = cache.dirty || false;
+    var dirty = cache.dirty || false;
     var pushTimer = null, pollTimer = null;
 
     // Flash the filter FAB when there are local changes that haven't
-    // landed in Gist. Colour depends on whether Gist sync is configured:
-    //   no Gist  → red pulse (urgent — edits will be lost on reload)
-    //   has Gist → blue pulse (just informational — push will arrive)
+    // landed on the server. Colour depends on whether the user is signed in:
+    //   not signed in → red pulse (urgent — edits live only in this browser)
+    //   signed in     → blue pulse (just informational — push will arrive)
     var fabEl = document.getElementById('ff-fab');
     function updateNeedsSyncIndicator() {
       if (!fabEl) return;
-      var hasGist = !!configured();
+      var signedIn = !!configured();
       var d = !!dirty;
-      fabEl.classList.toggle('needs-sync',         d && !hasGist);
-      fabEl.classList.toggle('needs-sync-pending', d &&  hasGist);
+      fabEl.classList.toggle('needs-sync',         d && !signedIn);
+      fabEl.classList.toggle('needs-sync-pending', d &&  signedIn);
       fabEl.title = d
-        ? (hasGist
-            ? '改动待同步到 Gist…'
-            : '收藏 / 弃用 / 景点 改动未同步到 Gist，点击查看')
+        ? (signedIn
+            ? '改动待同步到云端…'
+            : '收藏 / 弃用 / 景点 仅存于本地浏览器，点击登录以跨设备同步')
         : '筛选';
     }
 
-    function configured() {
-      var c = loadConfig();
-      return c.gistId ? c : null;
-    }
     function refreshAllMarkers() {
       // Only the markers that have actually been materialized can have their
       // icon updated. Rows outside the viewport will pick up the new state
@@ -4115,9 +3961,9 @@ FILTER_JS_TEMPLATE = r"""
       apply();
     }
     function pull() {
-      var c = configured();
-      if (!c) {
-        setStatus(dirty ? '本地模式（改动未同步）' : '本地模式',
+      var headers = authHeaders();
+      if (!headers) {
+        setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式',
                   dirty ? 'err' : '');
         updateNeedsSyncIndicator();
         return;
@@ -4125,83 +3971,83 @@ FILTER_JS_TEMPLATE = r"""
       // Don't clobber unsent local edits with a stale remote.
       if (dirty) { updateNeedsSyncIndicator(); return; }
       setStatus('同步中…', 'busy');
-      var headers = gistHeaders(c.pat);
-      if (etag) headers['If-None-Match'] = etag;
-      fetch(GIST_API + c.gistId, {headers: headers})
+      fetch(API, {headers: headers})
         .then(function(r) {
-          if (r.status === 304) { setStatus('已同步', 'ok'); return; }
+          if (r.status === 401) {
+            // Token rejected by Worker — most likely expired between cached
+            // exp check and request. Drop to local mode; reload triggers
+            // sign-in flow.
+            setStatus('登录已过期，请重新登录', 'err');
+            localStorage.removeItem(AUTH_KEY);
+            return null;
+          }
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          etag = r.headers.get('ETag');
-          return r.json().then(function(j) {
-            var remote = parseGistFiles(j);
-            if (remote.fav)   state.fav   = remote.fav;
-            if (remote.black) state.black = remote.black;
-            if (remote.bookmarks) {
-              // Wipe + re-render in place — closures hold the same array
-              // reference, so we mutate rather than reassign. Both layers
-              // (bookmarks + user-added attractions) get cleared so the
-              // pull rebuild starts from a clean slate. The builtin
-              // landmarks share the same layers, so the wipe takes them
-              // out too — renderFavoritesBuiltin puts them back.
-              bookmarks.length = 0;
-              bookmarksLayer.clearLayers();
-              userAttractionsLayer.clearLayers();
-              bmMarkerById = {};
-              remote.bookmarks.forEach(function(bm) {
-                bookmarks.push(bm);
-                renderBookmark(bm);   // early-returns on hidden / no-coord
-              });
-              // Recompute the hidden-builtin set from the freshly-pulled
-              // bookmarks before re-rendering builtins, so any hide flag
-              // the user set on another device takes effect now.
-              rebuildHiddenIds();
-              renderFavoritesBuiltin();
-              saveBookmarks();
-            }
-            saveCache(state, false);
-            refreshAllMarkers();
-            setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
-          });
+          return r.json();
+        })
+        .then(function(remote) {
+          if (!remote) return;
+          // Empty server (new account): server returns {}; nothing to apply.
+          // Server with data: {favorites, blacklist, bookmarks}.
+          if (Array.isArray(remote.favorites)) state.fav   = new Set(remote.favorites);
+          if (Array.isArray(remote.blacklist)) state.black = new Set(remote.blacklist);
+          if (Array.isArray(remote.bookmarks)) {
+            // Wipe + re-render in place — closures hold the same array
+            // reference, so we mutate rather than reassign. Both layers
+            // (bookmarks + user-added attractions) get cleared so the
+            // pull rebuild starts from a clean slate. The builtin
+            // landmarks share the same layers, so the wipe takes them
+            // out too — renderFavoritesBuiltin puts them back.
+            bookmarks.length = 0;
+            bookmarksLayer.clearLayers();
+            userAttractionsLayer.clearLayers();
+            bmMarkerById = {};
+            remote.bookmarks.forEach(function(bm) {
+              bookmarks.push(bm);
+              renderBookmark(bm);   // early-returns on hidden / no-coord
+            });
+            // Recompute the hidden-builtin set from the freshly-pulled
+            // bookmarks before re-rendering builtins, so any hide flag
+            // the user set on another device takes effect now.
+            rebuildHiddenIds();
+            renderFavoritesBuiltin();
+            saveBookmarks();
+          }
+          saveCache(state, false);
+          refreshAllMarkers();
+          setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
         })
         .catch(function(e) { setStatus('同步失败: ' + e.message, 'err'); })
         .finally(function() { updateNeedsSyncIndicator(); });
     }
     function push() {
-      var c = configured();
-      // Local mode (no Gist configured): nothing to push, but keep dirty=true
-      // so the FAB keeps flashing — the whole point is for the user to notice
-      // they haven't enabled sync. Indicator clears once they set up Gist
-      // and a real push succeeds.
-      if (!c) {
+      var headers = authHeaders();
+      // Local mode (not signed in): nothing to push, but keep dirty=true so
+      // the FAB keeps flashing — the whole point is for the user to notice
+      // they haven't enabled sync. Indicator clears once they sign in and
+      // a real push succeeds.
+      if (!headers) {
         saveCache(state, dirty);
-        setStatus(dirty ? '本地模式（改动未同步）' : '本地模式',
-                  dirty ? 'err' : '');
-        updateNeedsSyncIndicator();
-        return;
-      }
-      if (!c.pat) {                // read-only mode
-        saveCache(state, dirty);
-        setStatus('只读模式（无 PAT，改动未同步）',
+        setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式',
                   dirty ? 'err' : '');
         updateNeedsSyncIndicator();
         return;
       }
       setStatus('保存中…', 'busy');
-      var body = JSON.stringify({
-        files: {
-          'favorites.json': {content: JSON.stringify(Array.from(state.fav), null, 2)},
-          'blacklist.json': {content: JSON.stringify(Array.from(state.black), null, 2)},
-          // Gist auto-creates this file on the first push from a device
-          // that previously only had favorites + blacklist set up.
-          'bookmarks.json': {content: JSON.stringify(bookmarks, null, 2)},
-        },
-      });
-      var headers = gistHeaders(c.pat);
       headers['Content-Type'] = 'application/json';
-      fetch(GIST_API + c.gistId, {method: 'PATCH', headers: headers, body: body})
+      var body = JSON.stringify({
+        favorites: Array.from(state.fav),
+        blacklist: Array.from(state.black),
+        bookmarks: bookmarks,
+      });
+      fetch(API, {method: 'PUT', headers: headers, body: body})
         .then(function(r) {
+          if (r.status === 401) {
+            setStatus('登录已过期，请重新登录', 'err');
+            localStorage.removeItem(AUTH_KEY);
+            saveCache(state, true);
+            return;
+          }
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          etag = r.headers.get('ETag');
           dirty = false;
           saveCache(state, false);
           setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
@@ -4212,10 +4058,7 @@ FILTER_JS_TEMPLATE = r"""
           // unsaved change with the stale remote state. Change recovers when
           // a future push succeeds.
           saveCache(state, true);
-          var hint = e.message.indexOf('403') >= 0
-            ? '（PAT 没有写权限，去 settings → Gists 改 Read and write）'
-            : '（已存本地，将在下次成功推送时同步）';
-          setStatus('保存失败: ' + e.message + ' ' + hint, 'err');
+          setStatus('保存失败: ' + e.message + '（已存本地，下次推送时重试）', 'err');
         })
         .finally(function() { updateNeedsSyncIndicator(); });
     }
@@ -5214,16 +5057,32 @@ FILTER_JS_TEMPLATE = r"""
       apply();
     });
 
-    // ----- Settings modal: edit Gist ID + PAT (stored per-device).
+    // ----- Cloud sync settings modal: Google sign-in / sign-out.
     var modalBg = document.getElementById('ff-modal-bg');
-    var cfgGist = document.getElementById('ff-cfg-gist');
-    var cfgPat  = document.getElementById('ff-cfg-pat');
+    var authOut = document.getElementById('ff-auth-out');
+    var authIn  = document.getElementById('ff-auth-in');
+    var authPic = document.getElementById('ff-auth-pic');
+    var authName= document.getElementById('ff-auth-name');
+    var authEmail = document.getElementById('ff-auth-email');
     var cfgMsg  = document.getElementById('ff-cfg-msg');
+
+    function refreshAuthUI() {
+      var a = configured();
+      if (a) {
+        authOut.style.display = 'none';
+        authIn.style.display  = 'block';
+        authPic.src = a.picture || '';
+        authName.textContent  = a.name || '';
+        authEmail.textContent = a.email || '';
+      } else {
+        authOut.style.display = 'block';
+        authIn.style.display  = 'none';
+      }
+    }
+
     function openModal() {
-      var c = loadConfig();
-      cfgGist.value = c.gistId || '';
-      cfgPat.value  = c.pat || '';
       cfgMsg.textContent = '';
+      refreshAuthUI();
       modalBg.style.display = 'flex';
     }
     function closeModal() { modalBg.style.display = 'none'; }
@@ -5234,147 +5093,56 @@ FILTER_JS_TEMPLATE = r"""
       if (e.target === modalBg) closeModal();
     });
 
-    // ----- Help modal: in-page render of docs/help/gist-setup.md.
-    // marked.js is lazy-loaded the first time the modal opens so the cold
-    // page load doesn't pay for a parser the user might never need.
-    var helpBg   = document.getElementById('help-modal-bg');
-    var helpBody = document.getElementById('help-modal-body');
-    var helpRendered = false;          // first-open guard
-    var markedPromise = null;          // shared across re-opens
-
-    function loadMarked() {
-      if (window.marked) return Promise.resolve(window.marked);
-      if (markedPromise) return markedPromise;
-      markedPromise = new Promise(function(resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js';
-        s.onload  = function() { resolve(window.marked); };
-        s.onerror = function() {
-          markedPromise = null;
-          reject(new Error('无法加载 marked.js（检查网络）'));
-        };
-        document.head.appendChild(s);
-      });
-      return markedPromise;
-    }
-
-    // Per-language source-of-truth links shown in the modal footer, so a
-    // reader can hop from the rendered view to the editable .md.
-    var HELP_MD_FILE = {
-      'zh-CN': 'gist-setup.md',
-      'zh-TW': 'gist-setup-tw.md',
-      'en':    'gist-setup-en.md',
-      'ja':    'gist-setup-ja.md'
-    };
-
-    function renderHelp() {
-      if (helpRendered) return;
-      // Pick the variant for the active language with a zh-CN fallback,
-      // and a sturdier fallback to any non-empty entry in case the
-      // canonical zh-CN was missing at build time.
-      var md = HELP_MD[activeLang] || HELP_MD['zh-CN']
-            || HELP_MD['zh-TW'] || HELP_MD['en'] || '';
-      if (!md) {
-        helpBody.innerHTML = '<div style="color:#b91c1c;text-align:center;' +
-                             'padding:30px 0;">教程文件缺失</div>';
-        helpRendered = true;
-        return;
-      }
-      loadMarked()
-        .then(function(marked) {
-          // marked 12 emits semantic HTML by default; gfm + breaks make the
-          // line-break behavior match what the source MD looks like in a
-          // text editor (single newline inside a paragraph → <br>).
-          var html = marked.parse(md, { gfm: true, breaks: false });
-          helpBody.innerHTML = html;
-          // External links open in a new tab; the source MD doesn't have
-          // to repeat target="_blank" on every <a>.
-          helpBody.querySelectorAll('a[href^="http"]').forEach(function(a) {
-            a.target = '_blank';
-            a.rel = 'noopener';
-          });
-          // Match the rest of the UI's emoji rendering — system glyphs on
-          // Windows are missing flags etc., so swap to Apple PNGs.
-          emojify(helpBody);
-          helpRendered = true;
-        })
-        .catch(function(e) {
-          var f = HELP_MD_FILE[activeLang] || HELP_MD_FILE['zh-CN'];
-          helpBody.innerHTML = '<div style="color:#b91c1c;text-align:center;' +
-                               'padding:30px 0;">渲染失败：' +
-                               escapeHtml(e.message) + '<br>' +
-                               '<a href="https://github.com/fredhli/jp-foodmap/' +
-                               'blob/main/docs/help/' + f + '" target="_blank" ' +
-                               'rel="noopener" style="color:#2563eb;">' +
-                               'Open on GitHub →</a></div>';
-        });
-    }
-
-    // Repoint the modal footer link to the active language's source file
-    // each time the modal opens — the static HTML defaults to gist-setup.md.
-    var helpFootLink = helpBg.querySelector('#help-modal-foot a');
-    function updateHelpFootLink() {
-      if (!helpFootLink) return;
-      var f = HELP_MD_FILE[activeLang] || HELP_MD_FILE['zh-CN'];
-      helpFootLink.href =
-        'https://github.com/fredhli/jp-foodmap/blob/main/docs/help/' + f;
-      helpFootLink.textContent = 'docs/help/' + f;
-    }
-
-    function openHelp()  {
-      updateHelpFootLink();
-      renderHelp();
-      helpBg.classList.add('help-open');
-      // Reset scroll to the top each open so returning users always start
-      // from the intro rather than wherever they left off mid-read.
-      if (helpBody) helpBody.scrollTop = 0;
-    }
-    function closeHelp() { helpBg.classList.remove('help-open'); }
-
-    var helpBtn = document.getElementById('ff-cfg-help');
-    if (helpBtn) helpBtn.addEventListener('click', openHelp);
-    helpBg.addEventListener('click', function(e) {
-      if (e.target === helpBg) closeHelp();
-    });
-    helpBg.querySelector('.help-close').addEventListener('click', closeHelp);
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && helpBg.classList.contains('help-open')) {
-        closeHelp();
-      }
-    });
-
-    document.getElementById('ff-cfg-save').addEventListener('click', function() {
-      var gistId = cfgGist.value.trim();
-      var pat = cfgPat.value.trim();
-      if (!gistId) {
+    document.getElementById('ff-signin').addEventListener('click', function() {
+      if (!window.google || !google.accounts || !google.accounts.id) {
         cfgMsg.style.color = '#dc2626';
-        cfgMsg.textContent = '请填 Gist ID';
+        cfgMsg.textContent = 'Google 登录脚本未加载（检查网络）';
         return;
       }
       cfgMsg.style.color = '#2563eb';
-      cfgMsg.textContent = '测试中…';
-      // Verify by fetching the gist (and the PAT if given).
-      fetch(GIST_API + gistId, {headers: gistHeaders(pat)})
-        .then(function(r) {
-          if (r.status === 404) throw new Error('Gist 找不到');
-          if (r.status === 401) throw new Error('PAT 无效');
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.json();
-        })
-        .then(function(j) {
-          saveConfig({gistId: gistId, pat: pat});
-          cfgMsg.style.color = '#16a34a';
-          var hasFiles = (j.files && (j.files['favorites.json'] || j.files['blacklist.json']));
-          cfgMsg.textContent = dirty
-            ? '✓ 配置成功，正在重试上次失败的同步'
-            : (hasFiles ? '✓ 配置成功，正在拉取' : '✓ 已连接，Gist 是空的，下次操作会写入');
-          etag = null;
-          setTimeout(function() { closeModal(); startSync(); }, 700);
-        })
-        .catch(function(e) {
-          cfgMsg.style.color = '#dc2626';
-          cfgMsg.textContent = '✗ ' + e.message;
-        });
+      cfgMsg.textContent = '正在打开 Google 登录…';
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: function(resp) {
+          if (!resp || !resp.credential) {
+            cfgMsg.style.color = '#dc2626';
+            cfgMsg.textContent = '登录被取消';
+            return;
+          }
+          // ID token (JWT). Decode the payload — middle base64 segment — to
+          // pull profile fields for UI display. Worker re-verifies the token
+          // independently via Google tokeninfo, so trusting this payload for
+          // display only is fine.
+          try {
+            var parts = resp.credential.split('.');
+            var pad = '='.repeat((4 - parts[1].length % 4) % 4);
+            var b64 = (parts[1] + pad).replace(/-/g, '+').replace(/_/g, '/');
+            var payload = JSON.parse(decodeURIComponent(
+              atob(b64).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+              }).join('')));
+            saveAuth({
+              id_token: resp.credential,
+              email: payload.email || '',
+              name:  payload.name  || '',
+              picture: payload.picture || '',
+              exp: (payload.exp || 0) * 1000
+            });
+            cfgMsg.style.color = '#16a34a';
+            cfgMsg.textContent = '✓ 登录成功，重新加载…';
+            setTimeout(function() { location.reload(); }, 600);
+          } catch (e) {
+            cfgMsg.style.color = '#dc2626';
+            cfgMsg.textContent = '登录处理失败：' + e.message;
+          }
+        }
+      });
+      google.accounts.id.prompt();
+    });
+
+    document.getElementById('ff-signout').addEventListener('click', function() {
+      if (!confirm('退出登录？本设备上的本地缓存会保留，但不再同步到云端。')) return;
+      signOut();
     });
 
     // Language picker. activeLang was resolved on boot from ?lang= and
@@ -5629,7 +5397,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Landmark layer is rendered client-side from EMBEDDED_FAVORITES_BUILTIN
     # (baked from data/favorites_builtin.json) plus any user pins from
-    # localStorage / Gist — see the bookmarks block in FILTER_JS_TEMPLATE.
+    # localStorage / cloud sync — see the bookmarks block in FILTER_JS_TEMPLATE.
     # No folium-side FeatureGroup any more, so the FAB has only the JS
     # layers to toggle.
 
@@ -5814,19 +5582,6 @@ def main(argv: list[str] | None = None) -> None:
         f"  known_locs:       {len(known_locs)} tokens, "
         f"{len(known_locs_json.encode('utf-8')):,} bytes"
     )
-    # Help markdown gets embedded as one JSON-string literal per language
-    # inside an inline <script>. `</` is escaped to `<\/` so the JSON
-    # literal can't accidentally close the parent <script> tag if a future
-    # edit to one of the MDs introduces one.
-    help_md_by_lang = load_help_md_by_lang()
-
-    def _encode_help_md(md: str) -> str:
-        return json.dumps(md, ensure_ascii=False).replace("</", "<\\/")
-
-    help_md_cn_json = _encode_help_md(help_md_by_lang["zh-CN"])
-    help_md_tw_json = _encode_help_md(help_md_by_lang["zh-TW"])
-    help_md_en_json = _encode_help_md(help_md_by_lang["en"])
-    help_md_ja_json = _encode_help_md(help_md_by_lang["ja"])
     filter_js = (
         FILTER_JS_TEMPLATE.replace("__DEFAULT_OFF_GENRES__", default_off_json)
         .replace("__BOOKMARKS__", bookmarks_json)
@@ -5836,10 +5591,7 @@ def main(argv: list[str] | None = None) -> None:
         .replace("__EMOJI_MANIFEST__", emoji_manifest_json)
         .replace("__HAN_VARIANTS__", han_variants_json)
         .replace("__KNOWN_LOCS__", known_locs_json)
-        .replace("__HELP_MD_CN_JSON__", help_md_cn_json)
-        .replace("__HELP_MD_TW_JSON__", help_md_tw_json)
-        .replace("__HELP_MD_EN_JSON__", help_md_en_json)
-        .replace("__HELP_MD_JA_JSON__", help_md_ja_json)
+        .replace("__GOOGLE_CLIENT_ID__", GOOGLE_CLIENT_ID)
     )
     # Service worker — version-stamp the cache name so each redeploy
     # invalidates the previous one. Unix seconds is plenty granular for a
