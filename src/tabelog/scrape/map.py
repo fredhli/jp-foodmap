@@ -1389,23 +1389,19 @@ MAP_FAB_HTML = """
     filter: grayscale(1);
   }
   /* Low-zoom collapsed marker. At zoom < ZOOM_LOW_THRESHOLD (Python side,
-     mirrored in JS), the full emoji+label hides and a small coloured dot
-     shows in its place — like Google Maps' POI dots. Keeps the screen
-     readable at Japan-wide zoom where 200+ markers would otherwise fight
-     for space. Category drives the dot colour:
-       .bm-mk-attraction → purple (sightseeing — built-ins + user景点)
-       .bm-mk-bookmark   → gold   (personal pins, matches ⭐ FAB)  */
+     mirrored in JS) the full emoji+label hides and a 16px bare emoji
+     stands in — same size as the restaurant cluster icons, but with no
+     halo / no label / no drop-shadow circle, so 200+ markers stay
+     readable at Japan-wide zoom while preserving the category cue
+     (寺 / ⛩️ / ♨️ / 🗼 etc.). */
   .bm-mk-dot {
     display: none;
     position: relative;
-    width: 9px; height: 9px;
-    border-radius: 50%;
-    border: 1.5px solid #fff;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.45);
+    width: 16px; height: 16px;
     transform: translate(-50%, -50%);
+    line-height: 0;
   }
-  .bm-mk-attraction .bm-mk-dot { background: #a855f7; }
-  .bm-mk-bookmark   .bm-mk-dot { background: #eab308; }
+  .bm-mk-dot img { width: 16px; height: 16px; display: block; }
   body.zoom-low .bm-mk .bm-mk-full { display: none; }
   body.zoom-low .bm-mk .bm-mk-dot  { display: block; }
   .map-fab-ic { font-size: 15px; line-height: 1; }
@@ -2836,7 +2832,9 @@ FILTER_JS_TEMPLATE = r"""
       // affecting each other since both use position:relative + transform.
       var es = emojiSize || 22;
       var ls = labelSize || 10;
-      return '<div class="bm-mk-dot"></div>' +
+      return '<div class="bm-mk-dot">' +
+                emojiImg(emoji || '📍', 'width:16px;height:16px;') +
+             '</div>' +
              '<div class="bm-mk-full" ' +
                   'style="position:relative;transform:translate(-50%,-100%);' +
                          'text-align:center;width:max-content;">' +
@@ -3018,11 +3016,12 @@ FILTER_JS_TEMPLATE = r"""
     function openBookmarkPopup(bm, marker) {
       var coord = bm.lat.toFixed(6) + ', ' + bm.lon.toFixed(6);
       // Popup offset depends on what's actually showing:
-      //   dot mode (low zoom) → tiny offset to clear the 9px dot
+      //   dot mode (low zoom) → small offset to clear the 16px mini emoji
+      //                         (centred on the anchor, so top is 8px up)
       //   full marker         → bigger so the speech bubble tip sits above
       //                          the emoji (30px for 景点, 22px for 收藏)
       var inDotMode = (typeof map !== 'undefined') && map.getZoom() < 11;
-      var offY = inDotMode ? -8
+      var offY = inDotMode ? -10
                 : (bm.category === 'attraction') ? -30 : -22;
       // Action button varies by entry type:
       //   personal pin       → 删除  (one-shot, removes from bookmarks)
