@@ -19,7 +19,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tabelog.paths import DOCS_DIR, FAVORITES_BUILTIN_JSON  # noqa: E402
+from tabelog.paths import DATA, DOCS_DIR, FAVORITES_BUILTIN_JSON  # noqa: E402
 from tabelog.scrape.map_data import GENRE_EMOJI  # noqa: E402
 
 EMOJI_DIR = DOCS_DIR / "emoji"
@@ -45,14 +45,30 @@ def emoji_filename(emoji: str) -> str:
 
 
 def collect_emojis() -> set[str]:
+    """Union of every emoji that can land on the rendered page. Structured
+    sources (GENRE_EMOJI, the `emoji` field on built-in pins) are read
+    directly; everything else is harvested by regex from text payloads —
+    popup JSON, help markdown, i18n tables — so a new emoji shipped via
+    any of those gets pre-cached the next time the script runs."""
     out: set[str] = set()
     out.update(GENRE_EMOJI.values())
     for entry in json.loads(FAVORITES_BUILTIN_JSON.read_text(encoding="utf-8")):
         e = entry.get("emoji")
         if e:
             out.add(e)
-    src = MAP_PY.read_text(encoding="utf-8")
-    out.update(EMOJI_RE.findall(src))
+
+    text_targets: list[Path] = [MAP_PY]
+    text_targets.extend(sorted((DOCS_DIR / "data").glob("popups*.json")))
+    text_targets.extend(sorted((DOCS_DIR / "help").glob("*.md")))
+    i18n_dir = DATA / "i18n"
+    if i18n_dir.exists():
+        text_targets.extend(sorted(i18n_dir.glob("*.json")))
+
+    for path in text_targets:
+        if not path.exists():
+            continue
+        out.update(EMOJI_RE.findall(path.read_text(encoding="utf-8")))
+
     out.discard("")
     return out
 
