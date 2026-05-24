@@ -1586,6 +1586,8 @@ HELP_POPOVER_HTML = """
 </style>
 <div id="ff-help-pop" role="tooltip" aria-live="polite" hidden>
   <div class="ff-help-section" data-help-for="blacklist" hidden>弃用名单 = 你研究后决定不会去的餐厅，会从地图上自动隐藏；和收藏一起通过你的 Google 账号跨设备同步。</div>
+  <div class="ff-help-section" data-help-for="kind-bookmark" hidden>收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
+  <div class="ff-help-section" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。</div>
 </div>
 """
 
@@ -1766,9 +1768,13 @@ BOOKMARKS_MODAL_HTML = """
       <label>类型</label>
       <div class="bm-kind-seg" role="radiogroup" aria-label="类型">
         <button type="button" data-kind="bookmark" class="active"
-                role="radio" aria-checked="true">⭐ 收藏</button>
+                role="radio" aria-checked="true">⭐ 收藏<span class="ff-help-trigger"
+                data-help-for="kind-bookmark" role="button" tabindex="0"
+                aria-label="说明">?</span></button>
         <button type="button" data-kind="attraction"
-                role="radio" aria-checked="false">🗾 景点</button>
+                role="radio" aria-checked="false">🗾 景点<span class="ff-help-trigger"
+                data-help-for="kind-attraction" role="button" tabindex="0"
+                aria-label="说明">?</span></button>
       </div>
     </div>
     <div class="bm-row">
