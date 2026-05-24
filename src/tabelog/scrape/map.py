@@ -5539,8 +5539,12 @@ FILTER_JS_TEMPLATE = r"""
         var v = langEl.value;
         try { localStorage.setItem(LANG_KEY, v); } catch (_) {}
         var url = new URL(window.location.href);
+        // zh-CN is the source language so it drops the param entirely;
+        // every other choice gets a sticky ?lang= so deep links carry
+        // the picked language into a fresh browser.
         if (v === 'zh-TW') url.searchParams.set('lang', 'tw');
         else if (v === 'en') url.searchParams.set('lang', 'en');
+        else if (v === 'ja') url.searchParams.set('lang', 'ja');
         else url.searchParams.delete('lang');
         window.location.assign(url.toString());
       });
