@@ -1303,11 +1303,17 @@ LOCATE_ASSETS = """
 <script defer src="transit-layer.js"></script>
 <style>
   /* Suppress iOS long-press callout + text-selection on the map so the
-     contextmenu handler fires cleanly on touch. */
+     contextmenu handler fires cleanly on touch. Also restore Leaflet's
+     own default font-size — folium auto-injects `.leaflet-container
+     { font-size: 1rem }` which blows the attribution and tooltips up
+     to 16px. Leaflet's stylesheet ships with 0.75rem (= 12px); the
+     rule used to be re-asserted by a folium-shipped CSS patch that we
+     stripped alongside the other unused folium-injected dead deps. */
   .leaflet-container {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    font-size: 0.75rem;
   }
   /* The locate plugin renders its own top-left button; we drive it from
      the bottom-right FAB stack instead, so suppress the default UI. The
@@ -6117,7 +6123,9 @@ def main(argv: list[str] | None = None) -> None:
     # there's no Bootstrap or jQuery code anywhere. One of the URLs
     # (netdna.bootstrapcdn.com) is on a CDN that stopped serving, so every
     # visit was paying for a hung request that eventually 404s/times out.
-    # Strip the lot by URL substring after folium has rendered.
+    # Strip the lot by URL substring after folium has rendered. Scope the
+    # match to actual <script>/<link> tags so a stray mention of the URL
+    # inside a CSS comment, docstring, or data attribute isn't eaten.
     DEAD_DEP_MARKERS = (
         "code.jquery.com",
         "bootstrap@5.2.2",
@@ -6129,7 +6137,9 @@ def main(argv: list[str] | None = None) -> None:
     stripped_lines = []
     stripped_count = 0
     for line in saved_html.splitlines(keepends=True):
-        if any(marker in line for marker in DEAD_DEP_MARKERS):
+        stripped_line = line.lstrip()
+        is_tag = stripped_line.startswith("<script") or stripped_line.startswith("<link")
+        if is_tag and any(marker in line for marker in DEAD_DEP_MARKERS):
             stripped_count += 1
             continue
         stripped_lines.append(line)
