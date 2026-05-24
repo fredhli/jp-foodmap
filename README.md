@@ -1,10 +1,12 @@
 # jp-foodmap
 
-A personal interactive map of restaurants in the Kansai region. The static
-page lives in `docs/` and is served via GitHub Pages.
+A personal interactive map of restaurants across Japan, live at
+[jpfoodmap.com](https://jpfoodmap.com). The static page lives in `docs/`
+and is served via GitHub Pages.
 
-Per-user favorites and dismissals sync through a GitHub Gist (configured
-per-device, no shared secrets in the repo).
+Per-user favorites, dismissals, and bookmarks sync through a small
+Cloudflare Worker (`worker/`) backed by Google Sign-In. Visitors who skip
+sign-in keep their state purely in `localStorage`.
 
 ## Local build
 
@@ -14,36 +16,37 @@ uv run python src/tabelog/scrape/map.py
 open docs/index.html
 ```
 
-The build step pulls geocodes via GSI AddressSearch (cached locally in
+The build pulls geocodes via GSI AddressSearch (cached locally in
 `data/cache/`) and embeds the payload directly into `docs/index.html`.
 
-`data/` is gitignored — only `docs/index.html` is committed.
+`data/` is mostly gitignored — only `data/favorites_builtin.json` and
+`data/i18n/*.json` are committed (build-time inputs).
 
 ## Deploy
 
-The repo is already wired up to GitHub Pages serving from `main` / `/docs`.
+The repo is wired up to GitHub Pages serving from `main` / `/docs`.
 
 ```bash
 uv run python src/tabelog/scrape/map.py  # regenerate after data changes
-git add docs/index.html
+git add docs/index.html docs/data/restaurants.json
 git commit -m "rebuild map"
 git push
 ```
 
 Pages rebuilds in ~1 minute.
 
+The sync Worker deploys separately:
+
+```bash
+cd worker
+wrangler deploy
+```
+
 ## Sync (favorites + dismissals + bookmarks)
 
-Each browser keeps a local copy of these lists and pushes diffs to a shared
-secret GitHub Gist.
+Sign in with Google on the deployed page → settings modal → click the
+Google button. The Worker at `api.jpfoodmap.com` verifies the ID token via
+Google's tokeninfo endpoint and persists state to Cloudflare KV, keyed by
+Google `sub`. There is no setup beyond clicking sign-in.
 
-1. Create a **secret** gist on gist.github.com containing these files:
-   - `favorites.json` — JSON array of detail URLs
-   - `blacklist.json` — JSON array of detail URLs
-   - `bookmarks.json` — JSON array of map pins (`{id, name, emoji, lat, lon}`)
-     — optional; the page auto-creates it on first push if absent.
-2. Create a fine-grained PAT at github.com/settings/tokens with **Gists →
-   Read and write** only.
-3. On the deployed page → ⚙️ 同步设置 → paste Gist ID + PAT → 保存并测试.
-
-Read-only viewers can fill in just the Gist ID and leave the PAT blank.
+See `CLAUDE.md` for the project-internal architecture notes.

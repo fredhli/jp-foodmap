@@ -4278,8 +4278,7 @@ FILTER_JS_TEMPLATE = r"""
       return googleTranslate(text, 'ja', txTargetLangCode());
     }
     // ----- Wikidata lookup for bookmark/attraction names -----
-    // Mirror of src/tabelog/scrape/enhance_bookmarks_via_wikidata.py: try
-    // ja → en → zh Wikipedia for the user's name string, resolve to a
+    // Try ja → en → zh Wikipedia for the user's name string, resolve to a
     // wikibase_item Q-ID, then pull the multilingual labels from Wikidata.
     // Returns null on miss (no Wikipedia page, disambig page, or coord
     // drift > 5 km from the pin); on hit returns {sc, tc, jp, en} where
