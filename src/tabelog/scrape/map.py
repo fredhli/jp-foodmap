@@ -1871,6 +1871,16 @@ BOOKMARKS_MODAL_HTML = """
 MOBILE_UX_ASSETS = """
 <style>
   html, body { overscroll-behavior: none; }
+  /* Stop iOS Safari's "text size adjust" algorithm from inflating any
+     unstyled text on the page. Bootstrap's reset used to set this on
+     html; we dropped Bootstrap as a folium-injected dead dep, so own
+     the rule here instead. Affects mobile rendering only. */
+  html { -webkit-text-size-adjust: 100%; }
+  /* Use border-box globally so element widths include their padding
+     and border. Also a Bootstrap reset we used to inherit; making it
+     explicit means custom UI that sets width + padding behaves the
+     way the rest of the codebase already assumes. */
+  *, *::before, *::after { box-sizing: border-box; }
 </style>
 <script>
 (function() {
