@@ -1303,17 +1303,15 @@ LOCATE_ASSETS = """
 <script defer src="transit-layer.js"></script>
 <style>
   /* Suppress iOS long-press callout + text-selection on the map so the
-     contextmenu handler fires cleanly on touch. Also restore Leaflet's
-     own default font-size — folium auto-injects `.leaflet-container
-     { font-size: 1rem }` which blows the attribution and tooltips up
-     to 16px. Leaflet's stylesheet ships with 0.75rem (= 12px); the
-     rule used to be re-asserted by a folium-shipped CSS patch that we
-     stripped alongside the other unused folium-injected dead deps. */
+     contextmenu handler fires cleanly on touch. The font-size on
+     .leaflet-container is patched separately in the post-save pass
+     below, where folium's own `font-size: 1rem` rule is replaced — a
+     <style> rule there always wins over anything we inject here
+     because it renders later in source order. */
   .leaflet-container {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-    font-size: 0.75rem;
   }
   /* The locate plugin renders its own top-left button; we drive it from
      the bottom-right FAB stack instead, so suppress the default UI. The
@@ -6145,6 +6143,21 @@ def main(argv: list[str] | None = None) -> None:
         stripped_lines.append(line)
     saved_html = "".join(stripped_lines)
     print(f"  stripped {stripped_count} folium-injected dead-dep lines")
+
+    # Folium injects `.leaflet-container { font-size: 1rem; }` into its
+    # auto-generated <style> block — which sits AFTER any CSS we add via
+    # m.get_root().header, so it wins the cascade and inflates Leaflet's
+    # attribution and tooltips to 16px. Leaflet's own stylesheet wants
+    # 0.75rem (12px). Patch the value at the source instead of fighting
+    # the cascade with !important.
+    LEAFLET_FONT_PATCH_FROM = ".leaflet-container { font-size: 1rem; }"
+    LEAFLET_FONT_PATCH_TO   = ".leaflet-container { font-size: 0.75rem; }"
+    if LEAFLET_FONT_PATCH_FROM in saved_html:
+        saved_html = saved_html.replace(LEAFLET_FONT_PATCH_FROM, LEAFLET_FONT_PATCH_TO)
+        print("  patched folium's .leaflet-container font-size 1rem -> 0.75rem")
+    else:
+        print("  WARNING: folium .leaflet-container font-size rule not found "
+              "to patch — check if folium changed the rule format")
 
     # Second pass over the saved file: scan every CJK run that ended up
     # on the page (static UI, bucket names, attraction labels, AND the
