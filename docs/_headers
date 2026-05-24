@@ -8,3 +8,23 @@
 # Service worker must never be stale or rollouts get stuck on old code.
 /sw.js
   Cache-Control: no-cache
+
+# Big payloads (restaurants.json, popups-*.json). The SW busts its own
+# cache by VERSION on each deploy, so the HTTP layer only needs a short
+# freshness window with a long SWR tail. Returning users hit disk before
+# the SW even activates.
+/data/*
+  Cache-Control: public, max-age=300, stale-while-revalidate=86400
+
+# transit-layer.js ships with each redeploy but isn't version-stamped,
+# so keep it short-cached + revalidated like the data payloads.
+/transit-layer.js
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+# The HTML shell must be revalidated each visit so the SW version stamp
+# and any rolled-out template tweak land immediately. Cloudflare edge can
+# still cache it briefly; the must-revalidate keeps the browser honest.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
