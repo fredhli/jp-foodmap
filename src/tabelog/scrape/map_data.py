@@ -193,34 +193,37 @@ GENRE_CATEGORIES = {
         "小籠包",
         "肉まん",
         "飲茶・点心",
-        "台湾料理",
         "火鍋",
         "薬膳",
     ],
+    "台湾料理": ["台湾料理"],
     "韩国料理": ["韓国料理", "冷麺"],
-    "西餐/西式料理": [
-        "洋食",
-        "ハンバーガー",
-        "ハンバーグ",
-        "フレンチ",
-        "ヨーロッパ料理",
-        "イタリアン",
-        "ピザ",
-        "パスタ",
-        "オムライス",
-        "ビストロ",
-        "オーベルジュ",
-        "ギリシャ料理",
-        "スペイン料理",
-        "ドイツ料理",
-        "アメリカ料理",
-        "チーズ料理",
-        "ハワイ料理",
+    "法餐": ["フレンチ", "ビストロ", "オーベルジュ"],
+    "意餐·披萨·意面": ["イタリアン", "ピザ", "パスタ"],
+    "美式料理·汉堡": ["アメリカ料理", "ハンバーガー", "ハワイ料理"],
+    # Single bucket for all of Latin America — mostly Mexican-leaning by token
+    # count (メキシコ料理 + タコス + 中南米料理), but Brazilian / Peruvian
+    # mixed in. Argentina flag chosen as a pan-LatAm representative.
+    "拉美料理": [
+        "メキシコ料理",
+        "タコス",
         "ブラジル料理",
         "ペルー料理",
-        "メキシコ料理",
         "中南米料理",
-        "タコス",
+    ],
+    # Catch-all: Yōshoku and other Western specialties that don't justify a
+    # dedicated country bucket. Spain / Greece / Germany each have only one
+    # Tabelog token, so they live here under the EU flag rather than as
+    # one-token buckets.
+    "其他西餐": [
+        "洋食",
+        "ヨーロッパ料理",
+        "ハンバーグ",
+        "オムライス",
+        "チーズ料理",
+        "スペイン料理",
+        "ギリシャ料理",
+        "ドイツ料理",
     ],
     "南亚·东南亚料理": [
         "インドカレー",
@@ -279,8 +282,13 @@ MEAL_GROUPS = {
 # on "重置筛选". 全选 / 全清 buttons still toggle all rows including these.
 DEFAULT_OFF_GENRES = {
     "饺子·中餐",
+    "台湾料理",
     "韩国料理",
-    "西餐/西式料理",
+    "法餐",
+    "意餐·披萨·意面",
+    "美式料理·汉堡",
+    "拉美料理",
+    "其他西餐",
     "南亚·东南亚料理",
     "中东·非洲",
 }
@@ -307,8 +315,13 @@ GENRE_EMOJI = {
     "伴手礼·点心": "🍡",
     "其他": "🍽️",
     "饺子·中餐": "🇨🇳",
+    "台湾料理": "🇹🇼",
     "韩国料理": "🇰🇷",
-    "西餐/西式料理": "🇫🇷",
+    "法餐": "🇫🇷",
+    "意餐·披萨·意面": "🇮🇹",
+    "美式料理·汉堡": "🇺🇸",
+    "拉美料理": "🇦🇷",
+    "其他西餐": "🇪🇺",
     "南亚·东南亚料理": "🇮🇳",
     "中东·非洲": "🇱🇧",
 }
