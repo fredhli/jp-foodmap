@@ -2919,15 +2919,17 @@ FILTER_JS_TEMPLATE = r"""
       var chip = '<span class="' + chipCls + '">' + chipText + '</span>';
       // Per-field translate button. Hidden on the Japanese UI (source
       // text is already Japanese). The Chinese UIs (zh-CN / zh-TW) only
-      // show the button for `seat` — station and address are mostly
-      // kanji Chinese readers can read directly, so the affordance is
-      // visual noise there. English shows all three. The label "翻译"
-      // rides the CJK localizer: zh-TW gets 翻譯 via OpenCC, en gets
-      // "Translate" via TEXT_EN_MAP.
+      // show the button for `seat` and `genre` — station and address
+      // are mostly kanji Chinese readers can read directly, but Tabelog
+      // genre strings (そば, 串揚げ, etc.) are kana-heavy and worth
+      // translating. English shows all four. The label "翻译" rides the
+      // CJK localizer: zh-TW gets 翻譯 via OpenCC, en gets "Translate"
+      // via TEXT_EN_MAP.
       function txBtn(field, val) {
         if (!val || val === '—') return '';
         if (_lang === 'ja') return '';
-        if ((_lang === 'zh-CN' || _lang === 'zh-TW') && field !== 'seat') return '';
+        if ((_lang === 'zh-CN' || _lang === 'zh-TW')
+            && field !== 'seat' && field !== 'genre') return '';
         return '<button type="button" class="rst-tx-btn" data-tx="' + field + '">翻译</button>';
       }
       // Quick-jump to a Google Maps search for "<name> <address>". The
@@ -2960,7 +2962,7 @@ FILTER_JS_TEMPLATE = r"""
           + '</div>'
         + '</div>'
         + photoHtml
-        + '<div class="rst-genre"><span lang="ja">' + escapeHtml(genre) + '</span> / ' + escapeHtml(bucket) + '</div>'
+        + '<div class="rst-genre"><span class="rst-value"><span lang="ja">' + escapeHtml(genre) + '</span></span>' + txBtn('genre', genre) + ' / ' + escapeHtml(bucket) + '</div>'
         + '<div class="rst-info">'
           + '<div class="rst-info-row"><span class="rst-label">晚</span><span class="rst-value">' + escapeHtml(dinnerS) + '</span></div>'
           + '<div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 <span lang="ja">' + escapeHtml(station) + '</span></span>' + txBtn('station', station) + '</div>'
