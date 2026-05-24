@@ -48,3 +48,4 @@ src/tabelog/scrape/transit_audit.py
 
 # Local rollback snapshots (e.g. map.py.bak before a big refactor)
 *.bak
+docs/transit/japan*.geojson

@@ -103,9 +103,7 @@ _HELP_MD_LITERAL_RE = re.compile(
 # encoding can't substitute a visually-identical sibling (e.g. the basic
 # 豈 U+8C48 vs the compatibility 豈 U+F900, which renders the same but
 # fails to match).
-_CJK_RUN_RE_LITERAL_RE = re.compile(
-    r"/\[㐀-鿿豈-﫿\]\+/g"
-)
+_CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 
 
 def _scan_cjk_runs(html: str) -> set[str]:
@@ -199,9 +197,7 @@ def ja_popup_array(arr: list, policy_ja: str | None) -> list:
 # they resolve correctly against docs/index.html (the help/ dir sits next
 # to the rendered HTML at deploy time). External / absolute paths are
 # passed through untouched.
-_HELP_MD_REL_IMG_RE = re.compile(
-    r"(!\[[^\]]*\])\((?!https?://|/|help/)([^)\s]+)\)"
-)
+_HELP_MD_REL_IMG_RE = re.compile(r"(!\[[^\]]*\])\((?!https?://|/|help/)([^)\s]+)\)")
 
 
 def _load_one_help_md(path: Path) -> str:
@@ -222,8 +218,8 @@ def load_help_md_by_lang() -> dict[str, str]:
     return {
         "zh-CN": _load_one_help_md(HELP_GIST_MD),
         "zh-TW": _load_one_help_md(HELP_GIST_MD_TW),
-        "en":    _load_one_help_md(HELP_GIST_MD_EN),
-        "ja":    _load_one_help_md(HELP_GIST_MD_JA),
+        "en": _load_one_help_md(HELP_GIST_MD_EN),
+        "ja": _load_one_help_md(HELP_GIST_MD_JA),
     }
 
 
@@ -233,8 +229,7 @@ def load_policy_en() -> dict[str, str]:
     try:
         return json.loads(POLICY_EN_JSON.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
-        print(f"  WARN: {POLICY_EN_JSON} is invalid JSON ({e}); "
-              f"treating as empty")
+        print(f"  WARN: {POLICY_EN_JSON} is invalid JSON ({e}); treating as empty")
         return {}
 
 
@@ -259,20 +254,58 @@ def load_policy_ja() -> dict[str, str]:
         return {}
     return out
 
+
 # Japan's 47 都道府県. Used as a whitelist for parse_admin_prefix because the
 # regex approach trips on 都/府/県 also appearing INSIDE prefecture names
 # (e.g. "京都府京都市..." has 都 inside 京都府 not as a suffix).
 _PREFECTURES = (
     "北海道",
-    "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
-    "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "神奈川県", "東京都",
-    "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
-    "静岡県", "愛知県",
-    "三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県",
-    "鳥取県", "島根県", "岡山県", "広島県", "山口県",
-    "徳島県", "香川県", "愛媛県", "高知県",
-    "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県",
-    "鹿児島県", "沖縄県",
+    "青森県",
+    "岩手県",
+    "宮城県",
+    "秋田県",
+    "山形県",
+    "福島県",
+    "茨城県",
+    "栃木県",
+    "群馬県",
+    "埼玉県",
+    "千葉県",
+    "神奈川県",
+    "東京都",
+    "新潟県",
+    "富山県",
+    "石川県",
+    "福井県",
+    "山梨県",
+    "長野県",
+    "岐阜県",
+    "静岡県",
+    "愛知県",
+    "三重県",
+    "滋賀県",
+    "京都府",
+    "大阪府",
+    "兵庫県",
+    "奈良県",
+    "和歌山県",
+    "鳥取県",
+    "島根県",
+    "岡山県",
+    "広島県",
+    "山口県",
+    "徳島県",
+    "香川県",
+    "愛媛県",
+    "高知県",
+    "福岡県",
+    "佐賀県",
+    "長崎県",
+    "熊本県",
+    "大分県",
+    "宮崎県",
+    "鹿児島県",
+    "沖縄県",
 )
 # After the prefecture is stripped, repeated tokens of the form "<name><suffix>"
 # where suffix ∈ {市,郡,区,町,村}. The negation excludes digits so we stop
@@ -290,14 +323,14 @@ def parse_admin_prefix(addr: str) -> str:
     for p in _PREFECTURES:
         if addr.startswith(p):
             parts.append(p)
-            addr = addr[len(p):]
+            addr = addr[len(p) :]
             break
     for _ in range(3):
         m = _ADMIN_RE.match(addr)
         if not m:
             break
         parts.append(m.group(1))
-        addr = addr[m.end():]
+        addr = addr[m.end() :]
     return "".join(parts)
 
 
@@ -310,7 +343,7 @@ def extract_city(addr: str) -> str:
         return ""
     for p in _PREFECTURES:
         if addr.startswith(p):
-            addr = addr[len(p):]
+            addr = addr[len(p) :]
             break
     for _ in range(3):
         m = _ADMIN_RE.match(addr)
@@ -318,7 +351,7 @@ def extract_city(addr: str) -> str:
             return ""
         tok = m.group(1)
         if tok.endswith("郡"):
-            addr = addr[m.end():]
+            addr = addr[m.end() :]
             continue
         return tok[:-1]
     return ""
@@ -335,7 +368,7 @@ def admin_tokens_with_suffix(addr: str) -> list[str]:
     for p in _PREFECTURES:
         if addr.startswith(p):
             pref = p
-            addr = addr[len(p):]
+            addr = addr[len(p) :]
             break
     if pref:
         out.append(pref)
@@ -346,11 +379,12 @@ def admin_tokens_with_suffix(addr: str) -> list[str]:
         if not m:
             break
         tok = m.group(1)
-        addr = addr[m.end():]
+        addr = addr[m.end() :]
         out.append(tok)
         if not tok.endswith("郡"):
             out.append(tok[:-1])
     return out
+
 
 GSI_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
 
@@ -419,19 +453,20 @@ def load_bookmarks() -> list[dict]:
             "lon": lon,
             "category": cat,
         }
-        has_new = any(k in item for k in
-                      ("name_src", "name_sc", "name_tc", "name_en", "name_jp"))
+        has_new = any(
+            k in item for k in ("name_src", "name_sc", "name_tc", "name_en", "name_jp")
+        )
         if has_new:
             src = str(item.get("name_src") or "").strip()
-            sc  = str(item.get("name_sc")  or "").strip()
-            tc  = str(item.get("name_tc")  or "").strip()
-            en  = str(item.get("name_en")  or "").strip()
-            jp  = str(item.get("name_jp")  or "").strip()
+            sc = str(item.get("name_sc") or "").strip()
+            tc = str(item.get("name_tc") or "").strip()
+            en = str(item.get("name_en") or "").strip()
+            jp = str(item.get("name_jp") or "").strip()
             if not (src or sc or tc or en or jp):
                 src = "未命名"
             entry["name_src"] = src
-            entry["name_sc"]  = sc
-            entry["name_en"]  = en
+            entry["name_sc"] = sc
+            entry["name_en"] = en
             if tc:
                 entry["name_tc"] = tc
             if jp:
@@ -468,21 +503,21 @@ def load_favorites_builtin() -> list[dict]:
         if cat not in ("bookmark", "attraction"):
             cat = "bookmark"
         src = str(item.get("name_src") or "").strip()
-        sc  = str(item.get("name_sc")  or "").strip()
-        tc  = str(item.get("name_tc")  or "").strip()
-        en  = str(item.get("name_en")  or "").strip()
-        jp  = str(item.get("name_jp")  or "").strip()
+        sc = str(item.get("name_sc") or "").strip()
+        tc = str(item.get("name_tc") or "").strip()
+        en = str(item.get("name_en") or "").strip()
+        jp = str(item.get("name_jp") or "").strip()
         if not (src or sc or tc or en or jp):
             src = "未命名"
         entry: dict = {
-            "id":       str(item.get("id") or f"{lat:.6f},{lon:.6f}"),
-            "emoji":    str(item.get("emoji") or "📍"),
-            "lat":      lat,
-            "lon":      lon,
+            "id": str(item.get("id") or f"{lat:.6f},{lon:.6f}"),
+            "emoji": str(item.get("emoji") or "📍"),
+            "lat": lat,
+            "lon": lon,
             "category": cat,
             "name_src": src,
-            "name_sc":  sc,
-            "name_en":  en,
+            "name_sc": sc,
+            "name_en": en,
         }
         if tc:
             entry["name_tc"] = tc
@@ -490,6 +525,7 @@ def load_favorites_builtin() -> list[dict]:
             entry["name_jp"] = jp
         out.append(entry)
     return out
+
 
 JAPAN_CENTER = (36.2048, 138.2529)
 
@@ -507,9 +543,7 @@ def save_cache(cache: dict) -> None:
     )
 
 
-_FLOOR_RE = re.compile(
-    r"\s*[BbＢ]?[\d０-９]{1,2}\s*(?:[FfＦ]|階).*$"
-)
+_FLOOR_RE = re.compile(r"\s*[BbＢ]?[\d０-９]{1,2}\s*(?:[FfＦ]|階).*$")
 _BUILDING_KW = ("ビル", "メゾン", "ハイツ", "マンション", "別邸", "アネックス")
 
 
@@ -550,7 +584,7 @@ def kyoto_simplify(addr: str) -> str | None:
     if not m:
         return None
     ku = m.group(1)
-    rest = addr[m.end():]
+    rest = addr[m.end() :]
     last_end = -1
     for c in _KYOTO_CROSS_RE.finditer(rest):
         last_end = c.end()
@@ -608,7 +642,7 @@ def kyoto_extract_chome(addr: str) -> str | None:
     m = _KYOTO_KU_RE.match(addr.strip())
     if not m:
         return None
-    matches = list(_KYOTO_CHOME_RE.finditer(addr[m.end():]))
+    matches = list(_KYOTO_CHOME_RE.finditer(addr[m.end() :]))
     if not matches:
         return None
     return m.group(1) + matches[-1].group(0)
@@ -684,11 +718,11 @@ def categorize_genre(genre_str: str) -> list[str]:
 # filter panel. Tag slugs are the JS-side filter values and the strings that
 # appear in each row's `awards` payload array.
 AWARD_TAGS = [
-    ("gold",   "Gold",         "🥇"),
-    ("silver", "Silver",       "🥈"),
-    ("bronze", "Bronze",       "🥉"),
-    ("hyaku",  "百名店",        "💯"),
-    ("hot",    "热门餐厅 2026", "🔥"),
+    ("gold", "Gold", "🥇"),
+    ("silver", "Silver", "🥈"),
+    ("bronze", "Bronze", "🥉"),
+    ("hyaku", "百名店", "💯"),
+    ("hot", "热门餐厅 2026", "🔥"),
 ]
 _AWARD_ORDER = {slug: i for i, (slug, _, _) in enumerate(AWARD_TAGS)}
 
@@ -712,8 +746,8 @@ def _award_ribbons_html(awards_json: str) -> str:
         return ""
 
     medal_order = {"gold": 0, "silver": 1, "bronze": 2}
-    medals: list[tuple[int, str, str, str]] = []   # (sort, cls, label, tip)
-    hyaku_by_year: dict[str, list[str]] = {}       # year -> [long labels]
+    medals: list[tuple[int, str, str, str]] = []  # (sort, cls, label, tip)
+    hyaku_by_year: dict[str, list[str]] = {}  # year -> [long labels]
     hot_tips: list[str] = []
     seen_medals: set[str] = set()
 
@@ -721,19 +755,21 @@ def _award_ribbons_html(awards_json: str) -> str:
         if not isinstance(a, dict):
             continue
         kind = a.get("kind", "")
-        variant = (a.get("variant") or "")
+        variant = a.get("variant") or ""
         short = (a.get("short") or "").strip()
-        long_ = (a.get("long")  or "").strip()
+        long_ = (a.get("long") or "").strip()
 
         if kind == "award":
-            medal = next((m for m in ("gold", "silver", "bronze")
-                          if variant.endswith(m)), None)
+            medal = next(
+                (m for m in ("gold", "silver", "bronze") if variant.endswith(m)), None
+            )
             if not medal or medal in seen_medals:
                 continue
             seen_medals.add(medal)
             label = f"2026 {medal.upper()}"
-            medals.append((medal_order[medal], f"rst-ribbon-{medal}",
-                           label, long_ or short))
+            medals.append(
+                (medal_order[medal], f"rst-ribbon-{medal}", label, long_ or short)
+            )
         elif kind == "hyakumeiten":
             # variant is e.g. "2025ramen" — first 4 chars are the year.
             m = re.match(r"^(\d{4})", variant)
@@ -751,7 +787,7 @@ def _award_ribbons_html(awards_json: str) -> str:
     for _, cls, label, tip in medals:
         parts.append(
             f'<span class="rst-ribbon {cls}" title="{_html.escape(tip)}">'
-            f'{_html.escape(label)}</span>'
+            f"{_html.escape(label)}</span>"
         )
     # Newest year first.
     for year in sorted(hyaku_by_year, reverse=True):
@@ -761,7 +797,7 @@ def _award_ribbons_html(awards_json: str) -> str:
         tip = "\n".join(hyaku_by_year[year])
         parts.append(
             f'<span class="rst-ribbon {cls}" title="{_html.escape(tip)}">'
-            f'{_html.escape(f"百名店 {year}")}</span>'
+            f"{_html.escape(f'百名店 {year}')}</span>"
         )
     for tip in hot_tips:
         parts.append(
@@ -810,13 +846,13 @@ def parse_awards(awards_json: str) -> list[str]:
 # Price buckets — keys must match the JS filter values below.
 # (key, label, color, lower_inclusive, upper_exclusive)
 PRICE_BUCKETS = [
-    ("lt1k",   "< ¥1,000",         "#15803d", None,   1000),
-    ("1to3k",  "¥1,000 – 3,000",   "#16a34a", 1000,   3000),
-    ("3to5k",  "¥3,000 – 5,000",   "#84cc16", 3000,   5000),
-    ("5to10k", "¥5,000 – 10,000",  "#eab308", 5000,  10000),
-    ("10to20k","¥10,000 – 20,000", "#f97316", 10000, 20000),
-    ("ge20k",  "¥20,000+",         "#dc2626", 20000, None),
-    ("na",     "价格 NA",           "#9ca3af", None,   None),
+    ("lt1k", "< ¥1,000", "#15803d", None, 1000),
+    ("1to3k", "¥1,000 – 3,000", "#16a34a", 1000, 3000),
+    ("3to5k", "¥3,000 – 5,000", "#84cc16", 3000, 5000),
+    ("5to10k", "¥5,000 – 10,000", "#eab308", 5000, 10000),
+    ("10to20k", "¥10,000 – 20,000", "#f97316", 10000, 20000),
+    ("ge20k", "¥20,000+", "#dc2626", 20000, None),
+    ("na", "价格 NA", "#9ca3af", None, None),
 ]
 
 
@@ -860,10 +896,11 @@ def build_filter_panel_html(
         f'    <label style="display:inline-flex;align-items:center;gap:4px;'
         f'margin:0 8px 4px 0;font-size:12px;white-space:nowrap;">'
         f'<input type="checkbox" name="ff-award" value="{slug}"> '
-        f'{emoji} {label} '
+        f"{emoji} {label} "
         f'<span style="color:#9ca3af;font-size:11px;">({award_counts.get(slug, 0)})</span></label>'
         for slug, label, emoji in AWARD_TAGS
     )
+
     # DEFAULT_OFF_GENRES (中/韩/西/南亚/中东·非洲) are not shown in the
     # cuisine filter — they're controlled by the standalone "隐藏外国料理"
     # toggle below. Remaining buckets are grouped by MEAL_GROUPS with a
@@ -889,10 +926,11 @@ def build_filter_panel_html(
             f'<a href="#" class="ff-group-all" style="color:#2563eb;text-decoration:none;">全选</a>'
             f'<span style="color:#d1d5db;"> | </span>'
             f'<a href="#" class="ff-group-none" style="color:#2563eb;text-decoration:none;">全清</a>'
-            f'</span>'
-            f'</div>'
+            f"</span>"
+            f"</div>"
         )
         return f'      <div data-genre-group="{group}">\n{header}\n{rows}\n      </div>'
+
     genre_rows = "\n".join(
         _genre_section(group, buckets) for group, buckets in MEAL_GROUPS.items()
     )
@@ -2655,9 +2693,9 @@ FILTER_JS_TEMPLATE = r"""
     var transitLayer = (typeof L.transitLayer === 'function')
       ? L.transitLayer({
           lodUrls: {
-            low:  'transit/japan-low.geojson',
-            mid:  'transit/japan-mid.geojson',
-            high: 'transit/japan.geojson'
+            low:  'https://assets.jpfoodmap.com/japan-low.geojson',
+            mid:  'https://assets.jpfoodmap.com/japan-mid.geojson',
+            high: 'https://assets.jpfoodmap.com/japan.geojson'
           },
           lodBreaks: { mid: 9, high: 14 },
           opacity: 0.4,
@@ -5400,6 +5438,7 @@ def popup_data(row: dict) -> list:
     # from ~28 MB to ~5 MB.
     def _empty_to_none(v):
         return v if v not in (None, "", "None") else None
+
     photos = [row.get(f"photo{i}_url") for i in (1, 2, 3)]
     photos = [p for p in photos if p]
     return [
@@ -5417,9 +5456,13 @@ def popup_data(row: dict) -> list:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--fillall", action=argparse.BooleanOptionalAction, default=False,
-                    help="re-geocode every row (default: only geocode rows "
-                         "whose lat/lon are missing in CSV)")
+    ap.add_argument(
+        "--fillall",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="re-geocode every row (default: only geocode rows "
+        "whose lat/lon are missing in CSV)",
+    )
     return ap.parse_args(argv)
 
 
@@ -5451,8 +5494,9 @@ def fan_out_coincident(
         return 0
     groups: dict[tuple[float, float], list[int]] = {}
     for i, r in enumerate(rows):
-        groups.setdefault((round(r["lat"], precision),
-                           round(r["lon"], precision)), []).append(i)
+        groups.setdefault(
+            (round(r["lat"], precision), round(r["lon"], precision)), []
+        ).append(i)
     nudged = 0
     for (lat0, lon0), idxs in groups.items():
         n = len(idxs)
@@ -5462,7 +5506,7 @@ def fan_out_coincident(
         # neighbors = 2R·sin(π/n) ≥ marker_px, so R ≥ marker_px / (2 sin π/n).
         # The 18-px floor covers n=2, where the formula collapses to R=18.
         r_px = max(18.0, marker_px / (2 * math.sin(math.pi / n))) + margin_px
-        mpp = 40075016.686 * math.cos(math.radians(lat0)) / (256 * 2 ** zoom)
+        mpp = 40075016.686 * math.cos(math.radians(lat0)) / (256 * 2**zoom)
         r_m = r_px * mpp
         dlat = r_m / 111320.0
         dlon = r_m / (111320.0 * max(math.cos(math.radians(lat0)), 1e-6))
@@ -5499,8 +5543,10 @@ def main(argv: list[str] | None = None) -> None:
             r.setdefault(k, "")
 
     addr_rows = [r for r in all_rows if r.get("address")]
-    print(f"{len(addr_rows)} rows with non-empty address "
-          f"(of {len(all_rows)} total){'  [fillall mode]' if args.fillall else ''}")
+    print(
+        f"{len(addr_rows)} rows with non-empty address "
+        f"(of {len(all_rows)} total){'  [fillall mode]' if args.fillall else ''}"
+    )
 
     cache = load_cache()
     geocoded: list[tuple[dict, dict]] = []
@@ -5513,8 +5559,12 @@ def main(argv: list[str] | None = None) -> None:
             existing = _parse_latlon(row)
             if existing is not None:
                 lat, lon = existing
-                geocoded.append((row, {"lat": lat, "lon": lon,
-                                       "matched_query": addr, "display": ""}))
+                geocoded.append(
+                    (
+                        row,
+                        {"lat": lat, "lon": lon, "matched_query": addr, "display": ""},
+                    )
+                )
                 n_skipped += 1
                 continue
         loc = geocode(addr, client, cache)
@@ -5547,13 +5597,14 @@ def main(argv: list[str] | None = None) -> None:
     # transit option lives in custom JS as a togglable OpenRailwayMap
     # overlay (rail lines + station markers drawn on top), wired to the
     # floating "🚇 公共交通" pill button (see FAB_HTML / initMap).
-    m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None,
-                   zoom_control=False)
+    m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None, zoom_control=False)
     folium.TileLayer(
         tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-        attr=('&copy; <a href="https://www.openstreetmap.org/copyright">'
-              'OpenStreetMap</a> contributors &copy; '
-              '<a href="https://carto.com/attributions">CARTO</a>'),
+        attr=(
+            '&copy; <a href="https://www.openstreetmap.org/copyright">'
+            "OpenStreetMap</a> contributors &copy; "
+            '<a href="https://carto.com/attributions">CARTO</a>'
+        ),
         name="公路 (CartoDB Voyager)",
         max_zoom=19,
         subdomains="abcd",
@@ -5588,7 +5639,11 @@ def main(argv: list[str] | None = None) -> None:
     for row, loc in geocoded:
         bkey, _blabel, _bcolor = price_bucket(row)
         try:
-            rating_num = float(row.get("rating")) if row.get("rating") not in (None, "") else None
+            rating_num = (
+                float(row.get("rating"))
+                if row.get("rating") not in (None, "")
+                else None
+            )
         except (TypeError, ValueError):
             rating_num = None
         url = row.get("detail_url") or ""
@@ -5597,7 +5652,11 @@ def main(argv: list[str] | None = None) -> None:
             cat_counts[cat] = cat_counts.get(cat, 0) + 1
         # Track tokens that fell through to "其他" so we notice when Tabelog
         # adds a new genre label that deserves its own bucket.
-        for tok in (t.strip() for t in _GENRE_SPLIT_RE.split(row.get("genre") or "") if t.strip()):
+        for tok in (
+            t.strip()
+            for t in _GENRE_SPLIT_RE.split(row.get("genre") or "")
+            if t.strip()
+        ):
             if tok not in _GENRE_TO_CAT:
                 unmapped_tokens.add(tok)
         awards = parse_awards(row.get("awards") or "")
@@ -5638,9 +5697,11 @@ def main(argv: list[str] | None = None) -> None:
             popups_map[url] = popup_data(row)
     if unmapped_tokens:
         print(f"  unmapped genre tokens (fell into 其他): {sorted(unmapped_tokens)}")
-    n_fav = sum(1 for p in core_rows if p['favorited'])
-    n_black = sum(1 for p in core_rows if p['blacklisted'])
-    print(f"  favorites: {n_fav} from favorites.json, blacklist: {n_black} from blacklist.json")
+    n_fav = sum(1 for p in core_rows if p["favorited"])
+    n_black = sum(1 for p in core_rows if p["blacklisted"])
+    print(
+        f"  favorites: {n_fav} from favorites.json, blacklist: {n_black} from blacklist.json"
+    )
 
     nudged = fan_out_coincident(core_rows)
     if nudged:
@@ -5662,37 +5723,37 @@ def main(argv: list[str] | None = None) -> None:
     POPUPS_TW_JSON.write_bytes(popups_tw_bytes)
     policy_en = load_policy_en()
     popups_en_map = {
-        url: en_popup_array(arr, policy_en.get(url))
-        for url, arr in popups_map.items()
+        url: en_popup_array(arr, policy_en.get(url)) for url, arr in popups_map.items()
     }
     popups_en_bytes = json.dumps(
         popups_en_map, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
     POPUPS_EN_JSON.write_bytes(popups_en_bytes)
-    translated_count = sum(
-        1 for url in popups_map if policy_en.get(url, "").strip()
-    )
+    translated_count = sum(1 for url in popups_map if policy_en.get(url, "").strip())
     policy_ja = load_policy_ja()
     popups_ja_map = {
-        url: ja_popup_array(arr, policy_ja.get(url))
-        for url, arr in popups_map.items()
+        url: ja_popup_array(arr, policy_ja.get(url)) for url, arr in popups_map.items()
     }
     popups_ja_bytes = json.dumps(
         popups_ja_map, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
     POPUPS_JA_JSON.write_bytes(popups_ja_bytes)
-    ja_policy_count = sum(
-        1 for url in popups_map if policy_ja.get(url, "").strip()
+    ja_policy_count = sum(1 for url in popups_map if policy_ja.get(url, "").strip())
+    print(
+        f"  restaurants.json: {len(restaurants_bytes):,} bytes ({len(core_rows)} rows)"
     )
-    print(f"  restaurants.json: {len(restaurants_bytes):,} bytes "
-          f"({len(core_rows)} rows)")
-    print(f"  popups.json:      {len(popups_bytes):,} bytes "
-          f"({len(popups_map)} entries)")
+    print(
+        f"  popups.json:      {len(popups_bytes):,} bytes ({len(popups_map)} entries)"
+    )
     print(f"  popups-tw.json:   {len(popups_tw_bytes):,} bytes")
-    print(f"  popups-en.json:   {len(popups_en_bytes):,} bytes "
-          f"({translated_count}/{len(popups_map)} policies translated)")
-    print(f"  popups-ja.json:   {len(popups_ja_bytes):,} bytes "
-          f"({ja_policy_count}/{len(popups_map)} original JA policies)")
+    print(
+        f"  popups-en.json:   {len(popups_en_bytes):,} bytes "
+        f"({translated_count}/{len(popups_map)} policies translated)"
+    )
+    print(
+        f"  popups-ja.json:   {len(popups_ja_bytes):,} bytes "
+        f"({ja_policy_count}/{len(popups_map)} original JA policies)"
+    )
 
     panel_html = build_filter_panel_html(cat_counts, award_counts)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
@@ -5711,8 +5772,10 @@ def main(argv: list[str] | None = None) -> None:
             canon_set.add(c)
     han_variants = build_han_variants(canon_set)
     han_variants_json = json.dumps(han_variants, ensure_ascii=False)
-    print(f"  han_variants:     {len(han_variants)} char mappings, "
-          f"{len(han_variants_json.encode('utf-8')):,} bytes")
+    print(
+        f"  han_variants:     {len(han_variants)} char mappings, "
+        f"{len(han_variants_json.encode('utf-8')):,} bytes"
+    )
     # Known location whitelist for the search box. The trailing query token
     # is only treated as a location filter when it canonicalizes into this
     # set — otherwise the whole query stays a single restaurant-name match.
@@ -5723,22 +5786,25 @@ def main(argv: list[str] | None = None) -> None:
             if cn:
                 known_locs.add(cn)
     known_locs_json = json.dumps(sorted(known_locs), ensure_ascii=False)
-    print(f"  known_locs:       {len(known_locs)} tokens, "
-          f"{len(known_locs_json.encode('utf-8')):,} bytes")
+    print(
+        f"  known_locs:       {len(known_locs)} tokens, "
+        f"{len(known_locs_json.encode('utf-8')):,} bytes"
+    )
     # Help markdown gets embedded as one JSON-string literal per language
     # inside an inline <script>. `</` is escaped to `<\/` so the JSON
     # literal can't accidentally close the parent <script> tag if a future
     # edit to one of the MDs introduces one.
     help_md_by_lang = load_help_md_by_lang()
+
     def _encode_help_md(md: str) -> str:
         return json.dumps(md, ensure_ascii=False).replace("</", "<\\/")
+
     help_md_cn_json = _encode_help_md(help_md_by_lang["zh-CN"])
     help_md_tw_json = _encode_help_md(help_md_by_lang["zh-TW"])
     help_md_en_json = _encode_help_md(help_md_by_lang["en"])
     help_md_ja_json = _encode_help_md(help_md_by_lang["ja"])
     filter_js = (
-        FILTER_JS_TEMPLATE
-        .replace("__DEFAULT_OFF_GENRES__", default_off_json)
+        FILTER_JS_TEMPLATE.replace("__DEFAULT_OFF_GENRES__", default_off_json)
         .replace("__BOOKMARKS__", bookmarks_json)
         .replace("__FAVORITES_BUILTIN__", favorites_builtin_json)
         .replace("__BUCKET_COLORS__", bucket_colors_json)
@@ -5792,32 +5858,41 @@ def main(argv: list[str] | None = None) -> None:
         text_ja_map, ensure_ascii=False, separators=(",", ":")
     )
     saved_html = (
-        saved_html
-        .replace("__TEXT_TRAD_MAP__", text_trad_map_json)
+        saved_html.replace("__TEXT_TRAD_MAP__", text_trad_map_json)
         .replace("__TEXT_EN_MAP__", text_en_map_json)
         .replace("__TEXT_JA_MAP__", text_ja_map_json)
     )
     OUT_HTML.write_text(saved_html, encoding="utf-8")
     print(f"\nMap written to {OUT_HTML}")
     print(f"  {len(core_rows)} restaurants in payload (fetched at runtime)")
-    print(f"  text_trad_map:    {len(text_trad_map)} CJK runs, "
-          f"{len(text_trad_map_json.encode('utf-8')):,} bytes")
-    print(f"  text_en_map:      {len(text_en_map)} CJK runs, "
-          f"{len(text_en_map_json.encode('utf-8')):,} bytes")
+    print(
+        f"  text_trad_map:    {len(text_trad_map)} CJK runs, "
+        f"{len(text_trad_map_json.encode('utf-8')):,} bytes"
+    )
+    print(
+        f"  text_en_map:      {len(text_en_map)} CJK runs, "
+        f"{len(text_en_map_json.encode('utf-8')):,} bytes"
+    )
     if missing_en:
-        print(f"  missing EN translations: {len(missing_en)} runs "
-              f"(stay in Chinese at runtime)")
+        print(
+            f"  missing EN translations: {len(missing_en)} runs "
+            f"(stay in Chinese at runtime)"
+        )
         # Cap the printed list so a fresh i18n dir doesn't drown the log.
         preview = missing_en[:30]
         for run in preview:
             print(f"    - {run!r}")
         if len(missing_en) > len(preview):
             print(f"    ... and {len(missing_en) - len(preview)} more")
-    print(f"  text_ja_map:      {len(text_ja_map)} CJK runs, "
-          f"{len(text_ja_map_json.encode('utf-8')):,} bytes")
+    print(
+        f"  text_ja_map:      {len(text_ja_map)} CJK runs, "
+        f"{len(text_ja_map_json.encode('utf-8')):,} bytes"
+    )
     if missing_ja:
-        print(f"  missing JA translations: {len(missing_ja)} runs "
-              f"(stay in Chinese at runtime)")
+        print(
+            f"  missing JA translations: {len(missing_ja)} runs "
+            f"(stay in Chinese at runtime)"
+        )
         preview = missing_ja[:30]
         for run in preview:
             print(f"    - {run!r}")
