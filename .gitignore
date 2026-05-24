@@ -17,6 +17,11 @@ __pycache__/
 data/*
 !data/attractions.csv
 !data/favorites_builtin.json
+# Hand-written translation tables for the static UI (Simplified Chinese →
+# English / Japanese). Source, not scraped data — version them alongside
+# map.py so a fresh clone rebuilds with the same translations baked in.
+!data/i18n/
+!data/i18n/*.json
 
 # Editor / tool state
 .claude/
