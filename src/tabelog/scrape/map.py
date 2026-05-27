@@ -43,6 +43,7 @@ from tabelog.paths import (
     POPUPS_EN_JSON,
     POPUPS_JA_JSON,
     POLICY_EN_JSON,
+    GOOGLE_PLACES_CSV,
     TABELOG_CSV,
     SW_JS,
     DOCS_DIR,
@@ -159,26 +160,59 @@ def trad_popup_array(arr: list) -> list:
     return a
 
 
-def en_popup_array(arr: list, policy_en: str | None) -> list:
+def en_popup_array(arr: list, policy_en: str | None, en_addr: str | None = None) -> list:
     """Same shape as the simp popup row, with the policy field swapped
     for the English translation when one is available. Ribbons (index 8)
     are left in Chinese — the runtime localizer rewrites their few CJK
     runs (百名店, 受賞店, etc.) via TEXT_EN_MAP at insertion time, so we
-    don't need to pre-process them here."""
+    don't need to pre-process them here. `en_addr`, when supplied (Google-
+    calibrated rows), overlays the address slot with Google's English form."""
     a = list(arr)
     if policy_en and len(a) > 6:
         a[6] = policy_en
+    if en_addr and len(a) > 5:
+        a[5] = en_addr
     return a
 
 
 def ja_popup_array(arr: list, policy_ja: str | None) -> list:
     """JA variant — overlay the policy field with the original Japanese
     text from data/tabelog/tabelog.csv `reservation_policy`. Same fallback
-    convention as en_popup_array."""
+    convention as en_popup_array. The address slot already holds the
+    Japanese form (Google-calibrated 日本語 address, or the Tabelog one)."""
     a = list(arr)
     if policy_ja and len(a) > 6:
         a[6] = policy_ja
     return a
+
+
+def load_google_places() -> dict[str, dict]:
+    """Map detail_url -> Google-calibrated fields, for status=='accepted'
+    rows only. review / unmatched are not trusted for auto-replacement (see
+    scrape/google_enrich.py). Missing file => empty map (no calibration, the
+    build falls back to GSI coords + the Tabelog address everywhere)."""
+    if not GOOGLE_PLACES_CSV.exists():
+        return {}
+    out: dict[str, dict] = {}
+    with GOOGLE_PLACES_CSV.open(encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            if (r.get("status") or "") != "accepted":
+                continue
+            url = r.get("detail_url") or ""
+            if not url:
+                continue
+            try:
+                lat, lon = float(r["g_lat"]), float(r["g_lon"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            out[url] = {
+                "lat": lat,
+                "lon": lon,
+                "addr_ja": (r.get("g_address_ja") or "").strip(),
+                "addr_en": (r.get("g_address_en") or "").strip(),
+                "place_id": (r.get("place_id") or "").strip(),
+            }
+    return out
 
 
 # In-page help-popover copy. Authored per-language as full prose
@@ -894,6 +928,7 @@ def price_bucket(row: dict) -> tuple[str, str, str]:
 def build_filter_panel_html(
     cat_counts: dict[str, int],
     award_counts: dict[str, int],
+    gcal_count: int = 0,
 ) -> str:
     price_rows = "\n".join(
         f'      <label style="display:block;margin:1px 0;">'
@@ -1182,6 +1217,17 @@ def build_filter_panel_html(
   </div>
   <label style="display:block;margin-bottom:6px;">
     <input type="checkbox" id="ff-hide-foreign" checked> 隐藏非日本料理（中餐、韩餐、西餐、南亚、中东菜等）
+  </label>
+
+  <!-- TEMP: Google-calibration filter. Delete this whole section (plus the
+       ff-gcal-only wiring in FILTER_JS_TEMPLATE) once every restaurant is
+       calibrated — see scrape/google_enrich.py. -->
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
+    <span style="font-weight:600;">定位校准</span>
+    <span style="font-size:11px;color:#6b7280;">🛰️ <b>{gcal_count}</b></span>
+  </div>
+  <label style="display:block;margin-bottom:6px;">
+    <input type="checkbox" id="ff-gcal-only"> 只看谷歌校准过的餐厅
   </label>
 
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px;">
@@ -3021,22 +3067,37 @@ FILTER_JS_TEMPLATE = r"""
             && field !== 'seat' && field !== 'genre') return '';
         return '<button type="button" class="rst-tx-btn" data-tx="' + field + '">翻译</button>';
       }
-      // Quick-jump to a Google Maps search for "<name> <address>". The
-      // search URL avoids needing a place_id — Google's `?api=1&query=`
-      // form is documented + stable, and lands on the search results
-      // page so the user can pick the right pin if there are dupes.
-      // Title stays English (emoji's universal) so the build-time CJK
+      // Quick-jump to Google Maps. Calibrated rows carry the place_id (the one
+      // field Google's terms let us store) — append &query_place_id= to land
+      // directly on that exact place page, per the documented Maps URLs API.
+      // Uncalibrated rows fall back to a "<name> <address>" search, which lands
+      // on the results list so the user can pick the right pin if there are
+      // dupes. Title stays English (emoji's universal) so the build-time CJK
       // scan doesn't pick up phantom runs from JS string literals.
       var gmapsQ = encodeURIComponent(
         ((d.name || '') + ' ' + (addr || '')).trim()
       );
-      var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + gmapsQ;
+      var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + gmapsQ
+                   + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
       var gmapsBtn = '<a class="rst-gmaps" href="' + gmapsUrl
                    + '" target="_blank" rel="noopener" '
                    + 'aria-label="Open in Google Maps" '
                    + 'title="Open in Google Maps">'
                    + '<img src="img/google-maps.png" alt="Google Maps" '
                    + 'width="18" height="18" loading="lazy"></a>';
+      // TEMP-ish: "location calibrated by Google" note, shown under the
+      // address when this row was Google-calibrated (d.gcal). Hand-tuned per
+      // language like chipText, so the runtime CJK localizer doesn't fragment
+      // the mixed Latin+CJK string into "already Google map-calibrated".
+      var gcalNote = '';
+      if (d.gcal) {
+        var gcalTxt = '已被 Google 地图校准';
+        if (_lang === 'en') gcalTxt = 'Location verified by Google Maps';
+        else if (_lang === 'ja') gcalTxt = 'Google マップで位置補正済み';
+        else if (_lang === 'zh-TW') gcalTxt = '已被 Google 地圖校準';
+        gcalNote = '<div class="rst-gcal" style="font-size:11px;color:#16a34a;'
+                 + 'margin:4px 0 0;">🛰️ ' + gcalTxt + '</div>';
+      }
       return '<div class="rst-card">'
         + ribbons
         + '<div class="rst-header">'
@@ -3059,6 +3120,7 @@ FILTER_JS_TEMPLATE = r"""
           + '<div class="rst-info-row"><span class="rst-label">座位</span><span class="rst-value">' + (seat ? escapeHtml(seat) : '—') + '</span>' + txBtn('seat', seat) + '</div>'
           + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value" lang="ja">' + escapeHtml(addr) + '</span>' + txBtn('addr', addr) + '</div>'
         + '</div>'
+        + gcalNote
         + (policy ? '<div class="rst-policy">' + escapeHtml(policy) + '</div>' : '')
         + '<div class="rst-footer">'
           + chip
@@ -5010,7 +5072,8 @@ FILTER_JS_TEMPLATE = r"""
     var filterState = {
       minRating: 3.4, pSet: {}, gSet: {}, gAny: false,
       aSet: {}, aAny: false,
-      bookableOnly: false, onlyFav: false, hideBlack: true, hideForeign: true
+      bookableOnly: false, onlyFav: false, hideBlack: true, hideForeign: true,
+      gcalOnly: false  // TEMP: Google-calibration filter, remove after full calibration
     };
     function readFilterInputs() {
       filterState.minRating = parseFloat(ratingSlider.value);
@@ -5028,6 +5091,9 @@ FILTER_JS_TEMPLATE = r"""
       filterState.onlyFav = onlyFavEl.checked;
       filterState.hideBlack = hideBlackEl.checked;
       filterState.hideForeign = hideForeignEl.checked;
+      // TEMP: Google-calibration filter.
+      var gcEl = document.getElementById('ff-gcal-only');
+      filterState.gcalOnly = gcEl ? gcEl.checked : false;
     }
     function passesFilter(d) {
       var fs = filterState;
@@ -5058,6 +5124,7 @@ FILTER_JS_TEMPLATE = r"""
         if (!ok) return false;
       }
       if (fs.bookableOnly && !d.bookable) return false;
+      if (fs.gcalOnly && !d.gcal) return false;  // TEMP: Google-calibration filter
       if (fs.onlyFav && !isFav(d)) return false;
       // Award filter: OR across checked tags. Inactive when nothing checked —
       // that's the "any award status" state, not "show nothing".
@@ -5153,6 +5220,7 @@ FILTER_JS_TEMPLATE = r"""
         var awards = [];
         document.querySelectorAll('input[name=ff-award]:checked').forEach(function(c){ awards.push(c.value); });
         var bEl = document.getElementById('ff-bookable-only');
+        var gcEl = document.getElementById('ff-gcal-only');
         localStorage.setItem(STATE_KEY_FILTER, JSON.stringify({
           rating: parseFloat(ratingSlider.value),
           prices: prices,
@@ -5161,7 +5229,8 @@ FILTER_JS_TEMPLATE = r"""
           bookableOnly: bEl ? bEl.checked : false,
           onlyFav: onlyFavEl.checked,
           hideBlack: hideBlackEl.checked,
-          hideForeign: hideForeignEl.checked
+          hideForeign: hideForeignEl.checked,
+          gcalOnly: gcEl ? gcEl.checked : false
         }));
       } catch (e) {}
     }
@@ -5195,6 +5264,10 @@ FILTER_JS_TEMPLATE = r"""
       if (typeof s.onlyFav === 'boolean') onlyFavEl.checked = s.onlyFav;
       if (typeof s.hideBlack === 'boolean') hideBlackEl.checked = s.hideBlack;
       if (typeof s.hideForeign === 'boolean') hideForeignEl.checked = s.hideForeign;
+      // TEMP: Google-calibration filter. Absent in older saved state => the
+      // checkbox stays unchecked (show everything), so no one loses results.
+      var gcEl = document.getElementById('ff-gcal-only');
+      if (gcEl && typeof s.gcalOnly === 'boolean') gcEl.checked = s.gcalOnly;
     }
 
     // Live update on drag, not just on release.
@@ -5313,6 +5386,8 @@ FILTER_JS_TEMPLATE = r"""
       document.querySelectorAll('input[name=ff-award]').forEach(function(c){ c.checked = false; });
       var resetBookable = document.getElementById('ff-bookable-only');
       if (resetBookable) resetBookable.checked = false;
+      var resetGcal = document.getElementById('ff-gcal-only');  // TEMP
+      if (resetGcal) resetGcal.checked = false;
       onlyFavEl.checked = false;
       hideBlackEl.checked = true;
       hideForeignEl.checked = true;
@@ -5920,6 +5995,10 @@ def main(argv: list[str] | None = None) -> None:
     # the popups have downloaded.
     fav_set = load_favorites()
     black_set = load_blacklist()
+    # Google-calibrated coords + bilingual address, keyed by detail_url
+    # (accepted matches only). Overrides the GSI coord / Tabelog address in the
+    # rendered payload; the source CSVs are left untouched.
+    gcal_map = load_google_places()
     core_rows: list[dict] = []
     popups_map: dict[str, str] = {}
     cat_counts: dict[str, int] = {cat: 0 for cat in GENRE_CATEGORIES}
@@ -5970,6 +6049,17 @@ def main(argv: list[str] | None = None) -> None:
         # tag. JS treats absent / undefined the same as an empty array.
         if awards:
             entry["awards"] = awards
+        # Google calibration: swap in the more-precise POI coords and flag the
+        # row so the card shows the "verified" note and the filter can match.
+        gcal = gcal_map.get(url)
+        if gcal:
+            entry["lat"] = gcal["lat"]
+            entry["lon"] = gcal["lon"]
+            entry["gcal"] = 1
+            # place_id is the one Google field the ToS lets us store; the card's
+            # Google Maps button uses it to deep-link straight to the place page.
+            if gcal["place_id"]:
+                entry["gpid"] = gcal["place_id"]
         # Pre-canonicalized location string (prefecture + city + ward) for
         # the "name location" search syntax. Skipped when the address has no
         # extractable admin prefix — JS treats absent as "won't match any
@@ -5983,7 +6073,13 @@ def main(argv: list[str] | None = None) -> None:
             entry["city"] = city
         core_rows.append(entry)
         if url:
-            popups_map[url] = popup_data(row)
+            parr = popup_data(row)
+            # SC / TW / JA popups all show the Japanese address; for calibrated
+            # rows use Google's normalized 日本語 form (slot 5). The EN popup
+            # gets Google's English address via en_popup_array below.
+            if gcal and gcal["addr_ja"]:
+                parr[5] = gcal["addr_ja"]
+            popups_map[url] = parr
     if unmapped_tokens:
         print(f"  unmapped genre tokens (fell into 其他): {sorted(unmapped_tokens)}")
     n_fav = sum(1 for p in core_rows if p["favorited"])
@@ -6012,7 +6108,10 @@ def main(argv: list[str] | None = None) -> None:
     POPUPS_TW_JSON.write_bytes(popups_tw_bytes)
     policy_en = load_policy_en()
     popups_en_map = {
-        url: en_popup_array(arr, policy_en.get(url)) for url, arr in popups_map.items()
+        url: en_popup_array(
+            arr, policy_en.get(url), gcal_map.get(url, {}).get("addr_en")
+        )
+        for url, arr in popups_map.items()
     }
     popups_en_bytes = json.dumps(
         popups_en_map, ensure_ascii=False, separators=(",", ":")
@@ -6044,7 +6143,8 @@ def main(argv: list[str] | None = None) -> None:
         f"({ja_policy_count}/{len(popups_map)} original JA policies)"
     )
 
-    panel_html = build_filter_panel_html(cat_counts, award_counts)
+    gcal_count = sum(1 for e in core_rows if e.get("gcal"))
+    panel_html = build_filter_panel_html(cat_counts, award_counts, gcal_count)
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
     bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
     favorites_builtin_json = json.dumps(load_favorites_builtin(), ensure_ascii=False)

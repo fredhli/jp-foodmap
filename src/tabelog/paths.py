@@ -32,6 +32,20 @@ TABELOG_CSV = TABELOG_DIR / "tabelog.csv"
 # map.py when baking docs/data/popups-en.json. Separate from tabelog.csv so
 # scraping / geocoding rewrites don't trample the translations.
 POLICY_EN_JSON = TABELOG_DIR / "policy_en.json"
+# Google Places enrichment (Phase 1, static). A separate ledger keyed by
+# detail_url so the Google-sourced coords / bilingual address / types never
+# trample the scraped CSV until we explicitly decide to merge. Built by
+# scrape/google_enrich.py; one row per restaurant with a match status
+# (accepted / review / unmatched / error).
+GOOGLE_PLACES_CSV = TABELOG_DIR / "google_places.csv"
+# Raw Google API responses keyed by detail_url, so match decisions can be
+# re-scored (google_enrich.py --rescore) after tuning thresholds without
+# spending any more quota.
+GOOGLE_PLACES_CACHE = CACHE_DIR / "google_places_cache.json"
+# Local human-review surface for google_enrich.py 'review' matches (not
+# deployed). review_google.py emits the HTML; the browser downloads decisions
+# which review_google.py --apply writes back into GOOGLE_PLACES_CSV.
+GOOGLE_REVIEW_HTML = TABELOG_DIR / "google_review.html"
 
 # User-curated state edited via the map UI
 FAVORITES_JSON = USER_DIR / "favorites.json"
