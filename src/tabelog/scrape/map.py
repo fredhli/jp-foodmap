@@ -3319,9 +3319,13 @@ FILTER_JS_TEMPLATE = r"""
                       'margin-bottom:8px;">' + coord + '</div>' +
           actionBtn +
         '</div>';
+      // Run the popup HTML through the CJK localizer up front instead of
+      // relying on the MutationObserver hooked to .leaflet-popup-pane —
+      // the observer has been flaky on Leaflet's popup insertion path, and
+      // localizeText is a no-op in zh-CN mode so there's no downside.
       L.popup({offset: [0, offY]})
         .setLatLng([bm.lat, bm.lon])
-        .setContent(html)
+        .setContent(localizeText(html))
         .openOn(map);
       // Wire whichever button ended up in the popup. setTimeout(0) gives
       // Leaflet a frame to actually insert the popup HTML into the DOM.
@@ -3640,7 +3644,7 @@ FILTER_JS_TEMPLATE = r"""
                     '⭐ 加入收藏</button>' +
           '</div>' +
         '</div>';
-      L.popup().setLatLng(e.latlng).setContent(html).openOn(map);
+      L.popup().setLatLng(e.latlng).setContent(localizeText(html)).openOn(map);
       setTimeout(function() {
         var btn = document.getElementById('ff-copy-coord');
         if (btn) {
@@ -4106,7 +4110,7 @@ FILTER_JS_TEMPLATE = r"""
                   'background:#2563eb;color:#fff;font-weight:600;">' +
                   '⭐ 加入收藏</button>' +
         '</div>';
-      L.popup({offset: [0, -26]}).setLatLng(latlng).setContent(popHtml).openOn(map);
+      L.popup({offset: [0, -26]}).setLatLng(latlng).setContent(localizeText(popHtml)).openOn(map);
       setTimeout(function() {
         var btn = document.getElementById('ss-add-bm');
         if (!btn) return;
