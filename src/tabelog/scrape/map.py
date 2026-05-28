@@ -1044,11 +1044,11 @@ def build_filter_panel_html(
     background: #fff; color: #374151;
     border: 1px solid #d1d5db;
     border-radius: 999px;
-    padding: 9px 14px;
-    font-size: 13px; font-weight: 600;
+    padding: 12px 18px;
+    font-size: 15px; font-weight: 600;
     cursor: pointer;
     box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-    display: inline-flex; align-items: center; gap: 8px;
+    display: inline-flex; align-items: center; gap: 10px;
     user-select: none;
     transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -1057,7 +1057,8 @@ def build_filter_panel_html(
   #ff-fab:hover {{ background: #f9fafb;
                    box-shadow: 0 4px 10px rgba(0,0,0,0.18); }}
   #ff-fab[hidden] {{ display: none; }}
-  #ff-fab .ff-fab-ic {{ font-size: 15px; }}
+  #ff-fab .ff-fab-ic {{ display: inline-flex; align-items: center; }}
+  #ff-fab .ff-fab-ic svg {{ display: block; }}
   #ff-fab .ff-fab-count {{ font-variant-numeric: tabular-nums; }}
   #ff-fab .ff-fab-count b {{ color: #2563eb; }}
   /* Unsynced-changes alerts. Two flavours so the colour matches the
@@ -1118,7 +1119,7 @@ def build_filter_panel_html(
   }}
 </style>
 <button id="ff-fab" type="button" aria-label="打开筛选" title="筛选">
-  <span class="ff-fab-ic">🎛</span>
+  <span class="ff-fab-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
   <span class="ff-fab-count"><b class="ff-count">–</b> / <span class="ff-total">–</span></span>
 </button>
 <div id="ff-backdrop"></div>
@@ -2082,6 +2083,17 @@ MOBILE_UX_ASSETS = """
                transition: background 0.15s; }
   .rst-gmaps:hover { background: #f3f4f6; }
   .rst-gmaps img { width: 18px; height: 18px; display: block; }
+  /* Square × that mirrors the search box's clear control, sitting after
+     收藏/弃用 in the card header so the sheet can be dismissed without
+     reaching for the grip. Same 28px footprint as .rst-gmaps. */
+  .rst-close { display: inline-flex; align-items: center; justify-content: center;
+               box-sizing: border-box;
+               width: 28px; height: 28px;
+               padding: 0; border: 1px solid #d1d5db; border-radius: 5px;
+               background: #f9fafb; color: #6b7280;
+               font: 700 20px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+               cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .rst-close:hover, .rst-close:active { background: #f3f4f6; color: #1f2937; }
   .rst-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
   .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
                 gap: 6px; margin-bottom: 10px; }
@@ -3109,6 +3121,7 @@ FILTER_JS_TEMPLATE = r"""
               + '<span class="ff-fav-label">☆ 收藏</span></button>'
             + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
               + '<span class="ff-black-label">🚫 弃用</span></button>'
+            + '<button class="rst-close" type="button" aria-label="关闭">×</button>'
           + '</div>'
         + '</div>'
         + photoHtml
@@ -4834,6 +4847,12 @@ FILTER_JS_TEMPLATE = r"""
       var ffbtn = document.getElementById('ff-fab');
       if (ffbtn) ffbtn.hidden = false;
     }
+    // Close the bottom sheet when the card's × is tapped — mirrors the
+    // search box's clear control and the bs-grip swipe-to-dismiss. Delegated
+    // because the card HTML is re-rendered on every marker click.
+    document.addEventListener('click', function(e) {
+      if (e.target.closest('.rst-close')) closeSheet();
+    });
     function expandSheet() {
       if (bsSheet.classList.contains('bs-peek')) {
         bsSheet.classList.remove('bs-peek');
