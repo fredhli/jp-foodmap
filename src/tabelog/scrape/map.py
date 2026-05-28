@@ -1925,7 +1925,7 @@ BOOKMARKS_MODAL_HTML = """
     <button class="bm-close" aria-label="关闭">×</button>
   </div>
   <div class="bm-body">
-    <div class="bm-coord" id="bm-coord"></div>
+    <div class="bm-coord" id="bm-coord" lang="en"></div>
     <div class="bm-row">
       <label>类型</label>
       <div class="bm-kind-seg" role="radiogroup" aria-label="类型">
@@ -3315,7 +3315,7 @@ FILTER_JS_TEMPLATE = r"""
           '<div style="font-weight:700;margin-bottom:4px;">' +
             (bm.emoji || '📍') + ' ' + escapeHtml(bmDisplayName(bm)) +
           '</div>' +
-          '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
+          '<div lang="en" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#6b7280;' +
                       'margin-bottom:8px;">' + coord + '</div>' +
           actionBtn +
         '</div>';
@@ -3631,7 +3631,7 @@ FILTER_JS_TEMPLATE = r"""
       var s = e.latlng.lat.toFixed(6) + ', ' + e.latlng.lng.toFixed(6);
       var html =
         '<div style="font:13px sans-serif;text-align:center;min-width:160px;">' +
-          '<div style="font-family:monospace;margin-bottom:8px;">' + s + '</div>' +
+          '<div lang="en" style="font-family:ui-monospace,Menlo,Consolas,monospace;margin-bottom:8px;">' + s + '</div>' +
           '<div style="display:flex;gap:6px;justify-content:center;">' +
             '<button id="ff-copy-coord" ' +
                     'style="padding:4px 10px;font-size:12px;cursor:pointer;' +
@@ -4101,7 +4101,7 @@ FILTER_JS_TEMPLATE = r"""
         '<div style="font:13px sans-serif;text-align:center;min-width:170px;">' +
           '<div style="font-weight:700;margin-bottom:4px;">' +
             escapeHtml(it.name) + '</div>' +
-          '<div style="font-family:monospace;font-size:11px;color:#6b7280;' +
+          '<div lang="en" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#6b7280;' +
                       'margin-bottom:8px;">' +
             it.lat.toFixed(6) + ', ' + it.lon.toFixed(6) + '</div>' +
           '<button id="ss-add-bm" ' +
