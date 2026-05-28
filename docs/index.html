@@ -293,7 +293,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_db5eb16eef3b535e7d5dccdd6a72fe9d {
+                #map_c8e87e1af58cb201eeae9c1bce99098e {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -583,14 +583,148 @@
     #ss-input { font-size: 16px; }       /* iOS no-zoom */
     #ss-box { top: 8px; width: calc(100vw - 16px); }
   }
+  /* Top row: search input + avatar side by side. Restructured from a single
+     input-wrap so the avatar can anchor a Google-style account dropdown on
+     its right (#ss-menu below), without disturbing the result list layout. */
+  #ss-top { display: flex; align-items: center; gap: 8px; position: relative; }
+  #ss-input-wrap { flex: 1; min-width: 0; }
+  #ss-avatar {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    padding: 0; border: 1px solid #d1d5db; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    cursor: pointer; overflow: hidden;
+    display: inline-flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: box-shadow 0.15s ease-out;
+  }
+  #ss-avatar:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.22); }
+  #ss-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* Account / settings dropdown opened from #ss-avatar. Anchored to the
+     search box's right edge so it lines up under the avatar on both desktop
+     and mobile (the box is centered, so 'right:0' tracks correctly). */
+  #ss-menu {
+    position: absolute; top: 48px; right: 0;
+    width: 260px;
+    background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.20);
+    padding: 8px;
+    font-size: 13px; color: #1f2937;
+    display: none;
+  }
+  #ss-menu.open { display: block; }
+  /* Account info row — display-only now that sign-out lives below it as its
+     own row, so no pointer / hover. */
+  .ssm-acct {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px; border-radius: 8px;
+    color: #1f2937; font: inherit;
+  }
+  .ssm-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px; border-radius: 8px; cursor: pointer;
+    border: none; background: none; color: #1f2937;
+    font: inherit; text-align: left; width: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ssm-row:hover { background: #f3f4f6; }
+  .ssm-acct img {
+    width: 32px; height: 32px; border-radius: 50%;
+    flex-shrink: 0; background: #e5e7eb; object-fit: cover;
+  }
+  .ssm-acct-text { min-width: 0; flex: 1; line-height: 1.3; display: block; }
+  .ssm-acct-name {
+    display: block; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ssm-acct-email {
+    display: block; font-size: 11px; color: #6b7280;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Signed-out pane — Google's GIS button gets injected into #ssm-signin-btn
+     at runtime; the help paragraph below explains what signing in does. */
+  #ssm-signed-out { padding: 6px 4px 2px; }
+  #ssm-signin-btn { display: flex; justify-content: center; min-height: 40px; }
+  #ssm-cfg-msg {
+    font-size: 11px; text-align: center; color: #6b7280;
+    min-height: 14px; padding: 4px 0;
+  }
+  .ssm-signin-help {
+    font-size: 11px; color: #6b7280; line-height: 1.5;
+    margin: 4px 8px 6px; padding: 0;
+    text-align: center;
+  }
+  #ssm-signout { color: #b91c1c; }
+  #ssm-signout:hover { background: #fef2f2; }
+  .ssm-divider { height: 1px; background: #f3f4f6; margin: 6px 0; }
+  .ssm-section-lbl { font-size: 11px; color: #6b7280; padding: 4px 8px 2px; }
+  .ssm-langs { display: flex; gap: 4px; padding: 0 4px 4px; }
+  .ssm-langs button {
+    flex: 1; padding: 6px 0;
+    border: 1px solid #d1d5db; background: #f9fafb;
+    border-radius: 6px; cursor: pointer;
+    font: inherit; font-size: 11px; color: #374151;
+  }
+  .ssm-langs button:hover { background: #eef2ff; }
+  .ssm-langs button.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+  /* Keep ff-sync-status's id so the existing JS that mutates its text
+     ("本地模式" / "已同步" / etc.) doesn't have to be rewired — only its
+     parent moved from the filter sheet up here into the avatar menu. */
+  #ss-menu #ff-sync-status {
+    font-size: 10px; color: #6b7280; text-align: center;
+    padding: 6px 0 2px; min-height: 13px;
+  }
 </style>
 <div id="ss-box">
-  <div id="ss-input-wrap">
-    <span id="ss-icon">🔍</span>
-    <input id="ss-input" type="text" autocomplete="off"
-           placeholder="搜索餐厅 / 景点 / 地址 ...">
-    <div id="ss-spinner"></div>
-    <button id="ss-clear" type="button" aria-label="清空">×</button>
+  <div id="ss-top">
+    <div id="ss-input-wrap">
+      <span id="ss-icon">🔍</span>
+      <input id="ss-input" type="text" autocomplete="off"
+             placeholder="搜索餐厅 / 景点 / 地址 ...">
+      <div id="ss-spinner"></div>
+      <button id="ss-clear" type="button" aria-label="清空">×</button>
+    </div>
+    <button id="ss-avatar" type="button" aria-label="账户">
+      <img id="ss-avatar-pic" src="img/default-avatar.png" alt=""
+           referrerpolicy="no-referrer">
+    </button>
+    <div id="ss-menu" role="menu" hidden>
+      <!-- Signed-in pane: account info (info-only) + sign-out. -->
+      <div id="ssm-signed-in" hidden>
+        <div class="ssm-acct">
+          <img id="ssm-acct-pic" alt="" referrerpolicy="no-referrer">
+          <span class="ssm-acct-text">
+            <span class="ssm-acct-name" id="ssm-acct-name">—</span>
+            <span class="ssm-acct-email" id="ssm-acct-email">—</span>
+          </span>
+        </div>
+        <button class="ssm-row" id="ssm-signout" type="button">
+          <span aria-hidden="true">⎋</span><span>退出登录</span>
+        </button>
+      </div>
+      <!-- Signed-out pane: Google's official sign-in button is rendered into
+           #ssm-signin-btn by GIS, then a one-line status slot, then a help
+           paragraph explaining what signing in actually does. -->
+      <div id="ssm-signed-out" hidden>
+        <div id="ssm-signin-btn"></div>
+        <div id="ssm-cfg-msg"></div>
+        <p class="ssm-signin-help" id="ssm-signin-help">登录后，收藏 / 弃用 / 景点 会跨设备同步。未登录则只存在当前浏览器。</p>
+      </div>
+      <div class="ssm-divider"></div>
+      <button class="ssm-row" id="ssm-reset" type="button">
+        <span aria-hidden="true">↻</span><span>重置筛选</span>
+      </button>
+      <div class="ssm-divider"></div>
+      <div class="ssm-section-lbl">语言</div>
+      <div class="ssm-langs">
+        <button type="button" data-lang="zh-CN">简体</button>
+        <button type="button" data-lang="zh-TW">繁體</button>
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="ja">日本語</button>
+      </div>
+      <div id="ff-sync-status">本地模式</div>
+    </div>
   </div>
   <div id="ss-list" role="listbox"></div>
 </div>
@@ -1138,91 +1272,19 @@
     <span style="font-size:11px;color:#6b7280;">🛰️ <b>4490</b></span>
   </div>
   <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-gcal-only"> 只看谷歌校准过的餐厅
+    <input type="checkbox" id="ff-gcal-only"> 只看谷歌地图校准过坐标的餐厅
   </label>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px;">
-    <button id="ff-reset" style="padding:4px 0;border:1px solid #d1d5db;
-            background:#f9fafb;border-radius:4px;cursor:pointer;font-size:11px;
-            color:#374151;">重置筛选</button>
-    <button id="ff-settings" style="padding:4px 0;border:1px solid #d1d5db;
-            background:#eff6ff;border-radius:4px;cursor:pointer;font-size:11px;
-            color:#1d4ed8;">⚙️ 同步设置</button>
-    <!-- Language placeholder: persists the user's choice to localStorage
-         under `tabelog.lang`; the actual translation pass will read it later. -->
-    <select id="ff-lang" aria-label="语言"
-            style="padding:4px 4px;border:1px solid #d1d5db;
-                   background:#f9fafb;border-radius:4px;cursor:pointer;font-size:11px;
-                   color:#374151;font-family:inherit;line-height:1.3;
-                   text-align:center;text-align-last:center;
-                   appearance:none;-webkit-appearance:none;-moz-appearance:none;">
-      <option value="zh-CN">🌐 简体</option>
-      <option value="zh-TW">🌐 繁體</option>
-      <option value="en">🌐 EN</option>
-      <option value="ja">🌐 日本語</option>
-    </select>
-  </div>
-  <div id="ff-sync-status" style="font-size:10px;color:#6b7280;text-align:center;
-       margin-top:2px;min-height:13px;">本地模式</div>
+  <!-- Reset / Sync / Language used to live here as a 3-up grid; they moved
+       to the avatar dropdown rooted in the search box so the filter sheet
+       only carries filter controls. ff-sync-status follows them up there. -->
   </div>
 </div>
 
-<!-- Cloud sync settings modal. One Google sign-in button is the entire UX —
-     no Gist ID, no PAT, no help docs. Two states: signed-out (just the
-     button) and signed-in (email + sign-out). z-index beats ff-sheet
-     (10002) and bm-modal (10011) since this opens from the filter sheet. -->
-<div id="ff-modal-bg" style="display:none;position:fixed;inset:0;z-index:10020;
-     background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;padding:18px 20px;width:340px;
-       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-       font-size:13px;color:#111827;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
-    <div style="font-weight:700;font-size:15px;margin-bottom:10px;">云同步</div>
-
-    <!-- Signed-out state: Google's officially-rendered sign-in button.
-         We mount it into #ff-signin-btn via google.accounts.id.renderButton,
-         which gives the proper "popup window → choose account" flow that
-         works on iOS / Android browsers (the older One Tap / id.prompt()
-         path was unreliable on mobile and on desktop just auto-picked the
-         already-logged-in account in a top-right toast). -->
-    <div id="ff-auth-out" style="display:none;text-align:center;padding:6px 0;">
-      <div id="ff-signin-btn" style="display:inline-block;min-height:40px;"></div>
-      <div style="font-size:11px;color:#6b7280;margin-top:10px;line-height:1.5;">
-        登录后，收藏 / 弃用 / 景点 会跨设备同步。<br>
-        未登录则只存在当前浏览器。
-      </div>
-    </div>
-
-    <!-- Signed-in state: avatar + email + sign-out. -->
-    <div id="ff-auth-in" style="display:none;">
-      <div style="display:flex;align-items:center;gap:10px;
-                  padding:8px 10px;background:#f9fafb;border-radius:6px;
-                  margin-bottom:8px;">
-        <img id="ff-auth-pic" src="" alt=""
-             style="width:32px;height:32px;border-radius:50%;
-                    background:#e5e7eb;flex-shrink:0;">
-        <div style="flex:1;min-width:0;">
-          <div id="ff-auth-name" style="font-weight:600;font-size:12px;
-                  color:#111827;overflow:hidden;text-overflow:ellipsis;
-                  white-space:nowrap;"></div>
-          <div id="ff-auth-email" style="font-size:11px;color:#6b7280;
-                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
-        </div>
-      </div>
-      <button id="ff-signout"
-              style="width:100%;padding:6px;border:1px solid #d1d5db;
-                     background:#f9fafb;color:#374151;border-radius:4px;
-                     cursor:pointer;font-size:12px;">退出登录</button>
-    </div>
-
-    <div id="ff-cfg-msg" style="font-size:11px;min-height:14px;margin:10px 0 4px;"></div>
-
-    <div style="display:flex;gap:6px;">
-      <button id="ff-cfg-cancel" style="flex:1;padding:6px;border:1px solid #d1d5db;
-              background:#f9fafb;color:#374151;border-radius:4px;cursor:pointer;
-              font-size:12px;">关闭</button>
-    </div>
-  </div>
-</div>
+<!-- The cloud-sync modal used to live here. Removed: Google's official
+     sign-in button now renders directly inside the avatar dropdown (see
+     #ssm-signin-btn in SEARCH_BOX_HTML), so there's no intermediate step
+     to "open the modal" for anymore. -->
 
     
 <script>
@@ -1264,14 +1326,14 @@
   // via this table; runs without an entry are passed through unchanged.
   // Subtrees marked lang="ja" are skipped wholesale so Japanese names,
   // addresses and shinjitai genre tokens stay in their source form.
-  var TEXT_TRAD_MAP = {"长崎和平公园":"長崎和平公園","语言":"語言","机车博物馆":"機車博物館","鬼怒川温泉":"鬼怒川溫泉","测试中":"測試中","四万十川":"四萬十川","按钮里的选择器":"按鈕裏的選擇器","祇园":"祇園","乳頭温泉郷":"乳頭溫泉郷","市内":"市內","关闭":"關閉","猎奇":"獵奇","横滨中华街":"橫濱中華街","餐厅库":"餐廳庫","夫妇岩":"夫婦巖","试试":"試試","烤鸡":"烤雞","鸭川海洋世界":"鴨川海洋世界","城市轨道":"城市軌道","选择器":"選擇器","私铁":"私鐵","万座毛":"萬座毛","打开完整":"打開完整","成田山新胜寺":"成田山新勝寺","道後温泉":"道後溫泉","明治神宫":"明治神宮","亲子丼":"親子丼","范围内":"範圍內","苗场山":"苗場山","桂滨":"桂濱","台湾料理":"臺灣料理","乌冬":"烏冬","同步设置":"同步設置","显示我的位置":"顯示我的位置","端岛":"端島","晚餐价格":"晚餐價格","价格":"價格","获奖":"獲獎","严美溪":"嚴美溪","通天阁":"通天閣","会津若松":"會津若松","有马温泉":"有馬溫泉","出云大社":"出雲大社","地铁":"地鐵","炭火烧鸟":"炭火燒鳥","横浜中華街":"橫浜中華街","热海温泉":"熱海溫泉","无":"無","名称":"名稱","涩谷路口":"澀谷路口","银山温泉":"銀山溫泉","和景点一起通过你的":"和景點一起通過你的","札幌市钟楼":"札幌市鐘樓","大濠公园":"大濠公園","高千穂峡":"高千穂峽","登录处理失败":"登錄處理失敗","屋久岛":"屋久島","仓敷美观地区":"倉敷美觀地區","小吃":"小喫","面类":"面類","太宰府天满宫":"太宰府天滿宮","大内宿":"大內宿","佐渡岛":"佐渡島","预约":"預約","兼六园":"兼六園","道后温泉":"道後溫泉","披萨":"披薩","里歴史公園":"裏歴史公園","伊香保温泉":"伊香保溫泉","武雄温泉":"武雄溫泉","净土滨":"淨土濱","当前位置在地图范围之外":"當前位置在地圖範圍之外","奈良公园":"奈良公園","退出登录":"退出登錄","御台场":"御臺場","江之岛":"江之島","鹈户神宫":"鵜戶神宮","可随时删除":"可隨時刪除","烧":"燒","检查网络":"檢查網絡","会从地图上自动隐藏":"會從地圖上自動隱藏","长瀞町":"長瀞町","用户自添景点":"用戶自添景點","龙泉洞":"龍泉洞","冲绳美丽海水族馆":"沖繩美麗海水族館","删除景点":"刪除景點","金泽":"金澤","富冈制纱厂":"富岡制紗廠","这样":"這樣","荞麦":"蕎麥","西点":"西點","隐藏":"隱藏","锦带桥":"錦帶橋","松岛":"松島","男鹿半岛":"男鹿半島","加入景点":"加入景點","图标必须是":"圖標必須是","的餐厅":"的餐廳","进一步压到":"進一步壓到","谷川岳":"谷川嶽","全选":"全選","黑川温泉":"黑川溫泉","海鲜":"海鮮","严岛神社":"嚴島神社","删除收藏":"刪除收藏","延历寺":"延歷寺","黒川温泉":"黒川溫泉","但不再同步到云端":"但不再同步到雲端","寿司":"壽司","只显示已收藏":"只顯示已收藏","伊势神宫":"伊勢神宮","黑部峡谷":"黑部峽谷","其他区域":"其他區域","翻译":"翻譯","首里城":"首裏城","梦":"夢","金刀比罗宫":"金刀比羅宮","意面":"意麪","多选取并集":"多選取並集","后乐园":"後樂園","地图校准":"地圖校準","渡月桥":"渡月橋","小豆岛":"小豆島","南纪白滨温泉":"南紀白濱溫泉","内脏":"內臟","当日":"當日","日本环球影城":"日本環球影城","丰洲市场":"豐洲市場","东京迪士尼乐园":"東京迪士尼樂園","保存失败":"保存失敗","重新加载":"重新加載","搜索餐厅":"搜索餐廳","仙岩园":"仙岩園","你在约":"你在約","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","田泽湖":"田澤湖","和收藏一起通过你的":"和收藏一起通過你的","鸟取砂丘":"鳥取砂丘","显示":"顯示","冈山城":"岡山城","饺子":"餃子","新仓山浅间公园":"新倉山淺間公園","东南亚料理":"東南亞料理","国际通":"國際通","下呂温泉":"下呂溫泉","中禅寺湖":"中禪寺湖","咖啡厅":"咖啡廳","横浜":"橫浜","改动仅存浏览器":"改動僅存瀏覽器","隐藏非日本料理":"隱藏非日本料理","数日前":"數日前","浅草寺":"淺草寺","蔓桥":"蔓橋","炭火烧鸟正":"炭火燒鳥正","搜索失败":"搜索失敗","名称不能为空":"名稱不能爲空","伏见稻荷大社":"伏見稻荷大社","中东":"中東","角岛大橋":"角島大橋","南亚":"南亞","系统默认旅游锚点之外你自己加的去处":"系統默認旅遊錨點之外你自己加的去處","仅存于本地浏览器":"僅存於本地瀏覽器","云同步":"雲同步","中国料理":"中國料理","东京国际机场":"東京國際機場","箱根温泉":"箱根溫泉","评分":"評分","改动待同步到云端":"改動待同步到雲端","串烧":"串燒","删除":"刪除","打开筛选":"打開篩選","东京晴空塔":"東京晴空塔","札幌時計台":"札幌時計臺","港未来町":"港未來町","国際通":"國際通","越後湯沢温泉":"越後湯沢溫泉","景点锚点":"景點錨點","你自己想标注的地点或建筑物":"你自己想標註的地點或建築物","下次推送时重试":"下次推送時重試","复制":"複製","筛选":"篩選","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","那须高原":"那須高原","没有匹配的结果":"沒有匹配的結果","弃用":"棄用","下吕温泉":"下呂溫泉","锅物":"鍋物","古宇利岛":"古宇利島","同步失败":"同步失敗","已选":"已選","旭川市旭山动物园":"旭川市旭山動物園","台場":"臺場","鸣子温泉":"鳴子溫泉","鸣门漩涡":"鳴門漩渦","其中高价位":"其中高價位","会跨设备同步":"會跨設備同步","吉野里遗址":"吉野裏遺址","加载失败":"加載失敗","交差点":"交差點","与默认景点一起在地图上显示":"與默認景點一起在地圖上顯示","天妇罗":"天婦羅","有馬温泉":"有馬溫泉","恢复显示":"恢復顯示","广岛和平纪念公园":"廣島和平紀念公園","樱岛":"櫻島","登录成功":"登錄成功","栗林公園":"慄林公園","日光东照宫":"日光東照宮","可粘贴任意":"可粘貼任意","你研究后决定不会去的餐厅":"你研究後決定不會去的餐廳","关西国际机场":"關西國際機場","简体":"簡體","东山东":"東山東","栗林公园":"慄林公園","世纪美术馆":"世紀美術館","阿苏山":"阿蘇山","本设备上的本地缓存会保留":"本設備上的本地緩存會保留","奥入瀬":"奧入瀬","石垣岛":"石垣島","銀山温泉":"銀山溫泉","请检查网络":"請檢查網絡","弥彦神社":"彌彥神社","阿波舞会馆":"阿波舞會館","知床国立公園":"知牀國立公園","屏幕内":"屏幕內","鳴子温泉":"鳴子溫泉","面包店等非正餐也按比例控量":"麪包店等非正餐也按比例控量","已复制":"已複製","韩":"韓","心斋桥":"心齋橋","热田神宫":"熱田神宮","会館":"會館","弃用名单":"棄用名單","韩国料理":"韓國料理","越后汤泽温泉":"越後湯澤溫泉","景点":"景點","长途":"長途","三朝温泉":"三朝溫泉","说明":"說明","隐藏弃用名单":"隱藏棄用名單","类型":"類型","多数可以在一个合理的天数内提前预订":"多數可以在一個合理的天數內提前預訂","拉面":"拉麪","请重新登录":"請重新登錄","倉敷美観地区":"倉敷美観地區","神户港塔":"神戶港塔","只看谷歌校准过的餐厅":"只看谷歌校準過的餐廳","大通公园":"大通公園","图层切换":"圖層切換","关东煮":"關東煮","筑地市场":"築地市場","点击登录以跨设备同步":"點擊登錄以跨設備同步","白川乡":"白川鄉","草津温泉":"草津溫泉","东大寺":"東大寺","御好烧":"御好燒","富田农场":"富田農場","福冈塔":"福岡塔","东京塔":"東京塔","知床国立公园":"知牀國立公園","兴福寺":"興福寺","东寻坊":"東尋坊","会津若松城":"會津若松城","新干线":"新幹線","日元以下的高分正餐餐厅":"日元以下的高分正餐餐廳","地图搜索":"地圖搜索","等价物":"等價物","勾选后只看对应获奖店":"勾選後只看對應獲獎店","函馆山":"函館山","重新连接中":"重新連接中","乡土":"鄉土","新倉山浅間公園":"新倉山淺間公園","汉堡":"漢堡","门司港怀旧":"門司港懷舊","秋叶原":"秋葉原","银座":"銀座","淡路岛":"淡路島","输入更多字以缩小范围":"輸入更多字以縮小範圍","熱海温泉":"熱海溫泉","定位校准":"定位校準","哥拉巴园":"哥拉巴園","由布院温泉":"由布院溫泉","在地图上显示出来的":"在地圖上顯示出來的","未登录则只存在当前浏览器":"未登錄則只存在當前瀏覽器","彦根城":"彥根城","加载中":"加載中","小樽运河":"小樽運河","韩餐":"韓餐","石见银山":"石見銀山","指宿温泉":"指宿溫泉","足立美术馆":"足立美術館","成田国际机场":"成田國際機場","轻井泽":"輕井澤","国营常陆海滨公园":"國營常陸海濱公園","铁板烧":"鐵板燒","南紀白浜温泉":"南紀白浜溫泉","会津若松市":"會津若松市","点心":"點心","账号跨设备同步":"賬號跨設備同步","伊豆半岛":"伊豆半島","久能山东照宫":"久能山東照宮","海游馆":"海遊館","热门餐厅":"熱門餐廳","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","中东菜等":"中東菜等","関西国際空港":"関西國際空港","伴手礼":"伴手禮","登录脚本未加载":"登錄腳本未加載","不勾则不限制":"不勾則不限制","白须神社":"白鬚神社","下滩站":"下灘站","福井县立恐龙博物馆":"福井縣立恐龍博物館","鸟羽水族馆":"鳥羽水族館","国営":"國営","养老溪谷":"養老溪谷","道顿堀":"道頓堀","大吊桥":"大吊橋","个其他匹配":"個其他匹配","大三岛":"大三島","上野公园":"上野公園","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","长途线路":"長途線路","重置筛选":"重置篩選","盖饭":"蓋飯","华严瀑布":"華嚴瀑布","地狱谷野猿公苑":"地獄谷野猿公苑","乳头温泉乡":"乳頭溫泉鄉","本站只收录每个区域评分前":"本站只收錄每個區域評分前","只显示可以通过":"只顯示可以通過","眺遊楼":"眺遊樓","已弃用":"已棄用","龙安寺":"龍安寺","详情":"詳情","雾凇":"霧凇","登录被取消":"登錄被取消","登录已过期":"登錄已過期","上滑查看详情":"上滑查看詳情","青岛神社":"青島神社","鹤冈八幡宫":"鶴岡八幡宮","黒部峡谷":"黒部峽谷","车站":"車站","偕乐园":"偕樂園","眺游楼":"眺遊樓","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","二条城":"二條城","大须":"大須","中国料理眺游楼":"中國料理眺遊樓","夫婦岩":"夫婦巖","登录后":"登錄後"};
+  var TEXT_TRAD_MAP = {"地铁":"地鐵","龙安寺":"龍安寺","福冈塔":"福岡塔","成田山新胜寺":"成田山新勝寺","国際通":"國際通","本站只收录每个区域评分前":"本站只收錄每個區域評分前","选择器":"選擇器","荞麦":"蕎麥","加载失败":"加載失敗","知床国立公園":"知牀國立公園","登录被取消":"登錄被取消","已弃用":"已棄用","韩":"韓","门司港怀旧":"門司港懷舊","按钮里的选择器":"按鈕裏的選擇器","其中高价位":"其中高價位","登录已过期":"登錄已過期","下吕温泉":"下呂溫泉","苗场山":"苗場山","黒部峡谷":"黒部峽谷","彦根城":"彥根城","改动待同步到云端":"改動待同步到雲端","名称":"名稱","严岛神社":"嚴島神社","南纪白滨温泉":"南紀白濱溫泉","重置筛选":"重置篩選","仅存于本地浏览器":"僅存於本地瀏覽器","会津若松城":"會津若松城","江之岛":"江之島","内":"內","鹈户神宫":"鵜戶神宮","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","足立美术馆":"足立美術館","神户港塔":"神戶港塔","栗林公園":"慄林公園","定位校准":"定位校準","面包店等非正餐也按比例控量":"麪包店等非正餐也按比例控量","屏幕内":"屏幕內","大濠公园":"大濠公園","披萨":"披薩","与默认景点一起在地图上显示":"與默認景點一起在地圖上顯示","本设备上的本地缓存会保留":"本設備上的本地緩存會保留","恢复显示":"恢復顯示","鬼怒川温泉":"鬼怒川溫泉","登录成功":"登錄成功","输入更多字以缩小范围":"輸入更多字以縮小範圍","那须高原":"那須高原","炭火烧鸟":"炭火燒鳥","金刀比罗宫":"金刀比羅宮","富冈制纱厂":"富岡制紗廠","机车博物馆":"機車博物館","地狱谷野猿公苑":"地獄谷野猿公苑","国営":"國営","大吊桥":"大吊橋","伏见稻荷大社":"伏見稻荷大社","的餐厅":"的餐廳","函馆山":"函館山","南紀白浜温泉":"南紀白浜溫泉","日光东照宫":"日光東照宮","搜索餐厅":"搜索餐廳","地图校准":"地圖校準","道顿堀":"道頓堀","里歴史公園":"裏歴史公園","和收藏一起通过你的":"和收藏一起通過你的","东京晴空塔":"東京晴空塔","鸣子温泉":"鳴子溫泉","倉敷美観地区":"倉敷美観地區","已复制":"已複製","台湾料理":"臺灣料理","秋叶原":"秋葉原","无":"無","长瀞町":"長瀞町","城市轨道":"城市軌道","打开筛选":"打開篩選","加载中":"加載中","东京塔":"東京塔","鸟取砂丘":"鳥取砂丘","桂滨":"桂濱","搜索失败":"搜索失敗","熱海温泉":"熱海溫泉","白须神社":"白鬚神社","重新加载":"重新加載","咖啡厅":"咖啡廳","简体":"簡體","东山东":"東山東","和景点一起通过你的":"和景點一起通過你的","在地图上显示出来的":"在地圖上顯示出來的","中国料理眺游楼":"中國料理眺遊樓","兼六园":"兼六園","银座":"銀座","华严瀑布":"華嚴瀑布","松岛":"松島","阿苏山":"阿蘇山","猎奇":"獵奇","丰洲市场":"豐洲市場","筛选":"篩選","系统默认旅游锚点之外你自己加的去处":"系統默認旅遊錨點之外你自己加的去處","福井县立恐龙博物馆":"福井縣立恐龍博物館","弥彦神社":"彌彥神社","大三岛":"大三島","范围内":"範圍內","面类":"面類","会館":"會館","天妇罗":"天婦羅","登录脚本未加载":"登錄腳本未加載","知床国立公园":"知牀國立公園","热海温泉":"熱海溫泉","金泽":"金澤","首里城":"首裏城","车站":"車站","内脏":"內臟","弃用":"棄用","四万十川":"四萬十川","当日":"當日","未登录则只存在当前浏览器":"未登錄則只存在當前瀏覽器","进一步压到":"進一步壓到","国际通":"國際通","古宇利岛":"古宇利島","中东菜等":"中東菜等","关西国际机场":"關西國際機場","锅物":"鍋物","私铁":"私鐵","寿司":"壽司","烤鸡":"烤雞","景点":"景點","乳头温泉乡":"乳頭溫泉鄉","你自己想标注的地点或建筑物":"你自己想標註的地點或建築物","显示我的位置":"顯示我的位置","伴手礼":"伴手禮","日元以下的高分正餐餐厅":"日元以下的高分正餐餐廳","净土滨":"淨土濱","热门餐厅":"熱門餐廳","奈良公园":"奈良公園","登录处理失败":"登錄處理失敗","不勾则不限制":"不勾則不限制","鸟羽水族馆":"鳥羽水族館","等价物":"等價物","黒川温泉":"黒川溫泉","加入景点":"加入景點","港未来町":"港未來町","隐藏弃用名单":"隱藏棄用名單","眺游楼":"眺遊樓","仓敷美观地区":"倉敷美觀地區","多数可以在一个合理的天数内提前预订":"多數可以在一個合理的天數內提前預訂","隐藏":"隱藏","成田国际机场":"成田國際機場","雾凇":"霧凇","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","淡路岛":"淡路島","复制":"複製","但不再同步到云端":"但不再同步到雲端","说明":"說明","三朝温泉":"三朝溫泉","世纪美术馆":"世紀美術館","养老溪谷":"養老溪谷","没有匹配的结果":"沒有匹配的結果","龙泉洞":"龍泉洞","白川乡":"白川鄉","涩谷路口":"澀谷路口","广岛和平纪念公园":"廣島和平紀念公園","可粘贴任意":"可粘貼任意","有马温泉":"有馬溫泉","指宿温泉":"指宿溫泉","检查网络":"檢查網絡","中东":"中東","全选":"全選","男鹿半岛":"男鹿半島","屋久岛":"屋久島","小樽运河":"小樽運河","心斋桥":"心齋橋","大内宿":"大內宿","请重新登录":"請重新登錄","佐渡岛":"佐渡島","数日前":"數日前","东南亚料理":"東南亞料理","乳頭温泉郷":"乳頭溫泉郷","预约":"預約","伊香保温泉":"伊香保溫泉","旭川市旭山动物园":"旭川市旭山動物園","类型":"類型","你在约":"你在約","长途线路":"長途線路","蔓桥":"蔓橋","鸣门漩涡":"鳴門漩渦","语言":"語言","删除收藏":"刪除收藏","删除景点":"刪除景點","谷川岳":"谷川嶽","通天阁":"通天閣","弃用名单":"棄用名單","仙岩园":"仙岩園","西点":"西點","阿波舞会馆":"阿波舞會館","冲绳美丽海水族馆":"沖繩美麗海水族館","関西国際空港":"関西國際空港","已选":"已選","串烧":"串燒","筑地市场":"築地市場","会跨设备同步":"會跨設備同步","石见银山":"石見銀山","铁板烧":"鐵板燒","下滩站":"下灘站","鳴子温泉":"鳴子溫泉","保存失败":"保存失敗","用户自添景点":"用戶自添景點","图标必须是":"圖標必須是","小豆岛":"小豆島","只看谷歌地图校准过坐标的餐厅":"只看谷歌地圖校準過座標的餐廳","隐藏非日本料理":"隱藏非日本料理","中国料理":"中國料理","小吃":"小喫","锦带桥":"錦帶橋","乡土":"鄉土","渡月桥":"渡月橋","哥拉巴园":"哥拉巴園","青岛神社":"青島神社","意面":"意麪","试试":"試試","严美溪":"嚴美溪","显示":"顯示","会从地图上自动隐藏":"會從地圖上自動隱藏","当前位置在地图范围之外":"當前位置在地圖範圍之外","海鲜":"海鮮","下呂温泉":"下呂溫泉","删除":"刪除","炭火烧鸟正":"炭火燒鳥正","东京迪士尼乐园":"東京迪士尼樂園","太宰府天满宫":"太宰府天滿宮","新仓山浅间公园":"新倉山淺間公園","会津若松":"會津若松","关东煮":"關東煮","亲子丼":"親子丼","偕乐园":"偕樂園","银山温泉":"銀山溫泉","大通公园":"大通公園","万座毛":"萬座毛","黑部峡谷":"黑部峽谷","市内":"市內","详情":"詳情","上野公园":"上野公園","樱岛":"櫻島","你研究后决定不会去的餐厅":"你研究後決定不會去的餐廳","横滨中华街":"橫濱中華街","奥入瀬":"奧入瀬","兴福寺":"興福寺","图层切换":"圖層切換","新倉山浅間公園":"新倉山淺間公園","越後湯沢温泉":"越後湯沢溫泉","退出登录":"退出登錄","韩国料理":"韓國料理","南亚":"南亞","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","富田农场":"富田農場","有馬温泉":"有馬溫泉","景点锚点":"景點錨點","请检查网络":"請檢查網絡","只显示可以通过":"只顯示可以通過","获奖":"獲獎","登录后":"登錄後","晚餐价格":"晚餐價格","角岛大橋":"角島大橋","上滑查看详情":"上滑查看詳情","价格":"價格","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","韩餐":"韓餐","盖饭":"蓋飯","道后温泉":"道後溫泉","东京国际机场":"東京國際機場","关闭":"關閉","端岛":"端島","会津若松市":"會津若松市","这样":"這樣","重新连接中":"重新連接中","烧":"燒","鸭川海洋世界":"鴨川海洋世界","越后汤泽温泉":"越後湯澤溫泉","海游馆":"海遊館","大须":"大須","夫妇岩":"夫婦巖","后乐园":"後樂園","草津温泉":"草津溫泉","眺遊楼":"眺遊樓","餐厅库":"餐廳庫","箱根温泉":"箱根溫泉","明治神宫":"明治神宮","点击登录以跨设备同步":"點擊登錄以跨設備同步","石垣岛":"石垣島","台場":"臺場","长崎和平公园":"長崎和平公園","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","拉面":"拉麪","伊势神宫":"伊勢神宮","打开完整":"打開完整","热田神宫":"熱田神宮","吉野里遗址":"吉野裏遺址","轻井泽":"輕井澤","梦":"夢","伊豆半岛":"伊豆半島","田泽湖":"田澤湖","横浜":"橫浜","名称不能为空":"名稱不能爲空","御好烧":"御好燒","汉堡":"漢堡","札幌時計台":"札幌時計臺","二条城":"二條城","评分":"評分","国营常陆海滨公园":"國營常陸海濱公園","多选取并集":"多選取並集","勾选后只看对应获奖店":"勾選後只看對應獲獎店","高千穂峡":"高千穂峽","浅草寺":"淺草寺","新干线":"新幹線","长途":"長途","点心":"點心","账户":"賬戶","可随时删除":"可隨時刪除","个其他匹配":"個其他匹配","冈山城":"岡山城","翻译":"翻譯","道後温泉":"道後溫泉","黑川温泉":"黑川溫泉","交差点":"交差點","饺子":"餃子","改动仅存浏览器":"改動僅存瀏覽器","由布院温泉":"由布院溫泉","账号跨设备同步":"賬號跨設備同步","御台场":"御臺場","武雄温泉":"武雄溫泉","下次推送时重试":"下次推送時重試","延历寺":"延歷寺","地图搜索":"地圖搜索","东寻坊":"東尋坊","东大寺":"東大寺","銀山温泉":"銀山溫泉","久能山东照宫":"久能山東照宮","祇园":"祇園","横浜中華街":"橫浜中華街","出云大社":"出雲大社","鹤冈八幡宫":"鶴岡八幡宮","中禅寺湖":"中禪寺湖","栗林公园":"慄林公園","乌冬":"烏冬","其他区域":"其他區域","只显示已收藏":"只顯示已收藏","日本环球影城":"日本環球影城","同步失败":"同步失敗","札幌市钟楼":"札幌市鐘樓","夫婦岩":"夫婦巖"};
   // English lookup, same shape — keys are CJK runs in the rendered
   // page, values come from data/i18n/en.json. Runs without an entry
   // stay in Chinese at runtime (the build log lists what's missing).
-  var TEXT_EN_MAP = {"语言":"Language","测试中":"Testing","本地模式":"Local mode","按钮里的选择器":"Picker in the button","這樣":"So","本站只收錄每個區域評分前":"We list only each region's top","市内":"In-city","关闭":"Close","猎奇":"Adventurous","餐厅库":"Restaurant library","鳥取砂丘":"Tottori Sand Dunes","试试":"Try","烤鸡":"Yakitori","城市轨道":"Urban rail","选择器":"Picker","清空":"Clear","私铁":"Private rail","其他西餐":"Other Western","打开完整":"Open full","東京晴空塔":"Tokyo Skytree","皇居":"Imperial Palace","明治神宫":"Meiji Shrine","亲子丼":"Oyakodon","范围内":"In range","不可":"Not available","台湾料理":"Taiwanese","乌冬":"Udon","淺草寺":"Senso-ji","同步设置":"Sync settings","显示我的位置":"Show my location","晚":"Dinner","晚餐价格":"Dinner price","价格":"Price","获奖":"Awards","通天阁":"Tsutenkaku","出云大社":"Izumo Taisha","地铁":"Subway","炭火烧鸟":"Charcoal yakitori","无":"None","名称":"Name","炭火焼鳥正":"Sumibi Yakitori Sho","和景点一起通过你的":"synced with Sights via your","登录处理失败":"Sign-in handling failed","東京迪士尼樂園":"Tokyo Disneyland","珍味":"Delicacies","仓敷美观地区":"Kurashiki Bikan","小吃":"Snacks","面类":"Noodles","你自己想標註的地點或建築物":"Places or buildings you want to mark yourself","预约":"Booking","銀座":"Ginza","披萨":"Pizza","築地場外市場":"Tsukiji Outer Market","当前位置在地图范围之外":"Current location is outside the map","西餐":"Western","退出登录":"Sign out","可随时删除":"deletable anytime","烧":"Grilled","和收藏一起通過你的":"synced with Saved via your","检查网络":"check your network","取消":"Cancel","秋葉原":"Akihabara","会从地图上自动隐藏":"automatically hidden from the map","的餐廳":"rated restaurants","足立美術館":"Adachi Museum of Art","用户自添景点":"Custom Sights","定位到我的位置":"Locate me","删除景点":"Remove Sight","这样":"So","荞麦":"Soba","西点":"Pastry","隐藏":"Hide","保存中":"Saving","加入景点":"Add as Sight","图标必须是":"Icon must be","的餐厅":"rated restaurants","进一步压到":"are further capped at","道頓堀":"Dotonbori","全选":"All","甚至":"or even","三明治":"Sandwich","海鲜":"Seafood","删除收藏":"Remove","但不再同步到云端":"but won't sync to the cloud anymore","寿司":"Sushi","只显示已收藏":"Saved only","西":"Western","可":"Available","搜索中":"Searching","拉美料理":"Latin American","非洲":"Africa","其他区域":"Other regions","翻译":"Translate","意面":"Pasta","多选取并集":"Multi-select = union","已同步":"Synced","其他":"Other","原文":"Original","内脏":"Offal","日本环球影城":"Universal Studios Japan","正餐":"Mains","丰洲市场":"Toyosu Market","东京迪士尼乐园":"Tokyo Disneyland","保存失败":"Save failed","重新加载":"reloading","搜索餐厅":"Search restaurants","岡山城":"Okayama Castle","你在约":"You booked","冰品":"Ice cream","新世界":"Shinsekai","和收藏一起通过你的":"synced with Saved via your","鸟取砂丘":"Tottori Sand Dunes","六本木新城":"Roppongi Hills","显示":"Show","冈山城":"Okayama Castle","饺子":"Gyoza","座位":"Seats","东南亚料理":"Southeast Asian","系統默認旅遊錨點之外你自己加的去處":"Destinations you add beyond the built-in tourist anchors","和景點一起通過你的":"synced with Sights via your","咖啡厅":"cafés","横浜":"Yokohama","改动仅存浏览器":"edits live in browser only","隐藏非日本料理":"Hide non-Japanese","浅草寺":"Senso-ji","炭火烧鸟正":"Charcoal yakitori","搜索失败":"Search failed","名称不能为空":"Name cannot be empty","美式料理":"American","中东":"Middle East","通天閣":"Tsutenkaku","棄用名單":"Discarded","景點":"Sights","菜系":"Cuisine","南亚":"South Asian","系统默认旅游锚点之外你自己加的去处":"Destinations you add beyond the built-in tourist anchors","可隨時刪除":"deletable anytime","仅存于本地浏览器":"live only in this browser","上野公園":"Ueno Park","云同步":"Cloud Sync","酒吧":"Bar","中国料理":"Chinese cuisine","评分":"Rating","改动待同步到云端":"Edits pending cloud sync","法餐":"French","串烧":"Skewers","拉麵":"Ramen","與默認景點一起在地圖上顯示":"shown alongside the built-in Sights on the map","打开筛选":"Open filters","东京晴空塔":"Tokyo Skytree","松江城":"Matsue Castle","景点锚点":"Tourist Sights","你自己想标注的地点或建筑物":"Places or buildings you want to mark yourself","下次推送时重试":"will retry on next push","保存":"Save","复制":"Copy","筛选":"Filter","咖啡廳":"cafés","此餐厅当前不在筛选范围内":"This restaurant is outside the current filter","没有匹配的结果":"No results","弃用":"Hide","锅物":"Hot pot","繁體":"Traditional","搜尋餐廳":"Search restaurants","同步失败":"Sync failed","已选":"Selected","其中高价位":"of which high-end","居酒屋":"Izakaya","会跨设备同步":"syncs across devices","加载失败":"Load failed","咖啡":"Cafe","与默认景点一起在地图上显示":"shown alongside the built-in Sights on the map","天妇罗":"Tempura","炸物":"Fried","登录成功":"Signed in","收藏":"Saved","會從地圖上自動隱藏":"automatically hidden from the map","中":"Chinese","可粘贴任意":"Paste any","你研究后决定不会去的餐厅":"Restaurants you've researched and decided not to visit","可貼上任意":"Paste any","甜品":"Desserts","简体":"Simplified","海遊館":"Kaiyukan Aquarium","本设备上的本地缓存会保留":"Local cache on this device is kept","已清除":"Cleared","日式咖喱":"Japanese curry","沾面":"Tsukemen","请检查网络":"Check your network","你研究後決定不會去的餐廳":"Restaurants you've researched and decided not to visit","出雲大社":"Izumo Taisha","其中高價位":"of which high-end","日本環球影城":"Universal Studios Japan","日元以下的高分正餐餐廳":"yen-or-under high-rated proper-meal restaurants on the map","屏幕内":"On screen","賬號跨設備同步":"account across devices","全部":"All","和果子":"wagashi","面包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","在地圖上顯示出來的":"of the","烤肉":"Yakiniku","已复制":"Copied","非日本料理":"Non-Japanese cuisine","韩":"Korean","倉敷美觀地區":"Kurashiki Bikan","例如":"e.g.","日本料理":"Japanese cuisine","弃用名单":"Discarded","韩国料理":"Korean","景点":"Sights","长途":"Long-haul","三朝温泉":"Misasa Onsen","豐洲市場":"Toyosu Market","烘焙":"Bakery","隐藏弃用名单":"Hide discarded","类型":"Type","多数可以在一个合理的天数内提前预订":"most can be booked a reasonable number of days ahead","拉面":"Ramen","请重新登录":"please sign in again","午":"Lunch","只看谷歌校准过的餐厅":"Google-verified only","內臟":"Offal","图层切换":"Layers","关东煮":"Oden","点击登录以跨设备同步":"click to sign in for cross-device sync","御好烧":"Okonomiyaki","东京塔":"Tokyo Tower","新宿御苑":"Shinjuku Gyoen","新干线":"Shinkansen","明治神宮":"Meiji Shrine","日元以下的高分正餐餐厅":"yen-or-under high-rated proper-meal restaurants on the map","地图搜索":"Map search","勾选后只看对应获奖店":"Check to filter to award winners only","乡土":"Regional","汉堡":"Burgers","秋叶原":"Akihabara","银座":"Ginza","正":"Sho","输入更多字以缩小范围":"Type more to narrow the search","定位校准":"Location source","在地图上显示出来的":"of the","未登录则只存在当前浏览器":"Not signed in: data stays in this browser only","加载中":"Loading","韩餐":"Korean","東京塔":"Tokyo Tower","足立美术馆":"Adachi Museum of Art","地址":"Address","三朝溫泉":"Misasa Onsen","百名店":"Hyakumeiten","铁板烧":"Teppanyaki","点心":"Confectionery","已收藏":"Saved","账号跨设备同步":"account across devices","海游馆":"Kaiyukan Aquarium","热门餐厅":"Hot restaurants","中东菜等":"Middle Eastern, etc.","伴手礼":"Gift food","登录脚本未加载":"Sign-in script failed to load","進一步壓到":"are further capped at","不勾则不限制":"Leave unchecked for no filter","加入收藏":"Save","翻譯":"Translate","全清":"None","道顿堀":"Dotonbori","个其他匹配":"more matches","早餐":"Breakfast","已存本地":"Saved locally","上野公园":"Ueno Park","长途线路":"Long-haul lines","重置筛选":"Reset filters","盖饭":"Donburi","本站只收录每个区域评分前":"We list only each region's top","中餐":"Chinese","只显示可以通过":"Bookable via","焼":"Grilled","眺遊楼":"Tiao You Lou","已弃用":"Hidden","详情":"Details","大阪城":"Osaka Castle","登录被取消":"Sign-in canceled","登录已过期":"Session expired","未命名":"Unnamed","上滑查看详情":"Swipe up for details","常用":"Common","车站":"Station","眺游楼":"Tiao You Lou","意餐":"Italian","调整左侧筛选条件可让它出现在地图上":"Adjust filters to bring it onto the map","多數可以在一個合理的天數內提前預訂":"most can be booked a reasonable number of days ahead","我的收藏":"My Saved","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","同步中":"Syncing","登录后":"After signing in"};
+  var TEXT_EN_MAP = {"全清":"None","地铁":"Subway","本站只收录每个区域评分前":"We list only each region's top","选择器":"Picker","荞麦":"Soba","日本環球影城":"Universal Studios Japan","加载失败":"Load failed","登录被取消":"Sign-in canceled","西餐":"Western","已弃用":"Hidden","新宿御苑":"Shinjuku Gyoen","在地圖上顯示出來的":"of the","韩":"Korean","按钮里的选择器":"Picker in the button","其中高价位":"of which high-end","登录已过期":"Session expired","搜尋餐廳":"Search restaurants","棄用名單":"Discarded","東京塔":"Tokyo Tower","加入收藏":"Save","改动待同步到云端":"Edits pending cloud sync","名称":"Name","賬號跨設備同步":"account across devices","重置筛选":"Reset filters","仅存于本地浏览器":"live only in this browser","足立美术馆":"Adachi Museum of Art","定位校准":"Location source","面包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","屏幕内":"On screen","披萨":"Pizza","与默认景点一起在地图上显示":"shown alongside the built-in Sights on the map","棄用":"Hide","本设备上的本地缓存会保留":"Local cache on this device is kept","登录成功":"Signed in","输入更多字以缩小范围":"Type more to narrow the search","炭火烧鸟":"Charcoal yakitori","中":"Chinese","的餐厅":"rated restaurants","搜索餐厅":"Search restaurants","道顿堀":"Dotonbori","全部":"All","和收藏一起通过你的":"synced with Saved via your","东京晴空塔":"Tokyo Skytree","已复制":"Copied","台湾料理":"Taiwanese","秋叶原":"Akihabara","无":"None","日本料理":"Japanese cuisine","已同步":"Synced","城市轨道":"Urban rail","打开筛选":"Open filters","加载中":"Loading","东京塔":"Tokyo Tower","鸟取砂丘":"Tottori Sand Dunes","搜索失败":"Search failed","進一步壓到":"are further capped at","和收藏一起通過你的":"synced with Saved via your","重新加载":"reloading","咖啡厅":"cafés","简体":"Simplified","和景點一起通過你的":"synced with Sights via your","和景点一起通过你的":"synced with Sights via your","在地图上显示出来的":"of the","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","冰品":"Ice cream","三明治":"Sandwich","银座":"Ginza","保存中":"Saving","築地場外市場":"Tsukiji Outer Market","內臟":"Offal","甜品":"Desserts","西":"Western","猎奇":"Adventurous","丰洲市场":"Toyosu Market","這樣":"So","筛选":"Filter","系统默认旅游锚点之外你自己加的去处":"Destinations you add beyond the built-in tourist anchors","新世界":"Shinsekai","范围内":"In range","面类":"Noodles","天妇罗":"Tempura","登录脚本未加载":"Sign-in script failed to load","系統默認旅遊錨點之外你自己加的去處":"Destinations you add beyond the built-in tourist anchors","珍味":"Delicacies","车站":"Station","内脏":"Offal","岡山城":"Okayama Castle","弃用":"Hide","未登录则只存在当前浏览器":"Not signed in: data stays in this browser only","可隨時刪除":"deletable anytime","进一步压到":"are further capped at","晚":"Dinner","中东菜等":"Middle Eastern, etc.","翻譯":"Translate","三朝溫泉":"Misasa Onsen","锅物":"Hot pot","私铁":"Private rail","六本木新城":"Roppongi Hills","寿司":"Sushi","烤鸡":"Yakitori","拉美料理":"Latin American","景点":"Sights","你自己想标注的地点或建筑物":"Places or buildings you want to mark yourself","显示我的位置":"Show my location","伴手礼":"Gift food","座位":"Seats","日元以下的高分正餐餐厅":"yen-or-under high-rated proper-meal restaurants on the map","常用":"Common","热门餐厅":"Hot restaurants","登录处理失败":"Sign-in handling failed","不勾则不限制":"Leave unchecked for no filter","午":"Lunch","加入景点":"Add as Sight","你研究後決定不會去的餐廳":"Restaurants you've researched and decided not to visit","隐藏弃用名单":"Hide discarded","眺游楼":"Tiao You Lou","仓敷美观地区":"Kurashiki Bikan","多数可以在一个合理的天数内提前预订":"most can be booked a reasonable number of days ahead","隐藏":"Hide","炭火焼鳥正":"Sumibi Yakitori Sho","拉麵":"Ramen","淺草寺":"Senso-ji","调整左侧筛选条件可让它出现在地图上":"Adjust filters to bring it onto the map","复制":"Copy","但不再同步到云端":"but won't sync to the cloud anymore","三朝温泉":"Misasa Onsen","没有匹配的结果":"No results","非洲":"Africa","中餐":"Chinese","早餐":"Breakfast","清空":"Clear","可粘贴任意":"Paste any","检查网络":"check your network","中东":"Middle East","全选":"All","百名店":"Hyakumeiten","可貼上任意":"Paste any","请重新登录":"please sign in again","例如":"e.g.","和果子":"wagashi","东南亚料理":"Southeast Asian","炸物":"Fried","豐洲市場":"Toyosu Market","预约":"Booking","类型":"Type","的餐廳":"rated restaurants","你在约":"You booked","长途线路":"Long-haul lines","甚至":"or even","语言":"Language","可":"Available","删除收藏":"Remove","删除景点":"Remove Sight","與默認景點一起在地圖上顯示":"shown alongside the built-in Sights on the map","通天阁":"Tsutenkaku","弃用名单":"Discarded","日本語":"Japanese","西点":"Pastry","已选":"Selected","串烧":"Skewers","地址":"Address","会跨设备同步":"syncs across devices","烘焙":"Bakery","铁板烧":"Teppanyaki","保存失败":"Save failed","東京晴空塔":"Tokyo Skytree","居酒屋":"Izakaya","美式料理":"American","用户自添景点":"Custom Sights","图标必须是":"Icon must be","鳥取砂丘":"Tottori Sand Dunes","只看谷歌地图校准过坐标的餐厅":"Google-calibrated coordinates only","隐藏非日本料理":"Hide non-Japanese","中国料理":"Chinese cuisine","本站只收錄每個區域評分前":"We list only each region's top","小吃":"Snacks","其他西餐":"Other Western","定位到我的位置":"Locate me","不可":"Not available","乡土":"Regional","沾面":"Tsukemen","意面":"Pasta","试试":"Try","显示":"Show","会从地图上自动隐藏":"automatically hidden from the map","上野公園":"Ueno Park","当前位置在地图范围之外":"Current location is outside the map","海鲜":"Seafood","明治神宮":"Meiji Shrine","炭火烧鸟正":"Charcoal yakitori","东京迪士尼乐园":"Tokyo Disneyland","关东煮":"Oden","正餐":"Mains","亲子丼":"Oyakodon","已存本地":"Saved locally","市内":"In-city","日式咖喱":"Japanese curry","详情":"Details","取消":"Cancel","大阪城":"Osaka Castle","松江城":"Matsue Castle","上野公园":"Ueno Park","未命名":"Unnamed","你研究后决定不会去的餐厅":"Restaurants you've researched and decided not to visit","出雲大社":"Izumo Taisha","图层切换":"Layers","多數可以在一個合理的天數內提前預訂":"most can be booked a reasonable number of days ahead","退出登录":"Sign out","韩国料理":"Korean","南亚":"South Asian","非日本料理":"Non-Japanese cuisine","搜索中":"Searching","烤肉":"Yakiniku","景点锚点":"Tourist Sights","请检查网络":"Check your network","只显示可以通过":"Bookable via","获奖":"Awards","原文":"Original","咖啡":"Cafe","酒吧":"Bar","登录后":"After signing in","晚餐价格":"Dinner price","其他":"Other","上滑查看详情":"Swipe up for details","价格":"Price","會從地圖上自動隱藏":"automatically hidden from the map","銀座":"Ginza","我的收藏":"My Saved","韩餐":"Korean","盖饭":"Donburi","海遊館":"Kaiyukan Aquarium","关闭":"Close","皇居":"Imperial Palace","这样":"So","菜系":"Cuisine","烧":"Grilled","法餐":"French","意餐":"Italian","本地模式":"Local mode","秋葉原":"Akihabara","海游馆":"Kaiyukan Aquarium","眺遊楼":"Tiao You Lou","餐厅库":"Restaurant library","明治神宫":"Meiji Shrine","点击登录以跨设备同步":"click to sign in for cross-device sync","此餐厅当前不在筛选范围内":"This restaurant is outside the current filter","拉面":"Ramen","打开完整":"Open full","咖啡廳":"cafés","横浜":"Yokohama","名称不能为空":"Name cannot be empty","保存":"Save","御好烧":"Okonomiyaki","汉堡":"Burgers","景點":"Sights","评分":"Rating","倉敷美觀地區":"Kurashiki Bikan","多选取并集":"Multi-select = union","勾选后只看对应获奖店":"Check to filter to award winners only","浅草寺":"Senso-ji","已收藏":"Saved","新干线":"Shinkansen","长途":"Long-haul","東京迪士尼樂園":"Tokyo Disneyland","你自己想標註的地點或建築物":"Places or buildings you want to mark yourself","点心":"Confectionery","账户":"Account","可随时删除":"deletable anytime","个其他匹配":"more matches","冈山城":"Okayama Castle","翻译":"Translate","焼":"Grilled","饺子":"Gyoza","改动仅存浏览器":"edits live in browser only","其中高價位":"of which high-end","正":"Sho","账号跨设备同步":"account across devices","通天閣":"Tsutenkaku","下次推送时重试":"will retry on next push","地图搜索":"Map search","道頓堀":"Dotonbori","繁體":"Traditional","出云大社":"Izumo Taisha","同步中":"Syncing","日元以下的高分正餐餐廳":"yen-or-under high-rated proper-meal restaurants on the map","乌冬":"Udon","其他区域":"Other regions","只显示已收藏":"Saved only","日本环球影城":"Universal Studios Japan","同步失败":"Sync failed","收藏":"Saved","足立美術館":"Adachi Museum of Art"};
   // Japanese lookup, same shape. Values come from data/i18n/ja.json.
   // Runs without an entry stay in Chinese at runtime.
-  var TEXT_JA_MAP = {"语言":"言語","测试中":"テスト中","本地模式":"ローカルモード","按钮里的选择器":"ボタン内のピッカー","這樣":"こうして","本站只收錄每個區域評分前":"各エリアで評価上位","市内":"市内","关闭":"閉じる","猎奇":"ゲテモノ","餐厅库":"レストラン一覧","鳥取砂丘":"鳥取砂丘","试试":"試す","烤鸡":"焼鳥","城市轨道":"都市鉄道","选择器":"ピッカー","清空":"クリア","私铁":"私鉄","其他西餐":"その他洋食","打开完整":"全画面で開く","東京晴空塔":"東京スカイツリー","皇居":"皇居","明治神宫":"明治神宮","亲子丼":"親子丼","范围内":"範囲内","不可":"不可","台湾料理":"台湾料理","乌冬":"うどん","淺草寺":"浅草寺","同步设置":"同期設定","显示我的位置":"現在地を表示","晚":"ディナー","晚餐价格":"ディナー価格","价格":"価格","获奖":"受賞","通天阁":"通天閣","出云大社":"出雲大社","地铁":"地下鉄","炭火烧鸟":"炭火焼鳥","无":"なし","名称":"名称","炭火焼鳥正":"炭火焼鳥 正","和景点一起通过你的":"観光スポットと一緒に、あなたの","登录处理失败":"サインイン処理失敗","東京迪士尼樂園":"東京ディズニーランド","珍味":"珍味","仓敷美观地区":"倉敷美観地区","小吃":"軽食","面类":"麺類","你自己想標註的地點或建築物":"自分で印を付けたい場所や建物","预约":"予約","銀座":"銀座","披萨":"ピザ","築地場外市場":"築地場外市場","当前位置在地图范围之外":"現在地は地図の範囲外です","西餐":"西洋料理","退出登录":"サインアウト","可随时删除":"いつでも削除できます","烧":"焼","和收藏一起通過你的":"お気に入りと一緒に、あなたの","检查网络":"ネットワークを確認","取消":"キャンセル","秋葉原":"秋葉原","会从地图上自动隐藏":"地図から自動的に非表示になります","的餐廳":"のレストランのみ掲載","足立美術館":"足立美術館","用户自添景点":"カスタムスポット","定位到我的位置":"現在地に移動","删除景点":"スポット削除","这样":"こうして","荞麦":"そば","西点":"洋菓子","隐藏":"非表示","保存中":"保存中","加入景点":"スポットとして追加","图标必须是":"アイコンは","的餐厅":"のレストランのみ掲載","进一步压到":"はさらに","道頓堀":"道頓堀","全选":"全選択","甚至":"場合によっては","三明治":"サンドイッチ","海鲜":"海鮮","删除收藏":"削除","但不再同步到云端":"ただしクラウドには同期されなくなります","寿司":"寿司","只显示已收藏":"お気に入りのみ","西":"西洋","可":"可","搜索中":"検索中","拉美料理":"中南米料理","非洲":"アフリカ","其他区域":"他の地域","翻译":"翻訳","意面":"パスタ","多选取并集":"複数選択 = 和集合","已同步":"同期済み","其他":"その他","原文":"原文","内脏":"ホルモン","日本环球影城":"ユニバーサル・スタジオ・ジャパン","正餐":"メイン","丰洲市场":"豊洲市場","东京迪士尼乐园":"東京ディズニーランド","保存失败":"保存失敗","重新加载":"再読み込み中","搜索餐厅":"レストラン検索","岡山城":"岡山城","你在约":"予約済","冰品":"アイス","新世界":"新世界","和收藏一起通过你的":"お気に入りと一緒に、あなたの","鸟取砂丘":"鳥取砂丘","六本木新城":"六本木ヒルズ","显示":"表示","冈山城":"岡山城","饺子":"餃子","座位":"席数","东南亚料理":"東南アジア料理","系統默認旅遊錨點之外你自己加的去處":"デフォルトの観光スポットに加えて自分で追加した行き先","和景點一起通過你的":"観光スポットと一緒に、あなたの","咖啡厅":"カフェ","横浜":"横浜","改动仅存浏览器":"変更はブラウザのみに保存","隐藏非日本料理":"和食以外を隠す","浅草寺":"浅草寺","炭火烧鸟正":"炭火焼鳥 正","搜索失败":"検索失敗","名称不能为空":"名称は必須です","美式料理":"アメリカ料理","中东":"中東","通天閣":"通天閣","棄用名單":"非表示リスト","景點":"観光スポット","菜系":"ジャンル","南亚":"南アジア","系统默认旅游锚点之外你自己加的去处":"デフォルトの観光スポットに加えて自分で追加した行き先","可隨時刪除":"いつでも削除できます","仅存于本地浏览器":"このブラウザのみに保存","上野公園":"上野公園","云同步":"クラウド同期","酒吧":"バー","中国料理":"中国料理","评分":"評価","改动待同步到云端":"クラウド同期待ち","法餐":"フレンチ","串烧":"串焼き","拉麵":"ラーメン","與默認景點一起在地圖上顯示":"デフォルトと一緒に地図に表示され","打开筛选":"フィルターを開く","东京晴空塔":"東京スカイツリー","松江城":"松江城","景点锚点":"観光スポット","你自己想标注的地点或建筑物":"自分で印を付けたい場所や建物","下次推送时重试":"次回のプッシュ時に再試行","保存":"保存","复制":"コピー","筛选":"フィルター","咖啡廳":"カフェ","此餐厅当前不在筛选范围内":"この店は現在のフィルター範囲外です","没有匹配的结果":"結果なし","弃用":"非表示","锅物":"鍋物","繁體":"繁体字","搜尋餐廳":"レストラン検索","同步失败":"同期失敗","已选":"選択中","其中高价位":"うち高単価の","居酒屋":"居酒屋","会跨设备同步":"はデバイス間で同期されます","加载失败":"読み込み失敗","咖啡":"カフェ","与默认景点一起在地图上显示":"デフォルトと一緒に地図に表示され","天妇罗":"天ぷら","炸物":"揚げ物","登录成功":"サインイン成功","收藏":"お気に入り","會從地圖上自動隱藏":"地図から自動的に非表示になります","中":"中華","可粘贴任意":"任意の絵文字を貼り付け可","你研究后决定不会去的餐厅":"リサーチして行かないと決めたレストラン","可貼上任意":"任意の絵文字を貼り付け可","甜品":"スイーツ","简体":"簡体字","海遊館":"海遊館","本设备上的本地缓存会保留":"このデバイスのローカルキャッシュは保持されます","已清除":"クリア済み","日式咖喱":"日本式カレー","沾面":"つけ麺","请检查网络":"ネットワークを確認してください","你研究後決定不會去的餐廳":"リサーチして行かないと決めたレストラン","出雲大社":"出雲大社","其中高價位":"うち高単価の","日本環球影城":"ユニバーサル・スタジオ・ジャパン","日元以下的高分正餐餐廳":"円以下の高評価な食事系レストランは","屏幕内":"画面内","賬號跨設備同步":"アカウントでデバイス間同期されます","全部":"すべて","和果子":"和菓子","面包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","在地圖上顯示出來的":"地図に表示される","烤肉":"焼肉","已复制":"コピー済み","非日本料理":"和食以外","韩":"韓","倉敷美觀地區":"倉敷美観地区","例如":"例:","日本料理":"日本料理","弃用名单":"非表示リスト","韩国料理":"韓国料理","景点":"観光スポット","长途":"長距離","三朝温泉":"三朝温泉","豐洲市場":"豊洲市場","烘焙":"ベーカリー","隐藏弃用名单":"非表示リストを隠す","类型":"種類","多数可以在一个合理的天数内提前预订":"多くが妥当な日数で予約可能","拉面":"ラーメン","请重新登录":"再度サインインしてください","午":"ランチ","只看谷歌校准过的餐厅":"Google補正済みのみ","內臟":"ホルモン","图层切换":"レイヤー切替","关东煮":"おでん","点击登录以跨设备同步":"クリックしてサインインし、デバイス間同期","御好烧":"お好み焼き","东京塔":"東京タワー","新宿御苑":"新宿御苑","新干线":"新幹線","明治神宮":"明治神宮","日元以下的高分正餐餐厅":"円以下の高評価な食事系レストランは","地图搜索":"マップ検索","勾选后只看对应获奖店":"チェックで受賞店のみ表示","乡土":"郷土","汉堡":"バーガー","秋叶原":"秋葉原","银座":"銀座","正":"正","输入更多字以缩小范围":"もっと入力して絞り込む","定位校准":"位置情報の補正","在地图上显示出来的":"地図に表示される","未登录则只存在当前浏览器":"未サインインの場合、このブラウザのみに保存されます","加载中":"読み込み中","韩餐":"韓国","東京塔":"東京タワー","足立美术馆":"足立美術館","地址":"住所","三朝溫泉":"三朝温泉","百名店":"百名店","铁板烧":"鉄板焼き","点心":"和菓子","已收藏":"登録済み","账号跨设备同步":"アカウントでデバイス間同期されます","海游馆":"海遊館","热门餐厅":"人気店","中东菜等":"中東料理など","伴手礼":"お土産","登录脚本未加载":"サインインスクリプトの読み込み失敗","進一步壓到":"はさらに","不勾则不限制":"未チェックで制限なし","加入收藏":"保存","翻譯":"翻訳","全清":"クリア","道顿堀":"道頓堀","个其他匹配":"件の他の一致","早餐":"朝食","已存本地":"ローカル保存済み","上野公园":"上野公園","长途线路":"長距離路線","重置筛选":"フィルターをリセット","盖饭":"丼物","本站只收录每个区域评分前":"各エリアで評価上位","中餐":"中華","只显示可以通过":"次のサイト経由で予約可:","焼":"焼","眺遊楼":"眺遊楼","已弃用":"非表示中","详情":"詳細","大阪城":"大阪城","登录被取消":"サインインがキャンセルされました","登录已过期":"サインイン期限切れ","未命名":"無題","上滑查看详情":"上にスワイプで詳細","常用":"よく使う","车站":"駅","眺游楼":"眺遊楼","意餐":"イタリアン","调整左侧筛选条件可让它出现在地图上":"左のフィルターを調整して地図に表示できます","多數可以在一個合理的天數內提前預訂":"多くが妥当な日数で予約可能","我的收藏":"マイお気に入り","中国料理眺游楼":"中国料理 眺遊楼","同步中":"同期中","登录后":"サインイン後"};
+  var TEXT_JA_MAP = {"全清":"クリア","地铁":"地下鉄","本站只收录每个区域评分前":"各エリアで評価上位","选择器":"ピッカー","荞麦":"そば","日本環球影城":"ユニバーサル・スタジオ・ジャパン","加载失败":"読み込み失敗","登录被取消":"サインインがキャンセルされました","西餐":"西洋料理","已弃用":"非表示中","新宿御苑":"新宿御苑","在地圖上顯示出來的":"地図に表示される","韩":"韓","按钮里的选择器":"ボタン内のピッカー","其中高价位":"うち高単価の","登录已过期":"サインイン期限切れ","搜尋餐廳":"レストラン検索","棄用名單":"非表示リスト","東京塔":"東京タワー","加入收藏":"保存","改动待同步到云端":"クラウド同期待ち","名称":"名称","賬號跨設備同步":"アカウントでデバイス間同期されます","重置筛选":"フィルターをリセット","仅存于本地浏览器":"このブラウザのみに保存","足立美术馆":"足立美術館","定位校准":"位置情報の補正","面包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","屏幕内":"画面内","披萨":"ピザ","与默认景点一起在地图上显示":"デフォルトと一緒に地図に表示され","棄用":"非表示","本设备上的本地缓存会保留":"このデバイスのローカルキャッシュは保持されます","登录成功":"サインイン成功","输入更多字以缩小范围":"もっと入力して絞り込む","炭火烧鸟":"炭火焼鳥","中":"中華","的餐厅":"のレストランのみ掲載","搜索餐厅":"レストラン検索","道顿堀":"道頓堀","全部":"すべて","和收藏一起通过你的":"お気に入りと一緒に、あなたの","东京晴空塔":"東京スカイツリー","已复制":"コピー済み","台湾料理":"台湾料理","秋叶原":"秋葉原","无":"なし","日本料理":"日本料理","已同步":"同期済み","城市轨道":"都市鉄道","打开筛选":"フィルターを開く","加载中":"読み込み中","东京塔":"東京タワー","鸟取砂丘":"鳥取砂丘","搜索失败":"検索失敗","進一步壓到":"はさらに","和收藏一起通過你的":"お気に入りと一緒に、あなたの","重新加载":"再読み込み中","咖啡厅":"カフェ","简体":"簡体字","和景點一起通過你的":"観光スポットと一緒に、あなたの","和景点一起通过你的":"観光スポットと一緒に、あなたの","在地图上显示出来的":"地図に表示される","中国料理眺游楼":"中国料理 眺遊楼","冰品":"アイス","三明治":"サンドイッチ","银座":"銀座","保存中":"保存中","築地場外市場":"築地場外市場","內臟":"ホルモン","甜品":"スイーツ","西":"西洋","猎奇":"ゲテモノ","丰洲市场":"豊洲市場","這樣":"こうして","筛选":"フィルター","系统默认旅游锚点之外你自己加的去处":"デフォルトの観光スポットに加えて自分で追加した行き先","新世界":"新世界","范围内":"範囲内","面类":"麺類","天妇罗":"天ぷら","登录脚本未加载":"サインインスクリプトの読み込み失敗","系統默認旅遊錨點之外你自己加的去處":"デフォルトの観光スポットに加えて自分で追加した行き先","珍味":"珍味","车站":"駅","内脏":"ホルモン","岡山城":"岡山城","弃用":"非表示","未登录则只存在当前浏览器":"未サインインの場合、このブラウザのみに保存されます","可隨時刪除":"いつでも削除できます","进一步压到":"はさらに","晚":"ディナー","中东菜等":"中東料理など","翻譯":"翻訳","三朝溫泉":"三朝温泉","锅物":"鍋物","私铁":"私鉄","六本木新城":"六本木ヒルズ","寿司":"寿司","烤鸡":"焼鳥","拉美料理":"中南米料理","景点":"観光スポット","你自己想标注的地点或建筑物":"自分で印を付けたい場所や建物","显示我的位置":"現在地を表示","伴手礼":"お土産","座位":"席数","日元以下的高分正餐餐厅":"円以下の高評価な食事系レストランは","常用":"よく使う","热门餐厅":"人気店","登录处理失败":"サインイン処理失敗","不勾则不限制":"未チェックで制限なし","午":"ランチ","加入景点":"スポットとして追加","你研究後決定不會去的餐廳":"リサーチして行かないと決めたレストラン","隐藏弃用名单":"非表示リストを隠す","眺游楼":"眺遊楼","仓敷美观地区":"倉敷美観地区","多数可以在一个合理的天数内提前预订":"多くが妥当な日数で予約可能","隐藏":"非表示","炭火焼鳥正":"炭火焼鳥 正","拉麵":"ラーメン","淺草寺":"浅草寺","调整左侧筛选条件可让它出现在地图上":"左のフィルターを調整して地図に表示できます","复制":"コピー","但不再同步到云端":"ただしクラウドには同期されなくなります","三朝温泉":"三朝温泉","没有匹配的结果":"結果なし","非洲":"アフリカ","中餐":"中華","早餐":"朝食","清空":"クリア","可粘贴任意":"任意の絵文字を貼り付け可","检查网络":"ネットワークを確認","中东":"中東","全选":"全選択","百名店":"百名店","可貼上任意":"任意の絵文字を貼り付け可","请重新登录":"再度サインインしてください","例如":"例:","和果子":"和菓子","东南亚料理":"東南アジア料理","炸物":"揚げ物","豐洲市場":"豊洲市場","预约":"予約","类型":"種類","的餐廳":"のレストランのみ掲載","你在约":"予約済","长途线路":"長距離路線","甚至":"場合によっては","语言":"言語","可":"可","删除收藏":"削除","删除景点":"スポット削除","與默認景點一起在地圖上顯示":"デフォルトと一緒に地図に表示され","通天阁":"通天閣","弃用名单":"非表示リスト","西点":"洋菓子","已选":"選択中","串烧":"串焼き","地址":"住所","会跨设备同步":"はデバイス間で同期されます","烘焙":"ベーカリー","铁板烧":"鉄板焼き","保存失败":"保存失敗","東京晴空塔":"東京スカイツリー","居酒屋":"居酒屋","美式料理":"アメリカ料理","用户自添景点":"カスタムスポット","图标必须是":"アイコンは","鳥取砂丘":"鳥取砂丘","只看谷歌地图校准过坐标的餐厅":"Googleマップで座標補正済みのみ","隐藏非日本料理":"和食以外を隠す","中国料理":"中国料理","本站只收錄每個區域評分前":"各エリアで評価上位","小吃":"軽食","其他西餐":"その他洋食","定位到我的位置":"現在地に移動","不可":"不可","乡土":"郷土","沾面":"つけ麺","意面":"パスタ","试试":"試す","显示":"表示","会从地图上自动隐藏":"地図から自動的に非表示になります","上野公園":"上野公園","当前位置在地图范围之外":"現在地は地図の範囲外です","海鲜":"海鮮","明治神宮":"明治神宮","炭火烧鸟正":"炭火焼鳥 正","东京迪士尼乐园":"東京ディズニーランド","关东煮":"おでん","正餐":"メイン","亲子丼":"親子丼","已存本地":"ローカル保存済み","市内":"市内","日式咖喱":"日本式カレー","详情":"詳細","取消":"キャンセル","大阪城":"大阪城","松江城":"松江城","上野公园":"上野公園","未命名":"無題","你研究后决定不会去的餐厅":"リサーチして行かないと決めたレストラン","出雲大社":"出雲大社","图层切换":"レイヤー切替","多數可以在一個合理的天數內提前預訂":"多くが妥当な日数で予約可能","退出登录":"サインアウト","韩国料理":"韓国料理","南亚":"南アジア","非日本料理":"和食以外","搜索中":"検索中","烤肉":"焼肉","景点锚点":"観光スポット","请检查网络":"ネットワークを確認してください","只显示可以通过":"次のサイト経由で予約可:","获奖":"受賞","原文":"原文","咖啡":"カフェ","酒吧":"バー","登录后":"サインイン後","晚餐价格":"ディナー価格","其他":"その他","上滑查看详情":"上にスワイプで詳細","价格":"価格","會從地圖上自動隱藏":"地図から自動的に非表示になります","銀座":"銀座","我的收藏":"マイお気に入り","韩餐":"韓国","盖饭":"丼物","海遊館":"海遊館","关闭":"閉じる","皇居":"皇居","这样":"こうして","菜系":"ジャンル","烧":"焼","法餐":"フレンチ","意餐":"イタリアン","本地模式":"ローカルモード","秋葉原":"秋葉原","海游馆":"海遊館","眺遊楼":"眺遊楼","餐厅库":"レストラン一覧","明治神宫":"明治神宮","点击登录以跨设备同步":"クリックしてサインインし、デバイス間同期","此餐厅当前不在筛选范围内":"この店は現在のフィルター範囲外です","拉面":"ラーメン","打开完整":"全画面で開く","咖啡廳":"カフェ","横浜":"横浜","名称不能为空":"名称は必須です","保存":"保存","御好烧":"お好み焼き","汉堡":"バーガー","景點":"観光スポット","评分":"評価","倉敷美觀地區":"倉敷美観地区","多选取并集":"複数選択 = 和集合","勾选后只看对应获奖店":"チェックで受賞店のみ表示","浅草寺":"浅草寺","已收藏":"登録済み","新干线":"新幹線","长途":"長距離","東京迪士尼樂園":"東京ディズニーランド","你自己想標註的地點或建築物":"自分で印を付けたい場所や建物","点心":"和菓子","账户":"アカウント","可随时删除":"いつでも削除できます","个其他匹配":"件の他の一致","冈山城":"岡山城","翻译":"翻訳","焼":"焼","饺子":"餃子","改动仅存浏览器":"変更はブラウザのみに保存","其中高價位":"うち高単価の","正":"正","账号跨设备同步":"アカウントでデバイス間同期されます","通天閣":"通天閣","下次推送时重试":"次回のプッシュ時に再試行","地图搜索":"マップ検索","道頓堀":"道頓堀","繁體":"繁体字","出云大社":"出雲大社","同步中":"同期中","日元以下的高分正餐餐廳":"円以下の高評価な食事系レストランは","乌冬":"うどん","其他区域":"他の地域","只显示已收藏":"お気に入りのみ","日本环球影城":"ユニバーサル・スタジオ・ジャパン","同步失败":"同期失敗","收藏":"お気に入り","足立美術館":"足立美術館"};
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -1686,9 +1748,8 @@
     // "全部"/"无"/"已选 N / M", live count chips). Without an observer
     // here those flip back to Chinese after every filter change.
     observeForI18n(document.getElementById('ff-sheet-content'));
-    // Sync-settings modal (#ff-modal-bg) lives outside #ff-sheet and
-    // mutates its own status line (cfgMsg) — "测试中…", "已清除", etc.
-    observeForI18n(document.getElementById('ff-modal-bg'));
+    // (The sync-settings modal used to be observed here. It's gone now —
+    // sign-in/out lives inline in the avatar dropdown.)
     // Reflect onto <html lang> — browsers use it for hyphenation and
     // accessibility (screen readers, especially).
     try { document.documentElement.lang = activeLang; } catch (_) {}
@@ -4450,7 +4511,9 @@
     document.addEventListener('mousemove', ffDrag.move);
     document.addEventListener('mouseup',   ffDrag.end);
 
-    document.getElementById('ff-reset').addEventListener('click', function() {
+    // Filter reset. Extracted from an inline #ff-reset handler so the avatar
+    // dropdown's reset row can call it too — see the menu wiring below.
+    function resetFilters() {
       ratingSlider.value = '3.4';
       document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = true; });
       document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = true; });
@@ -4463,17 +4526,13 @@
       hideBlackEl.checked = true;
       hideForeignEl.checked = true;
       apply();
-    });
+    }
 
     // ----- Cloud sync settings modal: Google sign-in / sign-out.
-    var modalBg = document.getElementById('ff-modal-bg');
-    var authOut = document.getElementById('ff-auth-out');
-    var authIn  = document.getElementById('ff-auth-in');
-    var authPic = document.getElementById('ff-auth-pic');
-    var authName= document.getElementById('ff-auth-name');
-    var authEmail = document.getElementById('ff-auth-email');
-    var signinBtnContainer = document.getElementById('ff-signin-btn');
-    var cfgMsg  = document.getElementById('ff-cfg-msg');
+    // GIS now renders its sign-in button inline in the avatar dropdown
+    // (ssm-signin-btn), with its status feedback in ssm-cfg-msg right below.
+    var signinBtnContainer = document.getElementById('ssm-signin-btn');
+    var cfgMsg  = document.getElementById('ssm-cfg-msg');
 
     // Decode a Google ID token (JWT) and persist {id_token, email, name,
     // picture, exp} via saveAuth(). Pure data — no UI side effects, no
@@ -4624,9 +4683,10 @@
       setTimeout(bootSilentReAuth, 0);
     }
 
-    // Lazy-render Google's official sign-in button into the modal. Called on
-    // every openModal so we tolerate the GIS script still loading on first
-    // open — if it isn't ready yet, retry up to ~3s before giving up.
+    // Lazy-render Google's official sign-in button into ssm-signin-btn inside
+    // the avatar dropdown. Called from refreshAuthUI whenever the signed-out
+    // pane is shown — we tolerate the GIS script still loading on first call
+    // by retrying up to ~3s before giving up.
     var gisRendered = false;
     var gisRetryTimer = null;
     function renderSignInButton(attempt) {
@@ -4671,37 +4731,106 @@
       gisRendered = true;
     }
 
+    // ===== Avatar dropdown ("ss-avatar" → "ss-menu") =====
+    // Single Google-style circular control on the search box's right edge.
+    // Click toggles a popover with two states — signed-in: account info +
+    // sign-out; signed-out: Google's official inline sign-in button + a
+    // help paragraph explaining what signing in does — plus always-visible
+    // 重置筛选 and a 4-pill language picker. The old "Cloud sync" modal is
+    // gone; sign-in is now one click straight to Google.
+    var ssAvatar = document.getElementById('ss-avatar');
+    var ssAvatarPic = document.getElementById('ss-avatar-pic');
+    var ssMenu = document.getElementById('ss-menu');
+    var ssmSignedIn = document.getElementById('ssm-signed-in');
+    var ssmSignedOut = document.getElementById('ssm-signed-out');
+    var ssmAcctPic = document.getElementById('ssm-acct-pic');
+    var ssmAcctName = document.getElementById('ssm-acct-name');
+    var ssmAcctEmail = document.getElementById('ssm-acct-email');
+    var ssmSigninHelp = document.getElementById('ssm-signin-help');
+
+    // Hand-tune the help paragraph per language so the runtime CJK localizer
+    // doesn't fragment "登录后…会跨设备同步" into Saved/Discard/Sights-shaped
+    // word salad. zh-CN keeps the HTML source; zh-TW would auto-convert via
+    // OpenCC but the hand version reads cleaner.
+    (function tuneHelp() {
+      if (!ssmSigninHelp) return;
+      if (activeLang === 'en') {
+        ssmSigninHelp.textContent = 'Once signed in, your Saved / Discard / Sights sync across devices. Otherwise they stay in this browser only.';
+      } else if (activeLang === 'ja') {
+        ssmSigninHelp.textContent = 'サインインすると、お気に入り / 非表示リスト / 観光スポット が端末間で同期されます。それ以外はこのブラウザ内のみに保存されます。';
+      } else if (activeLang === 'zh-TW') {
+        ssmSigninHelp.textContent = '登入後，收藏 / 棄用 / 觀光景點 會跨裝置同步。未登入則僅存於目前的瀏覽器。';
+      }
+    })();
+
+    // Single auth-state refresh — keeps the avatar + the menu pane in sync,
+    // and lazily renders Google's sign-in button into ssm-signin-btn the
+    // first time the signed-out pane shows (renderSignInButton is internally
+    // guarded against double-renders + retries while the GIS script loads).
+    var DEFAULT_AVATAR = 'img/default-avatar.png';
     function refreshAuthUI() {
       var a = configured();
       if (a) {
-        authOut.style.display = 'none';
-        authIn.style.display  = 'block';
-        authPic.src = a.picture || '';
-        authName.textContent  = a.name || '';
-        authEmail.textContent = a.email || '';
+        // .signed-in is informational now (the placeholder is just a PNG);
+        // we only flip it when we actually have a profile picture.
+        if (a.picture) {
+          ssAvatar.classList.add('signed-in');
+          ssAvatarPic.src = a.picture;
+          ssmAcctPic.src = a.picture;
+        } else {
+          ssAvatar.classList.remove('signed-in');
+          ssAvatarPic.src = DEFAULT_AVATAR;
+          ssmAcctPic.src = DEFAULT_AVATAR;
+        }
+        ssmAcctName.textContent = a.name || '';
+        ssmAcctEmail.textContent = a.email || '';
+        ssmSignedIn.hidden = false;
+        ssmSignedOut.hidden = true;
       } else {
-        authOut.style.display = 'block';
-        authIn.style.display  = 'none';
+        ssAvatar.classList.remove('signed-in');
+        ssAvatarPic.src = DEFAULT_AVATAR;
+        ssmSignedIn.hidden = true;
+        ssmSignedOut.hidden = false;
         renderSignInButton();
       }
     }
+    refreshAuthUI();
 
-    function openModal() {
-      cfgMsg.textContent = '';
+    function openAvatarMenu() {
       refreshAuthUI();
-      modalBg.style.display = 'flex';
+      ssMenu.hidden = false;
+      ssMenu.classList.add('open');
     }
-    function closeModal() { modalBg.style.display = 'none'; }
-
-    document.getElementById('ff-settings').addEventListener('click', openModal);
-    document.getElementById('ff-cfg-cancel').addEventListener('click', closeModal);
-    modalBg.addEventListener('click', function(e) {
-      if (e.target === modalBg) closeModal();
+    function closeAvatarMenu() {
+      ssMenu.classList.remove('open');
+      ssMenu.hidden = true;
+    }
+    ssAvatar.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (ssMenu.classList.contains('open')) closeAvatarMenu();
+      else openAvatarMenu();
     });
-
-    document.getElementById('ff-signout').addEventListener('click', function() {
+    // Outside-click + Escape to dismiss. Clicks inside ssMenu (including on
+    // the GIS button iframe) stay open so the sign-in flow isn't interrupted.
+    document.addEventListener('click', function(e) {
+      if (!ssMenu.classList.contains('open')) return;
+      if (ssMenu.contains(e.target) || ssAvatar.contains(e.target)) return;
+      closeAvatarMenu();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && ssMenu.classList.contains('open')) closeAvatarMenu();
+    });
+    document.getElementById('ssm-signout').addEventListener('click', function() {
       if (!confirm('退出登录？本设备上的本地缓存会保留，但不再同步到云端。')) return;
       signOut();
+    });
+    document.getElementById('ssm-reset').addEventListener('click', function() {
+      resetFilters();
+      closeAvatarMenu();
+    });
+    document.querySelectorAll('#ss-menu [data-lang]').forEach(function(b) {
+      if (b.dataset.lang === activeLang) b.classList.add('on');
+      b.addEventListener('click', function() { setLanguage(b.dataset.lang); });
     });
 
     // ===== Help popovers ("?" badges next to filter subtitles) =====
@@ -4788,28 +4917,19 @@
     })();
 
     // Language picker. activeLang was resolved on boot from ?lang= and
-    // localStorage; reflect it into the dropdown so the UI matches state.
-    // On change: persist, update the URL (?lang=tw is sticky, default
-    // simplified drops the param) so deep links carry the language, then
-    // reload so the page reboots in the new language. We reload rather
-    // than live-convert because keeping every text node's pre-conversion
-    // value cached just to support a rare toggle isn't worth the memory.
-    var langEl = document.getElementById('ff-lang');
-    if (langEl) {
-      langEl.value = activeLang;
-      langEl.addEventListener('change', function() {
-        var v = langEl.value;
-        try { localStorage.setItem(LANG_KEY, v); } catch (_) {}
-        var url = new URL(window.location.href);
-        // zh-CN is the source language so it drops the param entirely;
-        // every other choice gets a sticky ?lang= so deep links carry
-        // the picked language into a fresh browser.
-        if (v === 'zh-TW') url.searchParams.set('lang', 'tw');
-        else if (v === 'en') url.searchParams.set('lang', 'en');
-        else if (v === 'ja') url.searchParams.set('lang', 'ja');
-        else url.searchParams.delete('lang');
-        window.location.assign(url.toString());
-      });
+    // localStorage; the avatar dropdown's language pills (wired below) call
+    // setLanguage on click. We persist, update the URL (?lang=tw is sticky,
+    // default zh-CN drops the param) so deep links carry the language, then
+    // reload — caching every text node's pre-conversion value just to support
+    // a rare toggle isn't worth the memory.
+    function setLanguage(v) {
+      try { localStorage.setItem(LANG_KEY, v); } catch (_) {}
+      var url = new URL(window.location.href);
+      if (v === 'zh-TW') url.searchParams.set('lang', 'tw');
+      else if (v === 'en') url.searchParams.set('lang', 'en');
+      else if (v === 'ja') url.searchParams.set('lang', 'ja');
+      else url.searchParams.delete('lang');
+      window.location.assign(url.toString());
     }
 
     restoreFilterState();
@@ -4841,14 +4961,14 @@
 })();
 </script>
     
-            <div class="folium-map" id="map_db5eb16eef3b535e7d5dccdd6a72fe9d" ></div>
+            <div class="folium-map" id="map_c8e87e1af58cb201eeae9c1bce99098e" ></div>
         
 </body>
 <script>
     
     
-            var map_db5eb16eef3b535e7d5dccdd6a72fe9d = L.map(
-                "map_db5eb16eef3b535e7d5dccdd6a72fe9d",
+            var map_c8e87e1af58cb201eeae9c1bce99098e = L.map(
+                "map_c8e87e1af58cb201eeae9c1bce99098e",
                 {
                     center: [36.2048, 138.2529],
                     crs: L.CRS.EPSG3857,
@@ -4865,7 +4985,7 @@
 
         
     
-            var tile_layer_1b720d7f59d98f2fb5052b30a918f84f = L.tileLayer(
+            var tile_layer_567f6c977b2c133fba674310040a8fda = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
                 {
   "minZoom": 0,
@@ -4884,16 +5004,16 @@
             );
         
     
-            tile_layer_1b720d7f59d98f2fb5052b30a918f84f.addTo(map_db5eb16eef3b535e7d5dccdd6a72fe9d);
+            tile_layer_567f6c977b2c133fba674310040a8fda.addTo(map_c8e87e1af58cb201eeae9c1bce99098e);
         
     
-            var marker_cluster_a38f769c2077965612b11e8e409e98db = L.markerClusterGroup(
+            var marker_cluster_4095085d87ec26309428553e834821b4 = L.markerClusterGroup(
                 {
 }
             );
         
     
-            marker_cluster_a38f769c2077965612b11e8e409e98db.addTo(map_db5eb16eef3b535e7d5dccdd6a72fe9d);
+            marker_cluster_4095085d87ec26309428553e834821b4.addTo(map_c8e87e1af58cb201eeae9c1bce99098e);
         
 </script>
 </html>

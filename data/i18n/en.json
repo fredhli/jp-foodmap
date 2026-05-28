@@ -45,7 +45,7 @@
   "隐藏非日本料理": "Hide non-Japanese",
   "隱藏非日本料理": "Hide non-Japanese",
   "定位校准": "Location source",
-  "只看谷歌校准过的餐厅": "Google-verified only",
+  "只看谷歌地图校准过坐标的餐厅": "Google-calibrated coordinates only",
   "中餐": "Chinese",
   "韩餐": "Korean",
   "韓餐": "Korean",
@@ -127,6 +127,9 @@
 
   "同步设置": "Sync settings",
   "同步設置": "Sync settings",
+  "账户": "Account",
+  "帳戶": "Account",
+  "日本語": "Japanese",
   "同步中": "Syncing",
   "测试中": "Testing",
   "測試中": "Testing",
