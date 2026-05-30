@@ -2715,23 +2715,47 @@ FILTER_JS_TEMPLATE = r"""
 
   // ===== Cloud sync layer (Google OAuth + Cloudflare Worker + KV) =====
   //
-  // Auth (Google ID token + cached profile) is per-device, stored in
-  // localStorage. The state (favorites/blacklist sets + bookmarks) is also
-  // cached locally so the page works offline / before the first pull.
-  // When signed in, the page pulls on load + tab-focus + every 60s, and
-  // pushes (debounced 500ms) on every edit. Last-writer-wins: no merge.
+  // Auth is a Worker-issued session cookie scoped to .jpfoodmap.com, 90-day
+  // lifetime. POST /api/session exchanges a Google id_token for the cookie;
+  // afterwards every /api/state call rides the cookie via credentials:'include'
+  // and we never touch Google again until the session expires or is revoked.
+  // localStorage 'tabelog.auth' mirrors the server-side exp + profile so the
+  // page knows whether it's signed in before any network call. The state
+  // blob (favorites/blacklist + bookmarks) is cached locally so the page
+  // works offline / before the first pull.
+  //
+  // Legacy: pages loaded against the old Worker stored {id_token, exp:1h}
+  // and used Authorization:Bearer. The new Worker still accepts Bearer as a
+  // fallback path, and the boot logic below upgrades any legacy id_token to
+  // a cookie session silently on next load.
   var AUTH_KEY = 'tabelog.auth';
   var CACHE_KEY = 'omakase_state_cache_v2';
-  var API = 'https://api.jpfoodmap.com/api/state';
+  var API_BASE = 'https://api.jpfoodmap.com/api';
+  var API = API_BASE + '/state';
+  var API_SESSION = API_BASE + '/session';
+  var API_ME = API_BASE + '/me';
 
   function loadAuth() {
     try { return JSON.parse(localStorage.getItem(AUTH_KEY) || '{}'); }
     catch (_) { return {}; }
   }
   function saveAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
+  // Async sign-out: revoke the server cookie first, then clear local state.
+  // Survives network errors — we always reload so the page rebuilds in the
+  // signed-out state regardless of what the Worker said.
   function signOut() {
-    localStorage.removeItem(AUTH_KEY);
-    location.reload();
+    var done = false;
+    function finish() {
+      if (done) return; done = true;
+      localStorage.removeItem(AUTH_KEY);
+      location.reload();
+    }
+    try {
+      fetch(API_SESSION, {method: 'DELETE', credentials: 'include'})
+        .catch(function(){}).finally(finish);
+    } catch (_) { finish(); }
+    // Hard timeout in case the Worker hangs.
+    setTimeout(finish, 1500);
   }
 
   function loadCache() {
@@ -2751,19 +2775,71 @@ FILTER_JS_TEMPLATE = r"""
     }));
   }
 
-  // Single source of truth for "are we currently signed in with a token
-  // that hasn't expired yet". exp is stored in ms on saveAuth(). Returns
-  // the full auth object (including id_token, email, name, picture) when
-  // valid, null otherwise — callers use truthiness.
+  // Single source of truth for "are we currently signed in". The mirrored
+  // session info (sub OR legacy id_token) must exist and the cached server-
+  // side exp must still be in the future. Returns the auth object (with
+  // email/name/picture) on success, null otherwise.
   function configured() {
     var a = loadAuth();
-    if (!a.id_token) return null;
-    if (a.exp && Date.now() >= a.exp) return null;   // expired
+    if (!a.sub && !a.id_token) return null;
+    if (a.exp && Date.now() >= a.exp) return null;
     return a;
   }
-  function authHeaders() {
-    var a = configured();
-    return a ? {'Authorization': 'Bearer ' + a.id_token} : null;
+  // Helper for every authed fetch. credentials:'include' lets the cookie
+  // ride; Bearer is only appended when a legacy id_token is still around
+  // (Worker prefers cookie when both are present).
+  function fetchAuthed(url, opts) {
+    opts = opts || {};
+    opts.credentials = 'include';
+    var a = loadAuth();
+    if (a && a.id_token) {
+      opts.headers = Object.assign({}, opts.headers || {}, {
+        'Authorization': 'Bearer ' + a.id_token
+      });
+    }
+    return fetch(url, opts);
+  }
+  // Trade a Google id_token for a 90-day Worker session cookie. The Worker
+  // verifies the id_token via Google tokeninfo and returns the signed-in
+  // profile + server-side exp. cb(true, profile) on success.
+  function exchangeForSession(idToken, cb) {
+    cb = cb || function(){};
+    fetch(API_SESSION, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id_token: idToken})
+    }).then(function(r) {
+      if (!r.ok) { cb(false); return; }
+      return r.json().then(function(p) { cb(true, p); });
+    }).catch(function() { cb(false); });
+  }
+  // Helper used by all "we just got a fresh server session" paths. Stores
+  // the profile without an id_token — the cookie is the source of truth
+  // for sync; localStorage just mirrors the visible profile + exp.
+  function saveSessionProfile(p) {
+    saveAuth({
+      sub: p.sub,
+      email: p.email || '',
+      name: p.name || '',
+      picture: p.picture || '',
+      exp: p.exp || 0
+    });
+  }
+  // Cheap "am I still signed in" probe — the Worker reads the cookie and
+  // returns the profile, no Google round-trip. cb(true) on success and
+  // localStorage is refreshed with the latest server exp.
+  function tryMe(cb) {
+    cb = cb || function(){};
+    fetch(API_ME, {credentials: 'include'})
+      .then(function(r) {
+        if (!r.ok) { cb(false); return; }
+        return r.json().then(function(p) {
+          saveSessionProfile(p);
+          cb(true);
+        });
+      })
+      .catch(function() { cb(false); });
   }
 
   function initMap(data) {
@@ -2821,6 +2897,9 @@ FILTER_JS_TEMPLATE = r"""
     // LOCATE_ASSETS; we drive it from the bottom-right locate FAB so the
     // control sits alongside the layer toggles instead of being a stray
     // Leaflet UI in the corner.
+    // maximumAge 10min lets the OS hand back a recent cached fix without
+    // re-summoning the GPS subsystem — on iOS Safari this is what
+    // suppresses the "Allow location" prompt on every reopen.
     var locateCtl = L.control.locate({
       position: 'topleft',
       flyTo: true,
@@ -2831,13 +2910,26 @@ FILTER_JS_TEMPLATE = r"""
       showCompass: true,
       drawCircle: true,
       drawMarker: true,
-      locateOptions: {enableHighAccuracy: true, maximumAge: 5000, watch: false},
+      locateOptions: {enableHighAccuracy: true, maximumAge: 600000, watch: false},
       strings: {
         title: '显示我的位置',
         popup: '你在约 {distance} {unit} 范围内',
         outsideMapBoundsMsg: '当前位置在地图范围之外'
       }
     }).addTo(map);
+    // Persist every successful fix so a reopen can paint the last position
+    // immediately (before the live fix arrives).
+    var LAST_LOC_KEY = 'tabelog.lastLocation';
+    map.on('locationfound', function(e) {
+      try {
+        localStorage.setItem(LAST_LOC_KEY, JSON.stringify({
+          lat: e.latlng.lat,
+          lon: e.latlng.lng,
+          acc: e.accuracy || null,
+          ts: Date.now()
+        }));
+      } catch (_) {}
+    });
     var locateFab = document.getElementById('fab-locate');
     if (locateFab) {
       locateFab.addEventListener('click', function() {
@@ -2851,6 +2943,25 @@ FILTER_JS_TEMPLATE = r"""
       map.on('locateactivate',   function() { locateFab.classList.add('locating'); });
       map.on('locatedeactivate', function() { locateFab.classList.remove('locating'); });
     }
+
+    // Permissions API: surface a tooltip hint when location is denied so the
+    // FAB explains itself instead of silently failing. We deliberately don't
+    // auto-start the locate plugin on 'granted' — that would flyTo the user's
+    // position and override the restored tabelog.mapView. The user taps the
+    // FAB when they want to be located; the maximumAge bump above ensures
+    // that tap reuses a cached OS fix without re-prompting.
+    (function checkGeoPermission() {
+      if (!navigator.permissions || !navigator.permissions.query) return;
+      try {
+        var p = navigator.permissions.query({name: 'geolocation'});
+        if (!p || typeof p.then !== 'function') return;
+        p.then(function(status) {
+          if (status && status.state === 'denied' && locateFab) {
+            locateFab.title = '定位被浏览器禁用，请在浏览器设置中开启';
+          }
+        }).catch(function() {});
+      } catch (_) {}
+    })();
 
     // ===== FAB layer toggles: transit overlay + attractions =====
     // Vector transit layer rendered from precomputed docs/transit/japan.geojson
@@ -4318,8 +4429,7 @@ FILTER_JS_TEMPLATE = r"""
     // freshly-minted token too.
     var pullRetriedAfterSilent = false;
     function pull() {
-      var headers = authHeaders();
-      if (!headers) {
+      if (!configured()) {
         setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式',
                   dirty ? 'err' : '');
         updateNeedsSyncIndicator();
@@ -4328,7 +4438,7 @@ FILTER_JS_TEMPLATE = r"""
       // Don't clobber unsent local edits with a stale remote.
       if (dirty) { updateNeedsSyncIndicator(); return; }
       setStatus('同步中…', 'busy');
-      fetch(API, {headers: headers})
+      fetchAuthed(API)
         .then(function(r) {
           if (r.status === 401) {
             // If we already retried after a silent refresh and STILL got
@@ -4401,12 +4511,11 @@ FILTER_JS_TEMPLATE = r"""
     }
     var pushRetriedAfterSilent = false;
     function push() {
-      var headers = authHeaders();
       // Local mode (not signed in): nothing to push, but keep dirty=true so
       // the FAB keeps flashing — the whole point is for the user to notice
       // they haven't enabled sync. Indicator clears once they sign in and
       // a real push succeeds.
-      if (!headers) {
+      if (!configured()) {
         saveCache(state, dirty);
         setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式',
                   dirty ? 'err' : '');
@@ -4414,13 +4523,16 @@ FILTER_JS_TEMPLATE = r"""
         return;
       }
       setStatus('保存中…', 'busy');
-      headers['Content-Type'] = 'application/json';
       var body = JSON.stringify({
         favorites: Array.from(state.fav),
         blacklist: Array.from(state.black),
         bookmarks: bookmarks,
       });
-      fetch(API, {method: 'PUT', headers: headers, body: body})
+      fetchAuthed(API, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: body
+      })
         .then(function(r) {
           if (r.status === 401) {
             if (pushRetriedAfterSilent) {
@@ -5486,58 +5598,38 @@ FILTER_JS_TEMPLATE = r"""
     var signinBtnContainer = document.getElementById('ssm-signin-btn');
     var cfgMsg  = document.getElementById('ssm-cfg-msg');
 
-    // Decode a Google ID token (JWT) and persist {id_token, email, name,
-    // picture, exp} via saveAuth(). Pure data — no UI side effects, no
-    // page reload — so both the interactive sign-in callback and the
-    // silent re-auth path can reuse it. Returns true on success.
-    function saveAuthFromCredential(credential) {
-      try {
-        var parts = credential.split('.');
-        var pad = '='.repeat((4 - parts[1].length % 4) % 4);
-        var b64 = (parts[1] + pad).replace(/-/g, '+').replace(/_/g, '/');
-        var payload = JSON.parse(decodeURIComponent(
-          atob(b64).split('').map(function(c) {
-            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-          }).join('')));
-        saveAuth({
-          id_token: credential,
-          email: payload.email || '',
-          name:  payload.name  || '',
-          picture: payload.picture || '',
-          exp: (payload.exp || 0) * 1000
-        });
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
-
-    // GIS callback for the visible sign-in button. Saves the new token and
-    // reloads so the rest of the page boots into the signed-in state.
+    // GIS callback for the visible sign-in button. Exchanges the Google
+    // credential for a Worker session cookie, mirrors the profile into
+    // localStorage, then reloads so the rest of the page boots signed in.
     function onGoogleCredential(resp) {
       if (!resp || !resp.credential) {
         cfgMsg.style.color = '#dc2626';
         cfgMsg.textContent = '登录被取消';
         return;
       }
-      if (!saveAuthFromCredential(resp.credential)) {
-        cfgMsg.style.color = '#dc2626';
-        cfgMsg.textContent = '登录处理失败';
-        return;
-      }
-      cfgMsg.style.color = '#16a34a';
-      cfgMsg.textContent = '✓ 登录成功，重新加载…';
-      setTimeout(function() { location.reload(); }, 600);
+      cfgMsg.style.color = '';
+      cfgMsg.textContent = '登录中…';
+      exchangeForSession(resp.credential, function(ok, profile) {
+        if (!ok || !profile) {
+          cfgMsg.style.color = '#dc2626';
+          cfgMsg.textContent = '登录处理失败';
+          return;
+        }
+        saveSessionProfile(profile);
+        cfgMsg.style.color = '#16a34a';
+        cfgMsg.textContent = '✓ 登录成功，重新加载…';
+        setTimeout(function() { location.reload(); }, 600);
+      });
     }
 
-    // Silent re-auth via Google One Tap with auto_select. Google ID tokens
-    // have a fixed 1h TTL (Google-side, can't extend); without this the
-    // user gets bumped to the sign-in button every hour, which on mobile
-    // (where the browser eagerly evicts background tabs) feels like
-    // "closing the app logs me out". With auto_select + an active Google
-    // session in the browser, this completes with no UI at all. Multi-
-    // account users see a single One Tap chooser — one click to refresh.
-    // FedCM is opted in (use_fedcm_for_prompt) so the flow survives
+    // Silent re-auth via Google One Tap with auto_select. Now used only as a
+    // last resort — the cookie session lasts 90 days so most loads skip GIS
+    // entirely (see tryRestoreSession's /api/me probe). When this DOES run,
+    // a successful re-auth is immediately exchanged for a fresh cookie so
+    // the 90-day clock resets.
+    // With auto_select + an active Google session in the browser, this
+    // completes with no UI at all. Multi-account users see a single One Tap
+    // chooser — one click to refresh. FedCM is opted in so the flow survives
     // Chrome's third-party cookie phaseout.
     // Queue of callbacks waiting on the current in-flight attempt. null
     // means no attempt is running. Coalescing matters because pull and
@@ -5563,11 +5655,15 @@ FILTER_JS_TEMPLATE = r"""
       google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: function(resp) {
-          if (resp && resp.credential && saveAuthFromCredential(resp.credential)) {
-            finish(true);
-          } else {
-            finish(false);
-          }
+          if (!resp || !resp.credential) { finish(false); return; }
+          exchangeForSession(resp.credential, function(ok, profile) {
+            if (ok && profile) {
+              saveSessionProfile(profile);
+              finish(true);
+            } else {
+              finish(false);
+            }
+          });
         },
         auto_select: true,
         use_fedcm_for_prompt: true,
@@ -5591,47 +5687,80 @@ FILTER_JS_TEMPLATE = r"""
       setTimeout(function() { finish(false); }, 4000);
     }
 
-    // Called on page load (after GIS loads) and on sync 401. Attempts to
-    // refresh the id_token silently; on success the new token is in
-    // localStorage and any in-page UI that re-checks configured() will
-    // see it as signed-in again.
-    function tryRestoreSession(cb) {
-      cb = cb || function(){};
-      var raw = loadAuth();
-      if (!raw.id_token) { cb(false); return; }
-      // Token still valid → nothing to do.
-      if (raw.exp && Date.now() < raw.exp - 60000) { cb(true); return; }
-      silentReAuth(function(ok) {
-        if (ok) {
-          refreshAuthUI();
-          // startSync already ran in local-mode (token had expired by the
-          // time it checked). Now that we have a fresh token, kick a
-          // sync — push if there's a pending local change, pull otherwise
-          // — so the user doesn't sit in "本地模式" until the 60s poll.
-          if (dirty) push(); else pull();
+    // Wait for the GIS script to materialize before invoking it. Used by
+    // the rare branches that actually need Google (boot-time fallback +
+    // 401 recovery in pull/push). The common boot path doesn't need GIS
+    // at all because /api/me works with just the cookie.
+    function whenGIS(fn) {
+      var n = 0;
+      (function tick() {
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+          fn(); return;
         }
-        cb(ok);
+        if (n++ > 30) return;   // ~3s give-up
+        setTimeout(tick, 100);
+      })();
+    }
+    function fallbackSilentGIS(cb) {
+      cb = cb || function(){};
+      whenGIS(function() {
+        silentReAuth(function(ok) {
+          if (ok) {
+            refreshAuthUI();
+            if (dirty) push(); else pull();
+          }
+          cb(ok);
+        });
       });
     }
 
-    // Boot-time silent re-auth. Waits for GIS to load (same retry budget
-    // as renderSignInButton — ~3 s), then attempts to refresh. Mostly
-    // invisible: succeeds silently on single-account browsers, no-ops if
-    // the token is still fresh, and triggers the One Tap chooser only
-    // for multi-account users with an expired token.
-    var bootSilentAttempt = 0;
+    // Called on page load and after a 401 from sync. Tiered restore:
+    //   1) GET /api/me — cheapest path, validates the existing Worker
+    //      session cookie without touching Google.
+    //   2) If localStorage still has a legacy id_token (page loaded before
+    //      cookie sessions existed), POST it to /api/session to upgrade
+    //      directly. No One Tap UI either.
+    //   3) Last resort: GIS silent One Tap, then exchange the resulting
+    //      credential for a fresh cookie.
+    function tryRestoreSession(cb) {
+      cb = cb || function(){};
+      var raw = loadAuth();
+      if (!raw.sub && !raw.id_token) { cb(false); return; }
+
+      tryMe(function(ok) {
+        if (ok) {
+          refreshAuthUI();
+          if (dirty) push(); else pull();
+          cb(true);
+          return;
+        }
+        if (raw.id_token && raw.exp && Date.now() < raw.exp - 60000) {
+          exchangeForSession(raw.id_token, function(ok2, p) {
+            if (ok2 && p) {
+              saveSessionProfile(p);
+              refreshAuthUI();
+              if (dirty) push(); else pull();
+              cb(true);
+            } else {
+              fallbackSilentGIS(cb);
+            }
+          });
+          return;
+        }
+        fallbackSilentGIS(cb);
+      });
+    }
+
+    // Boot-time restore — fires immediately, no GIS wait, because the
+    // common path is just an /api/me probe. Only the fall-through to
+    // fallbackSilentGIS needs Google, and that's wrapped in whenGIS.
     function bootSilentReAuth() {
-      if (!window.google || !google.accounts || !google.accounts.id) {
-        if (bootSilentAttempt > 30) return;
-        bootSilentAttempt++;
-        setTimeout(bootSilentReAuth, 100);
-        return;
-      }
       tryRestoreSession();
     }
     // Only attempt if we previously had a session; first-time visitors
-    // shouldn't see an unsolicited One Tap toast on page load.
-    if (loadAuth().id_token) {
+    // shouldn't see an unsolicited One Tap toast or an /api/me round-trip
+    // on page load.
+    if (loadAuth().sub || loadAuth().id_token) {
       setTimeout(bootSilentReAuth, 0);
     }
 
