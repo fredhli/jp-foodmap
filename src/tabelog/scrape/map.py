@@ -2462,7 +2462,7 @@ self.addEventListener('fetch', (event) => {
     // sw.js itself must always come from the network so updates land.
     if (url.pathname.endsWith('/sw.js')) return;
     if (req.mode === 'navigate' || url.pathname.endsWith('.html')) {
-      event.respondWith(networkFirst(req));
+      event.respondWith(networkFirst(req, event));
     } else {
       event.respondWith(cacheFirst(req));
     }
@@ -2495,16 +2495,30 @@ async function cacheFirst(req) {
   return fresh;
 }
 
-async function networkFirst(req) {
+// Navigations prefer fresh HTML, but a returning user with a good cached
+// copy shouldn't stare at a blank page while a flaky connection crawls to
+// the browser's own timeout (roaming travelers are this site's core
+// audience). If the network hasn't answered within NAV_TIMEOUT_MS and a
+// cached copy exists, serve it; the fetch keeps running via waitUntil and
+// still refreshes the cache for next time.
+const NAV_TIMEOUT_MS = 3500;
+async function networkFirst(req, event) {
   const cache = await caches.open(CACHE);
-  try {
-    const fresh = await fetch(req);
+  const fetchP = fetch(req).then((fresh) => {
     if (cacheable(fresh)) cache.put(req, fresh.clone());
     return fresh;
-  } catch (e) {
-    const cached = await cache.match(req);
-    if (cached) return cached;
-    throw e;
+  });
+  if (event) event.waitUntil(fetchP.catch(() => {}));
+  const cached = await cache.match(req);
+  if (!cached) return fetchP;
+  let timer;
+  try {
+    return await Promise.race([
+      fetchP.catch(() => cached),
+      new Promise((res) => { timer = setTimeout(() => res(cached), NAV_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -3035,15 +3049,38 @@ FILTER_JS_TEMPLATE = r"""
       .catch(function() { cb(false); });
   }
 
+  // Bounded dependency wait. The old unbounded 50ms poll meant that if an
+  // ad blocker or captive Wi-Fi portal ate one plugin script, the user got
+  // a dead basemap with zero explanation while a 20 Hz timer spun forever.
+  // ~10s covers even a very slow CDN; past that we say so, visibly.
+  var initMapAttempts = 0;
+  function showBootFailure() {
+    if (document.getElementById('boot-fail-banner')) return;
+    var el = document.createElement('div');
+    el.id = 'boot-fail-banner';
+    el.style.cssText =
+      'position:fixed;top:12px;left:50%;transform:translateX(-50%);' +
+      'z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;' +
+      'border-radius:8px;font:13px -apple-system,BlinkMacSystemFont,' +
+      "'Segoe UI',sans-serif;box-shadow:0 4px 12px rgba(0,0,0,0.3);" +
+      'max-width:calc(100vw - 32px);text-align:center;';
+    el.textContent = localizeText(
+      '地图组件加载失败（网络问题或广告拦截插件）— 请刷新重试');
+    document.body.appendChild(el);
+  }
   function initMap(data) {
+    function again() {
+      if (++initMapAttempts > 200) { showBootFailure(); return; }
+      setTimeout(function(){ initMap(data); }, 50);
+    }
     var mapEl = document.querySelector('.folium-map');
-    if (!mapEl) { setTimeout(function(){ initMap(data); }, 50); return; }
+    if (!mapEl) { again(); return; }
     // Find the leaflet map object that folium attached to this element.
     var mapId = mapEl.id;
     var map = window[mapId];
-    if (!map) { setTimeout(function(){ initMap(data); }, 50); return; }
-    if (typeof L === 'undefined' || !L.markerClusterGroup) { setTimeout(function(){ initMap(data); }, 50); return; }
-    if (!L.control.locate) { setTimeout(function(){ initMap(data); }, 50); return; }
+    if (!map) { again(); return; }
+    if (typeof L === 'undefined' || !L.markerClusterGroup) { again(); return; }
+    if (!L.control.locate) { again(); return; }
 
     // Late-bound emoji observer for Leaflet popups: search-result temp
     // marker and the right-click "加入收藏" popup both inject HTML into
@@ -3828,21 +3865,6 @@ FILTER_JS_TEMPLATE = r"""
       bmShowError('');
       bmPending = null;
     }
-    function setBmModalBusy(busy) {
-      var saveBtn   = bmModal.querySelector('.bm-save');
-      var cancelBtn = bmModal.querySelector('.bm-cancel');
-      var closeBtn  = bmModal.querySelector('.bm-close');
-      if (busy) {
-        saveBtn.dataset.origLabel = saveBtn.textContent;
-        saveBtn.textContent = '…';
-      } else if (saveBtn.dataset.origLabel) {
-        saveBtn.textContent = saveBtn.dataset.origLabel;
-        delete saveBtn.dataset.origLabel;
-      }
-      saveBtn.disabled = busy;
-      cancelBtn.disabled = busy;
-      closeBtn.disabled = busy;
-    }
     function commitBookmark() {
       if (!bmPending) return;
       var name = (bmNameInput.value || '').trim();
@@ -3859,54 +3881,67 @@ FILTER_JS_TEMPLATE = r"""
       }
       var emoji = emojiRaw || '📍';
       bmShowError('');
-      // Capture coords + category now so a click on a different pin while
-      // we're awaiting the translate fetch can't redirect the save.
       var pendingLat = bmPending.lat;
       var pendingLng = bmPending.lng;
       var pendingCat = bmKind;
-      setBmModalBusy(true);
-      // Wikidata lookup: hit fills sc/tc/jp/en with community-curated
-      // labels, miss leaves them empty — display falls back to name_src
-      // via bmDisplayName. We deliberately don't fall back to MT here;
-      // honest empty fields beat literal translations of proper nouns
-      // ("新世界" → "new world" was the cautionary example).
+      // Save the pin immediately. The schema tolerates empty translated
+      // names (bmDisplayName falls back to name_src), so there's no
+      // reason to hold the modal hostage to up to four sequential
+      // cross-origin Wikipedia/Wikidata round trips on a slow network —
+      // that used to lock 保存/取消 behind a "…" spinner with no timeout.
+      var bm = {
+        id: 'bm-' + Date.now().toString(36) + '-' +
+            Math.random().toString(36).slice(2, 7),
+        name_src: name,
+        name_sc: '', name_tc: '', name_jp: '', name_en: '',
+        emoji: emoji,
+        lat: pendingLat,
+        lon: pendingLng,
+        category: pendingCat
+      };
+      bookmarks.push(bm);
+      renderBookmark(bm);
+      saveBookmarks();
+      schedulePush();
+      // If a search-temp 📍 sits at this exact spot it's the one being
+      // bookmarked — drop it so the bookmark emoji doesn't stack on top.
+      // Coord match instead of a "source" flag keeps the right-click path
+      // from accidentally clearing an unrelated search pin elsewhere.
+      if (ssTempMarker) {
+        var t = ssTempMarker.getLatLng();
+        if (Math.abs(t.lat - bm.lat) < 1e-7 && Math.abs(t.lng - bm.lon) < 1e-7) {
+          ssRemoveTempMarker();
+        }
+      }
+      // Make sure the right layer is visible after adding — if the user
+      // has the corresponding FAB toggled off, surface the pin by
+      // re-enabling it.
+      var fabId = (bm.category === 'attraction') ? 'fab-attractions' : 'fab-bookmarks';
+      var fab = document.getElementById(fabId);
+      if (fab && fab.getAttribute('aria-pressed') !== 'true') fab.click();
+      closeBookmarkModal();
+      // Wikidata backfill, fully async: hit fills sc/tc/jp/en with
+      // community-curated labels, miss leaves them empty. We deliberately
+      // don't fall back to MT; honest empty fields beat literal
+      // translations of proper nouns ("新世界" → "new world" was the
+      // cautionary example). Refetch the entry by id before mutating —
+      // a pull/merge may have replaced the object, or the user may have
+      // deleted the pin while the lookup was in flight.
       wikidataLookup(name, pendingLat, pendingLng).then(function(wd) {
-        var bm = {
-          id: 'bm-' + Date.now().toString(36) + '-' +
-              Math.random().toString(36).slice(2, 7),
-          name_src: name,
-          name_sc: (wd && wd.sc) || '',
-          name_tc: (wd && wd.tc) || '',
-          name_jp: (wd && wd.jp) || '',
-          name_en: (wd && wd.en) || '',
-          emoji: emoji,
-          lat: pendingLat,
-          lon: pendingLng,
-          category: pendingCat
-        };
-        bookmarks.push(bm);
-        renderBookmark(bm);
+        if (!wd || !(wd.sc || wd.tc || wd.jp || wd.en)) return;
+        var cur = null;
+        for (var i = 0; i < bookmarks.length; i++) {
+          if (bookmarks[i] && bookmarks[i].id === bm.id) { cur = bookmarks[i]; break; }
+        }
+        if (!cur) return;   // deleted meanwhile — don't resurrect
+        cur.name_sc = wd.sc || '';
+        cur.name_tc = wd.tc || '';
+        cur.name_jp = wd.jp || '';
+        cur.name_en = wd.en || '';
+        removeBookmarkMarker(cur);
+        renderBookmark(cur);
         saveBookmarks();
         schedulePush();
-        // If a search-temp 📍 sits at this exact spot it's the one being
-        // bookmarked — drop it so the bookmark emoji doesn't stack on top.
-        // Coord match instead of a "source" flag keeps the right-click path
-        // from accidentally clearing an unrelated search pin elsewhere.
-        if (ssTempMarker) {
-          var t = ssTempMarker.getLatLng();
-          if (Math.abs(t.lat - bm.lat) < 1e-7 && Math.abs(t.lng - bm.lon) < 1e-7) {
-            ssRemoveTempMarker();
-          }
-        }
-        // Make sure the right layer is visible after adding — if the user
-        // has the corresponding FAB toggled off, surface the pin by
-        // re-enabling it.
-        var fabId = (bm.category === 'attraction') ? 'fab-attractions' : 'fab-bookmarks';
-        var fab = document.getElementById(fabId);
-        if (fab && fab.getAttribute('aria-pressed') !== 'true') fab.click();
-      }).then(function() {
-        setBmModalBusy(false);
-        closeBookmarkModal();
       });
     }
     bmBackdrop.addEventListener('click', closeBookmarkModal);
@@ -5359,7 +5394,16 @@ FILTER_JS_TEMPLATE = r"""
       }).catch(function(err) {
         console.warn('[tabelog] translate failed:', err);
         btn.disabled = false;
-        setTxBtnLabel(btn, '翻译');
+        // Visible failure: the button used to just flicker "…" and snap
+        // back, which read as "nothing happened" (notably for users where
+        // the unofficial gtx endpoint is blocked). Show why for a couple
+        // of seconds, then restore the affordance.
+        setTxBtnLabel(btn, '翻译失败');
+        setTimeout(function() {
+          if (btn.isConnected && btn.dataset.state !== 'translated') {
+            setTxBtnLabel(btn, '翻译');
+          }
+        }, 2200);
       });
     });
 

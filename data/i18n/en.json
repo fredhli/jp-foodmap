@@ -744,5 +744,9 @@
   "导入备份": "Import backup",
   "选择要导入的内容": "Choose what to import",
   "将合并到现有数据并自动去重": "it will be merged into your existing data with duplicates skipped",
-  "不会覆盖现有项": "existing items are never overwritten"
+  "不会覆盖现有项": "existing items are never overwritten",
+  "翻译失败": "Translate failed",
+  "地图组件加载失败": "Map components failed to load",
+  "网络问题或广告拦截插件": "network issue or ad blocker",
+  "请刷新重试": "please refresh to retry"
 }
