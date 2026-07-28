@@ -1867,6 +1867,16 @@ BOOKMARKS_MODAL_HTML = """
     flex: 1; min-width: 0;
     text-align: left; font-size: 18px;
   }
+  /* Phones: 16px inputs suppress iOS focus-zoom (same fix #ss-input got),
+     and the modal anchors to the upper part of the screen instead of
+     center — fixed centering is relative to the layout viewport, so with
+     the keyboard up the lower half (emoji row, 保存/取消) sat behind it. */
+  @media (max-width: 480px) {
+    #bm-modal { top: 7dvh; transform: translate(-50%, 0) scale(0.96); }
+    #bm-modal.bm-open { transform: translate(-50%, 0) scale(1); }
+    #bm-modal .bm-row > input { font-size: 16px; }
+    #bm-modal #bm-emoji { font-size: 18px; }
+  }
   /* "常用" quick-pick row — small label + chip buttons, on a tinted
      panel so the section is visually separate from the typed input. */
   #bm-modal .bm-quick {
@@ -3842,10 +3852,12 @@ FILTER_JS_TEMPLATE = r"""
       bmEmojiMore.textContent = '🔽';
     }
 
+    var bmInitialName = '';
     function openBookmarkModal(latlng, prefillName) {
       bmPending = {lat: latlng.lat, lng: latlng.lng};
       bmCoordEl.textContent = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
       bmNameInput.value = prefillName || '';
+      bmInitialName = bmNameInput.value;
       bmEmojiInput.value = '📍';
       bmSetKind('bookmark');           // reset default each open
       bmShowError('');
@@ -3944,7 +3956,15 @@ FILTER_JS_TEMPLATE = r"""
         schedulePush();
       });
     }
-    bmBackdrop.addEventListener('click', closeBookmarkModal);
+    // A stray tap on the dimmed backdrop is easy on phones (the keyboard
+    // shoves the modal around) — don't let it eat a typed name silently.
+    // Explicit 取消 / × still close without asking.
+    bmBackdrop.addEventListener('click', function() {
+      var typed = (bmNameInput.value || '').trim();
+      if (typed && typed !== bmInitialName
+          && !confirm(localizeText('放弃当前输入？'))) return;
+      closeBookmarkModal();
+    });
     bmModal.querySelector('.bm-close').addEventListener('click', closeBookmarkModal);
     bmModal.querySelector('.bm-cancel').addEventListener('click', closeBookmarkModal);
     bmModal.querySelector('.bm-save').addEventListener('click', commitBookmark);
