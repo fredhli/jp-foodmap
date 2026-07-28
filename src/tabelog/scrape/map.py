@@ -4453,6 +4453,7 @@ FILTER_JS_TEMPLATE = r"""
       ssCloseDropdown();
       ssInput.value = d.name || '';
       ssWrap.classList.add('has-text');
+      ssTitleMode = true;
       ssInput.blur();
       ssRemoveTempMarker();
 
@@ -4495,10 +4496,24 @@ FILTER_JS_TEMPLATE = r"""
       var TARGET_ZOOM = 17;
       var latlng = L.latLng(d.lat, d.lon);
       var targetZoom = Math.max(map.getZoom(), TARGET_ZOOM);
-      function onArrive() {
+      var onArrive = function() {
         map.off('moveend', onArrive);
-        reveal();
-      }
+        if (ssFlightArrive === onArrive) ssFlightArrive = null;
+        // Only reveal if we actually landed — a drag that interrupts the
+        // flyTo also ends in a moveend, but nowhere near the target, and
+        // popping the card there would be the "ghost card" bug.
+        var c = map.getCenter();
+        var arrived = map.getZoom() >= targetZoom - 0.5
+                   && Math.abs(c.lat - d.lat) < 0.005
+                   && Math.abs(c.lng - d.lon) < 0.005;
+        if (arrived) {
+          reveal();
+        } else if (pinnedRow === d) {
+          pinnedRow = null;   // interrupted — release the reaper pin
+        }
+      };
+      if (ssFlightArrive) map.off('moveend', ssFlightArrive);
+      ssFlightArrive = onArrive;
       map.on('moveend', onArrive);
       map.flyTo(latlng, targetZoom, {duration: 0.8});
     }
@@ -4506,6 +4521,7 @@ FILTER_JS_TEMPLATE = r"""
       ssCloseDropdown();
       ssInput.value = it.name;
       ssWrap.classList.add('has-text');
+      ssTitleMode = true;
       ssInput.blur();        // dismiss the on-screen keyboard on mobile
       var latlng = L.latLng(it.lat, it.lon);
       // 16 is tight enough to read shop signs without losing context. flyTo
@@ -4571,6 +4587,21 @@ FILTER_JS_TEMPLATE = r"""
     // Latest local match for the current query; held in module scope so the
     // API callback can re-render with the same restaurant section on top.
     var ssLocalMatch = {items: [], total: 0};
+    // The input doubles as the selected restaurant's title bar. ssQuery is
+    // the user's own typed text, tracked separately so selections can't eat
+    // it: openSheet switches the display to the name (title mode),
+    // closeSheet switches the query back, and refocusing the input while a
+    // title is shown resumes the search where it left off. Only the user
+    // (typing, ×, Escape) ever changes ssQuery.
+    var ssQuery = '';
+    var ssTitleMode = false;
+    // Last Nominatim result list, so a focus-resume can restore the full
+    // dropdown without refetching.
+    var ssLastApi = null;
+    // The in-flight search flight's moveend handler; tracked so a second
+    // result click (or any interruption) detaches the stale one instead of
+    // leaving it armed to pop the wrong card on a later pan.
+    var ssFlightArrive = null;
     function ssSearch(q) {
       var seq = ++ssReqSeq;
       ssWrap.classList.add('busy');
@@ -4594,16 +4625,25 @@ FILTER_JS_TEMPLATE = r"""
           var items = (Array.isArray(arr) ? arr : [])
             .map(ssParseResult)
             .filter(function(x){ return !isNaN(x.lat) && !isNaN(x.lon); });
+          ssLastApi = items;
+          // The user moved on to a card while this was in flight — cache
+          // the results for focus-resume, but don't pop the dropdown open
+          // over the sheet they're reading.
+          if (ssTitleMode) return;
           ssRender(ssLocalMatch, items, false);
         })
         .catch(function(err) {
           if (seq !== ssReqSeq) return;
           ssWrap.classList.remove('busy');
+          if (ssTitleMode) return;
           ssShowError(ssLocalMatch, '搜索失败: ' + err.message);
         });
     }
     function ssOnInput() {
       var v = ssInput.value.trim();
+      ssTitleMode = false;   // typing makes the input a live query again
+      ssQuery = v;
+      ssLastApi = null;
       if (v) ssWrap.classList.add('has-text');
       else   ssWrap.classList.remove('has-text');
       clearTimeout(ssDebounce);
@@ -4628,6 +4668,9 @@ FILTER_JS_TEMPLATE = r"""
     function ssExitSearch() {
       ssReqSeq++;
       ssLocalMatch = {items: [], total: 0};
+      ssQuery = '';
+      ssTitleMode = false;
+      ssLastApi = null;
       ssInput.value = '';
       ssWrap.classList.remove('has-text');
       ssWrap.classList.remove('busy');
@@ -4640,6 +4683,16 @@ FILTER_JS_TEMPLATE = r"""
     ssInput.addEventListener('input', ssOnInput);
     ssInput.addEventListener('focus', function() {
       ssWrap.classList.add('searching');
+      // Focusing while the box shows a selection title resumes the search:
+      // the typed query comes back along with its cached results. With a
+      // title but no prior query, select-all so typing replaces wholesale.
+      if (ssTitleMode && ssQuery) {
+        ssTitleMode = false;
+        ssInput.value = ssQuery;
+        ssRender(ssLocalMatch, ssLastApi, false);
+      } else if (ssTitleMode) {
+        ssInput.select();
+      }
       if (ssList.children.length > 0) ssList.classList.add('open');
     });
     ssInput.addEventListener('keydown', function(e) {
@@ -5484,13 +5537,16 @@ FILTER_JS_TEMPLATE = r"""
       }
       bsSheet.classList.toggle('bs-peek', peek);
       bsActive = d;
-      // Reflect the selection in the top search box. The × button stays
-      // visible (via .has-text) regardless of whether the dropdown is
-      // open, so the user has a one-click "deselect" affordance even when
-      // the sheet is collapsed to peek and they've panned the map around.
+      // Reflect the selection in the top search box (title mode — the
+      // user's typed query survives in ssQuery and comes back when the
+      // sheet closes). The × button stays visible (via .has-text)
+      // regardless of whether the dropdown is open, so the user has a
+      // one-click "deselect" affordance even when the sheet is collapsed
+      // to peek and they've panned the map around.
       if (ssInput) {
         ssInput.value = d.name || '';
         ssWrap.classList.add('has-text');
+        ssTitleMode = true;
       }
       // Hide the filter FAB so the bottom-left corner stays clean while
       // the restaurant card occupies the bottom slot.
@@ -5544,13 +5600,21 @@ FILTER_JS_TEMPLATE = r"""
       // Release the search-nav pin so the next pan can reap the marker.
       pinnedRow = null;
       clearHighlight();
-      // Drop the selected-restaurant name from the top search box. The
-      // input may be holding either that name (if the user opened the
-      // sheet then never touched the box) or a typed query (if they were
-      // mid-search) — both should clear when the selection goes away.
-      if (ssInput) {
-        ssInput.value = '';
-        ssWrap.classList.remove('has-text');
+      // Swap the selected-restaurant title out of the search box. If the
+      // user was mid-search when they opened the card, their query comes
+      // back — browsing several candidates used to mean retyping it after
+      // every card. When the input holds a live query the user typed after
+      // opening the card (not title mode), leave it entirely alone. × still
+      // wipes everything via ssExitSearch.
+      if (ssInput && ssTitleMode) {
+        ssTitleMode = false;
+        if (ssQuery) {
+          ssInput.value = ssQuery;
+          ssWrap.classList.add('has-text');
+        } else {
+          ssInput.value = '';
+          ssWrap.classList.remove('has-text');
+        }
       }
       var ffbtn = document.getElementById('ff-fab');
       if (ffbtn) ffbtn.hidden = false;
