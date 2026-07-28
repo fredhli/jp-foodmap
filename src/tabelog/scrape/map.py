@@ -1534,6 +1534,9 @@ SEARCH_BOX_HTML = """
   }
   #ss-list .ss-row:last-child { border-bottom: none; }
   #ss-list .ss-row:hover { background: #f9fafb; }
+  /* Keyboard-highlighted row — slightly stronger than hover so both can
+     coexist without ambiguity about which one Enter will pick. */
+  #ss-list .ss-row.ss-active { background: #eff6ff; }
   #ss-list .ss-row.ss-empty {
     cursor: default; color: #6b7280; font-size: 12px;
     justify-content: center; padding: 14px 10px;
@@ -1683,6 +1686,8 @@ SEARCH_BOX_HTML = """
     <div id="ss-input-wrap">
       <span id="ss-icon">🔍</span>
       <input id="ss-input" type="text" autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="ss-list"
+             aria-autocomplete="list"
              placeholder="搜索餐厅 / 景点 / 地址 ...">
       <div id="ss-spinner"></div>
       <button id="ss-clear" type="button" aria-label="清空">×</button>
@@ -4379,8 +4384,33 @@ FILTER_JS_TEMPLATE = r"""
       });
       ssList.appendChild(row);
     }
+    // Keyboard highlight over the dropdown's actionable rows. Reset on
+    // every re-render (the rows are new nodes); Enter falls back to the
+    // first row when nothing is highlighted, matching the old behavior.
+    var ssActiveIdx = -1;
+    function ssNavRows() {
+      return ssList.querySelectorAll('.ss-row:not(.ss-empty)');
+    }
+    function ssResetActive() {
+      ssActiveIdx = -1;
+      ssInput.removeAttribute('aria-activedescendant');
+    }
+    function ssSetActive(idx) {
+      var rows = ssNavRows();
+      if (!rows.length) { ssResetActive(); return; }
+      if (idx < 0) idx = rows.length - 1;
+      if (idx >= rows.length) idx = 0;
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.toggle('ss-active', i === idx);
+      }
+      ssActiveIdx = idx;
+      if (!rows[idx].id) rows[idx].id = 'ss-opt-' + idx;
+      ssInput.setAttribute('aria-activedescendant', rows[idx].id);
+      rows[idx].scrollIntoView({block: 'nearest'});
+    }
     function ssRender(localMatch, apiItems, apiPending) {
       ssList.innerHTML = '';
+      ssResetActive();
       var items = (localMatch && localMatch.items) || [];
       var total = (localMatch && localMatch.total) || 0;
       var hasLocal = items.length > 0;
@@ -4391,6 +4421,7 @@ FILTER_JS_TEMPLATE = r"""
         empty.textContent = '没有匹配的结果';
         ssList.appendChild(empty);
         ssList.classList.add('open');
+      ssInput.setAttribute('aria-expanded', 'true');
         return;
       }
       if (hasLocal) {
@@ -4416,12 +4447,14 @@ FILTER_JS_TEMPLATE = r"""
         }
       }
       ssList.classList.add('open');
+      ssInput.setAttribute('aria-expanded', 'true');
     }
     // Re-renders the dropdown with local section preserved, then appends a
     // single error row in place of the API section. Local hits stay usable
     // even when Nominatim is unreachable.
     function ssShowError(localMatch, msg) {
       ssList.innerHTML = '';
+      ssResetActive();
       var items = (localMatch && localMatch.items) || [];
       var total = (localMatch && localMatch.total) || 0;
       var ivc = localMatch ? localMatch.inViewportCount : null;
@@ -4442,9 +4475,12 @@ FILTER_JS_TEMPLATE = r"""
       r.textContent = msg;
       ssList.appendChild(r);
       ssList.classList.add('open');
+      ssInput.setAttribute('aria-expanded', 'true');
     }
     function ssCloseDropdown() {
       ssList.classList.remove('open');
+      ssInput.setAttribute('aria-expanded', 'false');
+      ssResetActive();
     }
     // Pan to a restaurant in the library and open its bottom sheet — the
     // same code path a marker click triggers. Keeps a temp marker out of
@@ -4605,6 +4641,9 @@ FILTER_JS_TEMPLATE = r"""
     function ssSearch(q) {
       var seq = ++ssReqSeq;
       ssWrap.classList.add('busy');
+      // The request is now genuinely in flight — this is where the 地图搜索
+      // section earns its 搜索中… row.
+      if (!ssTitleMode) ssRender(ssLocalMatch, null, true);
       // Japan bbox: lon 122-154, lat 24-46. viewbox order:
       //   x1 (left lon), y1 (top lat), x2 (right lon), y2 (bottom lat)
       // bounded=1 forbids matches outside the box; otherwise OSM happily
@@ -4657,9 +4696,14 @@ FILTER_JS_TEMPLATE = r"""
       }
       // Restaurant-library match runs synchronously — paint it first so the
       // user sees results in the same frame, no 300ms wait. The Nominatim
-      // call still goes through the debounce.
+      // call still goes through the debounce, and the 搜索中… row is only
+      // painted when that fetch actually fires (ssSearch) — showing it per
+      // keystroke advertised a request that kept being cancelled before it
+      // was sent, making map-search look perpetually slow. Exception: with
+      // zero local hits the dropdown would be blank (or claim "no
+      // matches") during the debounce, so the pending row stands in.
       ssLocalMatch = ssMatchLocal(v);
-      ssRender(ssLocalMatch, null, true);
+      ssRender(ssLocalMatch, null, ssLocalMatch.items.length === 0);
       ssDebounce = setTimeout(function() { ssSearch(v); }, 300);
     }
     // exitSearch: full bail-out. Used by the × button and Escape — clears
@@ -4693,19 +4737,33 @@ FILTER_JS_TEMPLATE = r"""
       } else if (ssTitleMode) {
         ssInput.select();
       }
-      if (ssList.children.length > 0) ssList.classList.add('open');
+      if (ssList.children.length > 0) {
+        ssList.classList.add('open');
+        ssInput.setAttribute('aria-expanded', 'true');
+      }
     });
     ssInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        if (ssList.classList.contains('open') && ssInput.value) {
+      var open = ssList.classList.contains('open');
+      if (e.key === 'ArrowDown' && open) {
+        e.preventDefault();
+        ssSetActive(ssActiveIdx + 1);
+      } else if (e.key === 'ArrowUp' && open) {
+        e.preventDefault();
+        ssSetActive(ssActiveIdx - 1);
+      } else if (e.key === 'Escape') {
+        if (open && ssInput.value) {
           ssCloseDropdown();
         } else {
           ssExitSearch();
         }
       } else if (e.key === 'Enter') {
-        // Enter on a non-empty dropdown -> pick the first result.
-        var first = ssList.querySelector('.ss-row:not(.ss-empty)');
-        if (first) first.click();
+        // Enter picks the keyboard-highlighted row; with no highlight,
+        // the first result (the previous behavior).
+        var rows = ssNavRows();
+        var target = (ssActiveIdx >= 0 && rows[ssActiveIdx])
+                   ? rows[ssActiveIdx]
+                   : ssList.querySelector('.ss-row:not(.ss-empty)');
+        if (target) target.click();
       }
     });
     // Mousedown preventDefault keeps focus on the input until our click
