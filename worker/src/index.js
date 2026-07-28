@@ -259,9 +259,41 @@ async function handleState(req, env, cors) {
   if (body.length > 200_000) {
     return new Response('payload too large', {status: 413, headers: cors});
   }
-  try { JSON.parse(body); }
+  let parsed;
+  try { parsed = JSON.parse(body); }
   catch (_) { return new Response('invalid json', {status: 400, headers: cors}); }
-  await env.KV.put(key, body);
+
+  // Optimistic concurrency. The stored blob carries a monotonically
+  // increasing `v`. New clients echo the version they last saw as `baseV`;
+  // a mismatch means another device wrote in between, so we return 409
+  // with the current blob and let the client three-way-merge and retry.
+  // Legacy clients don't send baseV and keep today's last-write-wins.
+  // (KV has no true CAS — concurrent writes at different PoPs can still
+  // race — but the realistic conflict is a stale device pushing hours or
+  // days later, which this catches.)
+  const cur = await env.KV.get(key);
+  let curV = 0;
+  if (cur) {
+    try {
+      const curObj = JSON.parse(cur);
+      if (typeof curObj.v === 'number') curV = curObj.v;
+    } catch (_) { /* unreadable blob — treat as v0 */ }
+  }
+  if (typeof parsed.baseV === 'number' && parsed.baseV !== curV) {
+    return new Response(cur ?? '{}', {
+      status: 409,
+      headers: {...cors, 'Content-Type': 'application/json'},
+    });
+  }
+  const versioned = typeof parsed.baseV === 'number';
+  delete parsed.baseV;
+  parsed.v = curV + 1;
+  await env.KV.put(key, JSON.stringify(parsed));
+  if (versioned) {
+    return new Response(JSON.stringify({v: parsed.v}), {
+      headers: {...cors, 'Content-Type': 'application/json'},
+    });
+  }
   return new Response('ok', {headers: cors});
 }
 

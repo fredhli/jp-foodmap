@@ -2876,6 +2876,38 @@ FILTER_JS_TEMPLATE = r"""
     }));
   }
 
+  // Last server state this device has seen, plus the blob version it carried.
+  // This is the common ancestor for the three-way merge that runs when a PUT
+  // comes back 409 (another device wrote in between): with it we can tell an
+  // add on one side from a delete on the other. Its own key — the state cache
+  // above predates it and old pages must keep reading that cache unchanged.
+  var SYNC_BASE_KEY = 'tabelog.syncBase';
+  function emptySyncBase(sub) {
+    return {v: 0, sub: sub || '', favorites: [], blacklist: [], bookmarks: []};
+  }
+  function loadSyncBase() {
+    try {
+      var d = JSON.parse(localStorage.getItem(SYNC_BASE_KEY) || '{}');
+      return {
+        v: typeof d.v === 'number' ? d.v : 0,
+        // Which Google account this snapshot belongs to. If the user signs
+        // into a different account, the base must be discarded (see push) —
+        // merging against another account's snapshot would misread all of
+        // its entries as "deleted by the other side".
+        sub: typeof d.sub === 'string' ? d.sub : '',
+        favorites: Array.isArray(d.favorites) ? d.favorites : [],
+        blacklist: Array.isArray(d.blacklist) ? d.blacklist : [],
+        bookmarks: Array.isArray(d.bookmarks) ? d.bookmarks : [],
+      };
+    } catch (_) {
+      return emptySyncBase('');
+    }
+  }
+  function saveSyncBase(base) {
+    try { localStorage.setItem(SYNC_BASE_KEY, JSON.stringify(base)); }
+    catch (_) { /* quota — merge degrades to union, never loses data */ }
+  }
+
   // Single source of truth for "are we currently signed in". The mirrored
   // session info (sub OR legacy id_token) must exist and the cached server-
   // side exp must still be in the future. Returns the auth object (with
@@ -4493,6 +4525,19 @@ FILTER_JS_TEMPLATE = r"""
     // dirty is restored from cache so an unpushed change survives a refresh.
     var dirty = cache.dirty || false;
     var pushTimer = null, pollTimer = null;
+    // Bumped on every local edit (schedulePush). A pull snapshots it before
+    // the fetch and discards the response if it moved while in flight —
+    // otherwise a star tapped during the round-trip would be visibly
+    // reverted by the stale remote blob and then re-uploaded as reverted.
+    var stateGen = 0;
+    // Server snapshot backing the 409 three-way merge; see loadSyncBase.
+    var syncBase = loadSyncBase();
+    // Serialize PUTs. Without this, push A (stale) can land after push B
+    // (fresh) and the server silently keeps A's state while the client
+    // thinks everything is synced. A push that fires while one is in
+    // flight just queues; the queued run re-snapshots state, so it always
+    // uploads the latest. pushQueuedDepth carries the 409-retry depth.
+    var pushInFlight = false, pushQueued = false, pushQueuedDepth = 0;
 
     // Flash the filter FAB when there are local changes that haven't
     // landed on the server. Colour depends on whether the user is signed in:
@@ -4525,6 +4570,43 @@ FILTER_JS_TEMPLATE = r"""
       updateBlackCount();
       apply();
     }
+    // Wipe + re-render the bookmarks store in place — closures hold the
+    // same array reference, so we mutate rather than reassign. Both layers
+    // (bookmarks + user-added attractions) get cleared so the rebuild
+    // starts from a clean slate. The builtin landmarks share the same
+    // layers, so the wipe takes them out too — renderFavoritesBuiltin puts
+    // them back (after rebuildHiddenIds, so a hide flag set on another
+    // device takes effect now). Used by pull() and the 409 merge path.
+    function replaceBookmarksArray(arr) {
+      bookmarks.length = 0;
+      bookmarksLayer.clearLayers();
+      userAttractionsLayer.clearLayers();
+      bmMarkerById = {};
+      arr.forEach(function(bm) {
+        sanitizeBookmarkEmoji(bm);
+        bookmarks.push(bm);
+        renderBookmark(bm);   // early-returns on hidden / no-coord
+      });
+      rebuildHiddenIds();
+      renderFavoritesBuiltin();
+      saveBookmarks();
+    }
+    // Deep-copied server snapshot for the merge base. Bookmark objects are
+    // edited in place elsewhere, so the base must not share references.
+    function currentSub() {
+      var a = configured();
+      return (a && a.sub) || '';
+    }
+    function snapshotRemote(remote) {
+      return {
+        v: typeof remote.v === 'number' ? remote.v : 0,
+        sub: currentSub(),
+        favorites: Array.isArray(remote.favorites) ? remote.favorites.slice() : [],
+        blacklist: Array.isArray(remote.blacklist) ? remote.blacklist.slice() : [],
+        bookmarks: Array.isArray(remote.bookmarks)
+          ? JSON.parse(JSON.stringify(remote.bookmarks)) : [],
+      };
+    }
     // True for the single retry that follows a successful silentReAuth.
     // Prevents an infinite loop in the (rare) case the Worker rejects a
     // freshly-minted token too.
@@ -4538,6 +4620,9 @@ FILTER_JS_TEMPLATE = r"""
       }
       // Don't clobber unsent local edits with a stale remote.
       if (dirty) { updateNeedsSyncIndicator(); return; }
+      // Snapshot the edit counter: if it moves while the GET is in flight,
+      // the response below is stale by definition and gets discarded.
+      var genAtStart = stateGen;
       setStatus('同步中…', 'busy');
       fetchAuthed(API)
         .then(function(r) {
@@ -4576,33 +4661,19 @@ FILTER_JS_TEMPLATE = r"""
         })
         .then(function(remote) {
           if (!remote) return;
+          // A local edit landed while this GET was in flight — applying the
+          // response would revert it on screen. Drop it; the edit's pending
+          // push flushes shortly and the next poll re-pulls fresh state.
+          if (stateGen !== genAtStart) return;
           // Empty server (new account): server returns {}; nothing to apply.
           // Server with data: {favorites, blacklist, bookmarks}.
           if (Array.isArray(remote.favorites)) state.fav   = new Set(remote.favorites);
           if (Array.isArray(remote.blacklist)) state.black = new Set(remote.blacklist);
           if (Array.isArray(remote.bookmarks)) {
-            // Wipe + re-render in place — closures hold the same array
-            // reference, so we mutate rather than reassign. Both layers
-            // (bookmarks + user-added attractions) get cleared so the
-            // pull rebuild starts from a clean slate. The builtin
-            // landmarks share the same layers, so the wipe takes them
-            // out too — renderFavoritesBuiltin puts them back.
-            bookmarks.length = 0;
-            bookmarksLayer.clearLayers();
-            userAttractionsLayer.clearLayers();
-            bmMarkerById = {};
-            remote.bookmarks.forEach(function(bm) {
-              sanitizeBookmarkEmoji(bm);
-              bookmarks.push(bm);
-              renderBookmark(bm);   // early-returns on hidden / no-coord
-            });
-            // Recompute the hidden-builtin set from the freshly-pulled
-            // bookmarks before re-rendering builtins, so any hide flag
-            // the user set on another device takes effect now.
-            rebuildHiddenIds();
-            renderFavoritesBuiltin();
-            saveBookmarks();
+            replaceBookmarksArray(remote.bookmarks);
           }
+          syncBase = snapshotRemote(remote);
+          saveSyncBase(syncBase);
           saveCache(state, false);
           refreshAllMarkers();
           setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
@@ -4610,8 +4681,65 @@ FILTER_JS_TEMPLATE = r"""
         .catch(function(e) { setStatus('同步失败: ' + e.message, 'err'); })
         .finally(function() { updateNeedsSyncIndicator(); });
     }
+    // Three-way merge, base = syncBase (the last server state this device
+    // saw): keep = (ours ∩ theirs) ∪ (ours − base) ∪ (theirs − base).
+    // Adds from both sides survive; a delete on either side wins unless the
+    // other side re-added. With an empty base (fresh upgrade, cleared
+    // storage) this degrades to a pure union — it may resurrect a
+    // concurrently-deleted entry once, but can never lose one.
+    function mergeSets(baseArr, oursSet, theirsArr) {
+      var base   = new Set(baseArr);
+      var theirs = new Set(Array.isArray(theirsArr) ? theirsArr : []);
+      var out = new Set();
+      oursSet.forEach(function(u) { if (theirs.has(u) || !base.has(u)) out.add(u); });
+      theirs.forEach(function(u) { if (!base.has(u)) out.add(u); });
+      return out;
+    }
+    // Same rule keyed by bookmark id; when both sides carry an id, this
+    // device's object wins (deterministic, and it's the one the user just
+    // touched). Legacy id-less entries can't be tracked through the base,
+    // so ours are always kept and theirs are kept unless byte-identical to
+    // one of ours — duplication risk over data loss.
+    function mergeBookmarks(baseArr, oursArr, theirsArr) {
+      var baseIds = new Set();
+      baseArr.forEach(function(b) { if (b && b.id) baseIds.add(b.id); });
+      var theirsList = Array.isArray(theirsArr) ? theirsArr : [];
+      var theirsIds = new Set();
+      theirsList.forEach(function(b) { if (b && b.id) theirsIds.add(b.id); });
+      var out = [], seen = new Set();
+      oursArr.forEach(function(b) {
+        if (!b) return;
+        if (!b.id) { out.push(b); return; }
+        if (theirsIds.has(b.id) || !baseIds.has(b.id)) {
+          out.push(b);
+          seen.add(b.id);
+        }
+      });
+      theirsList.forEach(function(b) {
+        if (!b) return;
+        if (!b.id) {
+          var s = JSON.stringify(b);
+          var dup = oursArr.some(function(o) {
+            return o && !o.id && JSON.stringify(o) === s;
+          });
+          if (!dup) out.push(b);
+          return;
+        }
+        if (seen.has(b.id)) return;
+        if (!baseIds.has(b.id)) out.push(b);
+      });
+      return out;
+    }
+    function mergeRemoteIntoLocal(theirs) {
+      state.fav   = mergeSets(syncBase.favorites, state.fav,   theirs.favorites);
+      state.black = mergeSets(syncBase.blacklist, state.black, theirs.blacklist);
+      replaceBookmarksArray(
+        mergeBookmarks(syncBase.bookmarks, bookmarks.slice(), theirs.bookmarks));
+      refreshAllMarkers();
+    }
     var pushRetriedAfterSilent = false;
-    function push() {
+    function push(conflictDepth) {
+      conflictDepth = conflictDepth || 0;
       // Local mode (not signed in): nothing to push, but keep dirty=true so
       // the FAB keeps flashing — the whole point is for the user to notice
       // they haven't enabled sync. Indicator clears once they sign in and
@@ -4623,11 +4751,29 @@ FILTER_JS_TEMPLATE = r"""
         updateNeedsSyncIndicator();
         return;
       }
+      if (pushInFlight) {
+        pushQueued = true;
+        pushQueuedDepth = Math.max(pushQueuedDepth, conflictDepth);
+        return;
+      }
+      // Signed into a different account than the base snapshot belongs to →
+      // discard it. An empty base can never propagate deletions, and if this
+      // account already has a remote blob the version mismatch 409s into a
+      // safe union merge.
+      if (syncBase.sub !== currentSub()) {
+        syncBase = emptySyncBase(currentSub());
+        saveSyncBase(syncBase);
+      }
+      pushInFlight = true;
       setStatus('保存中…', 'busy');
+      // Snapshot: if an edit lands while the PUT is in flight, the response
+      // must not clear dirty — the queued follow-up push flushes it.
+      var genAtPush = stateGen;
       var body = JSON.stringify({
         favorites: Array.from(state.fav),
         blacklist: Array.from(state.black),
         bookmarks: bookmarks,
+        baseV: syncBase.v,
       });
       fetchAuthed(API, {
         method: 'PUT',
@@ -4660,11 +4806,62 @@ FILTER_JS_TEMPLATE = r"""
             });
             return;
           }
+          if (r.status === 409) {
+            // Another device wrote since our last pull/push. Merge its blob
+            // into local state, rebase, and re-push on top of it via the
+            // queue (the .finally below re-invokes immediately). Depth-
+            // capped: repeated 409s mean the server is advancing under us;
+            // dirty stays true and the 60s poll picks the retry back up.
+            if (conflictDepth >= 3) {
+              saveCache(state, true);
+              setStatus('同步冲突：改动已存本地，稍后自动重试', 'err');
+              return;
+            }
+            return r.json().then(function(theirs) {
+              if (!theirs || typeof theirs !== 'object') theirs = {};
+              // A conflicting blob with no version means the server state
+              // was wiped or never written (a real mass-delete from another
+              // device would carry v). Merging against our old base would
+              // read that as "everything deleted" and drop local data —
+              // instead void the base so the merge unions and re-uploads.
+              if (typeof theirs.v !== 'number') {
+                syncBase = emptySyncBase(currentSub());
+              }
+              mergeRemoteIntoLocal(theirs);
+              syncBase = snapshotRemote(theirs);
+              saveSyncBase(syncBase);
+              saveCache(state, true);   // still dirty until the re-push lands
+              pushQueued = true;
+              pushQueuedDepth = Math.max(pushQueuedDepth, conflictDepth + 1);
+            });
+          }
           if (!r.ok) throw new Error('HTTP ' + r.status);
           pushRetriedAfterSilent = false;
-          dirty = false;
-          saveCache(state, false);
-          setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+          return r.text().then(function(t) {
+            // New Worker answers {v: n}; a pre-versioning Worker says 'ok'
+            // (then the blob has no v and the next pull rebases us to 0).
+            var newV = syncBase.v + 1;
+            try {
+              var j = JSON.parse(t);
+              if (j && typeof j.v === 'number') newV = j.v;
+            } catch (_) {}
+            var sent = JSON.parse(body);
+            syncBase = {
+              v: newV,
+              sub: currentSub(),
+              favorites: sent.favorites || [],
+              blacklist: sent.blacklist || [],
+              bookmarks: sent.bookmarks || [],
+            };
+            saveSyncBase(syncBase);
+            dirty = (stateGen !== genAtPush);
+            saveCache(state, dirty);
+            if (!dirty) {
+              setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+            }
+            // Still dirty → an edit raced the PUT; its own scheduled push
+            // (or the queue below) uploads it within ~500ms.
+          });
         })
         .catch(function(e) {
           // Keep dirty=true (in memory AND in localStorage) on failure so the
@@ -4672,11 +4869,21 @@ FILTER_JS_TEMPLATE = r"""
           // unsaved change with the stale remote state. Change recovers when
           // a future push succeeds.
           saveCache(state, true);
-          setStatus('保存失败: ' + e.message + '（已存本地，下次推送时重试）', 'err');
+          setStatus('保存失败: ' + e.message + '（已存本地，稍后自动重试）', 'err');
         })
-        .finally(function() { updateNeedsSyncIndicator(); });
+        .finally(function() {
+          pushInFlight = false;
+          updateNeedsSyncIndicator();
+          if (pushQueued) {
+            pushQueued = false;
+            var d = pushQueuedDepth;
+            pushQueuedDepth = 0;
+            push(d);
+          }
+        });
     }
     function schedulePush() {
+      stateGen++;   // invalidates any pull/push response currently in flight
       dirty = true;
       saveCache(state, true);
       updateNeedsSyncIndicator();
@@ -4693,12 +4900,17 @@ FILTER_JS_TEMPLATE = r"""
       // while their edit is actually still local-only.
       if (dirty) push(); else pull();
       clearInterval(pollTimer);
+      // dirty → retry the unsent push (a failed PUT used to strand edits
+      // for the whole session: pull() bails when dirty, so nothing ever
+      // retried until the next user edit). Clean → refresh from remote.
       pollTimer = setInterval(function() {
-        if (document.visibilityState === 'visible') pull();
+        if (document.visibilityState !== 'visible') return;
+        if (dirty) push(); else pull();
       }, 60000);
     }
     document.addEventListener('visibilitychange', function() {
-      if (document.visibilityState === 'visible') pull();
+      if (document.visibilityState !== 'visible') return;
+      if (dirty) push(); else pull();
     });
 
     function toggleFav(url) {
