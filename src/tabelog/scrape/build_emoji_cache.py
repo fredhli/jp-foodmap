@@ -34,6 +34,10 @@ EMOJICDN = "https://emojicdn.elk.sh/{}?style=apple"
 EMOJI_RE = re.compile(
     r"(?:[\U0001F1E6-\U0001F1FF][\U0001F1E6-\U0001F1FF])"
     r"|(?:[\U0001F300-\U0001FAFF\U00002600-\U000027BF"
+    # 2B00-2BFF: Misc Symbols and Arrows — ⭐ (2B50) lives here and was
+    # slipping through to the emojicdn runtime fallback despite being the
+    # favorites badge on every starred marker.
+    r"\U00002B00-\U00002BFF"
     r"\U0001F000-\U0001F02F\U0001F0A0-\U0001F0FF]️?)"
 )
 
