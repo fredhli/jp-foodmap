@@ -942,7 +942,7 @@ def build_filter_panel_html(
         f'margin:0 8px 4px 0;font-size:12px;white-space:nowrap;">'
         f'<input type="checkbox" name="ff-award" value="{slug}"> '
         f"{emoji} {label} "
-        f'<span style="color:#9ca3af;font-size:11px;">({award_counts.get(slug, 0)})</span></label>'
+        f'<span style="color:#6b7280;font-size:11px;">({award_counts.get(slug, 0)})</span></label>'
         for slug, label, emoji in AWARD_TAGS
     )
 
@@ -957,7 +957,7 @@ def build_filter_panel_html(
         rows = "\n".join(
             f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
             f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
-            f'{cat} <span style="color:#9ca3af;">({cat_counts.get(cat, 0)})</span></label>'
+            f'{cat} <span style="color:#6b7280;">({cat_counts.get(cat, 0)})</span></label>'
             for cat in visible
         )
         # Per-group 全选/全清 chips: same wiring as the section-wide ones,
@@ -1572,7 +1572,7 @@ SEARCH_BOX_HTML = """
   #ss-list .ss-subsection-head {
     padding: 2px 18px;
     font-size: 10px; font-weight: 600;
-    color: #9ca3af; background: #fafafa;
+    color: #6b7280; background: #fafafa;
     border-bottom: 1px solid #f3f4f6;
   }
   #ss-list .ss-rating {
@@ -1788,8 +1788,8 @@ HELP_POPOVER_HTML = """
 </style>
 <div id="ff-help-pop" role="tooltip" aria-live="polite" hidden>
   <div class="ff-help-section" data-help-for="blacklist" hidden>弃用名单 = 你研究后决定不会去的餐厅，会从地图上自动隐藏；和收藏一起通过你的 Google 账号跨设备同步。</div>
-  <div class="ff-help-section" data-help-for="kind-bookmark" hidden>收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
-  <div class="ff-help-section" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。</div>
+  <div class="ff-help-section" id="help-kind-bookmark" data-help-for="kind-bookmark" hidden>收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
+  <div class="ff-help-section" id="help-kind-attraction" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。</div>
   <div class="ff-help-section" data-help-for="price-curation" hidden>本站只收录每个区域评分前 1% 的餐厅；其中高价位 fine-dining 进一步压到 0.1%；和果子、咖啡厅、面包店等非正餐也按比例控量。这样，在地图上显示出来的 20000 日元以下的高分正餐餐厅，多数可以在一个合理的天数内提前预订，甚至 walk-in。</div>
 </div>
 """
@@ -1969,15 +1969,21 @@ BOOKMARKS_MODAL_HTML = """
     <div class="bm-coord" id="bm-coord" lang="en"></div>
     <div class="bm-row">
       <label>类型</label>
+      <!-- The "?" spans are decorative for AT (a focusable role=button
+           nested inside a role=radio is invalid ARIA and read
+           unpredictably); the help text is instead attached to each radio
+           via aria-describedby, so screen readers hear it with the
+           control. Sighted users keep the tap target — its click handler
+           stopPropagation()s so it never toggles the kind. -->
       <div class="bm-kind-seg" role="radiogroup" aria-label="类型">
         <button type="button" data-kind="bookmark" class="active"
-                role="radio" aria-checked="true">⭐ 收藏<span class="ff-help-trigger"
-                data-help-for="kind-bookmark" role="button" tabindex="0"
-                aria-label="说明">?</span></button>
+                role="radio" aria-checked="true"
+                aria-describedby="help-kind-bookmark">⭐ 收藏<span class="ff-help-trigger"
+                data-help-for="kind-bookmark" aria-hidden="true">?</span></button>
         <button type="button" data-kind="attraction"
-                role="radio" aria-checked="false">🗾 景点<span class="ff-help-trigger"
-                data-help-for="kind-attraction" role="button" tabindex="0"
-                aria-label="说明">?</span></button>
+                role="radio" aria-checked="false"
+                aria-describedby="help-kind-attraction">🗾 景点<span class="ff-help-trigger"
+                data-help-for="kind-attraction" aria-hidden="true">?</span></button>
       </div>
     </div>
     <div class="bm-row">
@@ -2131,15 +2137,14 @@ MOBILE_UX_ASSETS = """
   document.addEventListener('gesturechange', function(e){ e.preventDefault(); });
   document.addEventListener('gestureend',    function(e){ e.preventDefault(); });
 
-  // iOS Safari double-tap zoom. Scope to outside the map so Leaflet's
-  // own double-tap-to-zoom-in keeps working.
-  var lastTouchEnd = 0;
-  document.addEventListener('touchend', function(e){
-    if (e.target && e.target.closest && e.target.closest('.leaflet-container')) return;
-    var now = Date.now();
-    if (now - lastTouchEnd <= 350) e.preventDefault();
-    lastTouchEnd = now;
-  }, { passive: false });
+  // iOS double-tap zoom on the UI chrome is handled by CSS
+  // `touch-action: manipulation` (style block below) instead of the old
+  // 350ms touchend-preventDefault hack. preventDefault on touchend also
+  // suppressed the synthesized click, so the second of any two fast taps
+  // outside the map (rapid checkbox toggles, 全选 then 全清, double-tap
+  // on a star) silently did nothing. The map is unaffected either way:
+  // Leaflet sets touch-action on .leaflet-container itself and the
+  // ancestor intersection can only further restrict, never loosen.
 
   // Desktop ctrl/cmd + wheel. Leaflet's wheel zoom doesn't use ctrlKey.
   document.addEventListener('wheel', function(e){
@@ -2156,6 +2161,10 @@ MOBILE_UX_ASSETS = """
 })();
 </script>
 <style>
+  /* Kills double-tap-to-zoom (and the legacy 300ms click delay) on all UI
+     chrome without eating fast second taps. Pinch stays governed by the
+     gesture handlers above; Leaflet overrides this on its own container. */
+  html, body { touch-action: manipulation; }
   /* Bottom-sheet popup replacement. The markup lives near </body>; the
      filter JS controls open/close. Default Leaflet popups got cut off at
      mobile viewport edges; this sheet always docks to the bottom and
@@ -2230,7 +2239,7 @@ MOBILE_UX_ASSETS = """
   #bs-sheet.bs-peek #bs-grip::after {
     content: '上滑查看详情';
     display: block; text-align: center;
-    font-size: 10px; color: #9ca3af;
+    font-size: 10px; color: #6b7280;
     margin-top: 3px; letter-spacing: 0.5px;
   }
   /* The whole peek card is a tap-to-expand surface (handled in JS). The
@@ -2366,7 +2375,10 @@ MOBILE_UX_ASSETS = """
 # filter JS. Backdrop is a sibling so taps fall through to it.
 BOTTOM_SHEET_HTML = """
 <div id="bs-backdrop"></div>
-<div id="bs-sheet" role="dialog" aria-modal="true" aria-hidden="true">
+<!-- Deliberately NOT aria-modal: the backdrop is inert and the map stays
+     pannable behind every sheet state, so claiming modality would tell
+     screen readers the rest of the page is unreachable when it isn't. -->
+<div id="bs-sheet" role="dialog" aria-hidden="true">
   <div id="bs-grip"></div>
   <div id="bs-banner" hidden></div>
   <div id="bs-content"></div>
@@ -3040,14 +3052,23 @@ FILTER_JS_TEMPLATE = r"""
         map.setView([savedView.lat, savedView.lon], savedView.zoom, {animate: false});
       }
     } catch (e) {}
-    map.on('moveend', function() {
+    var viewSaveTimer = 0;
+    function saveViewNow() {
       try {
         var c = map.getCenter();
         localStorage.setItem(STATE_KEY_VIEW, JSON.stringify({
           lat: c.lat, lon: c.lng, zoom: map.getZoom()
         }));
       } catch (e) {}
+    }
+    // Debounced — animated flights fire moveend several times and each
+    // write is synchronous storage I/O on the gesture-end path. pagehide
+    // flushes so closing the tab right after a pan still persists.
+    map.on('moveend', function() {
+      clearTimeout(viewSaveTimer);
+      viewSaveTimer = setTimeout(saveViewNow, 250);
     });
+    window.addEventListener('pagehide', saveViewNow);
     // iOS Safari bfcache restore: the page comes back with stale container
     // dimensions, so tiles render at the wrong size (often a gray band on
     // the right edge or below the address bar). invalidateSize() forces
@@ -5454,9 +5475,19 @@ FILTER_JS_TEMPLATE = r"""
     bsGrip.addEventListener('touchstart', bsDragStart, { passive: true });
     bsGrip.addEventListener('touchmove',  bsDragMove,  { passive: true });
     bsGrip.addEventListener('touchend',   bsDragEnd);
-    bsGrip.addEventListener('mousedown',  bsDragStart);
-    document.addEventListener('mousemove', bsDragMove);
-    document.addEventListener('mouseup',   bsDragEnd);
+    // Mouse listeners live only for the duration of a drag — a permanent
+    // document-level mousemove runs on every pointer move for the page's
+    // whole life, for a gesture that is rare on desktop.
+    function bsMouseUp(e) {
+      document.removeEventListener('mousemove', bsDragMove);
+      document.removeEventListener('mouseup',   bsMouseUp);
+      bsDragEnd(e);
+    }
+    bsGrip.addEventListener('mousedown', function(e) {
+      bsDragStart(e);
+      document.addEventListener('mousemove', bsDragMove);
+      document.addEventListener('mouseup',   bsMouseUp);
+    });
 
     // Whole-peek-card tap to expand. Clicks on the grip have already been
     // handled by bsDragEnd (which removes .bs-peek before this fires), so
@@ -5821,8 +5852,17 @@ FILTER_JS_TEMPLATE = r"""
       if (gcEl && typeof s.gcalOnly === 'boolean') gcEl.checked = s.gcalOnly;
     }
 
-    // Live update on drag, not just on release.
-    ratingSlider.addEventListener('input', apply);
+    // Live update on drag — routed through the rAF-coalesced scheduler. A
+    // drag emits dozens of input events per second, and running the full
+    // apply() (checkbox DOM scan + recompute + localStorage write) on
+    // every one was textbook slider jank on dense viewports. Per event we
+    // only refresh the in-memory filter state + label (cheap); recompute
+    // is capped at one per frame; persistence waits for release.
+    ratingSlider.addEventListener('input', function() {
+      readFilterInputs();
+      scheduleRecompute();
+    });
+    ratingSlider.addEventListener('change', apply);
     document.querySelectorAll('#ff-sheet input[type=checkbox], #ff-sheet input[type=radio]').forEach(function(el) {
       el.addEventListener('change', apply);
     });
@@ -5926,9 +5966,17 @@ FILTER_JS_TEMPLATE = r"""
     ffGrip.addEventListener('touchstart', ffDrag.start, { passive: true });
     ffGrip.addEventListener('touchmove',  ffDrag.move,  { passive: true });
     ffGrip.addEventListener('touchend',   ffDrag.end);
-    ffGrip.addEventListener('mousedown',  ffDrag.start);
-    document.addEventListener('mousemove', ffDrag.move);
-    document.addEventListener('mouseup',   ffDrag.end);
+    // Same drag-scoped mouse listeners as the restaurant sheet above.
+    function ffMouseUp(e) {
+      document.removeEventListener('mousemove', ffDrag.move);
+      document.removeEventListener('mouseup',   ffMouseUp);
+      ffDrag.end(e);
+    }
+    ffGrip.addEventListener('mousedown', function(e) {
+      ffDrag.start(e);
+      document.addEventListener('mousemove', ffDrag.move);
+      document.addEventListener('mouseup',   ffMouseUp);
+    });
 
     // Filter reset. Extracted from an inline #ff-reset handler so the avatar
     // dropdown's reset row can call it too — see the menu wiring below.
