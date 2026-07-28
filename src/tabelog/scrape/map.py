@@ -1268,13 +1268,31 @@ def build_filter_panel_html(
 HEAD_BRANDING = """
 <title>Japan Foodmap</title>
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
-<!-- Pre-warm TCP/TLS to the two cross-origin hosts the page hits early:
-     jsDelivr serves Leaflet locatecontrol + emoji-picker-element synchronously;
-     emojicdn is the fallback for any emoji not in our local /emoji/ cache. -->
+<!-- Pre-warm TCP/TLS to the cross-origin hosts the page hits early.
+     A preconnect only matches requests of the same CORS-ness: the
+     `crossorigin` ones cover CORS fetches (emoji-picker module, GIS, the
+     sync API), the bare ones cover classic tags — leaflet.js/.css from
+     jsDelivr and MarkerCluster from cdnjs are render-blocking and were
+     paying a cold TCP+TLS handshake before first paint. Tile subdomains
+     get dns-prefetch only: four extra sockets up front would compete with
+     the critical path for bandwidth on slow links, but resolving the DNS
+     early is free. -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
 <link rel="preconnect" href="https://emojicdn.elk.sh" crossorigin>
 <link rel="preconnect" href="https://accounts.google.com" crossorigin>
 <link rel="preconnect" href="https://api.jpfoodmap.com" crossorigin>
+<link rel="dns-prefetch" href="https://a.basemaps.cartocdn.com">
+<link rel="dns-prefetch" href="https://b.basemaps.cartocdn.com">
+<link rel="dns-prefetch" href="https://c.basemaps.cartocdn.com">
+<link rel="dns-prefetch" href="https://d.basemaps.cartocdn.com">
+<!-- The 3MB marker payload used to start downloading only when the boot
+     script ran at DOMContentLoaded — seconds after the HTML arrived. The
+     preload starts it with the document; boot()'s fetch then picks the
+     response out of the preload/HTTP cache (same-origin + same
+     credentials mode, so it matches). -->
+<link rel="preload" href="data/restaurants.json" as="fetch">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 """
 
@@ -7064,6 +7082,38 @@ def main(argv: list[str] | None = None) -> None:
     else:
         print("  WARNING: folium .leaflet-container font-size rule not found "
               "to patch — check if folium changed the rule format")
+
+    # Restore the saved viewport BEFORE folium's init script creates the
+    # map. The restore inside initMap runs far later (it polls for plugin
+    # deps) — by then Leaflet has already requested a full whole-Japan z6
+    # tile set that the immediate setView throws away: double tile
+    # downloads and a visible jump on every boot. A one-shot L.map wrapper
+    # injected right after leaflet.js feeds the saved center/zoom straight
+    # into folium's constructor call; the initMap restore stays as the
+    # fallback when this injection is missing.
+    VIEW_RESTORE_SNIPPET = (
+        "<script>(function(){try{"
+        "var v=JSON.parse(localStorage.getItem('tabelog.mapView')||'null');"
+        "if(!v||typeof v.lat!=='number'||typeof v.lon!=='number'"
+        "||typeof v.zoom!=='number')return;"
+        "var o=L.map;"
+        "L.map=function(id,opts){L.map=o;"
+        "if(opts){opts.center=[v.lat,v.lon];opts.zoom=v.zoom;}"
+        "return o.call(L,id,opts);};"
+        "}catch(e){}})();</script>"
+    )
+    leaflet_tag_re = re.compile(r'<script src="[^"]*/leaflet(?:\.min)?\.js"></script>')
+    tag_match = leaflet_tag_re.search(saved_html)
+    if tag_match:
+        saved_html = (
+            saved_html[: tag_match.end()]
+            + VIEW_RESTORE_SNIPPET
+            + saved_html[tag_match.end() :]
+        )
+        print("  injected saved-view restore after leaflet.js")
+    else:
+        print("  WARNING: leaflet.js script tag not found — saved-view "
+              "restore not injected (boot will show the z6 default first)")
 
     # Second pass over the saved file: scan every CJK run that ended up
     # on the page (static UI, bucket names, attraction labels, AND the
