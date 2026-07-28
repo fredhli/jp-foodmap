@@ -4997,10 +4997,17 @@ FILTER_JS_TEMPLATE = r"""
       clearTimeout(pushTimer);
       pushTimer = setTimeout(push, 500);
     }
+    // True when startSync's initial pull/push ran with a live session —
+    // tryRestoreSession's success path checks it so a signed-in boot does
+    // one state GET, not two. When auth was stale at startSync time (exp
+    // passed → pull went local-mode without a request), the restore path
+    // still owns the real first pull.
+    var bootSyncedAuthed = false;
     function startSync() {
       // Paint the dirty indicator on first load so a flag restored from
       // localStorage shows up before the first push/pull lands.
       updateNeedsSyncIndicator();
+      bootSyncedAuthed = !!configured();
       // If a previous session left an unpushed change, retry pushing it
       // *before* pulling; otherwise pull would just confirm the remote
       // state (which still lacks the change) and the user would see "已同步"
@@ -6098,6 +6105,21 @@ FILTER_JS_TEMPLATE = r"""
         var waiters = silentWaiters;
         silentWaiters = null;
         waiters.forEach(function(c) { c(ok); });
+        // initialize() is global GIS state: our one-shot silent callback is
+        // now dead, and if the visible sign-in button was already rendered
+        // its clicks would deliver the credential here — the user completes
+        // the Google popup and the page visibly does nothing. Hand the
+        // callback back to the button.
+        if (gisRendered && window.google && google.accounts && google.accounts.id) {
+          try {
+            google.accounts.id.initialize({
+              client_id: GOOGLE_CLIENT_ID,
+              callback: onGoogleCredential,
+              ux_mode: 'popup',
+              auto_select: false
+            });
+          } catch (_) {}
+        }
       }
       google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
@@ -6154,7 +6176,10 @@ FILTER_JS_TEMPLATE = r"""
         silentReAuth(function(ok) {
           if (ok) {
             refreshAuthUI();
-            if (dirty) push(); else pull();
+            // Skip when startSync already pulled with live auth — its own
+            // 401 recovery covers the revoked-cookie case, so a second
+            // boot GET here would be pure duplication.
+            if (!bootSyncedAuthed) { if (dirty) push(); else pull(); }
           }
           cb(ok);
         });
@@ -6177,7 +6202,10 @@ FILTER_JS_TEMPLATE = r"""
       tryMe(function(ok) {
         if (ok) {
           refreshAuthUI();
-          if (dirty) push(); else pull();
+          // Only sync from here when startSync couldn't (stale local exp
+          // made its boot pull bail to local mode); with live auth at
+          // boot, startSync's pull already ran — see bootSyncedAuthed.
+          if (!bootSyncedAuthed) { if (dirty) push(); else pull(); }
           cb(true);
           return;
         }
@@ -6186,7 +6214,7 @@ FILTER_JS_TEMPLATE = r"""
             if (ok2 && p) {
               saveSessionProfile(p);
               refreshAuthUI();
-              if (dirty) push(); else pull();
+              if (!bootSyncedAuthed) { if (dirty) push(); else pull(); }
               cb(true);
             } else {
               fallbackSilentGIS(cb);
