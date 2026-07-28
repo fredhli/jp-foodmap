@@ -1270,14 +1270,14 @@ HEAD_BRANDING = """
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
 <!-- Pre-warm TCP/TLS to the cross-origin hosts the page hits early.
      A preconnect only matches requests of the same CORS-ness: the
-     `crossorigin` ones cover CORS fetches (emoji-picker module, GIS, the
-     sync API), the bare ones cover classic tags — leaflet.js/.css from
-     jsDelivr and MarkerCluster from cdnjs are render-blocking and were
-     paying a cold TCP+TLS handshake before first paint. Tile subdomains
-     get dns-prefetch only: four extra sockets up front would compete with
-     the critical path for bandwidth on slow links, but resolving the DNS
-     early is free. -->
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+     `crossorigin` ones cover CORS fetches (GIS, the sync API), the bare
+     ones cover classic tags — leaflet.js/.css from jsDelivr and
+     MarkerCluster from cdnjs are render-blocking and were paying a cold
+     TCP+TLS handshake before first paint. (No crossorigin jsDelivr
+     preconnect: its only CORS consumer, emoji-picker-element, is now a
+     lazy import.) Tile subdomains get dns-prefetch only: four extra
+     sockets up front would compete with the critical path on slow links,
+     but resolving the DNS early is free. -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 <link rel="preconnect" href="https://emojicdn.elk.sh" crossorigin>
@@ -1797,8 +1797,9 @@ HELP_POPOVER_HTML = """
 
 
 BOOKMARKS_MODAL_HTML = """
-<script type="module"
-        src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+<!-- emoji-picker-element is dynamically import()ed on first picker expand
+     (see ensurePickerModule in FILTER_JS) — the eager module tag here cost
+     every visitor a ~2.6s CDN fetch for a feature almost nobody opens. -->
 <style>
   #bm-backdrop {
     position: fixed; inset: 0; z-index: 10010;
@@ -3920,8 +3921,26 @@ FILTER_JS_TEMPLATE = r"""
         bmShowError('');
       });
     });
+    // The full picker module loads on first expand only. Pinned to the
+    // exact version the old `@^1` range URL was serving (immutable CDN
+    // path, no redirect); the <emoji-picker> tag upgrades in place once
+    // the module registers the custom element. Failure allows retry on
+    // the next click — the six quick chips keep working regardless.
+    var bmPickerLoaded = null;
+    function ensurePickerModule() {
+      if (!bmPickerLoaded) {
+        bmPickerLoaded =
+          import('https://cdn.jsdelivr.net/npm/emoji-picker-element@1.27.0/index.js')
+            .catch(function(e) {
+              bmPickerLoaded = null;
+              console.warn('[tabelog] emoji picker load failed:', e);
+            });
+      }
+      return bmPickerLoaded;
+    }
     bmEmojiMore.addEventListener('click', function() {
       var nowOpen = !bmPicker.classList.contains('bm-show');
+      if (nowOpen) ensurePickerModule();
       bmPicker.classList.toggle('bm-show', nowOpen);
       bmEmojiMore.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
       bmEmojiMore.textContent = nowOpen ? '🔼' : '🔽';
@@ -6634,6 +6653,19 @@ FILTER_JS_TEMPLATE = r"""
     apply();
     // Kick off the first pull (or stay in local mode if not configured).
     startSync();
+    // Warm the popup payload once boot is idle — nearly every session taps
+    // a marker eventually, and the 6MB download used to start only at the
+    // first tap (seconds of 加载中… on cold 4G). Idle-scheduled so it
+    // never competes with the boot critical path; skipped for users who
+    // asked to save data.
+    if (!(navigator.connection && navigator.connection.saveData)) {
+      var warmPopups = function() { loadPopups(); };
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(warmPopups, {timeout: 8000});
+      } else {
+        setTimeout(warmPopups, 4000);
+      }
+    }
   }
   function boot() {
     function setTotals(text) {
