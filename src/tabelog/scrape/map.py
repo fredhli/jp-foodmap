@@ -1742,7 +1742,10 @@ SEARCH_BOX_HTML = """
       <div id="ff-sync-status">本地模式</div>
     </div>
   </div>
-  <div id="ss-list" role="listbox"></div>
+  <!-- Two sub-containers so the async Nominatim response only rewrites its
+       own section — the local restaurant rows (and the list's scroll
+       position) survive untouched. -->
+  <div id="ss-list" role="listbox"><div id="ss-local"></div><div id="ss-api"></div></div>
 </div>
 """
 
@@ -2782,43 +2785,10 @@ FILTER_JS_TEMPLATE = r"""
       tn.replaceWith(span);
     });
   }
-  // Attach a MutationObserver to one container so any future emoji-bearing
-  // content under it gets swapped to Apple PNGs. Exposed so initMap() can
-  // hook the Leaflet popup pane once Leaflet has created it.
-  function observeForEmoji(root) {
-    if (!root) return;
-    new MutationObserver(function(muts) {
-      for (var i = 0; i < muts.length; i++) {
-        var added = muts[i].addedNodes;
-        for (var j = 0; j < added.length; j++) {
-          var nd = added[j];
-          if (nd.nodeType === 1) emojify(nd);
-          else if (nd.nodeType === 3 && nd.parentNode) emojify(nd.parentNode);
-        }
-      }
-    }).observe(root, {childList: true, subtree: true});
-  }
-  function startEmojiObserver() {
-    // One-shot pass over the static page (filter panel, FAB labels, modal
-    // titles…) — these never change after load.
-    emojify(document.body);
-    // Narrow ongoing observers only on the containers that mutate with
-    // emoji-bearing HTML at runtime. The previous wider `document.body`
-    // observer caught every marker insertion too, wasting one TreeWalker
-    // pass per marker on each pan — marker divIcons already pre-swap their
-    // emoji at construction (see makeIcon → emojiImg), so they don't need
-    // the observer. Leaflet popups (search result, right-click "加入收藏")
-    // live under .leaflet-popup-pane, which initMap() hooks once Leaflet
-    // has built its panes.
-    observeForEmoji(document.getElementById('bs-content'));
-    observeForEmoji(document.getElementById('bm-modal'));
-    observeForEmoji(document.getElementById('ss-list'));
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startEmojiObserver);
-  } else {
-    startEmojiObserver();
-  }
+  // The emoji observers are merged with the i18n ones — one MutationObserver
+  // per container running both passes; see observeDynamic below (defined
+  // after I18N_MAP exists). The one-shot emojify(document.body) runs there
+  // too, same synchronous eval, so nothing paints un-swapped.
 
   // ===== Runtime Simplified -> Traditional conversion =====
   // Page is authored in Simplified Chinese. When the user opts into 繁體
@@ -2875,20 +2845,27 @@ FILTER_JS_TEMPLATE = r"""
   function localizeTree(root) {
     if (!root || !I18N_MAP) return;
     if (root.nodeType !== 1) return;
-    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    // The root may itself sit inside a skipped scope — check its ancestor
+    // chain once here; below, rejected ELEMENTS prune their whole subtree
+    // in the walker, so the per-text-node cost is O(1) instead of the old
+    // walk-every-ancestor-per-text-node O(depth).
+    for (var p = root; p && p.nodeType === 1; p = p.parentNode) {
+      var pt = p.tagName;
+      if (pt === 'SCRIPT' || pt === 'STYLE' || pt === 'TEXTAREA' || pt === 'INPUT') return;
+      if (p.getAttribute && p.getAttribute('lang') === 'ja') return;
+    }
+    var walker = document.createTreeWalker(
+      root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode: function(n) {
-        var p = n.parentNode;
-        while (p && p.nodeType === 1) {
-          var t = p.tagName;
+        if (n.nodeType === 1) {
+          var t = n.tagName;
           if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEXTAREA' || t === 'INPUT') {
-            return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_REJECT;   // prunes the subtree
           }
-          if (p.getAttribute && p.getAttribute('lang') === 'ja') {
-            return NodeFilter.FILTER_REJECT;
-          }
-          p = p.parentNode;
+          if (n.getAttribute('lang') === 'ja') return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_SKIP;       // descend, don't emit
         }
-        return NodeFilter.FILTER_ACCEPT;
+        return NodeFilter.FILTER_ACCEPT;       // text node
       }
     });
     var nodes = [], n;
@@ -2900,43 +2877,57 @@ FILTER_JS_TEMPLATE = r"""
       if (out !== v) tn.nodeValue = out;
     });
   }
-  function observeForI18n(root) {
-    if (!root || !I18N_MAP) return;
+  // One MutationObserver per container running both dynamic passes (emoji
+  // PNG swap + CJK localization). The old scheme attached two observers to
+  // each container, so every insertion was walked twice — and each emoji
+  // text→<img> replacement re-triggered both for a settle pass.
+  function observeDynamic(root, doEmoji, doI18n) {
+    if (!root) return;
+    var i18nOn = doI18n && !!I18N_MAP;
+    if (!doEmoji && !i18nOn) return;
     new MutationObserver(function(muts) {
       for (var i = 0; i < muts.length; i++) {
         var added = muts[i].addedNodes;
         for (var j = 0; j < added.length; j++) {
           var nd = added[j];
-          if (nd.nodeType === 1) localizeTree(nd);
-          else if (nd.nodeType === 3 && nd.parentNode) localizeTree(nd.parentNode);
+          var el = nd.nodeType === 1 ? nd
+                 : (nd.nodeType === 3 ? nd.parentNode : null);
+          if (!el) continue;
+          if (doEmoji) emojify(el);
+          if (i18nOn) localizeTree(el);
         }
       }
     }).observe(root, {childList: true, subtree: true});
   }
-  function startI18nObserver() {
-    if (!I18N_MAP) return;
-    localizeTree(document.body);
-    observeForI18n(document.getElementById('bs-content'));
-    observeForI18n(document.getElementById('bm-modal'));
-    observeForI18n(document.getElementById('ss-list'));
+  function startDynamicObservers() {
+    // One-shot passes over the static page (filter panel, FAB labels,
+    // modal titles…) — these never change after load.
+    emojify(document.body);
+    if (I18N_MAP) localizeTree(document.body);
+    // Ongoing observers only on the containers that mutate with
+    // emoji/CJK-bearing HTML at runtime. Marker divIcons pre-swap their
+    // emoji at construction (makeIcon → emojiImg) so they stay unobserved;
+    // the Leaflet popup pane is hooked by initMap() once it exists.
+    observeDynamic(document.getElementById('bs-content'), true, true);
+    observeDynamic(document.getElementById('bm-modal'), true, true);
+    observeDynamic(document.getElementById('ss-list'), true, true);
     // Filter sheet has dynamic textContent rewrites (cuisine summary
-    // "全部"/"无"/"已选 N / M", live count chips). Without an observer
-    // here those flip back to Chinese after every filter change.
-    observeForI18n(document.getElementById('ff-sheet-content'));
-    // (The sync-settings modal used to be observed here. It's gone now —
-    // sign-in/out lives inline in the avatar dropdown.)
+    // "全部"/"无"/"已选 N / M", live count chips) but no runtime emoji.
+    observeDynamic(document.getElementById('ff-sheet-content'), false, true);
     // Reflect onto <html lang> — browsers use it for hyphenation and
     // accessibility (screen readers, especially).
-    try { document.documentElement.lang = activeLang; } catch (_) {}
+    if (I18N_MAP) {
+      try { document.documentElement.lang = activeLang; } catch (_) {}
+    }
   }
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startI18nObserver);
+    document.addEventListener('DOMContentLoaded', startDynamicObservers);
   } else {
-    startI18nObserver();
+    startDynamicObservers();
   }
-  // Exposed so initMap() can hook the Leaflet popup pane the same way
-  // emojify does, once Leaflet has built its panes.
-  window.__observeForI18n = observeForI18n;
+  // Exposed so initMap() can hook the Leaflet popup pane once Leaflet has
+  // built its panes.
+  window.__observeDynamic = observeDynamic;
   window.__localizeTree = localizeTree;
   window.__activeLang = activeLang;
 
@@ -3138,11 +3129,8 @@ FILTER_JS_TEMPLATE = r"""
     // marker and the right-click "加入收藏" popup both inject HTML into
     // .leaflet-popup-pane, which only exists after the map initializes.
     var popupPane = map.getPane && map.getPane('popupPane');
-    if (popupPane) {
-      observeForEmoji(popupPane);
-      if (window.__observeForI18n) {
-        window.__observeForI18n(popupPane);
-      }
+    if (popupPane && window.__observeDynamic) {
+      window.__observeDynamic(popupPane, true, true);
     }
 
     // ===== Persisted map view =====
@@ -4122,6 +4110,13 @@ FILTER_JS_TEMPLATE = r"""
     var ssInput   = document.getElementById('ss-input');
     var ssClear   = document.getElementById('ss-clear');
     var ssList    = document.getElementById('ss-list');
+    var ssLocal   = document.getElementById('ss-local');
+    var ssApi     = document.getElementById('ss-api');
+    // While a render helper is filling a DocumentFragment, the ssAppend*
+    // builders write here instead of straight into the live list — one
+    // batched insertion per section instead of a reflow-observable append
+    // per row.
+    var ssTarget  = null;
 
     // Placeholders are attributes, not text nodes, so localizeTree never
     // touches them — dispatch each one here on activeLang. zh-CN is the
@@ -4175,7 +4170,7 @@ FILTER_JS_TEMPLATE = r"""
     //
     // The dropdown scrolls internally; SS_RESTAURANT_LIMIT only kicks in
     // for pathologically broad queries ("の" etc.).
-    var SS_RESTAURANT_LIMIT = 200;
+    var SS_RESTAURANT_LIMIT = 50;
     // Above this zoom level the search results split into "屏幕内" and
     // "其他区域" sub-sections so the user sees nearby matches first. Below
     // it (regional / country-wide view) the bias is moot and we render a
@@ -4279,13 +4274,13 @@ FILTER_JS_TEMPLATE = r"""
       var h = document.createElement('div');
       h.className = 'ss-section-head';
       h.textContent = label;
-      ssList.appendChild(h);
+      (ssTarget || ssList).appendChild(h);
     }
     function ssAppendSubSectionHead(label) {
       var h = document.createElement('div');
       h.className = 'ss-subsection-head';
       h.textContent = label;
-      ssList.appendChild(h);
+      (ssTarget || ssList).appendChild(h);
     }
     // Render the restaurant section, splitting into 屏幕内 / 其他区域 when
     // ssMatchLocal flagged a viewport bias. Used by both ssRender (full
@@ -4342,7 +4337,7 @@ FILTER_JS_TEMPLATE = r"""
       row.appendChild(text);
       row.appendChild(rating);
       row.addEventListener('click', function() { ssGotoRestaurant(d); });
-      ssList.appendChild(row);
+      (ssTarget || ssList).appendChild(row);
     }
     function ssAppendApiRow(it) {
       var row = document.createElement('div');
@@ -4382,7 +4377,7 @@ FILTER_JS_TEMPLATE = r"""
         ssCloseDropdown();
         openBookmarkModal({lat: it.lat, lng: it.lon}, it.name);
       });
-      ssList.appendChild(row);
+      (ssTarget || ssList).appendChild(row);
     }
     // Keyboard highlight over the dropdown's actionable rows. Reset on
     // every re-render (the rows are new nodes); Enter falls back to the
@@ -4408,23 +4403,18 @@ FILTER_JS_TEMPLATE = r"""
       ssInput.setAttribute('aria-activedescendant', rows[idx].id);
       rows[idx].scrollIntoView({block: 'nearest'});
     }
-    function ssRender(localMatch, apiItems, apiPending) {
-      ssList.innerHTML = '';
+    // Section renderers. Each builds its rows into a DocumentFragment and
+    // swaps its own sub-container in one insertion — and, crucially, the
+    // Nominatim response only ever calls ssRenderApi, so the local
+    // restaurant rows (and the list's scroll position) are no longer
+    // rebuilt a second time when the network answer lands.
+    function ssRenderLocal(localMatch) {
       ssResetActive();
+      var frag = document.createDocumentFragment();
+      ssTarget = frag;
       var items = (localMatch && localMatch.items) || [];
       var total = (localMatch && localMatch.total) || 0;
-      var hasLocal = items.length > 0;
-      var hasApi   = apiItems && apiItems.length > 0;
-      if (!hasLocal && !hasApi && !apiPending) {
-        var empty = document.createElement('div');
-        empty.className = 'ss-row ss-empty';
-        empty.textContent = '没有匹配的结果';
-        ssList.appendChild(empty);
-        ssList.classList.add('open');
-      ssInput.setAttribute('aria-expanded', 'true');
-        return;
-      }
-      if (hasLocal) {
+      if (items.length > 0) {
         ssAppendSectionHead('餐厅库');
         ssAppendRestaurantSection(items, localMatch.inViewportCount);
         if (total > items.length) {
@@ -4432,50 +4422,49 @@ FILTER_JS_TEMPLATE = r"""
           more.className = 'ss-row ss-empty';
           more.textContent = '+' + (total - items.length) +
                              ' 个其他匹配 · 输入更多字以缩小范围';
-          ssList.appendChild(more);
+          frag.appendChild(more);
         }
       }
-      if (hasApi || apiPending) {
+      ssTarget = null;
+      ssLocal.innerHTML = '';
+      ssLocal.appendChild(frag);
+    }
+    function ssRenderApi(apiItems, apiPending, errMsg) {
+      ssResetActive();
+      var frag = document.createDocumentFragment();
+      ssTarget = frag;
+      var hasApi = apiItems && apiItems.length > 0;
+      if (hasApi || apiPending || errMsg) {
         ssAppendSectionHead('地图搜索');
         if (hasApi) {
           apiItems.forEach(ssAppendApiRow);
         } else {
-          var pending = document.createElement('div');
-          pending.className = 'ss-row ss-empty';
-          pending.textContent = '搜索中…';
-          ssList.appendChild(pending);
+          var r = document.createElement('div');
+          r.className = 'ss-row ss-empty' + (errMsg ? ' ss-error' : '');
+          r.textContent = errMsg || '搜索中…';
+          frag.appendChild(r);
         }
+      }
+      ssTarget = null;
+      ssApi.innerHTML = '';
+      ssApi.appendChild(frag);
+    }
+    // Opens the dropdown and, when both sections came up genuinely empty,
+    // shows the no-results placeholder. Every render path ends here.
+    function ssFinalize() {
+      if (!ssList.querySelector('.ss-row')) {
+        var empty = document.createElement('div');
+        empty.className = 'ss-row ss-empty';
+        empty.textContent = '没有匹配的结果';
+        ssApi.appendChild(empty);
       }
       ssList.classList.add('open');
       ssInput.setAttribute('aria-expanded', 'true');
     }
-    // Re-renders the dropdown with local section preserved, then appends a
-    // single error row in place of the API section. Local hits stay usable
-    // even when Nominatim is unreachable.
-    function ssShowError(localMatch, msg) {
-      ssList.innerHTML = '';
-      ssResetActive();
-      var items = (localMatch && localMatch.items) || [];
-      var total = (localMatch && localMatch.total) || 0;
-      var ivc = localMatch ? localMatch.inViewportCount : null;
-      if (items.length > 0) {
-        ssAppendSectionHead('餐厅库');
-        ssAppendRestaurantSection(items, ivc);
-        if (total > items.length) {
-          var more = document.createElement('div');
-          more.className = 'ss-row ss-empty';
-          more.textContent = '+' + (total - items.length) +
-                             ' 个其他匹配 · 输入更多字以缩小范围';
-          ssList.appendChild(more);
-        }
-      }
-      ssAppendSectionHead('地图搜索');
-      var r = document.createElement('div');
-      r.className = 'ss-row ss-empty ss-error';
-      r.textContent = msg;
-      ssList.appendChild(r);
-      ssList.classList.add('open');
-      ssInput.setAttribute('aria-expanded', 'true');
+    function ssRender(localMatch, apiItems, apiPending) {
+      ssRenderLocal(localMatch);
+      ssRenderApi(apiItems, apiPending, null);
+      ssFinalize();
     }
     function ssCloseDropdown() {
       ssList.classList.remove('open');
@@ -4638,12 +4627,19 @@ FILTER_JS_TEMPLATE = r"""
     // result click (or any interruption) detaches the stale one instead of
     // leaving it armed to pop the wrong card on a later pan.
     var ssFlightArrive = null;
+    var ssAbort = null;
     function ssSearch(q) {
       var seq = ++ssReqSeq;
       ssWrap.classList.add('busy');
       // The request is now genuinely in flight — this is where the 地图搜索
       // section earns its 搜索中… row.
-      if (!ssTitleMode) ssRender(ssLocalMatch, null, true);
+      if (!ssTitleMode) { ssRenderApi(null, true, null); ssFinalize(); }
+      // Abort the superseded request instead of letting it run to
+      // completion — ssReqSeq already guards the UI, but the dead fetch
+      // was still costing radio time and Nominatim quota.
+      if (ssAbort) ssAbort.abort();
+      var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      ssAbort = ctrl;
       // Japan bbox: lon 122-154, lat 24-46. viewbox order:
       //   x1 (left lon), y1 (top lat), x2 (right lon), y2 (bottom lat)
       // bounded=1 forbids matches outside the box; otherwise OSM happily
@@ -4653,7 +4649,8 @@ FILTER_JS_TEMPLATE = r"""
               + '&viewbox=122,46,154,24&bounded=1'
               + '&accept-language=zh-CN,zh,ja,en'
               + '&q=' + encodeURIComponent(q);
-      fetch(url, {headers: {'Accept': 'application/json'}})
+      fetch(url, {headers: {'Accept': 'application/json'},
+                  signal: ctrl && ctrl.signal})
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
@@ -4669,13 +4666,16 @@ FILTER_JS_TEMPLATE = r"""
           // the results for focus-resume, but don't pop the dropdown open
           // over the sheet they're reading.
           if (ssTitleMode) return;
-          ssRender(ssLocalMatch, items, false);
+          ssRenderApi(items, false, null);
+          ssFinalize();
         })
         .catch(function(err) {
+          if (err && err.name === 'AbortError') return;   // superseded
           if (seq !== ssReqSeq) return;
           ssWrap.classList.remove('busy');
           if (ssTitleMode) return;
-          ssShowError(ssLocalMatch, '搜索失败: ' + err.message);
+          ssRenderApi(null, false, '搜索失败: ' + err.message);
+          ssFinalize();
         });
     }
     function ssOnInput() {
@@ -4688,6 +4688,7 @@ FILTER_JS_TEMPLATE = r"""
       clearTimeout(ssDebounce);
       if (!v) {
         ssReqSeq++;
+        if (ssAbort) { ssAbort.abort(); ssAbort = null; }
         ssLocalMatch = {items: [], total: 0};
         ssWrap.classList.remove('busy');
         ssCloseDropdown();
@@ -4711,6 +4712,7 @@ FILTER_JS_TEMPLATE = r"""
     // the input so the mobile keyboard goes away.
     function ssExitSearch() {
       ssReqSeq++;
+      if (ssAbort) { ssAbort.abort(); ssAbort = null; }
       ssLocalMatch = {items: [], total: 0};
       ssQuery = '';
       ssTitleMode = false;
@@ -4737,7 +4739,9 @@ FILTER_JS_TEMPLATE = r"""
       } else if (ssTitleMode) {
         ssInput.select();
       }
-      if (ssList.children.length > 0) {
+      // (.ss-row, not children — the two section sub-containers are
+      // always present, so children.length would always be truthy.)
+      if (ssList.querySelector('.ss-row')) {
         ssList.classList.add('open');
         ssInput.setAttribute('aria-expanded', 'true');
       }
@@ -6929,6 +6933,33 @@ FILTER_JS_TEMPLATE = r"""
       } else {
         setTimeout(warmPopups, 4000);
       }
+    }
+    // Pre-normalize every restaurant name for the search index during
+    // idle — rowNameNorm is lazy, so the full ~9800-row NFKC pass used to
+    // land entirely on the first keystroke (noticeable jank on phones).
+    // Chunked against the idle deadline; pure CPU, so Save-Data doesn't
+    // apply.
+    var warmNameIdx = 0;
+    function warmNames(deadline) {
+      var more = function() {
+        return !deadline || typeof deadline.timeRemaining !== 'function'
+            || deadline.timeRemaining() > 4;
+      };
+      while (warmNameIdx < data.length && more()) {
+        rowNameNorm(data[warmNameIdx++]);
+      }
+      if (warmNameIdx < data.length) {
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(warmNames, {timeout: 5000});
+        } else {
+          setTimeout(warmNames, 250);
+        }
+      }
+    }
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(warmNames, {timeout: 5000});
+    } else {
+      setTimeout(warmNames, 2500);
     }
     // Restore what a language-switch reload carried over: reopen the card
     // that was on screen, or put the typed query back. openSheet itself
