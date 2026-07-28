@@ -200,8 +200,7 @@
       opacity: 0.7,         // line opacity when overlaid on a base map
       casingOpacity: 0.45,  // white casing underneath, less prominent
       padding: 0.25,
-      grid: 0.4,            // grid cell size in degrees
-      hitWeight: 14         // invisible wider polyline for hover
+      grid: 0.4             // grid cell size in degrees
     },
 
     initialize: function(options) {
@@ -223,9 +222,15 @@
       this._buckets = { long: true, city: true };
       // Volatile (cleared on remove)
       this._onMap = new Set();
+      // station feature -> {marker, radius, showLabel, label}; lets a pan
+      // diff the visible set instead of destroying and recreating every
+      // circle + permanent label on each moveend.
+      this._stationsOn = new Map();
       this._lastZoom = null;
       this._lastDrawCasing = null;
       this._rafToken = 0;
+      this._lastHover = 0;
+      this._hoverOpen = false;
     },
 
     setVisibleBuckets: function(opts) {
@@ -237,15 +242,29 @@
 
     onAdd: function(map) {
       this._map = map;
-      this._rCasing = L.canvas({ padding: this.options.padding }).addTo(map);
-      this._rImp = {};
-      for (var imp = 1; imp <= 5; imp++) {
-        this._rImp[imp] = L.canvas({ padding: this.options.padding }).addTo(map);
-      }
-      this._rHit = L.canvas({ padding: this.options.padding }).addTo(map);
+      // ONE canvas for all line work. The old scheme stacked seven
+      // full-viewport canvases (casing + five importance tiers + an
+      // invisible hit layer) — ~50MB of backing store EACH at hidpi, and
+      // every one repainted per moveend. Paint order inside a single
+      // canvas is insertion order, so the importance tiers are preserved
+      // by (re)attaching polylines sorted whenever membership changes;
+      // hover hit-testing is done in coordinate space (no hit canvas).
+      this._rLines = L.canvas({ padding: this.options.padding }).addTo(map);
       this._stationsLayer = L.layerGroup().addTo(map);
       this._scheduleRedrawBound = this._scheduleRedraw.bind(this);
       map.on('moveend', this._scheduleRedrawBound);
+      // Line-name hover, pointer devices only — touch never hovers, so
+      // phones skip the listener (and its per-move segment math) entirely.
+      if (window.matchMedia && matchMedia('(hover: hover)').matches) {
+        this._onMouseMoveBound = this._onMouseMove.bind(this);
+        this._onMouseOutBound = this._hideHover.bind(this);
+        map.on('mousemove', this._onMouseMoveBound);
+        map.on('mouseout', this._onMouseOutBound);
+        this._hoverTip = L.tooltip({
+          className: 'transit-line-label', direction: 'top',
+          offset: [0, -8], opacity: 1
+        });
+      }
       if (this._loaded) {
         this._scheduleRedraw();
       } else {
@@ -259,18 +278,21 @@
         map.off('moveend', this._scheduleRedrawBound);
         this._scheduleRedrawBound = null;
       }
+      if (this._onMouseMoveBound) {
+        map.off('mousemove', this._onMouseMoveBound);
+        map.off('mouseout', this._onMouseOutBound);
+        this._onMouseMoveBound = this._onMouseOutBound = null;
+      }
+      this._hideHover();
+      this._hoverTip = null;
       if (this._rafToken) {
         cancelAnimationFrame(this._rafToken);
         this._rafToken = 0;
       }
       this._teardownActiveLayers();
-      if (this._rCasing) this._rCasing.remove();
-      if (this._rImp) {
-        for (var imp = 1; imp <= 5; imp++) this._rImp[imp].remove();
-      }
-      if (this._rHit) this._rHit.remove();
+      if (this._rLines) this._rLines.remove();
       if (this._stationsLayer) this._stationsLayer.remove();
-      this._rCasing = this._rImp = this._rHit = this._stationsLayer = null;
+      this._rLines = this._stationsLayer = null;
       this._lastZoom = null;
       this._lastDrawCasing = null;
       this._map = null;
@@ -278,9 +300,10 @@
     },
 
     // Detach polylines for everything currently on the map and drop the
-    // refs. The polylines belong to the renderers we may be about to throw
+    // refs. The polylines belong to the renderer we may be about to throw
     // away (onRemove) or to a soon-to-be-swapped LOD (LOD switch), so
-    // holding onto them would pin dead state.
+    // holding onto them would pin dead state. Station markers belong to
+    // the active LOD's features too, so the registry goes with them.
     _teardownActiveLayers: function() {
       var it = this._onMap.values(), v;
       while (!(v = it.next()).done) {
@@ -290,9 +313,11 @@
           if (f._pl_casing._map) f._pl_casing.remove();
           f._pl_casing = null;
         }
-        if (f._pl_hit) { f._pl_hit.remove(); f._pl_hit = null; }
       }
       this._onMap.clear();
+      if (this._stationsLayer) this._stationsLayer.clearLayers();
+      this._stationsOn.clear();
+      this._hideHover();
     },
 
     _load: function() {
@@ -447,6 +472,8 @@
       // disagreeing with lines about which filter they belong to.
       f._bucket = f.properties.is_longhaul ? 'long' : 'city';
       f._color = colorFor(f.properties, cls);
+      f._imp = CLASSES[cls].importance;
+      f._label = pickLineLabel(f.properties) || '';
       var ll = new Array(coords.length);
       for (var j = 0; j < coords.length; j++) ll[j] = [coords[j][1], coords[j][0]];
       f._latlngs = ll;
@@ -496,25 +523,17 @@
       var op = this.options.opacity;
       var cop = this.options.casingOpacity;
       f._pl_casing = L.polyline(f._latlngs, {
-        renderer: this._rCasing, color: '#ffffff', weight: cls.w + 1.6,
+        renderer: this._rLines, color: '#ffffff', weight: cls.w + 1.6,
         opacity: cop, lineCap: 'round', lineJoin: 'round', interactive: false
       });
       f._pl = L.polyline(f._latlngs, {
-        renderer: this._rImp[cls.importance], color: f._color, weight: cls.w,
+        renderer: this._rLines, color: f._color, weight: cls.w,
         opacity: op, lineCap: 'round', lineJoin: 'round', interactive: false
       });
-      f._pl_hit = L.polyline(f._latlngs, {
-        renderer: this._rHit, color: '#000', weight: this.options.hitWeight,
-        opacity: 0, lineCap: 'round', lineJoin: 'round',
-        bubblingMouseEvents: false
-      });
-      var label = pickLineLabel(f.properties);
-      if (label) {
-        f._pl_hit.bindTooltip(label, {
-          sticky: true, direction: 'top', offset: [0, -8],
-          className: 'transit-line-label', opacity: 1
-        });
-      }
+      // No hit polyline: hover resolution runs in coordinate space against
+      // the visible set (_hitTest) — the old invisible weight-14 copy of
+      // every line cost a seventh full-viewport canvas that repainted for
+      // nothing on every pan.
     },
 
     _scheduleRedraw: function() {
@@ -549,72 +568,85 @@
         desired.add(f);
       }
 
-      // Remove
-      var toRemove = [];
-      this._onMap.forEach(function(f) { if (!desired.has(f)) toRemove.push(f); });
-      for (var r = 0; r < toRemove.length; r++) {
-        var fr = toRemove[r];
-        if (fr._pl) { fr._pl.remove(); fr._pl = null; }
-        if (fr._pl_hit) { fr._pl_hit.remove(); fr._pl_hit = null; }
-        if (fr._pl_casing) {
-          if (fr._pl_casing._map) fr._pl_casing.remove();
-          fr._pl_casing = null;
-        }
-        this._onMap.delete(fr);
+      // Membership diff. Any change to the visible set (or the casing
+      // threshold) triggers a full re-attach in paint order: casings
+      // first (bottom), then lines by importance ascending — insertion
+      // order IS z-order inside the single canvas. The canvas repaints
+      // once either way (Leaflet coalesces via rAF), so the re-attach
+      // costs only bookkeeping, not extra raster passes.
+      var self = this;
+      var membershipChanged = false;
+      this._onMap.forEach(function(f) {
+        if (!desired.has(f)) membershipChanged = true;
+      });
+      if (!membershipChanged) {
+        desired.forEach(function(f) {
+          if (!self._onMap.has(f)) membershipChanged = true;
+        });
       }
 
-      // Add / restyle
-      var self = this;
-      desired.forEach(function(f) {
-        self._ensurePolylines(f);
-        var c = CLASSES[f._class];
-        if (!self._onMap.has(f)) {
-          f._pl.setStyle({ weight: c.w + zoomBoost });
-          f._pl.addTo(self._map);
-          f._pl_hit.addTo(self._map);
-          if (drawCasing) {
-            f._pl_casing.setStyle({ weight: c.w + zoomBoost + 1.6 });
+      if (membershipChanged || casingChanged) {
+        this._onMap.forEach(function(f) {
+          if (f._pl && f._pl._map) f._pl.remove();
+          if (f._pl_casing && f._pl_casing._map) f._pl_casing.remove();
+        });
+        var list = [];
+        desired.forEach(function(f) { list.push(f); });
+        list.sort(function(a, b) { return a._imp - b._imp; });
+        var i, f;
+        if (drawCasing) {
+          for (i = 0; i < list.length; i++) {
+            f = list[i];
+            self._ensurePolylines(f);
+            f._pl_casing.setStyle({ weight: CLASSES[f._class].w + zoomBoost + 1.6 });
             f._pl_casing.addTo(self._map);
           }
-          self._onMap.add(f);
-        } else {
-          if (zoomChanged) {
-            f._pl.setStyle({ weight: c.w + zoomBoost });
-            if (f._pl_casing._map) {
-              f._pl_casing.setStyle({ weight: c.w + zoomBoost + 1.6 });
-            }
-          }
-          if (casingChanged) {
-            if (drawCasing && !f._pl_casing._map) {
-              f._pl_casing.setStyle({ weight: c.w + zoomBoost + 1.6 });
-              f._pl_casing.addTo(self._map);
-            } else if (!drawCasing && f._pl_casing._map) {
-              f._pl_casing.remove();
-            }
-          }
         }
-      });
+        for (i = 0; i < list.length; i++) {
+          f = list[i];
+          self._ensurePolylines(f);
+          f._pl.setStyle({ weight: CLASSES[f._class].w + zoomBoost });
+          f._pl.addTo(self._map);
+        }
+        this._onMap = desired;
+      } else if (zoomChanged) {
+        // Same set, new zoom — restyle in place.
+        desired.forEach(function(f) {
+          var c = CLASSES[f._class];
+          f._pl.setStyle({ weight: c.w + zoomBoost });
+          if (f._pl_casing && f._pl_casing._map) {
+            f._pl_casing.setStyle({ weight: c.w + zoomBoost + 1.6 });
+          }
+        });
+      }
 
       this._lastZoom = zoom;
       this._lastDrawCasing = drawCasing;
 
-      // Stations: lightweight recreate (small count visible at zoom >= 12).
+      // Stations: DIFFED against the previous frame — the old code did
+      // clearLayers() + full recreate on every moveend, which at z>=14 in
+      // central Tokyo destroyed and rebuilt 100+ SVG circles plus their
+      // permanent tooltip DOM nodes per pan (GC churn + a layout storm at
+      // the end of every drag). Now a pan only touches the stations that
+      // actually entered or left the viewport; existing dots get a cheap
+      // setRadius when the zoom band shifts, and only a permanent-label
+      // flip (z14 crossing) forces a rebind of that one marker.
       // Transfer hubs get a noticeably bigger circle so they read at a
       // glance: line_count >= 6 ("mega-hub" — 渋谷 / 新宿 / 上野 / 池袋 /
       // 京都...) and >= 3 ("regular hub") are precomputed by
       // transit_postprocess.py. Stations on the wrong bucket — e.g., a
       // pure shinkansen-only halt while the 长途 toggle is off — get
       // skipped entirely so the dots don't outlive their lines.
-      this._stationsLayer.clearLayers();
+      var want = new Map();
       if (zoom >= 12) {
-        var b = this._map.getBounds().pad(0.1);
-        var W = b.getWest(), E = b.getEast(), S2 = b.getSouth(), N = b.getNorth();
+        var b2 = this._map.getBounds().pad(0.1);
+        var W2 = b2.getWest(), E2 = b2.getEast(), S2 = b2.getSouth(), N2 = b2.getNorth();
         var showLabel = zoom >= 14;
         for (var s = 0; s < this._allStations.length; s++) {
           var stn = this._allStations[s];
           var lon = stn.geometry.coordinates[0];
           var lat = stn.geometry.coordinates[1];
-          if (lon < W || lon > E || lat < S2 || lat > N) continue;
+          if (lon < W2 || lon > E2 || lat < S2 || lat > N2) continue;
           // Hide the dot if its only nearby lines belong to a bucket that's
           // off. Legacy stations without the per-bucket flags fall back to
           // "show if any bucket is on" so old geojsons keep working.
@@ -631,31 +663,121 @@
           if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;
           else if (lc >= 3) radius = zoom >= 15 ? 6 : zoom >= 13 ? 5   : 4.2;
           else              radius = zoom >= 15 ? 4 : zoom >= 13 ? 3.2 : 2.6;
-          var isTram = stn.properties.railway === 'tram_stop';
-          var isHub = lc >= 3;
-          var dot = L.circleMarker([lat, lon], {
-            radius: radius,
-            weight: isHub ? 2 : 1.5,
-            color: isTram ? '#c62828' : (isHub ? '#111' : '#222'),
-            fillColor: isHub ? '#fffbea' : '#ffffff',
-            fillOpacity: this.options.opacity,
-            opacity: this.options.opacity
-          });
-          var nm = pickStationName(stn.properties);
-          if (nm) {
-            var opts = { className: 'transit-station-label' };
-            if (showLabel) {
-              opts.permanent = true;
-              opts.direction = 'top';
-              opts.offset = [0, -4];
-            }
-            var label = nm;
-            if (lc >= 3) label = nm + '  (' + lc + LINES_SUFFIX + ')';
-            dot.bindTooltip(label, opts);
-          }
-          this._stationsLayer.addLayer(dot);
+          want.set(stn, { radius: radius, showLabel: showLabel, lat: lat, lon: lon });
         }
       }
+      var stOn = this._stationsOn;
+      var stLayer = this._stationsLayer;
+      var stRemove = [];
+      stOn.forEach(function(rec, stn) { if (!want.has(stn)) stRemove.push(stn); });
+      for (var r2 = 0; r2 < stRemove.length; r2++) {
+        stLayer.removeLayer(stOn.get(stRemove[r2]).marker);
+        stOn.delete(stRemove[r2]);
+      }
+      var op2 = this.options.opacity;
+      want.forEach(function(p, stn) {
+        var rec = stOn.get(stn);
+        if (rec && rec.showLabel === p.showLabel) {
+          if (rec.radius !== p.radius) {
+            rec.marker.setRadius(p.radius);
+            rec.radius = p.radius;
+          }
+          return;
+        }
+        if (rec) {
+          // Label mode flipped (crossed z14) — rebuild just this marker so
+          // the tooltip's permanent-ness matches.
+          stLayer.removeLayer(rec.marker);
+          stOn.delete(stn);
+        }
+        var lc2 = stn.properties.line_count | 0;
+        var isTram = stn.properties.railway === 'tram_stop';
+        var isHub = lc2 >= 3;
+        var dot = L.circleMarker([p.lat, p.lon], {
+          radius: p.radius,
+          weight: isHub ? 2 : 1.5,
+          color: isTram ? '#c62828' : (isHub ? '#111' : '#222'),
+          fillColor: isHub ? '#fffbea' : '#ffffff',
+          fillOpacity: op2,
+          opacity: op2
+        });
+        var nm = pickStationName(stn.properties);
+        if (nm) {
+          var opts = { className: 'transit-station-label' };
+          if (p.showLabel) {
+            opts.permanent = true;
+            opts.direction = 'top';
+            opts.offset = [0, -4];
+          }
+          var label = nm;
+          if (lc2 >= 3) label = nm + '  (' + lc2 + LINES_SUFFIX + ')';
+          dot.bindTooltip(label, opts);
+        }
+        stLayer.addLayer(dot);
+        stOn.set(stn, { marker: dot, radius: p.radius, showLabel: p.showLabel });
+      });
+    },
+
+    // ---- line-name hover, no hit canvas ---------------------------------
+    // Point-to-segment distance against the *visible* line set, in a
+    // screen-proportional coordinate frame (lng, lat/cos φ). Throttled to
+    // ~25 fps; bbox pre-check skips almost every line per move.
+    _hideHover: function() {
+      if (this._hoverOpen && this._hoverTip) this._hoverTip.remove();
+      this._hoverOpen = false;
+    },
+    _onMouseMove: function(e) {
+      var now = Date.now();
+      if (now - this._lastHover < 40) return;
+      this._lastHover = now;
+      var hit = this._hitTest(e.latlng);
+      if (hit && hit._label) {
+        this._hoverTip.setContent(hit._label);
+        this._hoverTip.setLatLng(e.latlng);
+        if (!this._hoverOpen) {
+          this._hoverTip.addTo(this._map);
+          this._hoverOpen = true;
+        }
+      } else {
+        this._hideHover();
+      }
+    },
+    _hitTest: function(latlng) {
+      if (!this._map) return null;
+      var degPerPx = 360 / (256 * Math.pow(2, this._map.getZoom()));
+      var tol = 8 * degPerPx;                       // ~8px, in lng-degrees
+      var cosLat = Math.cos(latlng.lat * Math.PI / 180);
+      if (cosLat < 1e-6) cosLat = 1e-6;
+      var ux = latlng.lng, uy = latlng.lat / cosLat;
+      var best = null, bestD = tol * tol;
+      var latTol = tol * cosLat;
+      var it = this._onMap.values(), v;
+      while (!(v = it.next()).done) {
+        var f = v.value;
+        var bb = f._bbox;   // [minLng, minLat, maxLng, maxLat]
+        if (latlng.lng < bb[0] - tol   || latlng.lng > bb[2] + tol)   continue;
+        if (latlng.lat < bb[1] - latTol || latlng.lat > bb[3] + latTol) continue;
+        var ll = f._latlngs;   // [ [lat, lng], ... ]
+        for (var i = 1; i < ll.length; i++) {
+          var d = this._segDist2(
+            ux, uy,
+            ll[i - 1][1], ll[i - 1][0] / cosLat,
+            ll[i][1],     ll[i][0] / cosLat);
+          if (d < bestD) { bestD = d; best = f; }
+        }
+      }
+      return best;
+    },
+    _segDist2: function(px, py, ax, ay, bx, by) {
+      var dx = bx - ax, dy = by - ay;
+      var len2 = dx * dx + dy * dy;
+      var t = 0;
+      if (len2 > 0) {
+        t = ((px - ax) * dx + (py - ay) * dy) / len2;
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+      }
+      var ex = ax + t * dx - px, ey = ay + t * dy - py;
+      return ex * ex + ey * ey;
     }
   });
 
