@@ -4614,7 +4614,10 @@ FILTER_JS_TEMPLATE = r"""
     var statusEl = document.getElementById('ff-sync-status');
     function setStatus(text, kind) {
       if (!statusEl) return;
-      statusEl.textContent = text;
+      // #ff-sync-status sits outside the i18n MutationObserver's containers,
+      // so dynamic writes must localize explicitly (same for every sink in
+      // this file that writes user-visible zh-CN outside those containers).
+      statusEl.textContent = localizeText(text);
       statusEl.style.color = kind === 'err' ? '#dc2626'
                            : kind === 'ok'  ? '#16a34a'
                            : kind === 'busy'? '#2563eb' : '#6b7280';
@@ -4647,11 +4650,11 @@ FILTER_JS_TEMPLATE = r"""
       var d = !!dirty;
       fabEl.classList.toggle('needs-sync',         d && !signedIn);
       fabEl.classList.toggle('needs-sync-pending', d &&  signedIn);
-      fabEl.title = d
+      fabEl.title = localizeText(d
         ? (signedIn
             ? '改动待同步到云端…'
             : '收藏 / 弃用 / 景点 仅存于本地浏览器，点击登录以跨设备同步')
-        : '筛选';
+        : '筛选');
     }
 
     function refreshAllMarkers() {
@@ -5157,8 +5160,8 @@ FILTER_JS_TEMPLATE = r"""
         }
         if (bsBanner) {
           bsBanner.hidden = false;
-          bsBanner.textContent =
-            '🔍 此餐厅当前不在筛选范围内 — 调整左侧筛选条件可让它出现在地图上';
+          bsBanner.textContent = localizeText(
+            '🔍 此餐厅当前不在筛选范围内 — 调整左侧筛选条件可让它出现在地图上');
         }
       }
     }
@@ -6377,7 +6380,7 @@ FILTER_JS_TEMPLATE = r"""
       if (e.key === 'Escape' && ssMenu.classList.contains('open')) closeAvatarMenu();
     });
     document.getElementById('ssm-signout').addEventListener('click', function() {
-      if (!confirm('退出登录？本设备上的本地缓存会保留，但不再同步到云端。')) return;
+      if (!confirm(localizeText('退出登录？本设备上的本地缓存会保留，但不再同步到云端。'))) return;
       signOut();
     });
     document.getElementById('ssm-reset').addEventListener('click', function() {
@@ -6457,7 +6460,7 @@ FILTER_JS_TEMPLATE = r"""
     var pendingImport = null;
 
     function setImpRow(cb, countEl, text, available) {
-      countEl.textContent = text;
+      countEl.textContent = localizeText(text);
       cb.disabled = !available;
       cb.checked  = available;
     }
@@ -6498,19 +6501,19 @@ FILTER_JS_TEMPLATE = r"""
       reader.onload = function() {
         var parsed;
         try { parsed = JSON.parse(reader.result); }
-        catch (_) { alert('无法解析该文件，请确认它是导出的 favorites.json'); return; }
+        catch (_) { alert(localizeText('无法解析该文件，请确认它是导出的 favorites.json')); return; }
         var norm = normalizeImport(parsed);
-        if (!norm) { alert('文件格式无法识别'); return; }
+        if (!norm) { alert(localizeText('文件格式无法识别')); return; }
         openImportModal(norm);
       };
-      reader.onerror = function() { alert('读取文件失败'); };
+      reader.onerror = function() { alert(localizeText('读取文件失败')); };
       reader.readAsText(file);
     });
 
     function doImport() {
       if (!pendingImport) return;
       if (!impFavCb.checked && !impBlackCb.checked && !impBmCb.checked) {
-        impError.textContent = '请至少选择一项';
+        impError.textContent = localizeText('请至少选择一项');
         return;
       }
       var report = [];
@@ -6560,7 +6563,8 @@ FILTER_JS_TEMPLATE = r"""
       refreshAllMarkers();
       if (changed) schedulePush();
       closeImportModal();
-      alert(changed ? ('导入完成：' + report.join('，')) : '没有新增内容（全部已存在）');
+      alert(localizeText(
+        changed ? ('导入完成：' + report.join('，')) : '没有新增内容（全部已存在）'));
     }
 
     impModal.querySelector('.imp-confirm').addEventListener('click', doImport);
@@ -6667,6 +6671,15 @@ FILTER_JS_TEMPLATE = r"""
     // a rare toggle isn't worth the memory.
     function setLanguage(v) {
       try { localStorage.setItem(LANG_KEY, v); } catch (_) {}
+      // Carry the open card / typed query across the reload so trying a
+      // language doesn't dump the user's place. sessionStorage: per-tab,
+      // consumed once on the other side.
+      try {
+        sessionStorage.setItem('tabelog.langSwitch', JSON.stringify({
+          u: (bsActive && bsActive.detail_url) || '',
+          q: (ssInput && ssInput.value) || ''
+        }));
+      } catch (_) {}
       var url = new URL(window.location.href);
       if (v === 'zh-TW') url.searchParams.set('lang', 'tw');
       else if (v === 'en') url.searchParams.set('lang', 'en');
@@ -6694,13 +6707,29 @@ FILTER_JS_TEMPLATE = r"""
         setTimeout(warmPopups, 4000);
       }
     }
+    // Restore what a language-switch reload carried over: reopen the card
+    // that was on screen, or put the typed query back. openSheet itself
+    // writes the restaurant name into the search box, so the query only
+    // needs restoring when no card was open.
+    try {
+      var lsw = JSON.parse(sessionStorage.getItem('tabelog.langSwitch') || 'null');
+      sessionStorage.removeItem('tabelog.langSwitch');
+      if (lsw && lsw.u) {
+        for (var lswI = 0; lswI < data.length; lswI++) {
+          if (data[lswI].detail_url === lsw.u) { openSheet(data[lswI]); break; }
+        }
+      } else if (lsw && lsw.q && ssInput) {
+        ssInput.value = lsw.q;
+        ssWrap.classList.add('has-text');
+      }
+    } catch (_) {}
   }
   function boot() {
     function setTotals(text) {
       var nodes = document.querySelectorAll('.ff-total');
       for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
     }
-    setTotals('加载中…');
+    setTotals(localizeText('加载中…'));
     fetch('data/restaurants.json', {cache: 'force-cache'})
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -6709,7 +6738,7 @@ FILTER_JS_TEMPLATE = r"""
       .then(function(data) { initMap(data); })
       .catch(function(e) {
         console.error('[tabelog] restaurants.json load failed:', e);
-        setTotals('加载失败');
+        setTotals(localizeText('加载失败'));
       });
   }
   if (document.readyState !== 'loading') boot();
