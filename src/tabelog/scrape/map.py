@@ -1283,6 +1283,7 @@ HEAD_BRANDING = """
 <link rel="preconnect" href="https://emojicdn.elk.sh" crossorigin>
 <link rel="preconnect" href="https://accounts.google.com" crossorigin>
 <link rel="preconnect" href="https://api.jpfoodmap.com" crossorigin>
+<link rel="preconnect" href="https://tblg.k-img.com">
 <link rel="dns-prefetch" href="https://a.basemaps.cartocdn.com">
 <link rel="dns-prefetch" href="https://b.basemaps.cartocdn.com">
 <link rel="dns-prefetch" href="https://c.basemaps.cartocdn.com">
@@ -2301,9 +2302,23 @@ MOBILE_UX_ASSETS = """
   .rst-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
   .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
                 gap: 6px; margin-bottom: 10px; }
-  .rst-photos a { display: block; min-width: 0; }
+  .rst-photos a { display: block; min-width: 0; position: relative;
+                  overflow: hidden; border-radius: 6px;
+                  aspect-ratio: 1 / 1; background: #f3f4f6; }
   .rst-photos img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover;
                     border-radius: 6px; display: block; background: #f3f4f6; }
+  /* Loading shimmer — a translated gradient strip (transform-only, stays
+     on the compositor). The img's inline onload adds .ld to the anchor,
+     which removes the strip so nothing keeps animating under the photo. */
+  .rst-photos a::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(100deg, transparent 30%,
+                rgba(255,255,255,0.7) 50%, transparent 70%);
+    transform: translateX(-100%);
+    animation: rst-shimmer 1.1s ease-in-out infinite;
+  }
+  .rst-photos a.ld::after { content: none; }
+  @keyframes rst-shimmer { to { transform: translateX(100%); } }
   .rst-genre { color: #4b5563; margin-bottom: 8px; }
   .rst-info { display: grid; grid-template-columns: 1fr;
               gap: 4px 16px; margin-bottom: 8px; }
@@ -3401,10 +3416,20 @@ FILTER_JS_TEMPLATE = r"""
       var lunchS  = (lunch  != null) ? '¥' + lunch  : 'NA';
       var photoHtml = '';
       if (photos.length) {
+        // 150x150_square (the old thumb) upscaled 2-3x on any hidpi
+        // screen — visibly blurry. 320x320_square covers phone-sized boxes
+        // through dpr≈2.5; wide hidpi screens use the 640 rect directly —
+        // it's the same URL as the full-view link, so the bytes get reused
+        // when the user taps through. aspect-ratio + object-fit:cover in
+        // the CSS makes square and rect sources crop identically.
+        var thumbToken = (window.innerWidth >= 700
+                          && (window.devicePixelRatio || 1) > 1.2)
+                         ? '640x640_rect_' : '320x320_square_';
         photoHtml = '<div class="rst-photos">' + photos.map(function(big) {
-          var thumb = String(big).replace('640x640_rect_', '150x150_square_');
+          var thumb = String(big).replace('640x640_rect_', thumbToken);
           return '<a href="' + escapeHtml(big) + '" target="_blank" rel="noopener">'
                + '<img src="' + escapeHtml(thumb) + '" loading="lazy" alt="" '
+               + 'onload="this.parentElement.classList.add(\'ld\')" '
                + 'onerror="this.parentElement.style.display=\'none\'"></a>';
         }).join('') + '</div>';
       }
