@@ -5278,11 +5278,17 @@ FILTER_JS_TEMPLATE = r"""
                  'display:flex;align-items:center;justify-content:center;' +
                  'opacity:' + opacity + ';">' +
                  pulse +
+                 // Tighter halo than before (fade-out ends at 75% instead of
+                 // filling the whole 36px box) — with hundreds of markers in
+                 // a city view the fat fuzzy discs bled into each other and
+                 // into the transit layer. No drop-shadow on the emoji: the
+                 // halo already provides the contrast backdrop, and the
+                 // filter forced per-marker intermediate-surface compositing
+                 // during pans.
                  '<div style="position:absolute;inset:0;border-radius:50%;' +
                  'background:radial-gradient(circle closest-side, ' +
-                 color + 'EE 0%, ' + color + 'AA 50%, ' + color + '00 100%);"></div>' +
-                 emojiImg(emoji, 'position:relative;width:16px;height:16px;' +
-                                 'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));') +
+                 color + 'E6 0%, ' + color + '99 42%, ' + color + '00 75%);"></div>' +
+                 emojiImg(emoji, 'position:relative;width:16px;height:16px;') +
                  badge +
                  '</div>';
       return L.divIcon({className: '', html: html,

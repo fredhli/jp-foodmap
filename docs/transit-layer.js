@@ -152,6 +152,25 @@
     return h >>> 0;
   }
 
+  // Visual de-noising: city-bucket lines are context, not content — at
+  // z14 in central Tokyo they used to shout at full saturation over the
+  // restaurant layer. Mixing toward white (pastel) keeps every line
+  // traceable and color-distinguishable while pushing the whole tier
+  // into the background. Long-haul lines (shinkansen / JR mainline) stay
+  // at full strength: they're sparse, and they're what the 长途 user is
+  // actually looking at.
+  function muteColor(hex) {
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+    var t = 0.45;   // fraction mixed toward white
+    var out = '#';
+    for (var i = 1; i < 7; i += 2) {
+      var c = parseInt(hex.slice(i, i + 2), 16);
+      c = Math.round(c + (255 - c) * t);
+      out += (c < 16 ? '0' : '') + c.toString(16);
+    }
+    return out;
+  }
+
   var CLASS_DEFAULT_COLOR = {
     shinkansen: SK_DEFAULT,
     jr:         '#2e7d32',
@@ -197,7 +216,8 @@
       // z>=14.
       lodUrls: null,
       lodBreaks: null,
-      opacity: 0.7,         // line opacity when overlaid on a base map
+      opacity: 0.7,         // long-haul line opacity over the base map
+      cityOpacity: 0.45,    // city-bucket lines sit further back (see muteColor)
       casingOpacity: 0.45,  // white casing underneath, less prominent
       padding: 0.25,
       grid: 0.4             // grid cell size in degrees
@@ -472,6 +492,7 @@
       // disagreeing with lines about which filter they belong to.
       f._bucket = f.properties.is_longhaul ? 'long' : 'city';
       f._color = colorFor(f.properties, cls);
+      f._drawColor = f._bucket === 'city' ? muteColor(f._color) : f._color;
       f._imp = CLASSES[cls].importance;
       f._label = pickLineLabel(f.properties) || '';
       var ll = new Array(coords.length);
@@ -527,8 +548,9 @@
         opacity: cop, lineCap: 'round', lineJoin: 'round', interactive: false
       });
       f._pl = L.polyline(f._latlngs, {
-        renderer: this._rLines, color: f._color, weight: cls.w,
-        opacity: op, lineCap: 'round', lineJoin: 'round', interactive: false
+        renderer: this._rLines, color: f._drawColor || f._color, weight: cls.w,
+        opacity: f._bucket === 'city' ? this.options.cityOpacity : op,
+        lineCap: 'round', lineJoin: 'round', interactive: false
       });
       // No hit polyline: hover resolution runs in coordinate space against
       // the visible set (_hitTest) — the old invisible weight-14 copy of
@@ -641,7 +663,13 @@
       if (zoom >= 12) {
         var b2 = this._map.getBounds().pad(0.1);
         var W2 = b2.getWest(), E2 = b2.getEast(), S2 = b2.getSouth(), N2 = b2.getNorth();
-        var showLabel = zoom >= 14;
+        // Permanent-label tiering: z14 labels only transfer hubs (the
+        // stations people navigate by); every station gets its label at
+        // z15+, and hover always works. Flat z14 labeling put 150-220
+        // white pills over central Tokyo — over the restaurant markers
+        // this was most of the "unreadable map" complaint.
+        var labelAll  = zoom >= 15;
+        var labelHubs = zoom >= 14;
         for (var s = 0; s < this._allStations.length; s++) {
           var stn = this._allStations[s];
           var lon = stn.geometry.coordinates[0];
@@ -663,7 +691,8 @@
           if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;
           else if (lc >= 3) radius = zoom >= 15 ? 6 : zoom >= 13 ? 5   : 4.2;
           else              radius = zoom >= 15 ? 4 : zoom >= 13 ? 3.2 : 2.6;
-          want.set(stn, { radius: radius, showLabel: showLabel, lat: lat, lon: lon });
+          var perm = labelAll || (labelHubs && lc >= 3);
+          want.set(stn, { radius: radius, showLabel: perm, lat: lat, lon: lon });
         }
       }
       var stOn = this._stationsOn;
