@@ -1068,30 +1068,44 @@ def build_filter_panel_html(
        .needs-sync-pending — blue. Signed in; the push just hasn't landed
                               yet (or last attempt failed, but the status
                               text covers that channel). Informational. */
-  @keyframes ff-fab-pulse {{
-    0%   {{ background: #fee2e2; box-shadow: 0 2px 6px rgba(220,38,38,0.35); }}
-    50%  {{ background: #dc2626; box-shadow: 0 4px 14px rgba(220,38,38,0.55); }}
-    100% {{ background: #fee2e2; box-shadow: 0 2px 6px rgba(220,38,38,0.35); }}
+  /* The "breathing" is an ::after overlay in the light shade fading over a
+     static solid base — animating opacity alone stays on the compositor,
+     unlike the old background/box-shadow keyframes which repainted the
+     button on the main thread every frame for as long as the state lasted
+     (signed-out-with-edits pulses for the whole session — that was a
+     measurable battery cost on phones). Visual result is identical:
+     overlay at 1 shows the light shade, at 0 the solid base. */
+  @keyframes ff-fab-breathe {{
+    0%, 100% {{ opacity: 1; }}
+    50%      {{ opacity: 0; }}
   }}
   #ff-fab.needs-sync {{
-    color: #fff; border-color: #dc2626;
-    animation: ff-fab-pulse 1.4s ease-in-out infinite;
-  }}
-  #ff-fab.needs-sync:hover {{ animation-play-state: paused;
-                              background: #dc2626; }}
-  #ff-fab.needs-sync .ff-fab-count b {{ color: #fff; }}
-  #ff-fab.needs-sync .ff-fab-count {{ color: #fff; }}
-  @keyframes ff-fab-pulse-pending {{
-    0%   {{ background: #dbeafe; box-shadow: 0 2px 6px rgba(37,99,235,0.35); }}
-    50%  {{ background: #2563eb; box-shadow: 0 4px 14px rgba(37,99,235,0.55); }}
-    100% {{ background: #dbeafe; box-shadow: 0 2px 6px rgba(37,99,235,0.35); }}
+    color: #fff; border-color: #dc2626; background: #dc2626;
+    box-shadow: 0 3px 10px rgba(220,38,38,0.45);
   }}
   #ff-fab.needs-sync-pending {{
-    color: #fff; border-color: #2563eb;
-    animation: ff-fab-pulse-pending 1.4s ease-in-out infinite;
+    color: #fff; border-color: #2563eb; background: #2563eb;
+    box-shadow: 0 3px 10px rgba(37,99,235,0.45);
   }}
-  #ff-fab.needs-sync-pending:hover {{ animation-play-state: paused;
-                                      background: #2563eb; }}
+  #ff-fab.needs-sync::after, #ff-fab.needs-sync-pending::after {{
+    content: ''; position: absolute; inset: 0;
+    border-radius: inherit; pointer-events: none;
+    animation: ff-fab-breathe 1.4s ease-in-out infinite;
+  }}
+  #ff-fab.needs-sync::after {{ background: #fee2e2; }}
+  #ff-fab.needs-sync-pending::after {{ background: #dbeafe; }}
+  /* Keep the label above the overlay (matches the old white-on-color look
+     through the whole cycle). */
+  #ff-fab.needs-sync > *, #ff-fab.needs-sync-pending > * {{
+    position: relative; z-index: 1;
+  }}
+  #ff-fab.needs-sync:hover::after, #ff-fab.needs-sync-pending:hover::after {{
+    animation-play-state: paused; opacity: 0;
+  }}
+  #ff-fab.needs-sync:hover {{ background: #dc2626; }}
+  #ff-fab.needs-sync-pending:hover {{ background: #2563eb; }}
+  #ff-fab.needs-sync .ff-fab-count b {{ color: #fff; }}
+  #ff-fab.needs-sync .ff-fab-count {{ color: #fff; }}
   #ff-fab.needs-sync-pending .ff-fab-count b {{ color: #fff; }}
   #ff-fab.needs-sync-pending .ff-fab-count {{ color: #fff; }}
   /* Small "?" badge next to bold subtitles inside the filter sheet.
@@ -4665,6 +4679,16 @@ FILTER_JS_TEMPLATE = r"""
           // response would revert it on screen. Drop it; the edit's pending
           // push flushes shortly and the next poll re-pulls fresh state.
           if (stateGen !== genAtStart) return;
+          // Same version we already have → nothing changed remotely, so
+          // skip the full apply (bookmark-layer wipe + setIcon on every
+          // materialized marker + filter recompute + storage writes). The
+          // 60s poll and every tab refocus land here in the common case —
+          // this used to be a per-minute main-thread spike for nothing.
+          if (typeof remote.v === 'number' && remote.v === syncBase.v
+              && syncBase.sub === currentSub()) {
+            setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+            return;
+          }
           // Empty server (new account): server returns {}; nothing to apply.
           // Server with data: {favorites, blacklist, bookmarks}.
           if (Array.isArray(remote.favorites)) state.fav   = new Set(remote.favorites);
