@@ -1684,6 +1684,15 @@ SEARCH_BOX_HTML = """
         <span aria-hidden="true">↻</span><span>重置筛选</span>
       </button>
       <div class="ssm-divider"></div>
+      <div class="ssm-section-lbl">备份 / 迁移</div>
+      <button class="ssm-row" id="ssm-export" type="button">
+        <span aria-hidden="true">↓</span><span>导出 favorites.json</span>
+      </button>
+      <button class="ssm-row" id="ssm-import" type="button">
+        <span aria-hidden="true">↑</span><span>导入 favorites.json</span>
+      </button>
+      <input id="ssm-import-file" type="file" accept="application/json,.json" hidden>
+      <div class="ssm-divider"></div>
       <div class="ssm-section-lbl">语言</div>
       <div class="ssm-langs">
         <button type="button" data-lang="zh-CN">简体</button>
@@ -1972,6 +1981,98 @@ BOOKMARKS_MODAL_HTML = """
   <div class="bm-foot">
     <button type="button" class="bm-cancel">取消</button>
     <button type="button" class="bm-save">保存</button>
+  </div>
+</div>
+
+<style>
+  /* Import-picker modal: opened from the avatar menu's "导入 favorites.json".
+     Lets the user choose which of the three corpora in the backup file to
+     merge, with a per-corpus item count shown alongside each checkbox.
+     Lives in this constant (not SEARCH_BOX_HTML) so it rides the same
+     body-level injection as #bm-modal — confirmed-safe for position:fixed. */
+  #imp-backdrop {
+    position: fixed; inset: 0; z-index: 11000;
+    background: rgba(0,0,0,0.35); display: none;
+  }
+  #imp-backdrop.imp-open { display: block; }
+  #imp-modal {
+    position: fixed; z-index: 11001;
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 32px));
+    background: #fff; border-radius: 14px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.25);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: none;
+  }
+  #imp-modal.imp-open { display: block; }
+  #imp-modal .imp-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid #f3f4f6;
+  }
+  #imp-modal .imp-title { font-weight: 600; font-size: 15px; color: #1f2937; }
+  #imp-modal .imp-close {
+    border: none; background: none; cursor: pointer;
+    font-size: 20px; line-height: 1; color: #6b7280; padding: 0 4px;
+  }
+  #imp-modal .imp-body { padding: 12px 14px; }
+  #imp-modal .imp-sub {
+    margin: 0 0 10px; font-size: 12px; color: #6b7280; line-height: 1.5;
+  }
+  #imp-modal .imp-opt {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; margin-bottom: 6px;
+    border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer;
+  }
+  #imp-modal .imp-opt:hover { background: #f9fafb; }
+  #imp-modal .imp-opt input { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
+  #imp-modal .imp-opt-label { flex: 1; font-size: 13px; color: #1f2937; font-weight: 600; }
+  #imp-modal .imp-opt-count { font-size: 12px; color: #6b7280; flex-shrink: 0; }
+  #imp-modal .imp-opt input:disabled { cursor: default; }
+  #imp-modal .imp-opt input:disabled ~ .imp-opt-label,
+  #imp-modal .imp-opt input:disabled ~ .imp-opt-count { color: #9ca3af; }
+  #imp-modal .imp-error { color: #b91c1c; font-size: 12px; min-height: 14px; margin-top: 4px; }
+  #imp-modal .imp-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 10px 14px 14px; border-top: 1px solid #f3f4f6;
+  }
+  #imp-modal .imp-foot button {
+    padding: 7px 16px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 600; border: 1px solid #d1d5db;
+    background: #f9fafb; color: #1f2937; font-family: inherit;
+  }
+  #imp-modal .imp-foot button.imp-confirm { background: #2563eb; border-color: #2563eb; color: #fff; }
+  #imp-modal .imp-foot button.imp-confirm:hover { background: #1d4ed8; }
+  #imp-modal .imp-foot button.imp-cancel:hover { background: #f3f4f6; }
+</style>
+<div id="imp-backdrop"></div>
+<div id="imp-modal" role="dialog" aria-modal="true" aria-hidden="true"
+     aria-labelledby="imp-title">
+  <div class="imp-head">
+    <span class="imp-title" id="imp-title">导入备份</span>
+    <button class="imp-close" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="imp-body">
+    <p class="imp-sub">选择要导入的内容，将合并到现有数据并自动去重（不会覆盖现有项）：</p>
+    <label class="imp-opt">
+      <input type="checkbox" id="imp-fav" checked>
+      <span class="imp-opt-label">收藏</span>
+      <span class="imp-opt-count" id="imp-fav-n">—</span>
+    </label>
+    <label class="imp-opt">
+      <input type="checkbox" id="imp-black" checked>
+      <span class="imp-opt-label">弃用名单</span>
+      <span class="imp-opt-count" id="imp-black-n">—</span>
+    </label>
+    <label class="imp-opt">
+      <input type="checkbox" id="imp-bm" checked>
+      <span class="imp-opt-label">书签 / 景点</span>
+      <span class="imp-opt-count" id="imp-bm-n">—</span>
+    </label>
+    <div class="imp-error" id="imp-error" aria-live="polite"></div>
+  </div>
+  <div class="imp-foot">
+    <button type="button" class="imp-cancel">取消</button>
+    <button type="button" class="imp-confirm">导入</button>
   </div>
 </div>
 """
@@ -5909,6 +6010,193 @@ FILTER_JS_TEMPLATE = r"""
       resetFilters();
       closeAvatarMenu();
     });
+
+    // ===== Export / import (favorites.json) =====
+    // Export dumps the exact sync blob — favorites + blacklist + bookmarks —
+    // so a backup round-trips losslessly back through import. Import lets the
+    // user pick which of the three corpora to take, shows each one's size,
+    // and MERGES (set-union for fav/blacklist, id-dedup for bookmarks) so an
+    // import can only ever add, never clobber existing state. After a merge
+    // we schedulePush() — same path a normal star/blacklist toggle takes —
+    // which saves locally and (when signed in) flushes to the Worker/KV.
+    function backupBlob() {
+      return {
+        schema: 1,
+        app: 'jpfoodmap',
+        favorites: Array.from(state.fav),
+        blacklist: Array.from(state.black),
+        bookmarks: bookmarks
+      };
+    }
+    function downloadBackup() {
+      var text = JSON.stringify(backupBlob(), null, 2);
+      var blob = new Blob([text], {type: 'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'favorites.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+    document.getElementById('ssm-export').addEventListener('click', function() {
+      downloadBackup();
+      closeAvatarMenu();
+    });
+
+    // Accept either a string URL or an object carrying one — older/manual
+    // exports might store favorites as {url|detail_url, name}.
+    function pickUrl(x) {
+      if (typeof x === 'string') return x;
+      if (x && typeof x === 'object') return x.url || x.detail_url || '';
+      return '';
+    }
+    // Normalize an arbitrary parsed file into {favorites:[url], blacklist:[url],
+    // bookmarks:[obj]}. Tolerates a bare array (treated as favorites) and the
+    // legacy {fav, black} cache shape. Returns null if nothing usable.
+    function normalizeImport(parsed) {
+      if (Array.isArray(parsed)) {
+        return {favorites: parsed.map(pickUrl).filter(Boolean), blacklist: [], bookmarks: []};
+      }
+      if (!parsed || typeof parsed !== 'object') return null;
+      var favSrc   = parsed.favorites || parsed.fav   || [];
+      var blackSrc = parsed.blacklist || parsed.black || [];
+      var bmSrc    = parsed.bookmarks || [];
+      if (!Array.isArray(favSrc) && !Array.isArray(blackSrc) && !Array.isArray(bmSrc)) return null;
+      return {
+        favorites: (Array.isArray(favSrc)   ? favSrc   : []).map(pickUrl).filter(Boolean),
+        blacklist: (Array.isArray(blackSrc) ? blackSrc : []).map(pickUrl).filter(Boolean),
+        bookmarks: (Array.isArray(bmSrc)    ? bmSrc    : []).filter(function(b) {
+          return b && typeof b === 'object';
+        })
+      };
+    }
+
+    var impBackdrop = document.getElementById('imp-backdrop');
+    var impModal    = document.getElementById('imp-modal');
+    var impFile     = document.getElementById('ssm-import-file');
+    var impFavCb    = document.getElementById('imp-fav');
+    var impBlackCb  = document.getElementById('imp-black');
+    var impBmCb     = document.getElementById('imp-bm');
+    var impError    = document.getElementById('imp-error');
+    var pendingImport = null;
+
+    function setImpRow(cb, countEl, text, available) {
+      countEl.textContent = text;
+      cb.disabled = !available;
+      cb.checked  = available;
+    }
+    function openImportModal(norm) {
+      // Bookmark array carries real pins + metadata-only "hidden" tombstones;
+      // only count the real pins, split into 景点 (attraction) vs 书签.
+      var realBm = norm.bookmarks.filter(function(b) { return b.category !== 'hidden'; });
+      var attrN  = realBm.filter(function(b) { return b.category === 'attraction'; }).length;
+      var pinN   = realBm.length - attrN;
+      setImpRow(impFavCb,   document.getElementById('imp-fav-n'),
+                norm.favorites.length + ' 家餐厅', norm.favorites.length > 0);
+      setImpRow(impBlackCb, document.getElementById('imp-black-n'),
+                norm.blacklist.length + ' 家餐厅', norm.blacklist.length > 0);
+      setImpRow(impBmCb,    document.getElementById('imp-bm-n'),
+                attrN + ' 个景点 · ' + pinN + ' 个书签', norm.bookmarks.length > 0);
+      impError.textContent = '';
+      pendingImport = norm;
+      impBackdrop.classList.add('imp-open');
+      impModal.classList.add('imp-open');
+      impModal.setAttribute('aria-hidden', 'false');
+    }
+    function closeImportModal() {
+      impBackdrop.classList.remove('imp-open');
+      impModal.classList.remove('imp-open');
+      impModal.setAttribute('aria-hidden', 'true');
+      pendingImport = null;
+    }
+
+    document.getElementById('ssm-import').addEventListener('click', function() {
+      impFile.click();
+    });
+    impFile.addEventListener('change', function() {
+      var file = impFile.files && impFile.files[0];
+      impFile.value = '';   // let the same file be re-selected later
+      if (!file) return;
+      closeAvatarMenu();
+      var reader = new FileReader();
+      reader.onload = function() {
+        var parsed;
+        try { parsed = JSON.parse(reader.result); }
+        catch (_) { alert('无法解析该文件，请确认它是导出的 favorites.json'); return; }
+        var norm = normalizeImport(parsed);
+        if (!norm) { alert('文件格式无法识别'); return; }
+        openImportModal(norm);
+      };
+      reader.onerror = function() { alert('读取文件失败'); };
+      reader.readAsText(file);
+    });
+
+    function doImport() {
+      if (!pendingImport) return;
+      if (!impFavCb.checked && !impBlackCb.checked && !impBmCb.checked) {
+        impError.textContent = '请至少选择一项';
+        return;
+      }
+      var report = [];
+      var changed = false;
+
+      if (impFavCb.checked) {
+        var n0 = state.fav.size;
+        pendingImport.favorites.forEach(function(u) { state.fav.add(u); });
+        var df = state.fav.size - n0;
+        report.push('收藏 +' + df);
+        if (df) changed = true;
+      }
+      if (impBlackCb.checked) {
+        var b0 = state.black.size;
+        pendingImport.blacklist.forEach(function(u) { state.black.add(u); });
+        var db = state.black.size - b0;
+        report.push('弃用 +' + db);
+        if (db) changed = true;
+      }
+      if (impBmCb.checked) {
+        var existing = {};
+        bookmarks.forEach(function(bm) { if (bm && bm.id) existing[bm.id] = true; });
+        var added = 0;
+        pendingImport.bookmarks.forEach(function(bm) {
+          if (!bm.id || existing[bm.id]) return;   // dedup by id; skip id-less junk
+          existing[bm.id] = true;
+          sanitizeBookmarkEmoji(bm);
+          bookmarks.push(bm);
+          added++;
+        });
+        report.push('书签 +' + added);
+        if (added) {
+          changed = true;
+          // Full rebuild of both bookmark layers from the merged array —
+          // mirrors the pull() path so freshly-merged "hidden" tombstones
+          // re-hide their builtins correctly (a piecemeal render wouldn't).
+          bookmarksLayer.clearLayers();
+          userAttractionsLayer.clearLayers();
+          bmMarkerById = {};
+          rebuildHiddenIds();
+          bookmarks.forEach(function(bm) { renderBookmark(bm); });
+          renderFavoritesBuiltin();
+          saveBookmarks();
+        }
+      }
+
+      refreshAllMarkers();
+      if (changed) schedulePush();
+      closeImportModal();
+      alert(changed ? ('导入完成：' + report.join('，')) : '没有新增内容（全部已存在）');
+    }
+
+    impModal.querySelector('.imp-confirm').addEventListener('click', doImport);
+    impModal.querySelector('.imp-cancel').addEventListener('click', closeImportModal);
+    impModal.querySelector('.imp-close').addEventListener('click', closeImportModal);
+    impBackdrop.addEventListener('click', closeImportModal);
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && impModal.classList.contains('imp-open')) closeImportModal();
+    });
+
     document.querySelectorAll('#ss-menu [data-lang]').forEach(function(b) {
       if (b.dataset.lang === activeLang) b.classList.add('on');
       b.addEventListener('click', function() { setLanguage(b.dataset.lang); });

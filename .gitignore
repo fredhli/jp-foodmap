@@ -28,6 +28,9 @@ data/*
 .idea/
 .vscode/
 
+# Wrangler local dev state
+.wrangler/
+
 # Local config (Gist ID, etc) — never commit
 config.json
 
