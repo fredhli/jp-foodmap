@@ -1040,7 +1040,8 @@ def build_filter_panel_html(
      style but stands alone — labelled with the live filter count so the
      "how many results match" feedback survives the collapse to a sheet. */
   #ff-fab {{
-    position: fixed; bottom: 18px; left: 14px;
+    position: fixed;
+    bottom: calc(18px + env(safe-area-inset-bottom)); left: 14px;
     z-index: 9995;
     background: #fff; color: #374151;
     border: 1px solid #d1d5db;
@@ -1260,15 +1261,19 @@ def build_filter_panel_html(
 """
 
 
-# Page title + favicon. SVG-emoji favicon is a one-liner that avoids
-# shipping a binary asset and renders consistently on every modern browser
-# (Chrome / Safari / Firefox all accept utf-8 SVG data URLs). 🗾 = Japan
-# silhouette — most thematic for the project. Tab icons always render with
-# the system emoji font; the emojicdn Apple-PNG swap covers page content
-# only, not tab/bookmark/window-title icons (browser security limit).
+# Page title, install metadata, and launcher icons. The manifest + 192/512
+# PNGs satisfy Chromium's installability checks; apple-touch-icon and the
+# Apple standalone tags cover Home Screen installs on iPhone/iPad.
 HEAD_BRANDING = """
 <title>Japan Foodmap</title>
-<link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#b91c1c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Japan Foodmap">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <!-- Pre-warm TCP/TLS to the cross-origin hosts the page hits early.
      A preconnect only matches requests of the same CORS-ness: the
      `crossorigin` ones cover CORS fetches (GIS, the sync API), the bare
@@ -1341,7 +1346,8 @@ MAP_FAB_HTML = """
      Container is pointer-events:none so the gaps don't block map drags;
      each button re-enables pointer events. */
   .map-fab-stack {
-    position: fixed; bottom: 18px; right: 14px;
+    position: fixed;
+    bottom: calc(18px + env(safe-area-inset-bottom)); right: 14px;
     z-index: 9995;
     display: flex; flex-direction: column; gap: 8px;
     pointer-events: none;
@@ -1461,7 +1467,8 @@ MAP_FAB_HTML = """
 SEARCH_BOX_HTML = """
 <style>
   #ss-box {
-    position: fixed; top: 12px; left: 50%;
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%);
     z-index: 9996;
     width: min(calc(100vw - 32px), 380px);
@@ -2442,6 +2449,18 @@ const DATA_CACHE  = 'tabelog-data-v1';
 const EXT_CACHE   = 'tabelog-ext-v1';
 const KEEP = [SHELL_CACHE, DATA_CACHE, EXT_CACHE];
 
+// Versioned with SHELL_CACHE so launcher metadata and icons update with a
+// deploy. Caching the root document during install makes the very first
+// installed-app launch work even if the phone has already gone offline.
+const APP_SHELL_URLS = [
+  './',
+  './manifest.webmanifest',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+  './apple-touch-icon.png',
+];
+
 // What install warms (subset: the boot-critical payloads for the default
 // language) and everything the current build references with a ?v= hash
 // (used by activate's garbage collection — entries outside this list are
@@ -2451,6 +2470,15 @@ const CURRENT_VERSIONED_URLS = __ALL_VERSIONED_URLS__;
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
+    try {
+      const shell = await caches.open(SHELL_CACHE);
+      await Promise.all(APP_SHELL_URLS.map(async (u) => {
+        try {
+          const resp = await fetch(u, {cache: 'reload'});
+          if (resp && (resp.ok || resp.type === 'opaque')) await shell.put(u, resp);
+        } catch (_) {}
+      }));
+    } catch (_) { /* opening the shell cache failed — install still proceeds */ }
     try {
       const cache = await caches.open(DATA_CACHE);
       // Content-addressed: if the hash matches an entry we already hold,
@@ -2501,6 +2529,12 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(networkFirst(req, event));
       return;
     }
+    if (url.pathname.endsWith('/manifest.webmanifest') ||
+        url.pathname.endsWith('/apple-touch-icon.png') ||
+        url.pathname.indexOf('/icons/') !== -1) {
+      event.respondWith(cacheFirst(req, SHELL_CACHE));
+      return;
+    }
     if (url.pathname.indexOf('/transit/') !== -1) {
       event.respondWith(staleWhileRevalidate(req, DATA_CACHE, false));
       return;
@@ -2537,8 +2571,8 @@ async function trimCache(cacheName, max) {
   } catch (_) {}
 }
 
-async function cacheFirst(req) {
-  const cache = await caches.open(DATA_CACHE);
+async function cacheFirst(req, cacheName = DATA_CACHE) {
+  const cache = await caches.open(cacheName);
   const cached = await cache.match(req);
   if (cached) return cached;
   const fresh = await fetch(req);
@@ -2560,7 +2594,9 @@ async function networkFirst(req, event) {
     return fresh;
   });
   if (event) event.waitUntil(fetchP.catch(() => {}));
-  const cached = await cache.match(req);
+  // Root is pre-cached during installation. It is also the safe fallback
+  // for an offline /index.html navigation or an unexpected same-scope URL.
+  const cached = await cache.match(req) || await cache.match('./');
   if (!cached) return fetchP;
   let timer;
   try {
@@ -7514,6 +7550,17 @@ def main(argv: list[str] | None = None) -> None:
         stripped_lines.append(line)
     saved_html = "".join(stripped_lines)
     print(f"  stripped {stripped_count} folium-injected dead-dep lines")
+
+    # Let installed iOS/Android web apps use the full screen while exposing
+    # safe-area insets to the fixed controls and bottom sheets.
+    VIEWPORT_FROM = "initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    VIEWPORT_TO = VIEWPORT_FROM + ", viewport-fit=cover"
+    viewport_hits = saved_html.count(VIEWPORT_FROM)
+    if viewport_hits == 1:
+        saved_html = saved_html.replace(VIEWPORT_FROM, VIEWPORT_TO)
+        print("  added viewport-fit=cover for installed mobile layout")
+    else:
+        print(f"  WARNING: expected one viewport meta tag, found {viewport_hits}")
 
     # Folium injects `.leaflet-container { font-size: 1rem; }` into its
     # auto-generated <style> block — which sits AFTER any CSS we add via

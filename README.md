@@ -8,6 +8,18 @@ Per-user favorites, dismissals, and bookmarks sync through a small
 Cloudflare Worker (`worker/`) backed by Google Sign-In. Visitors who skip
 sign-in keep their state purely in `localStorage`.
 
+## Install on a phone
+
+The site is an installable Progressive Web App with a standalone window,
+launcher icon, and an offline-cached application shell.
+
+- Android Chrome: open `jpfoodmap.com` → menu → **Install app**.
+- iPhone/iPad Chrome: open `jpfoodmap.com` → Share → **Add to Home Screen**.
+
+The restaurant database, default-language popup data, and transit renderer
+are warmed by the service worker. Live map tiles, place search, and cloud
+sync still require a network connection.
+
 ## Local build
 
 ```bash
@@ -25,7 +37,8 @@ The build pulls geocodes via GSI AddressSearch (cached locally in
 ## Deploy
 
 The repo is wired up to Cloudflare Pages serving from `main` / `/docs`.
-`docs/_headers` sets cache rules (immutable emoji PNGs, no-cache sw.js).
+`docs/_headers` sets cache rules (PWA metadata/icons, immutable emoji PNGs,
+no-cache sw.js).
 
 ```bash
 uv run python src/tabelog/scrape/map.py  # regenerate after data changes
