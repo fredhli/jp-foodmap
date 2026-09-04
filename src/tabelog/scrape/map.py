@@ -1267,9 +1267,9 @@ def build_filter_panel_html(
 """
 
 
-# Page title, install metadata, and launcher icons. The manifest + 192/512
-# PNGs satisfy Chromium's installability checks; apple-touch-icon and the
-# Apple standalone tags cover Home Screen installs on iPhone/iPad.
+# Page title, install metadata, and launcher icons. The browser tab keeps the
+# original inline 🗾 emoji favicon; the raster launcher icons use the same
+# emoji at the sizes required by Chromium and Apple Home Screen installs.
 HEAD_BRANDING = """
 <title>Japan Foodmap</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -1278,7 +1278,7 @@ HEAD_BRANDING = """
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Japan Foodmap">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <!-- Pre-warm TCP/TLS to the cross-origin hosts the page hits early.
      A preconnect only matches requests of the same CORS-ness: the
