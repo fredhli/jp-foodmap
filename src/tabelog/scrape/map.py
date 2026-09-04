@@ -18,13 +18,16 @@ import hashlib
 import html as _html
 import json
 import math
+import os
 import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import folium
 import httpx
+from dotenv import load_dotenv
 from folium.plugins import MarkerCluster
 
 # Force UTF-8 stdout — Windows console defaults to cp1252 and chokes on
@@ -32,7 +35,10 @@ from folium.plugins import MarkerCluster
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(PROJECT_ROOT / ".env")
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from tabelog.paths import (
     TABELOG_CSV,
@@ -7160,6 +7166,16 @@ def write_csv_with_coords(rows: list[dict], fieldnames: list[str]) -> None:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
+    carto_api_key = os.environ.get("CARTO_BASEMAP_API_KEY", "").strip()
+    if not carto_api_key:
+        raise SystemExit(
+            "CARTO_BASEMAP_API_KEY is not set. Add it to the project-root .env file."
+        )
+    carto_tile_url = (
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/"
+        f"{{z}}/{{x}}/{{y}}.png?key={quote(carto_api_key, safe='')}"
+    )
+
     with CSV_PATH.open(encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames or [])
@@ -7227,7 +7243,7 @@ def main(argv: list[str] | None = None) -> None:
     # floating "🚇 公共交通" pill button (see FAB_HTML / initMap).
     m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None, zoom_control=False)
     folium.TileLayer(
-        tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        tiles=carto_tile_url,
         attr=(
             '&copy; <a href="https://www.openstreetmap.org/copyright">'
             "OpenStreetMap</a> contributors &copy; "
