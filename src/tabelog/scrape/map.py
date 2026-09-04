@@ -1272,14 +1272,14 @@ def build_filter_panel_html(
 # emoji at the sizes required by Chromium and Apple Home Screen installs.
 HEAD_BRANDING = """
 <title>Japan Foodmap</title>
-<link rel="manifest" href="manifest.webmanifest?v=japan-emoji-1">
+<link rel="manifest" href="manifest.webmanifest?v=japan-emoji-2">
 <meta name="theme-color" content="#b91c1c">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Japan Foodmap">
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
-<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon-japan-emoji.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon-japan-emoji-v2.png">
 <!-- Pre-warm TCP/TLS to the cross-origin hosts the page hits early.
      A preconnect only matches requests of the same CORS-ness: the
      `crossorigin` ones cover CORS fetches (GIS, the sync API), the bare
@@ -2460,11 +2460,11 @@ const KEEP = [SHELL_CACHE, DATA_CACHE, EXT_CACHE];
 // installed-app launch work even if the phone has already gone offline.
 const APP_SHELL_URLS = [
   './',
-  './manifest.webmanifest?v=japan-emoji-1',
-  './icons/icon-japan-emoji-192.png',
-  './icons/icon-japan-emoji-512.png',
-  './icons/icon-japan-emoji-maskable-512.png',
-  './apple-touch-icon-japan-emoji.png',
+  './manifest.webmanifest?v=japan-emoji-2',
+  './icons/icon-japan-emoji-292.png',
+  './icons/icon-japan-emoji-v2-512.png',
+  './icons/icon-japan-emoji-v2-maskable-512.png',
+  './apple-touch-icon-japan-emoji-v2.png',
 ];
 
 // What install warms (subset: the boot-critical payloads for the default
