@@ -18,6 +18,8 @@
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 /apple-touch-icon.png
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/apple-touch-icon-japan-emoji.png
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
 # Big payloads (restaurants.json, popups-*.json). The SW busts its own
 # cache by VERSION on each deploy, so the HTTP layer only needs a short
