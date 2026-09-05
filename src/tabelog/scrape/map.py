@@ -1272,8 +1272,7 @@ def build_filter_panel_html(
 # emoji at the sizes required by Chromium and Apple Home Screen installs.
 HEAD_BRANDING = """
 <title>Japan Foodmap</title>
-<link rel="manifest" href="manifest.webmanifest?v=japan-emoji-3">
-<meta name="theme-color" content="#b91c1c">
+<link rel="manifest" href="manifest.webmanifest?v=no-theme-color-1">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -2460,7 +2459,7 @@ const KEEP = [SHELL_CACHE, DATA_CACHE, EXT_CACHE];
 // installed-app launch work even if the phone has already gone offline.
 const APP_SHELL_URLS = [
   './',
-  './manifest.webmanifest?v=japan-emoji-3',
+  './manifest.webmanifest?v=no-theme-color-1',
   './icons/icon-japan-emoji-v2-192.png',
   './icons/icon-japan-emoji-v2-512.png',
   './icons/icon-japan-emoji-v2-maskable-512.png',

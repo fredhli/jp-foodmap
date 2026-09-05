@@ -9,7 +9,6 @@
   "display": "standalone",
   "orientation": "any",
   "background_color": "#fdf6e3",
-  "theme_color": "#b91c1c",
   "categories": ["food", "travel", "navigation"],
   "icons": [
     {
