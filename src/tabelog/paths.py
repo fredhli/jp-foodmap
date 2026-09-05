@@ -3,6 +3,16 @@ on-disk layout is described in one place."""
 
 from pathlib import Path
 
+# M-020: atomic write helpers live in tabelog/atomic.py; re-exported here so
+# a script only ever needs one import line for "where do I write, and how".
+from tabelog.atomic import (  # noqa: F401
+    atomic_write_bytes,
+    atomic_write_csv,
+    atomic_write_json,
+    atomic_write_text,
+    backup_file,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DATA = PROJECT_ROOT / "data"
@@ -27,6 +37,15 @@ BOOKABLE_CSV = OMAKASE_DIR / "bookable.csv"
 # Tabelog pipeline (tabelog.com) — unified across regions; each row carries
 # a `region` column tagging which Tabelog list it was scraped from.
 TABELOG_CSV = TABELOG_DIR / "tabelog.csv"
+# M-020: one-generation backup of the master CSV, written by scrape_all.py
+# right before it replaces TABELOG_CSV. The master is gitignored, so without
+# this a bad scrape has no undo path. Dropbox file history is the second net.
+TABELOG_CSV_PREV = TABELOG_DIR / "tabelog.csv.prev"
+# M-019: rows scrape_all.py refused to merge into the master CSV (detail page
+# came back without an address, so keeping the new row would have blanked a
+# good old row). Append-only JSONL, one record per rejected row, so a failed
+# re-scrape leaves a readable trail instead of just a log line.
+SCRAPE_FAILED_LEDGER = TABELOG_DIR / "scrape_failed.jsonl"
 # Side store for English translations of reservation_policy_chinese, keyed
 # by Tabelog detail URL. Populated by scrape/translate_policies.py, read by
 # map.py when baking docs/data/popups-en.json. Separate from tabelog.csv so
@@ -79,6 +98,10 @@ POPUPS_JA_JSON = DOCS_DATA_DIR / "popups-ja.json"
 # visits skip the network round-trip. Built fresh per run with a version
 # stamp so an older SW can't keep serving stale data after a redeploy.
 SW_JS = DOCS_DIR / "sw.js"
+# M-094: rows that had an address but never made it into restaurants.json
+# (geocoding found nothing). Written next to restaurants.json every build so
+# the omission is visible instead of scrolling past in the build log.
+DROPPED_JSON = DOCS_DATA_DIR / "dropped.json"
 GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
 # Repo-shipped landmark set: always rendered on the map regardless of
 # whether the visitor has Gist sync configured, so friends opening the
@@ -98,6 +121,21 @@ I18N_EN_JSON = I18N_DIR / "en.json"
 # {cn_run: ja_text}. Place names use natural Japanese forms (東京タワー,
 # 渋谷スクランブル交差点) rather than re-romanising.
 I18N_JA_JSON = I18N_DIR / "ja.json"
+
+# M-056: build-contract checker (scripts/verify_build.py) and the small JSON
+# it keeps its moving thresholds in (last known-good restaurants.json row
+# count, so "the corpus silently shrank by 20%" fails the build).
+SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+VERIFY_BASELINE_JSON = SCRIPTS_DIR / "verify_baseline.json"
+# M-056: the repo's test suites. tests/pipeline + tests/compat + the smoke
+# run live here; tests/worker and tests/sync are owned by the worker / sync
+# work. See tests/README.md.
+TESTS_DIR = PROJECT_ROOT / "tests"
+# M-056: machine-readable summary of the last map.py run (row counts, popup
+# slot count, missing-translation counts). Written every build, read by
+# scripts/verify_build.py so the contract check doesn't have to scrape stdout.
+# Lives under data/output/ because it describes a local build, not the site.
+BUILD_REPORT_JSON = OUTPUT_DIR / "build_report.json"
 
 # In-page help content directory. Currently unused — was authored for the
 # old Gist sync flow, which got replaced by Google OAuth. Kept around as a

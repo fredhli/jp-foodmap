@@ -1,0 +1,6 @@
+{
+  "__note__": "Pre-2.0 tabelog.filterState. Written by a build from before the bookable radio group became a single checkbox: it stores the legacy `bookable: 'yes'|'no'|'all'` string, the even older `book` key that no build ever read back, and CHECKED lists for prices/genres (pre-M-016 — today's build writes the `uncheckedPrices`/`uncheckedGenres` complement instead). The genres list is deliberately missing one bucket that exists today, simulating a bucket added after this state was saved.",
+  "localStorage": {
+    "tabelog.filterState": "{\"rating\":3.4,\"prices\":[\"lt1k\",\"1to3k\",\"3to5k\",\"5to10k\",\"10to20k\",\"ge20k\",\"na\"],\"genres\":[\"寿司·海鲜\",\"烤肉·内脏\",\"烤鸡·串烧\"],\"awards\":[],\"bookable\":\"yes\",\"book\":\"yes\",\"onlyFav\":false,\"hideBlack\":true,\"hideForeign\":true}"
+  }
+}

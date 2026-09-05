@@ -1,0 +1,6 @@
+{
+  "__note__": "Pre-2.0 omakase_state_cache_v2 with unsynced local edits: three starred restaurants (key 'fav'), one hidden (key 'black') and dirty:true meaning 'these have not reached the cloud yet'. Anonymous (never signed in), so there is no tabelog.auth alongside it. Boot must keep the favorites AND keep dirty true — clearing it silently would drop the pending push on the next sign-in. NOTE the field names: the localStorage cache has always used fav/black, while the KV blob uses favorites/blacklist. Neither may be renamed.",
+  "localStorage": {
+    "omakase_state_cache_v2": "{\"fav\":[\"https://tabelog.com/tottori/A3101/A310101/31000300/\",\"https://tabelog.com/tottori/A3101/A310101/31004889/\",\"https://tabelog.com/tottori/A3101/A310101/31000868/\"],\"black\":[\"https://tabelog.com/tottori/A3101/A310101/31001933/\"],\"dirty\":true}"
+  }
+}

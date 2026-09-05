@@ -1,0 +1,188 @@
+"""Shared Playwright plumbing for tests/compat and tests/smoke_playwright.py.
+
+Serves docs/ over a local http.server (localStorage needs a real origin) and
+blocks third-party hosts so a run is deterministic and costs nobody's quota.
+Nothing here talks to api.jpfoodmap.com — the sync layer's own harness in
+tests/sync covers that with a fake Worker.
+
+    uv run python tests/compat/run.py
+    uv run python tests/smoke_playwright.py
+"""
+
+from __future__ import annotations
+
+import http.server
+import socket
+import socketserver
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+DOCS = REPO / "docs"
+
+# Requests that must never leave the machine during a test run. Tiles are
+# allowed (the map needs something to draw) but everything third-party that
+# costs quota, money, or wall-clock time is stubbed out.
+BLOCKED_HOST_FRAGMENTS = (
+    "tblg.k-img.com",          # Tabelog photos
+    "emojicdn.elk.sh",         # emoji fallback CDN
+    "translate.googleapis.com",
+    "nominatim.openstreetmap.org",
+    "api.jpfoodmap.com",       # never write to production sync
+    "www.google-analytics.com",
+)
+
+# Console / network noise that is expected offline and must NOT fail a run.
+CONSOLE_ALLOWLIST = (
+    "accounts.google.com",     # GIS 403 when the page is not on the real origin
+    "gsi/client",
+    "ERR_BLOCKED_BY_CLIENT",
+    "net::ERR_FAILED",
+    "Failed to load resource",
+    "The FetchEvent for",      # SW passthrough for a blocked request
+    "service worker",
+    "Content Security Policy",
+    "GSI_LOGGER",              # "origin is not allowed for this client ID"
+    "origin is not allowed",
+)
+
+
+def _free_port(preferred: int) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", preferred))
+            return preferred
+        except OSError:
+            pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class _Handler(http.server.SimpleHTTPRequestHandler):
+    # Keep-alive: the page pulls restaurants.json (3.3 MB) plus a popups
+    # variant (6.4 MB) plus tiles, and a reload does it again. HTTP/1.0 with
+    # connection-close per request made those large reads fail intermittently
+    # ("TypeError: Failed to fetch") once a browser-side cancel had killed a
+    # handler thread.
+    protocol_version = "HTTP/1.1"
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=str(DOCS), **kw)
+
+    def log_message(self, *a):  # keep the test output readable
+        pass
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            # The browser cancelled (navigation, reload, SW takeover). Normal.
+            self.close_connection = True
+
+
+class _Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        pass  # connection resets are expected; don't spam the test output
+
+
+@contextmanager
+def serve_docs(port: int = 8926):
+    """Serve docs/ on 127.0.0.1:<port> for the duration of the block."""
+    port = _free_port(port)
+    httpd = _Server(("127.0.0.1", port), _Handler)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def install_guards(page, errors: list[str]) -> None:
+    """Block the third-party hosts and collect console errors / page errors
+    that are not on the allowlist."""
+
+    # Route ONLY the blocked hosts. A catch-all "**/*" handler makes every
+    # local response round-trip through the driver, which turns the 3.3 MB
+    # restaurants.json fetch into a flaky one (broken pipes, "Failed to
+    # fetch"). Pattern-scoped aborts leave same-origin traffic untouched.
+    for frag in BLOCKED_HOST_FRAGMENTS:
+        page.route(f"**{frag}**", lambda r: r.abort())
+
+    def on_console(msg):
+        if msg.type != "error":
+            return
+        text = msg.text
+        if any(a in text for a in CONSOLE_ALLOWLIST):
+            return
+        errors.append(f"console: {text}")
+
+    page.on("console", on_console)
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+
+
+def seed_local_storage(page, entries: dict[str, str]) -> None:
+    """Write localStorage before any page script runs. add_init_script fires
+    on every navigation in this page, which is what makes a reload-based
+    assertion (state survived a refresh) work."""
+    js = "(() => { const e = %s; try { for (const k in e) localStorage.setItem(k, e[k]); } catch (_) {} })()" % (
+        __import__("json").dumps(entries)
+    )
+    page.add_init_script(js)
+
+
+# Both counters carry an en-dash placeholder until the payload lands. .ff-total
+# is set as soon as restaurants.json parses; .ff-count only after the first
+# apply(), which is also when the favorites counter and the markers are in
+# their final state — so that is the barrier the tests wait on.
+READY_JS = (
+    "() => { const t = document.querySelector('.ff-total');"
+    "        const c = document.querySelector('.ff-count');"
+    "        const ok = el => el && el.textContent"
+    "          && el.textContent.trim() !== '\u2013'"
+    "          && el.textContent.trim() !== '';"
+    "        return ok(t) && ok(c); }"
+)
+
+
+def wait_ready(page, timeout_ms: int = 60000) -> None:
+    page.wait_for_function(READY_JS, timeout=timeout_ms)
+
+
+def boot(page, base_url: str, timeout_ms: int = 60000) -> None:
+    """Load the map and wait until the payload has been applied (the counter
+    in the filter FAB stops showing the placeholder)."""
+    page.goto(base_url + "/index.html", wait_until="domcontentloaded",
+              timeout=timeout_ms)
+    wait_ready(page, timeout_ms)
+
+
+def reload_and_wait(page, timeout_ms: int = 60000) -> None:
+    """Refresh in place. Deliberately NOT reload()+boot(): boot() navigates,
+    and a goto() on top of an in-flight reload aborts the page's own
+    restaurants.json fetch, which the page then logs as a console error."""
+    # Let the background popups prefetch (6.4 MB) finish first. Reloading on
+    # top of it aborts the fetch, and the page correctly logs that abort as an
+    # error — a test artefact that would otherwise look like a page bug.
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except Exception:
+        pass
+    page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
+    wait_ready(page, timeout_ms)
+
+
+def total_count(page) -> int:
+    txt = page.eval_on_selector(".ff-total", "el => el.textContent")
+    return int("".join(ch for ch in txt if ch.isdigit()) or 0)
+
+
+def shown_count(page) -> int:
+    txt = page.eval_on_selector(".ff-count", "el => el.textContent")
+    return int("".join(ch for ch in txt if ch.isdigit()) or 0)

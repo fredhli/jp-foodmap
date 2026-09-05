@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>隐私说明 · Japan Foodmap</title>
+<meta name="robots" content="index, follow">
+<meta name="description" content="Japan Foodmap 收集什么数据、存在哪里、怎么删除。">
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
+<!-- M-008: standalone static page, hand-written (not a map.py build output).
+     No external CSS/JS/fonts — it must render with the network off. -->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --card: #ffffff;
+    --ink: #1d1d1f;
+    --muted: #6b6b70;
+    --rule: #e3e3e0;
+    --link: #b23b2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a;
+      --card: #1f2024;
+      --ink: #ececef;
+      --muted: #a2a2a9;
+      --rule: #313238;
+      --link: #ff9a8b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 64px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 660px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 22px; line-height: 1.4; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 20px 0 4px; letter-spacing: .02em; }
+  p, ul { margin: 0 0 12px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .updated { color: var(--muted); font-size: 13px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  a { color: var(--link); }
+  a.back { display: inline-block; margin-bottom: 16px; text-decoration: none; font-size: 14px; }
+  a.back:hover { text-decoration: underline; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .92em;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">← 回到地图 / Back to the map</a>
+  <header>
+    <h1>隐私说明 · Privacy · プライバシー</h1>
+    <p class="updated">最后更新 2026-09-05 · Last updated 2026-09-05</p>
+  </header>
+
+  <section lang="zh-CN">
+    <h2>中文</h2>
+    <h3>收集什么</h3>
+    <p>不登录时，本站不收集任何东西：收藏、弃用名单、自建地点全部只存在你自己浏览器的本地存储里，不会离开这台设备。</p>
+    <p>用 Google 登录后，为了跨设备同步，服务器会保存：你的 Google 账号 ID（一串数字）、邮箱、显示名、头像链接，以及你的收藏、弃用名单和自建地点（名称、图标、坐标）。没有广告、没有统计脚本、没有第三方追踪，也不会把这些数据卖给或分享给任何人。</p>
+    <h3>存在哪里</h3>
+    <p>存在 Cloudflare Workers KV，以你的 Google 账号 ID 为键，只有 <code>api.jpfoodmap.com</code> 能读写。登录状态是一个只发给 <code>api.jpfoodmap.com</code> 的 HttpOnly Cookie，有效期 90 天。地图底图来自 CARTO，店铺图片来自食べログ，登录组件来自 Google——它们会看到你的 IP 和常规请求信息。</p>
+    <h3>怎么删除</h3>
+    <p>登录后打开账户菜单，点「删除我的云端数据」，二次确认即可。服务器上属于你的记录会被立即删除，本机数据一并清空，并自动退出登录。你也可以随时在 <a href="https://myaccount.google.com/permissions" rel="noopener">Google 账号权限页</a>撤销本站的登录授权。</p>
+    <h3>联系</h3>
+    <p>有问题请到 <a href="https://github.com/fredhli/jp-foodmap/issues" rel="noopener">GitHub Issues</a> 留言。</p>
+  </section>
+
+  <section lang="en">
+    <h2>English</h2>
+    <h3>What is collected</h3>
+    <p>If you don't sign in, nothing is collected. Your favorites, hidden list and custom pins live only in your own browser's local storage and never leave the device.</p>
+    <p>If you sign in with Google — the only reason to sign in is cross-device sync — the server stores your Google account ID (a number), email, display name and avatar URL, plus your favorites, hidden list and custom pins (name, icon, coordinates). No ads, no analytics, no third-party tracking, and nothing is sold or shared.</p>
+    <h3>Where it lives</h3>
+    <p>In Cloudflare Workers KV, keyed by your Google account ID, readable only by <code>api.jpfoodmap.com</code>. The session is an HttpOnly cookie sent only to <code>api.jpfoodmap.com</code>, valid for 90 days. Map tiles come from CARTO, restaurant photos from Tabelog, and the sign-in widget from Google; those services see your IP and the usual request metadata.</p>
+    <h3>How to delete it</h3>
+    <p>Open the account menu while signed in and choose “删除我的云端数据” (Delete my cloud data), then confirm. Your server-side record is deleted immediately, local data is cleared, and you are signed out. You can also revoke this site's access at any time from your <a href="https://myaccount.google.com/permissions" rel="noopener">Google account permissions</a> page.</p>
+    <h3>Contact</h3>
+    <p>Questions: <a href="https://github.com/fredhli/jp-foodmap/issues" rel="noopener">GitHub Issues</a>.</p>
+  </section>
+
+  <section lang="ja">
+    <h2>日本語</h2>
+    <h3>収集する情報</h3>
+    <p>ログインしない場合、当サイトは何も収集しません。お気に入り・非表示リスト・自作ピンはすべてブラウザのローカルストレージにのみ保存され、端末の外に出ません。</p>
+    <p>Google でログインした場合（目的は端末間の同期のみ）、サーバーに Google アカウント ID（数字）、メールアドレス、表示名、アイコン URL と、お気に入り・非表示リスト・自作ピン（名称・絵文字・座標）を保存します。広告・アクセス解析・第三者トラッキングはなく、データの販売や共有も行いません。</p>
+    <h3>保存場所</h3>
+    <p>Cloudflare Workers KV に Google アカウント ID をキーとして保存し、<code>api.jpfoodmap.com</code> だけが読み書きできます。ログイン状態は <code>api.jpfoodmap.com</code> にのみ送られる HttpOnly Cookie（有効期間 90 日）です。地図タイルは CARTO、店舗写真は食べログ、ログイン部品は Google から読み込まれ、これらには IP アドレスなど通常のリクエスト情報が渡ります。</p>
+    <h3>削除方法</h3>
+    <p>ログイン中にアカウントメニューの「删除我的云端数据（クラウドデータを削除）」を選び、確認してください。サーバー上の記録は即座に削除され、ローカルのデータも消去してログアウトします。<a href="https://myaccount.google.com/permissions" rel="noopener">Google アカウントの権限ページ</a>からいつでも連携を解除できます。</p>
+    <h3>お問い合わせ</h3>
+    <p><a href="https://github.com/fredhli/jp-foodmap/issues" rel="noopener">GitHub Issues</a> までどうぞ。</p>
+  </section>
+
+  <footer>jpfoodmap.com</footer>
+</main>
+</body>
+</html>

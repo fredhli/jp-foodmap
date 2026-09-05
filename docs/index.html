@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     
     <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
@@ -9,6 +9,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<!-- M-076: the page is a light-only UI (see `color-scheme: only light` in
+     MOBILE_UX_ASSETS), so tell the browser chrome to match instead of
+     picking its own tint. White, deliberately: commit 84835a8 removed the
+     old red theme-color on purpose — do not put it back. -->
+<meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-title" content="Japan Foodmap">
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon-japan-emoji-v2.png">
@@ -64,6 +69,17 @@
 </style>
     
 <style>
+  /* M-076/M-077: declare the page light-only. Without a color-scheme
+     declaration Chrome's Auto Dark Theme algorithmically inverts the whole
+     UI on an Android phone in dark mode — the search box, both sheets and
+     the FAB pills all flip to near-black while the map tiles stay light,
+     and the two "light plate / dark text" 百名店 ribbons collapse to a
+     1.35:1 contrast smear. `only light` was measured (Chromium 147, forced
+     dark + prefers dark) to be the variant that actually stops it; plain
+     `light` does not. Not `light dark`: there is no dark palette here, so
+     opting into one would only hand the native controls a black skin.
+     ⚠ Needs one real-device confirmation on a Fold 8 in system dark mode. */
+  html { color-scheme: only light; }
   html, body { overscroll-behavior: none; }
   /* Stop iOS Safari's "text size adjust" algorithm from inflating any
      unstyled text on the page. Bootstrap's reset used to set this on
@@ -75,13 +91,55 @@
      explicit means custom UI that sets width + padding behaves the
      way the rest of the codebase already assumes. */
   *, *::before, *::after { box-sizing: border-box; }
+  /* M-085: honour "reduce motion" globally. Everything decorative collapses
+     to a single ~instant frame; the exceptions below keep the two elements
+     that carry meaning readable in their resting state.
+       .mk-pulse-ring          — resting state is the static blue halo (the
+                                 keyframes only scale/fade it), so the
+                                 selected marker is still findable.
+       #ff-fab.needs-sync      — resting state is the solid red/blue pill.
+       #ss-spinner             — progress feedback for an in-flight search,
+                                 not decoration. A stopped rotation reads as
+                                 a broken widget, so it becomes an explicit
+                                 static two-tone ring instead. (Higher
+                                 specificity than `*`, so it wins even with
+                                 both marked !important.) */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+    #ss-spinner {
+      animation: none !important;
+      border-color: #bfdbfe; border-top-color: #2563eb;
+    }
+  }
 </style>
 <script>
 (function() {
-  // iOS Safari page-level pinch.
-  document.addEventListener('gesturestart',  function(e){ e.preventDefault(); });
-  document.addEventListener('gesturechange', function(e){ e.preventDefault(); });
-  document.addEventListener('gestureend',    function(e){ e.preventDefault(); });
+  // M-018 / M-143: page zoom is the user's, not ours. These guards used to
+  // sit on `document` — which (a) blocked browser zoom over the whole page,
+  // not just the map, and (b) made every wheel event on the page wait for a
+  // non-passive listener before the browser could scroll. They now bind to
+  // the Leaflet container only, so the map keeps its pinch/ctrl+wheel
+  // behaviour while the rest of the document scrolls passively and zooms
+  // normally. The keyboard ctrl +/-/0 interception is gone entirely: there
+  // is no map-vs-page ambiguity for a keystroke, so it was pure a11y tax.
+  // (The viewport meta stopped pinning the scale too — see main().)
+  function bindZoomGuards(el) {
+    // iOS Safari pinch over the map. Leaflet drives its own touch zoom from
+    // raw touch events and never listens for gesture*, so preventing these
+    // stops the *page* zooming while the map still pinches.
+    el.addEventListener('gesturestart',  function(e){ e.preventDefault(); });
+    el.addEventListener('gesturechange', function(e){ e.preventDefault(); });
+    el.addEventListener('gestureend',    function(e){ e.preventDefault(); });
+    // Desktop ctrl/cmd + wheel — this is also what a macOS trackpad pinch
+    // sends, so it has to stay. Leaflet's wheel zoom doesn't use ctrlKey.
+    el.addEventListener('wheel', function(e){
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+    }, { passive: false });
+  }
 
   // iOS double-tap zoom on the UI chrome is handled by CSS
   // `touch-action: manipulation` (style block below) instead of the old
@@ -92,18 +150,15 @@
   // Leaflet sets touch-action on .leaflet-container itself and the
   // ancestor intersection can only further restrict, never loosen.
 
-  // Desktop ctrl/cmd + wheel. Leaflet's wheel zoom doesn't use ctrlKey.
-  document.addEventListener('wheel', function(e){
-    if (e.ctrlKey || e.metaKey) e.preventDefault();
-  }, { passive: false });
-
-  // Desktop cmd/ctrl + 0/-/=/+ keyboard zoom.
-  document.addEventListener('keydown', function(e){
-    if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.key === '=' || e.key === '-' || e.key === '+' || e.key === '0') {
-      e.preventDefault();
-    }
-  });
+  // The container is created by folium's own script at the end of <body>,
+  // long after this head script runs — poll briefly, then give up.
+  var tries = 0;
+  (function waitForMap() {
+    var el = document.querySelector('.leaflet-container');
+    if (el) { bindZoomGuards(el); return; }
+    if (++tries > 150) return;
+    setTimeout(waitForMap, 100);
+  })();
 })();
 </script>
 <style>
@@ -169,6 +224,9 @@
     overflow-y: auto;
     padding: 0 14px 14px;
     flex: 1 1 auto;
+    /* M-170: a flick that runs past the end of the card used to chain into
+       a map pan behind it. */
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
   /* Peek mode — entered when the sheet is opened from a search-result tap.
@@ -215,8 +273,15 @@
   .rst-ribbon-hyaku-2026 { background: #5a4a26; }
   .rst-ribbon-hyaku-2025 { background: #7a6a3a; }
   .rst-ribbon-hyaku-2024 { background: #998860; }
-  .rst-ribbon-hyaku-2023 { background: #b8a988; color: #3a2f15; }
-  .rst-ribbon-hyaku-2022 { background: #d4c8aa; color: #3a2f15; }
+  /* M-076: these two used to be the only "pale plate / dark ink" ribbons of
+     the eleven. Chrome's Auto Dark Theme lightens text but keeps a pale
+     background, so they measured 1.35:1 and 1.89:1 on an Android phone in
+     dark mode (against 8.74 / 6.29 normally) — unreadable. Brought into the
+     same dark-plate / white-ink family as the other nine, still a rung
+     lighter per year so the ramp still reads oldest → palest, and still in
+     the same 3.0-3.5:1 band as the gold/silver ribbons. */
+  .rst-ribbon-hyaku-2023 { background: #a08d63; }
+  .rst-ribbon-hyaku-2022 { background: #a49373; }
   .rst-header { display: flex; justify-content: space-between;
                 align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
@@ -260,7 +325,12 @@
     background: linear-gradient(100deg, transparent 30%,
                 rgba(255,255,255,0.7) 50%, transparent 70%);
     transform: translateX(-100%);
-    animation: rst-shimmer 1.1s ease-in-out infinite;
+    /* M-141: bounded, not infinite. The strip only stops on the img's
+       onload/onerror, and a photo request that neither completes nor fails
+       (captive portal, dead cell edge) fired neither — so the shimmer ran
+       forever, including after the card was dismissed. 10 passes ≈ 11s is
+       longer than any photo that is ever going to arrive. */
+    animation: rst-shimmer 1.1s ease-in-out 10;
   }
   .rst-photos a.ld::after { content: none; }
   @keyframes rst-shimmer { to { transform: translateX(100%); } }
@@ -325,7 +395,11 @@
   .mk-pulse-ring {
     position: absolute; inset: 0; border-radius: 50%;
     border: 2px solid #2563eb;
-    animation: mk-pulse 1.6s ease-out infinite;
+    /* M-140: five pulses (8s) instead of `infinite`. Reading a card takes
+       30-120s, and the ring kept the compositor drawing for all of it. Once
+       the animation ends the element rests at scale 1 / opacity 1, i.e. a
+       static blue halo — the marker stays just as findable. */
+    animation: mk-pulse 1.6s ease-out 5;
     pointer-events: none;
   }
 </style>
@@ -333,9 +407,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
     
             <meta name="viewport" content="width=device-width,
-                initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+                initial-scale=1.0, viewport-fit=cover" />
             <style>
-                #map_e16962fa0ae1d5ca1cbb2743eb5ba560 {
+                #map_4155b3266603a105321692f024fb6ce6 {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -512,6 +586,22 @@
     width: min(calc(100vw - 32px), 380px);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
+  /* M-073: the search box sits *below* the two bottom sheets (10002), so an
+     open restaurant card covered the result dropdown and the account menu —
+     on a short window every single row was unreachable. Lift the whole box
+     while something is dropped out of it, and only then: 10003 clears both
+     sheets but stays under #bm-backdrop (10010), so the bookmark modal's
+     scrim still means "nothing else is clickable".
+     Two selectors, deliberately not one list: the class is toggled by
+     ssFinalize/ssCloseDropdown for the search dropdown, and the :has()
+     rule covers the account menu without reaching into its handler. A
+     browser without :has() simply drops that second rule. */
+  #ss-box.ss-open {
+    z-index: 10003;
+  }
+  #ss-box:has(#ss-menu.open) {
+    z-index: 10003;
+  }
   #ss-input-wrap {
     position: relative; display: flex; align-items: center;
     background: #fff; border: 1px solid #d1d5db; border-radius: 22px;
@@ -553,7 +643,12 @@
     animation: ss-spin 0.8s linear infinite;
   }
   #ss-input-wrap.busy #ss-spinner { display: block; }
-  #ss-input-wrap.busy #ss-clear   { display: none; }
+  /* M-082: the spinner used to REPLACE the ×, so the worse the network,
+     the harder it was to get out of a search — and a phone has no Escape
+     key. They sit side by side now; the spinner just gives back some of
+     its right margin when both are on screen. */
+  #ss-input-wrap.busy.has-text #ss-spinner,
+  #ss-input-wrap.busy.searching #ss-spinner { margin-right: 4px; }
   @keyframes ss-spin { to { transform: rotate(360deg); } }
   #ss-list {
     margin-top: 6px;
@@ -567,6 +662,9 @@
        never overflow the mobile bottom edge. */
     max-height: min(360px, 70dvh);
     overflow-y: auto;
+    /* M-170: keep an overscrolling flick inside the list instead of
+       chaining it into a map pan. */
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
   #ss-list.open { display: block; }
@@ -629,8 +727,18 @@
     flex-shrink: 0; font-size: 11px; font-weight: 600;
     color: #b45309; padding: 0 6px;
   }
-  @media (max-width: 480px) {
+  /* M-081 (hard prerequisite for M-018): iOS Safari zooms the page in on
+     focus whenever an input renders below 16px, and never zooms back out.
+     The rule used to live inside the 480px block, which excluded every
+     touch device wider than a phone — iPad mini (744), iPad Air (1180),
+     iPhone landscape (852), Fold 8 inner screen (616/816). Keyed off the
+     pointer instead, it now covers all of them. Kept separate from the
+     layout block below on purpose: widening #ss-box to calc(100vw - 16px)
+     on an iPad would stretch the search box across the whole screen. */
+  @media (max-width: 480px), (hover: none) and (pointer: coarse) {
     #ss-input { font-size: 16px; }       /* iOS no-zoom */
+  }
+  @media (max-width: 480px) {
     #ss-box { top: 8px; width: calc(100vw - 16px); }
   }
   /* Top row: search input + avatar side by side. Restructured from a single
@@ -655,7 +763,19 @@
      and mobile (the box is centered, so 'right:0' tracks correctly). */
   #ss-menu {
     position: absolute; top: 48px; right: 0;
-    width: 260px;
+    /* M-072: the menu had no max-height and no overflow, and its top edge
+       is pinned 48px under a fixed box — so on a short window (Fold 8 outer
+       screen, phone landscape) its lower rows, sync status first, were
+       simply cut off with no way to reach them, and on a narrow one the
+       fixed 260px pushed off the left edge. Cap it to the viewport and let
+       it scroll. The vh pair is a fallback for the dvh pair; the GIS
+       sign-in button is an iframe and is happy inside a scroll container. */
+    width: min(260px, calc(100vw - 24px));
+    max-height: calc(100vh - 72px);
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - 60px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     background: #fff;
     border: 1px solid #e5e7eb; border-radius: 12px;
     box-shadow: 0 10px 28px rgba(0,0,0,0.20);
@@ -738,9 +858,14 @@
       <button id="ss-clear" type="button" aria-label="清空">×</button>
     </div>
     <button id="ss-avatar" type="button" aria-label="账户">
-      <img id="ss-avatar-pic" src="img/default-avatar.png" alt=""
+      <img id="ss-avatar-pic" src="img/default-avatar-v2.png" alt=""
            referrerpolicy="no-referrer">
     </button>
+    <!-- M-034: unsynced / failing state gets a badge on the avatar, since
+         that's where the sync UI lives. Sibling rather than a child because
+         #ss-avatar is overflow:hidden (round crop). Styled in SYNC_UI_HTML;
+         purely decorative — the words are in #sync-sr / #sync-banner. -->
+    <span id="ss-avatar-dot" hidden aria-hidden="true"></span>
     <div id="ss-menu" role="menu" hidden>
       <!-- Signed-in pane: account info (info-only) + sign-out. -->
       <div id="ssm-signed-in" hidden>
@@ -777,14 +902,30 @@
       </button>
       <input id="ssm-import-file" type="file" accept="application/json,.json" hidden>
       <div class="ssm-divider"></div>
+      <!-- M-008: the site stores a Google sub / email / name / avatar URL in
+           Cloudflare KV; until now there was no policy page and no way to ask
+           for it back. The delete button is the ONLY place in this codebase
+           allowed to clear localStorage, and only after the Worker confirms
+           the cloud copy is gone (204). -->
+      <div class="ssm-section-lbl">隐私与数据</div>
+      <a class="ssm-row" id="ssm-privacy-link" href="privacy.html"
+         target="_blank" rel="noopener">
+        <span aria-hidden="true">↗</span><span>隐私政策</span>
+      </a>
+      <button class="ssm-row" id="ssm-delete-cloud" type="button">
+        <span aria-hidden="true">✕</span><span id="ssm-delete-label">删除我的云端数据</span>
+      </button>
+      <div id="ssm-delete-msg" role="status"></div>
+      <div class="ssm-divider"></div>
       <div class="ssm-section-lbl">语言</div>
-      <div class="ssm-langs">
+      <div class="ssm-langs" role="group">
         <button type="button" data-lang="zh-CN">简体</button>
         <button type="button" data-lang="zh-TW">繁體</button>
         <button type="button" data-lang="en">EN</button>
         <button type="button" data-lang="ja">日本語</button>
       </div>
-      <div id="ff-sync-status">本地模式</div>
+      <!-- M-089: role=status so sync state changes are announced. -->
+      <div id="ff-sync-status" role="status">本地模式</div>
     </div>
   </div>
   <!-- Two sub-containers so the async Nominatim response only rewrites its
@@ -867,11 +1008,16 @@
      and the modal anchors to the upper part of the screen instead of
      center — fixed centering is relative to the layout viewport, so with
      the keyboard up the lower half (emoji row, 保存/取消) sat behind it. */
+  /* M-081: the 16px anti-zoom rule applies to every touch device, not just
+     the ≤480px ones (see the same split in SEARCH_BOX_HTML); the keyboard-
+     avoidance repositioning stays phone-only. */
+  @media (max-width: 480px), (hover: none) and (pointer: coarse) {
+    #bm-modal .bm-row > input { font-size: 16px; }
+    #bm-modal #bm-emoji { font-size: 18px; }
+  }
   @media (max-width: 480px) {
     #bm-modal { top: 7dvh; transform: translate(-50%, 0) scale(0.96); }
     #bm-modal.bm-open { transform: translate(-50%, 0) scale(1); }
-    #bm-modal .bm-row > input { font-size: 16px; }
-    #bm-modal #bm-emoji { font-size: 18px; }
   }
   /* "常用" quick-pick row — small label + chip buttons, on a tinted
      panel so the section is visually separate from the typed input. */
@@ -1160,6 +1306,192 @@
 </div>
     
 <style>
+  /* These nodes set an explicit `display`, which outranks the UA's
+     `[hidden] { display: none }` — without this rule `el.hidden = true`
+     would leave them on screen. */
+  #sync-banner[hidden], #sync-hint[hidden], #ff-empty-map[hidden],
+  #ff-empty-panel[hidden], #ss-avatar-dot[hidden] { display: none; }
+
+  /* Visually hidden but readable by assistive tech. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%);
+    white-space: nowrap; border: 0;
+  }
+
+  /* ---- M-034: failure banner, top, under the search box ---- */
+  #sync-banner {
+    position: fixed;
+    top: calc(max(12px, env(safe-area-inset-top)) + 48px);
+    left: 50%; transform: translateX(-50%);
+    z-index: 10005;
+    width: min(calc(100vw - 24px), 460px);
+    box-sizing: border-box;
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 9px 10px 9px 12px;
+    border: 1px solid #fca5a5; border-left: 4px solid #dc2626;
+    border-radius: 8px;
+    background: #fef2f2; color: #7f1d1d;
+    font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.16);
+  }
+  #sync-banner-msg { flex: 1; min-width: 0; }
+  #sync-banner-x {
+    flex-shrink: 0; width: 22px; height: 22px; padding: 0;
+    border: 0; border-radius: 5px; background: transparent;
+    color: #991b1b; font: 700 18px/1 -apple-system, sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  #sync-banner-x:hover { background: rgba(220,38,38,0.12); }
+
+  /* ---- M-033: bottom stack (toasts + sign-in hint) ---- */
+  #sync-stack {
+    position: fixed;
+    left: 0; right: 0;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    z-index: 10005;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 0 12px; pointer-events: none;
+  }
+  #sync-stack > * {
+    pointer-events: auto;
+    width: 100%; max-width: 460px; box-sizing: border-box;
+  }
+  .sync-toast, #sync-hint {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #111827; color: #f9fafb;
+    font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  }
+  .sync-toast-msg, #sync-hint-msg { flex: 1; min-width: 0; }
+  .sync-toast img.emoji-img, #sync-hint img.emoji-img {
+    height: 1.05em; width: 1.05em; vertical-align: -0.15em;
+  }
+  .sync-btn {
+    flex-shrink: 0;
+    padding: 6px 11px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.35);
+    background: transparent; color: #f9fafb;
+    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .sync-btn:hover { background: rgba(255,255,255,0.14); }
+  .sync-btn.primary {
+    border-color: #60a5fa; background: #2563eb; color: #fff;
+  }
+  .sync-btn.primary:hover { background: #1d4ed8; }
+  #sync-hint-btns { display: flex; gap: 6px; flex-shrink: 0; }
+  @media (prefers-reduced-motion: no-preference) {
+    .sync-toast, #sync-hint { animation: sync-rise 0.18s ease-out; }
+  }
+  @keyframes sync-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ---- M-034: red dot on the avatar while state is unsynced / failing ---- */
+  #ss-avatar-dot {
+    position: absolute; top: -1px; right: -1px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #dc2626; border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    pointer-events: none;
+  }
+
+  /* ---- M-028: empty state ---- */
+  #ff-empty-map {
+    position: fixed;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 9994;
+    width: min(calc(100vw - 48px), 320px);
+    box-sizing: border-box;
+    padding: 16px 18px;
+    border: 1px solid #e5e7eb; border-radius: 12px;
+    background: rgba(255,255,255,0.96);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    pointer-events: none;   /* never steal a map drag */
+  }
+  .ffe-title { font-size: 15px; font-weight: 700; color: #111827; }
+  .ffe-sub   { font-size: 12.5px; line-height: 1.5; color: #6b7280;
+               margin-top: 5px; }
+  .ffe-reset {
+    pointer-events: auto;
+    margin-top: 12px; padding: 8px 16px;
+    border: 1px solid #2563eb; border-radius: 999px;
+    background: #2563eb; color: #fff;
+    font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .ffe-reset:hover { background: #1d4ed8; }
+  /* Panel-top twin: same copy, flat card, no shadow. */
+  #ff-empty-panel {
+    margin: 0 0 10px; padding: 10px 12px;
+    border: 1px solid #fecaca; border-radius: 8px;
+    background: #fef2f2; text-align: left;
+  }
+  #ff-empty-panel .ffe-title { font-size: 13px; color: #7f1d1d; }
+  #ff-empty-panel .ffe-sub   { font-size: 12px; color: #991b1b; }
+  #ff-empty-panel .ffe-reset { margin-top: 8px; padding: 6px 12px;
+                               font-size: 12px; }
+  /* M-028: the live count turns red at zero so the number itself carries
+     the signal, not just the card. */
+  .ff-count.is-zero { color: #dc2626; }
+
+  /* ---- M-028: reset copied into the panel footer ---- */
+  #ff-panel-reset {
+    display: block; width: 100%;
+    margin: 10px 0 2px; padding: 9px 12px;
+    border: 1px solid #d1d5db; border-radius: 8px;
+    background: #f9fafb; color: #374151;
+    font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  #ff-panel-reset:hover { background: #f3f4f6; }
+
+  /* ---- M-008: privacy + delete-my-cloud-data rows in the account menu ---- */
+  #ssm-privacy-link { color: #2563eb; text-decoration: none; }
+  #ssm-privacy-link:hover { text-decoration: underline; }
+  #ssm-delete-cloud { color: #b91c1c; }
+  #ssm-delete-cloud[data-armed="1"] { background: #fef2f2; font-weight: 700; }
+  #ssm-delete-msg {
+    font-size: 10px; line-height: 1.5; color: #6b7280;
+    padding: 2px 0 4px; min-height: 0;
+  }
+</style>
+<!-- M-034: only failures reach this banner; success stays in the quiet
+     status line inside the account menu. -->
+<div id="sync-banner" hidden role="alert" aria-live="assertive">
+  <span id="sync-banner-msg"></span>
+  <button id="sync-banner-x" type="button" aria-label="关闭">×</button>
+</div>
+<div id="sync-stack">
+  <!-- M-033: the sync warning used to be a title= on the filter FAB, which
+       no touch device can ever show. Its own banner, its own dismissal. -->
+  <div id="sync-hint" hidden>
+    <span id="sync-hint-msg">收藏只存在这台设备。登录后可在其它设备看到。</span>
+    <span id="sync-hint-btns">
+      <button id="sync-hint-signin" class="sync-btn primary" type="button">登录</button>
+      <button id="sync-hint-ok" class="sync-btn" type="button">知道了</button>
+    </span>
+  </div>
+</div>
+<!-- M-028 -->
+<div id="ff-empty-map" hidden>
+  <div class="ffe-title">没有符合条件的餐厅</div>
+  <div class="ffe-sub">筛选条件太严格了。放宽条件或重置筛选。</div>
+  <button id="ff-empty-reset" class="ffe-reset" type="button">重置筛选</button>
+</div>
+<!-- M-089: every announcement that has no visible-text equivalent (or whose
+     visible text lives in a container screen readers don't watch) is written
+     here instead of being lost. -->
+<div id="sync-sr" class="sr-only" role="status" aria-live="polite"></div>
+    
+<style>
   /* Filter bottom-sheet — same visual treatment as the restaurant detail
      sheet (#bs-sheet), with parallel width breakpoints. The two sheets are
      mutually exclusive (opening one closes the other), so they share the
@@ -1211,7 +1543,20 @@
     padding: 0 16px 16px;
     flex: 1 1 auto;
     -webkit-overflow-scrolling: touch;
+    /* M-016 sibling fix M-170: stop the scroll chaining into the map once
+       the panel hits its end — a flick that overshoots used to pan the map
+       underneath the sheet. */
+    overscroll-behavior: contain;
     font-size: 13px; line-height: 1.5; color: #111827;
+  }
+  /* M-087: the panel's only live feedback ("筛选 · 显示 N / 9807") used to
+     scroll away with the content while #ff-fab (which carries the same
+     count) is hidden for as long as the sheet is open — so the second half
+     of the controls was operated with no number on screen at all. The
+     parent is already overflow-y:auto, so one sticky rule pins it. */
+  #ff-sheet-content .ff-sheet-head {
+    position: sticky; top: 0; z-index: 1;
+    background: #fff;
   }
   /* Bottom-left FAB that opens the sheet. Matches the right-side .map-fab
      style but stands alone — labelled with the live filter count so the
@@ -1266,10 +1611,18 @@
     color: #fff; border-color: #2563eb; background: #2563eb;
     box-shadow: 0 3px 10px rgba(37,99,235,0.45);
   }
+  /* M-057: the pulse used to be `infinite`, so a signed-out user with
+     unsynced edits kept the compositor drawing for the whole session (the
+     dirty flag is persisted, so it survived reloads too). Six blinks are
+     plenty to catch the eye; the overlay then rests at opacity 0, i.e. the
+     solid red/blue base — still unmistakable, and burning nothing. Base
+     opacity 0 (not 1) is what makes the resting state the solid colour and
+     keeps the white label legible; the animation itself starts at 1. */
   #ff-fab.needs-sync::after, #ff-fab.needs-sync-pending::after {
     content: ''; position: absolute; inset: 0;
     border-radius: inherit; pointer-events: none;
-    animation: ff-fab-breathe 1.4s ease-in-out infinite;
+    opacity: 0;
+    animation: ff-fab-breathe 1.4s ease-in-out 6;
   }
   #ff-fab.needs-sync::after { background: #fee2e2; }
   #ff-fab.needs-sync-pending::after { background: #dbeafe; }
@@ -1311,7 +1664,10 @@
     background: #d1d5db; color: #111827; outline: none;
   }
 </style>
-<button id="ff-fab" type="button" aria-label="打开筛选" title="筛选">
+<!-- M-089: no static aria-label — it wins over the element's own content,
+     so the visible "1234 / 9807" count was invisible to screen readers.
+     updateFabAria() writes an aria-label that carries the count. -->
+<button id="ff-fab" type="button" title="筛选">
   <span class="ff-fab-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
   <span class="ff-fab-count"><b class="ff-count">–</b> / <span class="ff-total">–</span></span>
 </button>
@@ -1320,12 +1676,23 @@
      aria-labelledby="ff-sheet-title">
   <div id="ff-grip"></div>
   <div id="ff-sheet-content">
-  <div style="display:flex;justify-content:space-between;align-items:center;
+  <div class="ff-sheet-head"
+       style="display:flex;justify-content:space-between;align-items:center;
               border-bottom:1px solid #e5e7eb;padding:2px 0 8px;margin-bottom:10px;">
     <span id="ff-sheet-title" style="font-weight:700;font-size:15px;">筛选</span>
     <span style="font-size:12px;color:#6b7280;">
       显示 <b class="ff-count">–</b> / <span class="ff-total">–</span>
     </span>
+  </div>
+
+  <!-- M-028: filtering down to zero used to change nothing but the number —
+       the restaurants vanished, the 219 sights stayed, and the page said
+       nothing. Twin of #ff-empty-map (SYNC_UI_HTML); recompute() toggles
+       both. Empty by default so it costs nothing until it is needed. -->
+  <div id="ff-empty-panel" hidden>
+    <div class="ffe-title">没有符合条件的餐厅</div>
+    <div class="ffe-sub">筛选条件太严格了。放宽条件或重置筛选。</div>
+    <button id="ff-empty-panel-reset" class="ffe-reset" type="button">重置筛选</button>
   </div>
 
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;">
@@ -1463,6 +1830,11 @@
     <input type="checkbox" id="ff-gcal-only"> 只看谷歌地图校准过坐标的餐厅
   </label>
 
+  <!-- M-028: a copy of the avatar menu's 重置筛选, at the bottom of the panel
+       where a user who has just over-filtered is actually looking. The one in
+       the avatar dropdown stays — same handler, two entry points. -->
+  <button id="ff-panel-reset" type="button">↻ 重置筛选</button>
+
   <!-- Reset / Sync / Language used to live here as a 3-up grid; they moved
        to the avatar dropdown rooted in the search box so the filter sheet
        only carries filter controls. ff-sync-status follows them up there. -->
@@ -1514,14 +1886,14 @@
   // via this table; runs without an entry are passed through unchanged.
   // Subtrees marked lang="ja" are skipped wholesale so Japanese names,
   // addresses and shinjitai genre tokens stay in their source form.
-  var TEXT_TRAD_MAP = {"南纪白滨温泉":"南紀白濱溫泉","西点":"西點","多数可以在一个合理的天数内提前预订":"多數可以在一個合理的天數內提前預訂","点心":"點心","佐渡岛":"佐渡島","其他区域":"其他區域","说明":"說明","白须神社":"白鬚神社","御好烧":"御好燒","请至少选择一项":"請至少選擇一項","函馆山":"函館山","銀山温泉":"銀山溫泉","加载失败":"加載失敗","偕乐园":"偕樂園","价格":"價格","披萨":"披薩","仓敷美观地区":"倉敷美觀地區","重新加载":"重新加載","雾凇":"霧凇","里歴史公園":"裏歴史公園","青岛神社":"青島神社","没有新增内容":"沒有新增內容","只显示已收藏":"只顯示已收藏","石见银山":"石見銀山","机车博物馆":"機車博物館","大三岛":"大三島","鸭川海洋世界":"鴨川海洋世界","关西国际机场":"關西國際機場","长瀞町":"長瀞町","上野公园":"上野公園","会从地图上自动隐藏":"會從地圖上自動隱藏","会跨设备同步":"會跨設備同步","中国料理":"中國料理","华严瀑布":"華嚴瀑布","东山东":"東山東","书签":"書籤","勾选后只看对应获奖店":"勾選後只看對應獲獎店","净土滨":"淨土濱","东寻坊":"東尋坊","门司港怀旧":"門司港懷舊","进一步压到":"進一步壓到","加入景点":"加入景點","请确认它是导出的":"請確認它是導出的","鬼怒川温泉":"鬼怒川溫泉","景点锚点":"景點錨點","轻井泽":"輕井澤","隐藏":"隱藏","显示":"顯示","无":"無","古宇利岛":"古宇利島","国営":"國営","秋叶原":"秋葉原","横浜中華街":"橫浜中華街","本站只收录每个区域评分前":"本站只收錄每個區域評分前","会津若松市":"會津若松市","御台场":"御臺場","日元以下的高分正餐餐厅":"日元以下的高分正餐餐廳","江之岛":"江之島","地狱谷野猿公苑":"地獄谷野猿公苑","不会覆盖现有项":"不會覆蓋現有項","福井县立恐龙博物馆":"福井縣立恐龍博物館","意面":"意麪","登录脚本未加载":"登錄腳本未加載","新仓山浅间公园":"新倉山淺間公園","冲绳美丽海水族馆":"沖繩美麗海水族館","日光东照宫":"日光東照宮","海鲜":"海鮮","桂滨":"桂濱","武雄温泉":"武雄溫泉","屏幕内":"屏幕內","大通公园":"大通公園","无法解析该文件":"無法解析該文件","登录被取消":"登錄被取消","乡土":"鄉土","祇园":"祇園","富冈制纱厂":"富岡制紗廠","全选":"全選","评分":"評分","会津若松":"會津若松","太宰府天满宫":"太宰府天滿宮","首里城":"首裏城","数日前":"數日前","出云大社":"出雲大社","系统默认旅游锚点之外你自己加的去处":"系統默認旅遊錨點之外你自己加的去處","热田神宫":"熱田神宮","仙岩园":"仙岩園","预约":"預約","重置筛选":"重置篩選","拉面":"拉麪","关闭":"關閉","大内宿":"大內宿","隐藏非日本料理":"隱藏非日本料理","彦根城":"彥根城","新倉山浅間公園":"新倉山淺間公園","関西国際空港":"関西國際空港","黑川温泉":"黑川溫泉","福冈塔":"福岡塔","你在约":"你在約","个景点":"個景點","读取文件失败":"讀取文件失敗","阿波舞会馆":"阿波舞會館","炭火烧鸟正":"炭火燒鳥正","恢复显示":"恢復顯示","改动已存本地":"改動已存本地","下滩站":"下灘站","明治神宫":"明治神宮","涩谷路口":"澀谷路口","成田山新胜寺":"成田山新勝寺","淡路岛":"淡路島","和收藏一起通过你的":"和收藏一起通過你的","大濠公园":"大濠公園","小豆岛":"小豆島","草津温泉":"草津溫泉","后乐园":"後樂園","屋久岛":"屋久島","退出登录":"退出登錄","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","中禅寺湖":"中禪寺湖","文件格式无法识别":"文件格式無法識別","男鹿半岛":"男鹿半島","地图校准":"地圖校準","四万十川":"四萬十川","奈良公园":"奈良公園","黑部峡谷":"黑部峽谷","渡月桥":"渡月橋","知床国立公園":"知牀國立公園","铁板烧":"鐵板燒","餐厅库":"餐廳庫","阿苏山":"阿蘇山","定位校准":"定位校準","长途线路":"長途線路","横滨中华街":"橫濱中華街","眺游楼":"眺遊樓","知床国立公园":"知牀國立公園","港未来町":"港未來町","松岛":"松島","语言":"語言","同步冲突":"同步衝突","筛选":"篩選","神户港塔":"神戶港塔","交差点":"交差點","大须":"大須","本设备上的本地缓存会保留":"本設備上的本地緩存會保留","导入备份":"導入備份","寿司":"壽司","栗林公園":"慄林公園","乌冬":"烏冬","点击登录以跨设备同步":"點擊登錄以跨設備同步","在地图上显示出来的":"在地圖上顯示出來的","与默认景点一起在地图上显示":"與默認景點一起在地圖上顯示","久能山东照宫":"久能山東照宮","东京国际机场":"東京國際機場","成田国际机场":"成田國際機場","道顿堀":"道頓堀","烧":"燒","奥入瀬":"奧入瀬","横浜":"橫浜","黒川温泉":"黒川溫泉","请检查网络":"請檢查網絡","猎奇":"獵奇","类型":"類型","延历寺":"延歷寺","锅物":"鍋物","当前位置在地图范围之外":"當前位置在地圖範圍之外","小吃":"小喫","富田农场":"富田農場","伊豆半岛":"伊豆半島","账户":"賬戶","串烧":"串燒","金刀比罗宫":"金刀比羅宮","锦带桥":"錦帶橋","但不再同步到云端":"但不再同步到雲端","导入":"導入","长崎和平公园":"長崎和平公園","选择要导入的内容":"選擇要導入的內容","当日":"當日","搜索失败":"搜索失敗","炭火烧鸟":"炭火燒鳥","只显示可以通过":"只顯示可以通過","石垣岛":"石垣島","新干线":"新幹線","可粘贴任意":"可粘貼任意","这样":"這樣","登录后":"登錄後","越后汤泽温泉":"越後湯澤溫泉","简体":"簡體","删除收藏":"刪除收藏","札幌市钟楼":"札幌市鐘樓","保存失败":"保存失敗","打开筛选":"打開篩選","韩餐":"韓餐","伴手礼":"伴手禮","田泽湖":"田澤湖","梦":"夢","的餐厅":"的餐廳","已选":"已選","你研究后决定不会去的餐厅":"你研究後決定不會去的餐廳","个书签":"個書籤","丰洲市场":"豐洲市場","眺遊楼":"眺遊樓","东南亚料理":"東南亞料理","箱根温泉":"箱根溫泉","三朝温泉":"三朝溫泉","会館":"會館","将合并到现有数据并自动去重":"將合併到現有數據並自動去重","删除":"刪除","东京迪士尼乐园":"東京迪士尼樂園","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","登录成功":"登錄成功","伊势神宫":"伊勢神宮","家餐厅":"家餐廳","弃用":"棄用","等价物":"等價物","详情":"詳情","龙泉洞":"龍泉洞","只看谷歌地图校准过坐标的餐厅":"只看谷歌地圖校準過座標的餐廳","同步失败":"同步失敗","下吕温泉":"下呂溫泉","韩":"韓","可随时删除":"可隨時刪除","车站":"車站","高千穂峡":"高千穂峽","海游馆":"海遊館","饺子":"餃子","已弃用":"已棄用","苗场山":"苗場山","内脏":"內臟","热海温泉":"熱海溫泉","选择器":"選擇器","东京晴空塔":"東京晴空塔","有马温泉":"有馬溫泉","放弃当前输入":"放棄當前輸入","咖啡厅":"咖啡廳","中东菜等":"中東菜等","筑地市场":"築地市場","栗林公园":"慄林公園","打开完整":"打開完整","你自己想标注的地点或建筑物":"你自己想標註的地點或建築物","札幌時計台":"札幌時計臺","下呂温泉":"下呂溫泉","翻译":"翻譯","输入更多字以缩小范围":"輸入更多字以縮小範圍","显示我的位置":"顯示我的位置","登录中":"登錄中","有馬温泉":"有馬溫泉","万座毛":"萬座毛","大吊桥":"大吊橋","天妇罗":"天婦羅","国際通":"國際通","地图组件加载失败":"地圖組件加載失敗","名称不能为空":"名稱不能爲空","改动待同步到云端":"改動待同步到雲端","熱海温泉":"熱海溫泉","景点":"景點","中国料理眺游楼":"中國料理眺遊樓","登录已过期":"登錄已過期","改动仅存浏览器":"改動僅存瀏覽器","热门餐厅":"熱門餐廳","荞麦":"蕎麥","倉敷美観地区":"倉敷美観地區","和景点一起通过你的":"和景點一起通過你的","未登录则只存在当前浏览器":"未登錄則只存在當前瀏覽器","心斋桥":"心齋橋","角岛大橋":"角島大橋","广岛和平纪念公园":"廣島和平紀念公園","浅草寺":"淺草寺","面包店等非正餐也按比例控量":"麪包店等非正餐也按比例控量","冈山城":"岡山城","银座":"銀座","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","鳴子温泉":"鳴子溫泉","严岛神社":"嚴島神社","汉堡":"漢堡","弃用名单":"棄用名單","道後温泉":"道後溫泉","关东煮":"關東煮","旭川市旭山动物园":"旭川市旭山動物園","复制":"複製","定位被浏览器禁用":"定位被瀏覽器禁用","严美溪":"嚴美溪","道后温泉":"道後溫泉","网络问题或广告拦截插件":"網絡問題或廣告攔截插件","鹈户神宫":"鵜戶神宮","账号跨设备同步":"賬號跨設備同步","仅存于本地浏览器":"僅存於本地瀏覽器","通天阁":"通天閣","龙安寺":"龍安寺","翻译失败":"翻譯失敗","黒部峡谷":"黒部峽谷","搜索餐厅":"搜索餐廳","烤鸡":"烤雞","不勾则不限制":"不勾則不限制","弥彦神社":"彌彥神社","伊香保温泉":"伊香保溫泉","按钮里的选择器":"按鈕裏的選擇器","长途":"長途","夫妇岩":"夫婦巖","加载中":"加載中","登录处理失败":"登錄處理失敗","稍后自动重试":"稍後自動重試","谷川岳":"谷川嶽","盖饭":"蓋飯","兴福寺":"興福寺","上滑查看详情":"上滑查看詳情","获奖":"獲獎","足立美术馆":"足立美術館","日本环球影城":"日本環球影城","导出":"導出","南紀白浜温泉":"南紀白浜溫泉","蔓桥":"蔓橋","吉野里遗址":"吉野裏遺址","图层切换":"圖層切換","银山温泉":"銀山溫泉","删除景点":"刪除景點","市内":"市內","中东":"中東","重新连接中":"重新連接中","请刷新重试":"請刷新重試","鸟取砂丘":"鳥取砂丘","由布院温泉":"由布院溫泉","用户自添景点":"用戶自添景點","请重新登录":"請重新登錄","请在浏览器设置中开启":"請在瀏覽器設置中開啓","那须高原":"那須高原","世纪美术馆":"世紀美術館","私铁":"私鐵","兼六园":"兼六園","隐藏弃用名单":"隱藏棄用名單","导入完成":"導入完成","范围内":"範圍內","迁移":"遷移","东大寺":"東大寺","端岛":"端島","金泽":"金澤","小樽运河":"小樽運河","二条城":"二條城","内":"內","鹤冈八幡宫":"鶴岡八幡宮","指宿温泉":"指宿溫泉","韩国料理":"韓國料理","地铁":"地鐵","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","名称":"名稱","个其他匹配":"個其他匹配","南亚":"南亞","晚餐价格":"晚餐價格","东京塔":"東京塔","没有匹配的结果":"沒有匹配的結果","鸣子温泉":"鳴子溫泉","亲子丼":"親子丼","鸣门漩涡":"鳴門漩渦","国际通":"國際通","哥拉巴园":"哥拉巴園","樱岛":"櫻島","乳头温泉乡":"乳頭溫泉鄉","台湾料理":"臺灣料理","检查网络":"檢查網絡","多选取并集":"多選取並集","备份":"備份","伏见稻荷大社":"伏見稻荷大社","会津若松城":"會津若松城","养老溪谷":"養老溪谷","鸟羽水族馆":"鳥羽水族館","白川乡":"白川鄉","试试":"試試","图标必须是":"圖標必須是","地图搜索":"地圖搜索","城市轨道":"城市軌道","越後湯沢温泉":"越後湯沢溫泉","其中高价位":"其中高價位","已复制":"已複製","面类":"面類","台場":"臺場","夫婦岩":"夫婦巖","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","国营常陆海滨公园":"國營常陸海濱公園","乳頭温泉郷":"乳頭溫泉郷"};
+  var TEXT_TRAD_MAP = {"同步冲突":"同步衝突","东京迪士尼乐园":"東京迪士尼樂園","登录可在其他设备恢复":"登錄可在其他設備恢復","白须神社":"白鬚神社","无":"無","富田农场":"富田農場","乳头温泉乡":"乳頭溫泉鄉","评分":"評分","下吕温泉":"下呂溫泉","通天阁":"通天閣","广岛和平纪念公园":"廣島和平紀念公園","松岛":"松島","熱海温泉":"熱海溫泉","重置筛选":"重置篩選","大通公园":"大通公園","你在另一个窗口登录了":"你在另一個窗口登錄了","蔓桥":"蔓橋","内":"內","私铁":"私鐵","弥彦神社":"彌彥神社","同步数据":"同步數據","已弃用":"已棄用","炭火烧鸟":"炭火燒鳥","有馬温泉":"有馬溫泉","加载失败":"加載失敗","市内":"市內","鬼怒川温泉":"鬼怒川溫泉","翻译":"翻譯","只显示已收藏":"只顯示已收藏","隐藏弃用名单":"隱藏棄用名單","有马温泉":"有馬溫泉","输入更多字以缩小范围":"輸入更多字以縮小範圍","草津温泉":"草津溫泉","长途":"長途","中东":"中東","请检查网络":"請檢查網絡","大三岛":"大三島","乡土":"鄉土","男鹿半岛":"男鹿半島","迁移":"遷移","成田山新胜寺":"成田山新勝寺","角岛大橋":"角島大橋","定位被浏览器禁用":"定位被瀏覽器禁用","检查网络":"檢查網絡","请至少选择一项":"請至少選擇一項","銀山温泉":"銀山溫泉","奥入瀬":"奧入瀬","恢复网络后请重试":"恢復網絡後請重試","后乐园":"後樂園","二条城":"二條城","越后汤泽温泉":"越後湯澤溫泉","备份":"備份","重试":"重試","亲子丼":"親子丼","国際通":"國際通","会館":"會館","黒部峡谷":"黒部峽谷","点心":"點心","鹈户神宫":"鵜戶神宮","地图校准":"地圖校準","横浜":"橫浜","登录被取消":"登錄被取消","栗林公園":"慄林公園","打开完整":"打開完整","账户":"賬戶","天妇罗":"天婦羅","上野公园":"上野公園","请检查网络后刷新":"請檢查網絡後刷新","延历寺":"延歷寺","御台场":"御臺場","撤销":"撤銷","点击登录以跨设备同步":"點擊登錄以跨設備同步","试试":"試試","关闭":"關閉","范围内":"範圍內","多选取并集":"多選取並集","登录中":"登錄中","隐私政策":"隱私政策","放弃当前输入":"放棄當前輸入","古宇利岛":"古宇利島","不勾则不限制":"不勾則不限制","已选":"已選","初始化失败":"初始化失敗","的餐厅":"的餐廳","冲绳美丽海水族馆":"沖繩美麗海水族館","涩谷路口":"澀谷路口","久能山东照宫":"久能山東照宮","大内宿":"大內宿","铁板烧":"鐵板燒","关东煮":"關東煮","秋叶原":"秋葉原","数日前":"數日前","札幌時計台":"札幌時計臺","图标必须是":"圖標必須是","南亚":"南亞","导出":"導出","加载中":"加載中","阿波舞会馆":"阿波舞會館","系统默认旅游锚点之外你自己加的去处":"系統默認旅遊錨點之外你自己加的去處","东寻坊":"東尋坊","福井县立恐龙博物馆":"福井縣立恐龍博物館","未登录则只存在当前浏览器":"未登錄則只存在當前瀏覽器","阿苏山":"阿蘇山","导入失败":"導入失敗","请检查文件内容":"請檢查文件內容","会津若松城":"會津若松城","图层切换":"圖層切換","会津若松":"會津若松","价格":"價格","严美溪":"嚴美溪","养老溪谷":"養老溪谷","多数可以在一个合理的天数内提前预订":"多數可以在一個合理的天數內提前預訂","这样":"這樣","在地图上显示出来的":"在地圖上顯示出來的","荞麦":"蕎麥","其中高价位":"其中高價位","地图组件加载失败":"地圖組件加載失敗","鹤冈八幡宫":"鶴岡八幡宮","谷川岳":"谷川嶽","同步失败":"同步失敗","佐渡岛":"佐渡島","餐厅库":"餐廳庫","横浜中華街":"橫浜中華街","云端数据不受影响":"雲端數據不受影響","浏览器不允许本站保存数据":"瀏覽器不允許本站保存數據","东京国际机场":"東京國際機場","已保存在此浏览器":"已保存在此瀏覽器","登录成功":"登錄成功","长瀞町":"長瀞町","国营常陆海滨公园":"國營常陸海濱公園","上滑查看详情":"上滑查看詳情","串烧":"串燒","面类":"面類","文件格式无法识别":"文件格式無法識別","请重新登录":"請重新登錄","筛选":"篩選","确认删除":"確認刪除","由布院温泉":"由布院溫泉","恢复显示":"恢復顯示","会津若松市":"會津若松市","当前处于离线状态":"當前處於離線狀態","删除":"刪除","家餐厅":"家餐廳","删除我的云端数据":"刪除我的雲端數據","越後湯沢温泉":"越後湯沢溫泉","龙安寺":"龍安寺","偕乐园":"偕樂園","淡路岛":"淡路島","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","夫婦岩":"夫婦巖","锅物":"鍋物","选择器":"選擇器","神户港塔":"神戶港塔","韩国料理":"韓國料理","请确认它是导出的":"請確認它是導出的","其他区域":"其他區域","龙泉洞":"龍泉洞","中国料理眺游楼":"中國料理眺遊樓","同步数据接近上限":"同步數據接近上限","景点锚点":"景點錨點","烤鸡":"烤雞","个其他匹配":"個其他匹配","小豆岛":"小豆島","奈良公园":"奈良公園","中禅寺湖":"中禪寺湖","登录处理失败":"登錄處理失敗","横滨中华街":"橫濱中華街","知床国立公園":"知牀國立公園","大濠公园":"大濠公園","请在浏览器设置中开启":"請在瀏覽器設置中開啓","删除景点":"刪除景點","鸭川海洋世界":"鴨川海洋世界","高千穂峡":"高千穂峽","饺子":"餃子","个景点":"個景點","那须高原":"那須高原","道顿堀":"道頓堀","晚餐价格":"晚餐價格","语言":"語言","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","登录后可在其它设备看到":"登錄後可在其它設備看到","梦":"夢","烧":"燒","黒川温泉":"黒川溫泉","改动已存在本机":"改動已存在本機","未能保存到云端":"未能保存到雲端","进一步压到":"進一步壓到","详情":"詳情","将合并到现有数据并自动去重":"將合併到現有數據並自動去重","拉面":"拉麪","樱岛":"櫻島","搜索失败":"搜索失敗","道後温泉":"道後溫泉","武雄温泉":"武雄溫泉","重新连接中":"重新連接中","面包店等非正餐也按比例控量":"麪包店等非正餐也按比例控量","田泽湖":"田澤湖","显示":"顯示","万座毛":"萬座毛","没有新增内容":"沒有新增內容","长途线路":"長途線路","导入备份":"導入備份","距离约":"距離約","热海温泉":"熱海溫泉","青岛神社":"青島神社","下次登录会重新下载":"下次登錄會重新下載","没有匹配的结果":"沒有匹配的結果","金泽":"金澤","知床国立公园":"知牀國立公園","本设备上的本地缓存会保留":"本設備上的本地緩存會保留","请删减收藏或书签":"請刪減收藏或書籤","当前位置在地图范围之外":"當前位置在地圖範圍之外","请稍后再试":"請稍後再試","你研究后决定不会去的餐厅":"你研究後決定不會去的餐廳","说明":"說明","海游馆":"海遊館","请先登录":"請先登錄","兼六园":"兼六園","韩餐":"韓餐","浅草寺":"淺草寺","国営":"國営","盖饭":"蓋飯","里歴史公園":"裏歴史公園","删除收藏":"刪除收藏","已复制":"已複製","银山温泉":"銀山溫泉","收藏只在本次会话有效":"收藏只在本次會話有效","账号跨设备同步":"賬號跨設備同步","登录后":"登錄後","足立美术馆":"足立美術館","西点":"西點","御好烧":"御好燒","伊势神宫":"伊勢神宮","东大寺":"東大寺","首里城":"首裏城","和收藏一起通过你的":"和收藏一起通過你的","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","获奖":"獲獎","定位校准":"定位校準","心斋桥":"心齋橋","热田神宫":"熱田神宮","隐藏":"隱藏","书签会从本设备删除":"書籤會從本設備刪除","你在另一个窗口退出了登录":"你在另一個窗口退出了登錄","恢复后会自动上传":"恢復後會自動上傳","导入完成":"導入完成","中东菜等":"中東菜等","简体":"簡體","冈山城":"岡山城","餐厅数据加载失败":"餐廳數據加載失敗","夫妇岩":"夫婦巖","此操作不可撤销":"此操作不可撤銷","登录脚本未加载":"登錄腳本未加載","车站":"車站","伏见稻荷大社":"伏見稻荷大社","请刷新重试":"請刷新重試","世纪美术馆":"世紀美術館","勾选后只看对应获奖店":"勾選後只看對應獲獎店","登录":"登錄","乳頭温泉郷":"乳頭溫泉郷","内脏":"內臟","出云大社":"出雲大社","你在约":"你在約","三朝温泉":"三朝溫泉","显示我的位置":"顯示我的位置","南紀白浜温泉":"南紀白浜溫泉","网络问题或广告拦截插件":"網絡問題或廣告攔截插件","关西国际机场":"關西國際機場","收藏只存在这台设备":"收藏只存在這臺設備","寿司":"壽司","哥拉巴园":"哥拉巴園","黑川温泉":"黑川溫泉","成田国际机场":"成田國際機場","仙岩园":"仙岩園","箱根温泉":"箱根溫泉","小樽运河":"小樽運河","热门餐厅":"熱門餐廳","不会覆盖现有项":"不會覆蓋現有項","你自己想标注的地点或建筑物":"你自己想標註的地點或建築物","轻井泽":"輕井澤","已恢复":"已恢復","地图组件无法加载":"地圖組件無法加載","祇园":"祇園","汉堡":"漢堡","名称不能为空":"名稱不能爲空","改动仅存浏览器":"改動僅存瀏覽器","加入景点":"加入景點","咖啡厅":"咖啡廳","下呂温泉":"下呂溫泉","四万十川":"四萬十川","披萨":"披薩","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","东京晴空塔":"東京晴空塔","丰洲市场":"豐洲市場","日元以下的高分正餐餐厅":"日元以下的高分正餐餐廳","富冈制纱厂":"富岡制紗廠","台湾料理":"臺灣料理","鸟取砂丘":"鳥取砂丘","日本环球影城":"日本環球影城","地铁":"地鐵","意面":"意麪","乌冬":"烏冬","下滩站":"下灘站","隐藏非日本料理":"隱藏非日本料理","猎奇":"獵奇","渡月桥":"渡月橋","鸣子温泉":"鳴子溫泉","搜索超时":"搜索超時","可随时删除":"可隨時刪除","眺游楼":"眺遊樓","端岛":"端島","用户自添景点":"用戶自添景點","鸣门漩涡":"鳴門漩渦","等价物":"等價物","已删除":"已刪除","韩":"韓","同步数据超过上限":"同步數據超過上限","会跨设备同步":"會跨設備同步","筛选条件太严格了":"篩選條件太嚴格了","重新加载":"重新加載","服务暂不可用":"服務暫不可用","读取文件失败":"讀取文件失敗","净土滨":"淨土濱","会从地图上自动隐藏":"會從地圖上自動隱藏","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","石见银山":"石見銀山","仓敷美观地区":"倉敷美觀地區","地图搜索":"地圖搜索","函馆山":"函館山","个书签":"個書籤","机车博物馆":"機車博物館","长崎和平公园":"長崎和平公園","筑地市场":"築地市場","彦根城":"彥根城","福冈塔":"福岡塔","预约":"預約","伊香保温泉":"伊香保溫泉","雾凇":"霧凇","栗林公园":"慄林公園","网络不通":"網絡不通","白川乡":"白川鄉","札幌市钟楼":"札幌市鐘樓","桂滨":"桂濱","东山东":"東山東","明治神宫":"明治神宮","仅存于本地浏览器":"僅存於本地瀏覽器","导入":"導入","倉敷美観地区":"倉敷美観地區","翻译失败":"翻譯失敗","复制":"複製","眺遊楼":"眺遊樓","鸟羽水族馆":"鳥羽水族館","按钮里的选择器":"按鈕裏的選擇器","锦带桥":"錦帶橋","稍后自动重试":"稍後自動重試","可粘贴任意":"可粘貼任意","东南亚料理":"東南亞料理","隐私与数据":"隱私與數據","鳴子温泉":"鳴子溫泉","名称":"名稱","兴福寺":"興福寺","书签":"書籤","你在另一个窗口切换了登录":"你在另一個窗口切換了登錄","已跳过":"已跳過","银座":"銀座","搜索餐厅":"搜索餐廳","道后温泉":"道後溫泉","严岛神社":"嚴島神社","只显示可以通过":"只顯示可以通過","放宽条件或重置筛选":"放寬條件或重置篩選","改动已存本地":"改動已存本地","选择要导入的内容":"選擇要導入的內容","苗场山":"苗場山","大吊桥":"大吊橋","同时清除本设备数据":"同時清除本設備數據","屋久岛":"屋久島","类型":"類型","南纪白滨温泉":"南紀白濱溫泉","保存失败":"保存失敗","石垣岛":"石垣島","已改用云端数据":"已改用雲端數據","已切换账号":"已切換賬號","黑部峡谷":"黑部峽谷","筛选结果":"篩選結果","小吃":"小喫","城市轨道":"城市軌道","伴手礼":"伴手禮","新倉山浅間公園":"新倉山淺間公園","但不再同步到云端":"但不再同步到雲端","海鲜":"海鮮","新干线":"新幹線","関西国際空港":"関西國際空港","江之岛":"江之島","餐厅数据无法加载":"餐廳數據無法加載","新仓山浅间公园":"新倉山淺間公園","中国料理":"中國料理","正在删除":"正在刪除","和景点一起通过你的":"和景點一起通過你的","当日":"當日","太宰府天满宫":"太宰府天滿宮","只看谷歌地图校准过坐标的餐厅":"只看谷歌地圖校準過座標的餐廳","屏幕内":"屏幕內","无法解析该文件":"無法解析該文件","华严瀑布":"華嚴瀑布","门司港怀旧":"門司港懷舊","地狱谷野猿公苑":"地獄谷野猿公苑","炭火烧鸟正":"炭火燒鳥正","港未来町":"港未來町","台場":"臺場","与默认景点一起在地图上显示":"與默認景點一起在地圖上顯示","服务器出错":"服務器出錯","退出登录":"退出登錄","东京塔":"東京塔","登录已过期":"登錄已過期","日光东照宫":"日光東照宮","没有符合条件的餐厅":"沒有符合條件的餐廳","交差点":"交差點","国际通":"國際通","云端数据已删除":"雲端數據已刪除","改动待同步到云端":"改動待同步到雲端","伊豆半岛":"伊豆半島","指宿温泉":"指宿溫泉","大须":"大須","全选":"全選","旭川市旭山动物园":"旭川市旭山動物園","本站只收录每个区域评分前":"本站只收錄每個區域評分前","弃用名单":"棄用名單","吉野里遗址":"吉野裏遺址","景点":"景點","金刀比罗宫":"金刀比羅宮","弃用":"棄用"};
   // English lookup, same shape — keys are CJK runs in the rendered
   // page, values come from data/i18n/en.json. Runs without an entry
   // stay in Chinese at runtime (the build log lists what's missing).
-  var TEXT_EN_MAP = {"西点":"Pastry","日本料理":"Japanese cuisine","多数可以在一个合理的天数内提前预订":"most can be booked a reasonable number of days ahead","点心":"Confectionery","菜系":"Cuisine","皇居":"Imperial Palace","其他区域":"Other regions","例如":"e.g.","御好烧":"Okonomiyaki","请至少选择一项":"Select at least one item","拉美料理":"Latin American","加载失败":"Load failed","烘焙":"Bakery","价格":"Price","披萨":"Pizza","仓敷美观地区":"Kurashiki Bikan","美式料理":"American","重新加载":"reloading","没有新增内容":"Nothing new to add","只显示已收藏":"Saved only","的餐廳":"rated restaurants","咖啡":"Cafe","居酒屋":"Izakaya","上野公园":"Ueno Park","会从地图上自动隐藏":"automatically hidden from the map","会跨设备同步":"syncs across devices","中国料理":"Chinese cuisine","加入收藏":"Save","道頓堀":"Dotonbori","书签":"Bookmarks","勾选后只看对应获奖店":"Check to filter to award winners only","不可":"Not available","进一步压到":"are further capped at","加入景点":"Add as Sight","定位到我的位置":"Locate me","正":"Sho","请确认它是导出的":"please make sure it is an exported","景点锚点":"Tourist Sights","東京塔":"Tokyo Tower","隐藏":"Hide","显示":"Show","可貼上任意":"Paste any","无":"None","正餐":"Mains","松江城":"Matsue Castle","秋叶原":"Akihabara","本站只收录每个区域评分前":"We list only each region's top","晚":"Dinner","日元以下的高分正餐餐厅":"yen-or-under high-rated proper-meal restaurants on the map","本站只收錄每個區域評分前":"We list only each region's top","不会覆盖现有项":"existing items are never overwritten","意面":"Pasta","登录脚本未加载":"Sign-in script failed to load","其他西餐":"Other Western","海鲜":"Seafood","屏幕内":"On screen","座位":"Seats","你自己想標註的地點或建築物":"Places or buildings you want to mark yourself","无法解析该文件":"Could not parse the file","登录被取消":"Sign-in canceled","出雲大社":"Izumo Taisha","乡土":"Regional","清空":"Clear","海遊館":"Kaiyukan Aquarium","酒吧":"Bar","西餐":"Western","全选":"All","评分":"Rating","出云大社":"Izumo Taisha","系统默认旅游锚点之外你自己加的去处":"Destinations you add beyond the built-in tourist anchors","東京迪士尼樂園":"Tokyo Disneyland","预约":"Booking","重置筛选":"Reset filters","拉面":"Ramen","关闭":"Close","常用":"Common","隐藏非日本料理":"Hide non-Japanese","其他":"Other","你在约":"You booked","个景点":"sights","读取文件失败":"Failed to read the file","炭火烧鸟正":"Charcoal yakitori","改动已存本地":"changes saved locally","明治神宫":"Meiji Shrine","這樣":"So","和收藏一起通过你的":"synced with Saved via your","退出登录":"Sign out","文件格式无法识别":"Unrecognized file format","焼":"Grilled","未命名":"Unnamed","烤肉":"Yakiniku","铁板烧":"Teppanyaki","餐厅库":"Restaurant library","定位校准":"Location source","长途线路":"Long-haul lines","三明治":"Sandwich","眺游楼":"Tiao You Lou","秋葉原":"Akihabara","同步中":"Syncing","语言":"Language","同步冲突":"Sync conflict","筛选":"Filter","棄用":"Hide","本设备上的本地缓存会保留":"Local cache on this device is kept","导入备份":"Import backup","多數可以在一個合理的天數內提前預訂":"most can be booked a reasonable number of days ahead","寿司":"Sushi","乌冬":"Udon","点击登录以跨设备同步":"click to sign in for cross-device sync","百名店":"Hyakumeiten","在地图上显示出来的":"of the","与默认景点一起在地图上显示":"shown alongside the built-in Sights on the map","炭火焼鳥正":"Sumibi Yakitori Sho","法餐":"French","道顿堀":"Dotonbori","烧":"Grilled","鳥取砂丘":"Tottori Sand Dunes","横浜":"Yokohama","请检查网络":"Check your network","猎奇":"Adventurous","类型":"Type","锅物":"Hot pot","当前位置在地图范围之外":"Current location is outside the map","東京晴空塔":"Tokyo Skytree","小吃":"Snacks","冰品":"Ice cream","账户":"Account","保存":"Save","取消":"Cancel","串烧":"Skewers","中餐":"Chinese","但不再同步到云端":"but won't sync to the cloud anymore","导入":"Import","选择要导入的内容":"Choose what to import","搜索失败":"Search failed","炸物":"Fried","炭火烧鸟":"Charcoal yakitori","只显示可以通过":"Bookable via","你研究後決定不會去的餐廳":"Restaurants you've researched and decided not to visit","和果子":"wagashi","沾面":"Tsukemen","新干线":"Shinkansen","非洲":"Africa","可粘贴任意":"Paste any","这样":"So","登录后":"After signing in","简体":"Simplified","删除收藏":"Remove","甚至":"or even","保存失败":"Save failed","打开筛选":"Open filters","韩餐":"Korean","伴手礼":"Gift food","搜尋餐廳":"Search restaurants","的餐厅":"rated restaurants","已选":"Selected","你研究后决定不会去的餐厅":"Restaurants you've researched and decided not to visit","保存中":"Saving","个书签":"bookmarks","丰洲市场":"Toyosu Market","淺草寺":"Senso-ji","眺遊楼":"Tiao You Lou","东南亚料理":"Southeast Asian","三朝温泉":"Misasa Onsen","将合并到现有数据并自动去重":"it will be merged into your existing data with duplicates skipped","东京迪士尼乐园":"Tokyo Disneyland","登录成功":"Signed in","家餐厅":"restaurants","弃用":"Hide","详情":"Details","只看谷歌地图校准过坐标的餐厅":"Google-calibrated coordinates only","同步失败":"Sync failed","日式咖喱":"Japanese curry","韩":"Korean","可随时删除":"deletable anytime","收藏":"Saved","车站":"Station","六本木新城":"Roppongi Hills","海游馆":"Kaiyukan Aquarium","饺子":"Gyoza","已弃用":"Hidden","進一步壓到":"are further capped at","可":"Available","已收藏":"Saved","内脏":"Offal","选择器":"Picker","东京晴空塔":"Tokyo Skytree","日元以下的高分正餐餐廳":"yen-or-under high-rated proper-meal restaurants on the map","放弃当前输入":"Discard what you typed","咖啡厅":"cafés","中东菜等":"Middle Eastern, etc.","築地場外市場":"Tsukiji Outer Market","打开完整":"Open full","你自己想标注的地点或建筑物":"Places or buildings you want to mark yourself","倉敷美觀地區":"Kurashiki Bikan","新世界":"Shinsekai","珍味":"Delicacies","咖啡廳":"cafés","新宿御苑":"Shinjuku Gyoen","翻译":"Translate","西":"Western","输入更多字以缩小范围":"Type more to narrow the search","显示我的位置":"Show my location","會從地圖上自動隱藏":"automatically hidden from the map","通天閣":"Tsutenkaku","天妇罗":"Tempura","地图组件加载失败":"Map components failed to load","名称不能为空":"Name cannot be empty","改动待同步到云端":"Edits pending cloud sync","景点":"Sights","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","棄用名單":"Discarded","登录已过期":"Session expired","全部":"All","改动仅存浏览器":"edits live in browser only","热门餐厅":"Hot restaurants","荞麦":"Soba","和景点一起通过你的":"synced with Sights via your","未登录则只存在当前浏览器":"Not signed in: data stays in this browser only","午":"Lunch","浅草寺":"Senso-ji","面包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","冈山城":"Okayama Castle","银座":"Ginza","意餐":"Italian","和景點一起通過你的":"synced with Sights via your","调整左侧筛选条件可让它出现在地图上":"loosen the filters to bring it back onto the map","全清":"None","汉堡":"Burgers","弃用名单":"Discarded","本地模式":"Local mode","关东煮":"Oden","复制":"Copy","地址":"Address","景點":"Sights","搜索中":"Searching","网络问题或广告拦截插件":"network issue or ad blocker","账号跨设备同步":"account across devices","仅存于本地浏览器":"live only in this browser","通天阁":"Tsutenkaku","翻译失败":"Translate failed","我的收藏":"My Saved","搜索餐厅":"Search restaurants","烤鸡":"Yakitori","不勾则不限制":"Leave unchecked for no filter","按钮里的选择器":"Picker in the button","长途":"Long-haul","銀座":"Ginza","加载中":"Loading","登录处理失败":"Sign-in handling failed","稍后自动重试":"will retry automatically","盖饭":"Donburi","上滑查看详情":"Swipe up for details","获奖":"Awards","足立美术馆":"Adachi Museum of Art","日本环球影城":"Universal Studios Japan","导出":"Export","賬號跨設備同步":"account across devices","系統默認旅遊錨點之外你自己加的去處":"Destinations you add beyond the built-in tourist anchors","图层切换":"Layers","删除景点":"Remove Sight","市内":"In-city","中东":"Middle East","岡山城":"Okayama Castle","重新连接中":"Reconnecting","明治神宮":"Meiji Shrine","请刷新重试":"please refresh to retry","在地圖上顯示出來的":"of the","足立美術館":"Adachi Museum of Art","早餐":"Breakfast","鸟取砂丘":"Tottori Sand Dunes","用户自添景点":"Custom Sights","请重新登录":"please sign in again","其中高價位":"of which high-end","原文":"Original","私铁":"Private rail","隐藏弃用名单":"Hide discarded","导入完成":"Import complete","范围内":"In range","迁移":"Migrate","拉麵":"Ramen","甜品":"Desserts","已同步":"Synced","三朝溫泉":"Misasa Onsen","韩国料理":"Korean","內臟":"Offal","地铁":"Subway","此餐厅当前不在筛选范围内":"This restaurant is outside the current filters","名称":"Name","已存本地":"Saved locally","个其他匹配":"more matches","與默認景點一起在地圖上顯示":"shown alongside the built-in Sights on the map","南亚":"South Asian","翻譯":"Translate","晚餐价格":"Dinner price","日本語":"Japanese","东京塔":"Tokyo Tower","繁體":"Traditional","没有匹配的结果":"No results","亲子丼":"Oyakodon","日本環球影城":"Universal Studios Japan","非日本料理":"Non-Japanese cuisine","上野公園":"Ueno Park","中":"Chinese","可隨時刪除":"deletable anytime","台湾料理":"Taiwanese","检查网络":"check your network","多选取并集":"Multi-select = union","备份":"Backup","全部已存在":"everything already exists","试试":"Try","图标必须是":"Icon must be","地图搜索":"Map search","城市轨道":"Urban rail","其中高价位":"of which high-end","已复制":"Copied","面类":"Noodles","大阪城":"Osaka Castle","和收藏一起通過你的":"synced with Saved via your","豐洲市場":"Toyosu Market"};
+  var TEXT_EN_MAP = {"已收藏":"Saved","同步冲突":"Sync conflict","东京迪士尼乐园":"Tokyo Disneyland","珍味":"Delicacies","登录可在其他设备恢复":"sign in to restore it on other devices","无":"None","常用":"Common","加入收藏":"Save","评分":"Rating","通天阁":"Tsutenkaku","我的收藏":"My Saved","重置筛选":"Reset filters","你在另一个窗口登录了":"You signed in from another window","私铁":"Private rail","同步数据":"Sync data","已弃用":"Hidden","炭火烧鸟":"Charcoal yakitori","加载失败":"Load failed","市内":"In-city","翻译":"Translate","只显示已收藏":"Saved only","隐藏弃用名单":"Hide discarded","输入更多字以缩小范围":"Type more to narrow the search","长途":"Long-haul","中东":"Middle East","请检查网络":"Check your network","乡土":"Regional","甚至":"or even","迁移":"Migrate","定位被浏览器禁用":"Location is blocked by the browser","检查网络":"check your network","请至少选择一项":"Select at least one item","咖啡廳":"cafés","恢复网络后请重试":"please retry once you're back online","拉美料理":"Latin American","正":"Sho","备份":"Backup","重试":"Retry","亲子丼":"Oyakodon","清空":"Clear","明治神宮":"Meiji Shrine","点心":"Confectionery","横浜":"Yokohama","登录被取消":"Sign-in canceled","打开完整":"Open full","账户":"Account","天妇罗":"Tempura","東京塔":"Tokyo Tower","上野公园":"Ueno Park","请检查网络后刷新":"check your network, then refresh","撤销":"Undo","点击登录以跨设备同步":"click to sign in for cross-device sync","试试":"Try","海遊館":"Kaiyukan Aquarium","关闭":"Close","范围内":"In range","未命名":"Unnamed","賬號跨設備同步":"account across devices","多选取并集":"Multi-select = union","已同步":"Synced","登录中":"Signing in","隐私政策":"Privacy policy","已存本地":"Saved locally","你自己想標註的地點或建築物":"Places or buildings you want to mark yourself","放弃当前输入":"Discard what you typed","不勾则不限制":"Leave unchecked for no filter","已选":"Selected","例如":"e.g.","初始化失败":"Initialisation failed","的餐厅":"rated restaurants","新世界":"Shinsekai","铁板烧":"Teppanyaki","关东煮":"Oden","秋叶原":"Akihabara","這樣":"So","豐洲市場":"Toyosu Market","其他":"Other","图标必须是":"Icon must be","南亚":"South Asian","导出":"Export","居酒屋":"Izakaya","加载中":"Loading","系统默认旅游锚点之外你自己加的去处":"Destinations you add beyond the built-in tourist anchors","正餐":"Mains","東京晴空塔":"Tokyo Skytree","和景點一起通過你的":"synced with Sights via your","未登录则只存在当前浏览器":"Not signed in: data stays in this browser only","西":"Western","沾面":"Tsukemen","导入失败":"Import failed","请检查文件内容":"please check the file contents","图层切换":"Layers","价格":"Price","會從地圖上自動隱藏":"automatically hidden from the map","百名店":"Hyakumeiten","棄用名單":"Discarded","座位":"Seats","多数可以在一个合理的天数内提前预订":"most can be booked a reasonable number of days ahead","这样":"So","在地图上显示出来的":"of the","多數可以在一個合理的天數內提前預訂":"most can be booked a reasonable number of days ahead","其中高價位":"of which high-end","荞麦":"Soba","其中高价位":"of which high-end","地图组件加载失败":"Map components failed to load","焼":"Grilled","不可":"Not available","同步失败":"Sync failed","餐厅库":"Restaurant library","云端数据不受影响":"cloud data is not affected","浏览器不允许本站保存数据":"The browser won't let this site store data","已保存在此浏览器":"Saved in this browser","意餐":"Italian","登录成功":"Signed in","早餐":"Breakfast","和收藏一起通過你的":"synced with Saved via your","上滑查看详情":"Swipe up for details","串烧":"Skewers","面类":"Noodles","文件格式无法识别":"Unrecognized file format","请重新登录":"please sign in again","筛选":"Filter","确认删除":"Confirm deletion","可隨時刪除":"deletable anytime","拉麵":"Ramen","当前处于离线状态":"You appear to be offline","家餐厅":"restaurants","删除我的云端数据":"Delete my cloud data","米":"m","此餐厅当前不在筛选范围内":"This restaurant is outside the current filters","锅物":"Hot pot","选择器":"Picker","酒吧":"Bar","韩国料理":"Korean","上野公園":"Ueno Park","法餐":"French","美式料理":"American","日本語":"Japanese","请确认它是导出的":"please make sure it is an exported","系統默認旅遊錨點之外你自己加的去處":"Destinations you add beyond the built-in tourist anchors","其他区域":"Other regions","鳥取砂丘":"Tottori Sand Dunes","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","同步数据接近上限":"Sync data is close to the size limit","景点锚点":"Tourist Sights","烤鸡":"Yakitori","个其他匹配":"more matches","登录处理失败":"Sign-in handling failed","请在浏览器设置中开启":"turn it on in the browser settings","删除景点":"Remove Sight","本站只收錄每個區域評分前":"We list only each region's top","在地圖上顯示出來的":"of the","饺子":"Gyoza","个景点":"sights","道顿堀":"Dotonbori","三朝溫泉":"Misasa Onsen","晚餐价格":"Dinner price","语言":"Language","调整左侧筛选条件可让它出现在地图上":"loosen the filters to bring it back onto the map","登录后可在其它设备看到":"sign in to see them on your other devices","烧":"Grilled","改动已存在本机":"your changes are saved on this device","新宿御苑":"Shinjuku Gyoen","未能保存到云端":"could not be saved to the cloud","全清":"None","进一步压到":"are further capped at","详情":"Details","保存":"Save","将合并到现有数据并自动去重":"it will be merged into your existing data with duplicates skipped","拉面":"Ramen","你研究後決定不會去的餐廳":"Restaurants you've researched and decided not to visit","搜索失败":"Search failed","銀座":"Ginza","收藏":"Saved","重新连接中":"Reconnecting","面包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","原文":"Original","显示":"Show","没有新增内容":"Nothing new to add","长途线路":"Long-haul lines","道頓堀":"Dotonbori","导入备份":"Import backup","距离约":"approx.","下次登录会重新下载":"it is downloaded again at your next sign-in","没有匹配的结果":"No results","本设备上的本地缓存会保留":"Local cache on this device is kept","请删减收藏或书签":"please remove some saved places or bookmarks","定位到我的位置":"Locate me","当前位置在地图范围之外":"Current location is outside the map","请稍后再试":"please try again later","炸物":"Fried","你研究后决定不会去的餐厅":"Restaurants you've researched and decided not to visit","说明":"Help","海游馆":"Kaiyukan Aquarium","请先登录":"Sign in first","大阪城":"Osaka Castle","松江城":"Matsue Castle","韩餐":"Korean","同步中":"Syncing","浅草寺":"Senso-ji","岡山城":"Okayama Castle","午":"Lunch","盖饭":"Donburi","通天閣":"Tsutenkaku","删除收藏":"Remove","已复制":"Copied","收藏只在本次会话有效":"saved places last only for this session","账号跨设备同步":"account across devices","登录后":"After signing in","足立美术馆":"Adachi Museum of Art","西点":"Pastry","東京迪士尼樂園":"Tokyo Disneyland","御好烧":"Okonomiyaki","出雲大社":"Izumo Taisha","和收藏一起通过你的":"synced with Saved via your","获奖":"Awards","定位校准":"Location source","進一步壓到":"are further capped at","隐藏":"Hide","书签会从本设备删除":"and bookmarks will be removed from this device","你在另一个窗口退出了登录":"You signed out in another window","恢复后会自动上传":"they will upload automatically once it is back","六本木新城":"Roppongi Hills","咖啡":"Cafe","导入完成":"Import complete","中东菜等":"Middle Eastern, etc.","简体":"Simplified","冈山城":"Okayama Castle","餐厅数据加载失败":"Restaurant data failed to load","此操作不可撤销":"This cannot be undone","登录脚本未加载":"Sign-in script failed to load","车站":"Station","中":"Chinese","搜索中":"Searching","请刷新重试":"please refresh to retry","勾选后只看对应获奖店":"Check to filter to award winners only","登录":"Sign in","内脏":"Offal","出云大社":"Izumo Taisha","你在约":"You booked","三朝温泉":"Misasa Onsen","可貼上任意":"Paste any","显示我的位置":"Show my location","网络问题或广告拦截插件":"network issue or ad blocker","收藏只存在这台设备":"Saved places live on this device only","寿司":"Sushi","热门餐厅":"Hot restaurants","烤肉":"Yakiniku","不会覆盖现有项":"existing items are never overwritten","你自己想标注的地点或建筑物":"Places or buildings you want to mark yourself","內臟":"Offal","景點":"Sights","已恢复":"Restored","地图组件无法加载":"map components can't load","的餐廳":"rated restaurants","汉堡":"Burgers","名称不能为空":"Name cannot be empty","改动仅存浏览器":"edits live in browser only","加入景点":"Add as Sight","咖啡厅":"cafés","披萨":"Pizza","地址":"Address","东京晴空塔":"Tokyo Skytree","非洲":"Africa","丰洲市场":"Toyosu Market","日元以下的高分正餐餐厅":"yen-or-under high-rated proper-meal restaurants on the map","台湾料理":"Taiwanese","鸟取砂丘":"Tottori Sand Dunes","日本环球影城":"Universal Studios Japan","地铁":"Subway","意面":"Pasta","乌冬":"Udon","隐藏非日本料理":"Hide non-Japanese","猎奇":"Adventurous","搜索超时":"Search timed out","可随时删除":"deletable anytime","眺游楼":"Tiao You Lou","用户自添景点":"Custom Sights","已删除":"Deleted","韩":"Korean","同步数据超过上限":"Sync data exceeds the size limit","会跨设备同步":"syncs across devices","筛选条件太严格了":"The filters are too strict","重新加载":"reloading","倉敷美觀地區":"Kurashiki Bikan","服务暂不可用":"The service is unavailable right now","读取文件失败":"Failed to read the file","会从地图上自动隐藏":"automatically hidden from the map","日式咖喱":"Japanese curry","晚":"Dinner","仓敷美观地区":"Kurashiki Bikan","地图搜索":"Map search","个书签":"bookmarks","甜品":"Desserts","本地模式":"Local mode","棄用":"Hide","搜尋餐廳":"Search restaurants","英尺":"ft","全部":"All","预约":"Booking","网络不通":"No network connection","取消":"Cancel","明治神宫":"Meiji Shrine","仅存于本地浏览器":"live only in this browser","导入":"Import","翻譯":"Translate","烘焙":"Bakery","翻译失败":"Translate failed","复制":"Copy","眺遊楼":"Tiao You Lou","按钮里的选择器":"Picker in the button","菜系":"Cuisine","稍后自动重试":"will retry automatically","可粘贴任意":"Paste any","东南亚料理":"Southeast Asian","隐私与数据":"Privacy & data","名称":"Name","非日本料理":"Non-Japanese cuisine","可":"Available","书签":"Bookmarks","你在另一个窗口切换了登录":"You switched accounts in another window","已跳过":"skipped","保存中":"Saving","知道了":"Got it","和果子":"wagashi","银座":"Ginza","繁體":"Traditional","搜索餐厅":"Search restaurants","中餐":"Chinese","只显示可以通过":"Bookable via","放宽条件或重置筛选":"Loosen them, or reset the filters","足立美術館":"Adachi Museum of Art","改动已存本地":"changes saved locally","选择要导入的内容":"Choose what to import","秋葉原":"Akihabara","西餐":"Western","同时清除本设备数据":"Also clear this device's data","类型":"Type","保存失败":"Save failed","已改用云端数据":"now using the cloud copy","已切换账号":"Account switched","筛选结果":"Filter results","小吃":"Snacks","城市轨道":"Urban rail","伴手礼":"Gift food","日元以下的高分正餐餐廳":"yen-or-under high-rated proper-meal restaurants on the map","淺草寺":"Senso-ji","但不再同步到云端":"but won't sync to the cloud anymore","海鲜":"Seafood","新干线":"Shinkansen","餐厅数据无法加载":"restaurant data can't load","中国料理":"Chinese cuisine","正在删除":"Deleting","和景点一起通过你的":"synced with Sights via your","其他西餐":"Other Western","炭火焼鳥正":"Sumibi Yakitori Sho","只看谷歌地图校准过坐标的餐厅":"Google-calibrated coordinates only","屏幕内":"On screen","无法解析该文件":"Could not parse the file","炭火烧鸟正":"Charcoal yakitori","三明治":"Sandwich","与默认景点一起在地图上显示":"shown alongside the built-in Sights on the map","服务器出错":"The server returned an error","退出登录":"Sign out","皇居":"Imperial Palace","东京塔":"Tokyo Tower","登录已过期":"Session expired","與默認景點一起在地圖上顯示":"shown alongside the built-in Sights on the map","没有符合条件的餐厅":"No restaurants match","云端数据已删除":"Your cloud data has been deleted","日本料理":"Japanese cuisine","改动待同步到云端":"Edits pending cloud sync","冰品":"Ice cream","全选":"All","本站只收录每个区域评分前":"We list only each region's top","築地場外市場":"Tsukiji Outer Market","日本環球影城":"Universal Studios Japan","弃用名单":"Discarded","全部已存在":"everything already exists","景点":"Sights","弃用":"Hide"};
   // Japanese lookup, same shape. Values come from data/i18n/ja.json.
   // Runs without an entry stay in Chinese at runtime.
-  var TEXT_JA_MAP = {"西点":"洋菓子","日本料理":"日本料理","多数可以在一个合理的天数内提前预订":"多くが妥当な日数で予約可能","点心":"和菓子","菜系":"ジャンル","皇居":"皇居","其他区域":"他の地域","例如":"例:","御好烧":"お好み焼き","请至少选择一项":"少なくとも 1 項目を選択してください","拉美料理":"中南米料理","加载失败":"読み込み失敗","烘焙":"ベーカリー","价格":"価格","披萨":"ピザ","仓敷美观地区":"倉敷美観地区","美式料理":"アメリカ料理","重新加载":"再読み込み中","没有新增内容":"新規追加はありません","只显示已收藏":"お気に入りのみ","的餐廳":"のレストランのみ掲載","咖啡":"カフェ","居酒屋":"居酒屋","上野公园":"上野公園","会从地图上自动隐藏":"地図から自動的に非表示になります","会跨设备同步":"はデバイス間で同期されます","中国料理":"中国料理","加入收藏":"保存","道頓堀":"道頓堀","书签":"ブックマーク","勾选后只看对应获奖店":"チェックで受賞店のみ表示","不可":"不可","进一步压到":"はさらに","加入景点":"スポットとして追加","定位到我的位置":"現在地に移動","正":"正","请确认它是导出的":"エクスポート済みの","景点锚点":"観光スポット","東京塔":"東京タワー","隐藏":"非表示","显示":"表示","可貼上任意":"任意の絵文字を貼り付け可","无":"なし","正餐":"メイン","松江城":"松江城","秋叶原":"秋葉原","本站只收录每个区域评分前":"各エリアで評価上位","晚":"ディナー","日元以下的高分正餐餐厅":"円以下の高評価な食事系レストランは","本站只收錄每個區域評分前":"各エリアで評価上位","不会覆盖现有项":"既存の項目は上書きされません","意面":"パスタ","登录脚本未加载":"サインインスクリプトの読み込み失敗","其他西餐":"その他洋食","海鲜":"海鮮","屏幕内":"画面内","座位":"席数","你自己想標註的地點或建築物":"自分で印を付けたい場所や建物","无法解析该文件":"ファイルを解析できません","登录被取消":"サインインがキャンセルされました","出雲大社":"出雲大社","乡土":"郷土","清空":"クリア","海遊館":"海遊館","酒吧":"バー","西餐":"西洋料理","全选":"全選択","评分":"評価","出云大社":"出雲大社","系统默认旅游锚点之外你自己加的去处":"デフォルトの観光スポットに加えて自分で追加した行き先","東京迪士尼樂園":"東京ディズニーランド","预约":"予約","重置筛选":"フィルターをリセット","拉面":"ラーメン","关闭":"閉じる","常用":"よく使う","隐藏非日本料理":"和食以外を隠す","其他":"その他","你在约":"予約済","个景点":"件の観光スポット","读取文件失败":"ファイルの読み込みに失敗しました","炭火烧鸟正":"炭火焼鳥 正","改动已存本地":"変更はローカルに保存済み","明治神宫":"明治神宮","這樣":"こうして","和收藏一起通过你的":"お気に入りと一緒に、あなたの","退出登录":"サインアウト","文件格式无法识别":"ファイル形式を認識できません","焼":"焼","未命名":"無題","烤肉":"焼肉","铁板烧":"鉄板焼き","餐厅库":"レストラン一覧","定位校准":"位置情報の補正","长途线路":"長距離路線","三明治":"サンドイッチ","眺游楼":"眺遊楼","秋葉原":"秋葉原","同步中":"同期中","语言":"言語","同步冲突":"同期の競合","筛选":"フィルター","棄用":"非表示","本设备上的本地缓存会保留":"このデバイスのローカルキャッシュは保持されます","导入备份":"バックアップをインポート","多數可以在一個合理的天數內提前預訂":"多くが妥当な日数で予約可能","寿司":"寿司","乌冬":"うどん","点击登录以跨设备同步":"クリックしてサインインし、デバイス間同期","百名店":"百名店","在地图上显示出来的":"地図に表示される","与默认景点一起在地图上显示":"デフォルトと一緒に地図に表示され","炭火焼鳥正":"炭火焼鳥 正","法餐":"フレンチ","道顿堀":"道頓堀","烧":"焼","鳥取砂丘":"鳥取砂丘","横浜":"横浜","请检查网络":"ネットワークを確認してください","猎奇":"ゲテモノ","类型":"種類","锅物":"鍋物","当前位置在地图范围之外":"現在地は地図の範囲外です","東京晴空塔":"東京スカイツリー","小吃":"軽食","冰品":"アイス","账户":"アカウント","保存":"保存","取消":"キャンセル","串烧":"串焼き","中餐":"中華","但不再同步到云端":"ただしクラウドには同期されなくなります","导入":"インポート","选择要导入的内容":"インポートする内容を選択","搜索失败":"検索失敗","炸物":"揚げ物","炭火烧鸟":"炭火焼鳥","只显示可以通过":"次のサイト経由で予約可:","你研究後決定不會去的餐廳":"リサーチして行かないと決めたレストラン","和果子":"和菓子","沾面":"つけ麺","新干线":"新幹線","非洲":"アフリカ","可粘贴任意":"任意の絵文字を貼り付け可","这样":"こうして","登录后":"サインイン後","简体":"簡体字","删除收藏":"削除","甚至":"場合によっては","保存失败":"保存失敗","打开筛选":"フィルターを開く","韩餐":"韓国","伴手礼":"お土産","搜尋餐廳":"レストラン検索","的餐厅":"のレストランのみ掲載","已选":"選択中","你研究后决定不会去的餐厅":"リサーチして行かないと決めたレストラン","保存中":"保存中","个书签":"件のブックマーク","丰洲市场":"豊洲市場","淺草寺":"浅草寺","眺遊楼":"眺遊楼","东南亚料理":"東南アジア料理","三朝温泉":"三朝温泉","将合并到现有数据并自动去重":"既存データに統合され重複は自動的に除外されます","东京迪士尼乐园":"東京ディズニーランド","登录成功":"サインイン成功","家餐厅":"軒のレストラン","弃用":"非表示","详情":"詳細","只看谷歌地图校准过坐标的餐厅":"Googleマップで座標補正済みのみ","同步失败":"同期失敗","日式咖喱":"日本式カレー","韩":"韓","可随时删除":"いつでも削除できます","收藏":"お気に入り","车站":"駅","六本木新城":"六本木ヒルズ","海游馆":"海遊館","饺子":"餃子","已弃用":"非表示中","進一步壓到":"はさらに","可":"可","已收藏":"登録済み","内脏":"ホルモン","选择器":"ピッカー","东京晴空塔":"東京スカイツリー","日元以下的高分正餐餐廳":"円以下の高評価な食事系レストランは","放弃当前输入":"入力を破棄しますか","咖啡厅":"カフェ","中东菜等":"中東料理など","築地場外市場":"築地場外市場","打开完整":"全画面で開く","你自己想标注的地点或建筑物":"自分で印を付けたい場所や建物","倉敷美觀地區":"倉敷美観地区","新世界":"新世界","珍味":"珍味","咖啡廳":"カフェ","新宿御苑":"新宿御苑","翻译":"翻訳","西":"西洋","输入更多字以缩小范围":"もっと入力して絞り込む","显示我的位置":"現在地を表示","會從地圖上自動隱藏":"地図から自動的に非表示になります","通天閣":"通天閣","天妇罗":"天ぷら","地图组件加载失败":"地図コンポーネントの読み込みに失敗しました","名称不能为空":"名称は必須です","改动待同步到云端":"クラウド同期待ち","景点":"観光スポット","中国料理眺游楼":"中国料理 眺遊楼","棄用名單":"非表示リスト","登录已过期":"サインイン期限切れ","全部":"すべて","改动仅存浏览器":"変更はブラウザのみに保存","热门餐厅":"人気店","荞麦":"そば","和景点一起通过你的":"観光スポットと一緒に、あなたの","未登录则只存在当前浏览器":"未サインインの場合、このブラウザのみに保存されます","午":"ランチ","浅草寺":"浅草寺","面包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","冈山城":"岡山城","银座":"銀座","意餐":"イタリアン","和景點一起通過你的":"観光スポットと一緒に、あなたの","调整左侧筛选条件可让它出现在地图上":"フィルターを緩めると地図に表示されます","全清":"クリア","汉堡":"バーガー","弃用名单":"非表示リスト","本地模式":"ローカルモード","关东煮":"おでん","复制":"コピー","地址":"住所","景點":"観光スポット","搜索中":"検索中","网络问题或广告拦截插件":"ネットワーク障害または広告ブロッカー","账号跨设备同步":"アカウントでデバイス間同期されます","仅存于本地浏览器":"このブラウザのみに保存","通天阁":"通天閣","翻译失败":"翻訳に失敗","我的收藏":"マイお気に入り","搜索餐厅":"レストラン検索","烤鸡":"焼鳥","不勾则不限制":"未チェックで制限なし","按钮里的选择器":"ボタン内のピッカー","长途":"長距離","銀座":"銀座","加载中":"読み込み中","登录处理失败":"サインイン処理失敗","稍后自动重试":"後で自動再試行します","盖饭":"丼物","上滑查看详情":"上にスワイプで詳細","获奖":"受賞","足立美术馆":"足立美術館","日本环球影城":"ユニバーサル・スタジオ・ジャパン","导出":"エクスポート","賬號跨設備同步":"アカウントでデバイス間同期されます","系統默認旅遊錨點之外你自己加的去處":"デフォルトの観光スポットに加えて自分で追加した行き先","图层切换":"レイヤー切替","删除景点":"スポット削除","市内":"市内","中东":"中東","岡山城":"岡山城","重新连接中":"再接続中","明治神宮":"明治神宮","请刷新重试":"再読み込みしてください","在地圖上顯示出來的":"地図に表示される","足立美術館":"足立美術館","早餐":"朝食","鸟取砂丘":"鳥取砂丘","用户自添景点":"カスタムスポット","请重新登录":"再度サインインしてください","其中高價位":"うち高単価の","原文":"原文","私铁":"私鉄","隐藏弃用名单":"非表示リストを隠す","导入完成":"インポート完了","范围内":"範囲内","迁移":"移行","拉麵":"ラーメン","甜品":"スイーツ","已同步":"同期済み","三朝溫泉":"三朝温泉","韩国料理":"韓国料理","內臟":"ホルモン","地铁":"地下鉄","此餐厅当前不在筛选范围内":"このレストランは現在のフィルター対象外です","名称":"名称","已存本地":"ローカル保存済み","个其他匹配":"件の他の一致","與默認景點一起在地圖上顯示":"デフォルトと一緒に地図に表示され","南亚":"南アジア","翻譯":"翻訳","晚餐价格":"ディナー価格","东京塔":"東京タワー","繁體":"繁体字","没有匹配的结果":"結果なし","亲子丼":"親子丼","日本環球影城":"ユニバーサル・スタジオ・ジャパン","非日本料理":"和食以外","上野公園":"上野公園","中":"中華","可隨時刪除":"いつでも削除できます","台湾料理":"台湾料理","检查网络":"ネットワークを確認","多选取并集":"複数選択 = 和集合","备份":"バックアップ","全部已存在":"すべて既存","试试":"試す","图标必须是":"アイコンは","地图搜索":"マップ検索","城市轨道":"都市鉄道","其中高价位":"うち高単価の","已复制":"コピー済み","面类":"麺類","大阪城":"大阪城","和收藏一起通過你的":"お気に入りと一緒に、あなたの","豐洲市場":"豊洲市場"};
+  var TEXT_JA_MAP = {"已收藏":"登録済み","同步冲突":"同期の競合","东京迪士尼乐园":"東京ディズニーランド","珍味":"珍味","登录可在其他设备恢复":"サインインすれば他の端末でも復元できます","无":"なし","常用":"よく使う","加入收藏":"保存","评分":"評価","通天阁":"通天閣","我的收藏":"マイお気に入り","重置筛选":"フィルターをリセット","你在另一个窗口登录了":"別のウィンドウでサインインしました","私铁":"私鉄","同步数据":"同期データ","已弃用":"非表示中","炭火烧鸟":"炭火焼鳥","加载失败":"読み込み失敗","市内":"市内","翻译":"翻訳","只显示已收藏":"お気に入りのみ","隐藏弃用名单":"非表示リストを隠す","输入更多字以缩小范围":"もっと入力して絞り込む","长途":"長距離","中东":"中東","请检查网络":"ネットワークを確認してください","乡土":"郷土","甚至":"場合によっては","迁移":"移行","定位被浏览器禁用":"位置情報がブラウザでブロックされています","检查网络":"ネットワークを確認","请至少选择一项":"少なくとも 1 項目を選択してください","咖啡廳":"カフェ","恢复网络后请重试":"ネットワーク復旧後にもう一度お試しください","拉美料理":"中南米料理","正":"正","备份":"バックアップ","重试":"再試行","亲子丼":"親子丼","清空":"クリア","明治神宮":"明治神宮","点心":"和菓子","横浜":"横浜","登录被取消":"サインインがキャンセルされました","打开完整":"全画面で開く","账户":"アカウント","天妇罗":"天ぷら","東京塔":"東京タワー","上野公园":"上野公園","请检查网络后刷新":"ネットワークを確認して再読み込みしてください","撤销":"元に戻す","点击登录以跨设备同步":"クリックしてサインインし、デバイス間同期","试试":"試す","海遊館":"海遊館","关闭":"閉じる","范围内":"範囲内","未命名":"無題","賬號跨設備同步":"アカウントでデバイス間同期されます","多选取并集":"複数選択 = 和集合","已同步":"同期済み","登录中":"サインイン中","隐私政策":"プライバシーポリシー","已存本地":"ローカル保存済み","你自己想標註的地點或建築物":"自分で印を付けたい場所や建物","放弃当前输入":"入力を破棄しますか","不勾则不限制":"未チェックで制限なし","已选":"選択中","例如":"例:","初始化失败":"初期化に失敗しました","的餐厅":"のレストランのみ掲載","新世界":"新世界","铁板烧":"鉄板焼き","关东煮":"おでん","秋叶原":"秋葉原","這樣":"こうして","豐洲市場":"豊洲市場","其他":"その他","图标必须是":"アイコンは","南亚":"南アジア","导出":"エクスポート","居酒屋":"居酒屋","加载中":"読み込み中","系统默认旅游锚点之外你自己加的去处":"デフォルトの観光スポットに加えて自分で追加した行き先","正餐":"メイン","東京晴空塔":"東京スカイツリー","和景點一起通過你的":"観光スポットと一緒に、あなたの","未登录则只存在当前浏览器":"未サインインの場合、このブラウザのみに保存されます","西":"西洋","沾面":"つけ麺","导入失败":"インポートに失敗しました","请检查文件内容":"ファイルの内容をご確認ください","图层切换":"レイヤー切替","价格":"価格","會從地圖上自動隱藏":"地図から自動的に非表示になります","百名店":"百名店","棄用名單":"非表示リスト","座位":"席数","多数可以在一个合理的天数内提前预订":"多くが妥当な日数で予約可能","这样":"こうして","在地图上显示出来的":"地図に表示される","多數可以在一個合理的天數內提前預訂":"多くが妥当な日数で予約可能","其中高價位":"うち高単価の","荞麦":"そば","其中高价位":"うち高単価の","地图组件加载失败":"地図コンポーネントの読み込みに失敗しました","焼":"焼","不可":"不可","同步失败":"同期失敗","餐厅库":"レストラン一覧","云端数据不受影响":"クラウドのデータには影響しません","浏览器不允许本站保存数据":"ブラウザがこのサイトのデータ保存を許可していません","已保存在此浏览器":"このブラウザに保存しました","意餐":"イタリアン","登录成功":"サインイン成功","早餐":"朝食","和收藏一起通過你的":"お気に入りと一緒に、あなたの","上滑查看详情":"上にスワイプで詳細","串烧":"串焼き","面类":"麺類","文件格式无法识别":"ファイル形式を認識できません","请重新登录":"再度サインインしてください","筛选":"フィルター","确认删除":"削除を確認","可隨時刪除":"いつでも削除できます","拉麵":"ラーメン","当前处于离线状态":"現在オフラインです","家餐厅":"軒のレストラン","删除我的云端数据":"クラウドのデータを削除","米":"m","此餐厅当前不在筛选范围内":"このレストランは現在のフィルター対象外です","锅物":"鍋物","选择器":"ピッカー","酒吧":"バー","韩国料理":"韓国料理","上野公園":"上野公園","法餐":"フレンチ","美式料理":"アメリカ料理","请确认它是导出的":"エクスポート済みの","系統默認旅遊錨點之外你自己加的去處":"デフォルトの観光スポットに加えて自分で追加した行き先","其他区域":"他の地域","鳥取砂丘":"鳥取砂丘","中国料理眺游楼":"中国料理 眺遊楼","同步数据接近上限":"同期データが上限に近づいています","景点锚点":"観光スポット","烤鸡":"焼鳥","个其他匹配":"件の他の一致","登录处理失败":"サインイン処理失敗","请在浏览器设置中开启":"ブラウザの設定でオンにしてください","删除景点":"スポット削除","本站只收錄每個區域評分前":"各エリアで評価上位","在地圖上顯示出來的":"地図に表示される","饺子":"餃子","个景点":"件の観光スポット","道顿堀":"道頓堀","三朝溫泉":"三朝温泉","晚餐价格":"ディナー価格","语言":"言語","调整左侧筛选条件可让它出现在地图上":"フィルターを緩めると地図に表示されます","登录后可在其它设备看到":"ログインすると他の端末でも見られます","烧":"焼","改动已存在本机":"変更はこの端末に保存済みです","新宿御苑":"新宿御苑","未能保存到云端":"クラウドに保存できませんでした","全清":"クリア","进一步压到":"はさらに","详情":"詳細","保存":"保存","将合并到现有数据并自动去重":"既存データに統合され重複は自動的に除外されます","拉面":"ラーメン","你研究後決定不會去的餐廳":"リサーチして行かないと決めたレストラン","搜索失败":"検索失敗","銀座":"銀座","收藏":"お気に入り","重新连接中":"再接続中","面包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","原文":"原文","显示":"表示","没有新增内容":"新規追加はありません","长途线路":"長距離路線","道頓堀":"道頓堀","导入备份":"バックアップをインポート","距离约":"約","下次登录会重新下载":"次回サインイン時に再ダウンロードされます","没有匹配的结果":"結果なし","本设备上的本地缓存会保留":"このデバイスのローカルキャッシュは保持されます","请删减收藏或书签":"お気に入りやブックマークを減らしてください","定位到我的位置":"現在地に移動","当前位置在地图范围之外":"現在地は地図の範囲外です","请稍后再试":"後でもう一度お試しください","炸物":"揚げ物","你研究后决定不会去的餐厅":"リサーチして行かないと決めたレストラン","说明":"説明","海游馆":"海遊館","请先登录":"先にサインインしてください","大阪城":"大阪城","松江城":"松江城","韩餐":"韓国","同步中":"同期中","浅草寺":"浅草寺","岡山城":"岡山城","午":"ランチ","盖饭":"丼物","通天閣":"通天閣","删除收藏":"削除","已复制":"コピー済み","收藏只在本次会话有效":"お気に入りはこのセッション中のみ有効です","账号跨设备同步":"アカウントでデバイス間同期されます","登录后":"サインイン後","足立美术馆":"足立美術館","西点":"洋菓子","東京迪士尼樂園":"東京ディズニーランド","御好烧":"お好み焼き","出雲大社":"出雲大社","和收藏一起通过你的":"お気に入りと一緒に、あなたの","获奖":"受賞","定位校准":"位置情報の補正","進一步壓到":"はさらに","隐藏":"非表示","书签会从本设备删除":"ブックマークはこの端末から削除されます","你在另一个窗口退出了登录":"別のウィンドウでサインアウトしました","恢复后会自动上传":"回復すると自動でアップロードします","六本木新城":"六本木ヒルズ","咖啡":"カフェ","导入完成":"インポート完了","中东菜等":"中東料理など","简体":"簡体字","冈山城":"岡山城","餐厅数据加载失败":"レストランデータの読み込みに失敗しました","此操作不可撤销":"この操作は取り消せません","登录脚本未加载":"サインインスクリプトの読み込み失敗","车站":"駅","中":"中華","搜索中":"検索中","请刷新重试":"再読み込みしてください","勾选后只看对应获奖店":"チェックで受賞店のみ表示","登录":"サインイン","内脏":"ホルモン","出云大社":"出雲大社","你在约":"予約済","三朝温泉":"三朝温泉","可貼上任意":"任意の絵文字を貼り付け可","显示我的位置":"現在地を表示","网络问题或广告拦截插件":"ネットワーク障害または広告ブロッカー","收藏只存在这台设备":"お気に入りはこの端末にのみ保存されます","寿司":"寿司","热门餐厅":"人気店","烤肉":"焼肉","不会覆盖现有项":"既存の項目は上書きされません","你自己想标注的地点或建筑物":"自分で印を付けたい場所や建物","內臟":"ホルモン","景點":"観光スポット","已恢复":"復元しました","地图组件无法加载":"地図コンポーネントを読み込めません","的餐廳":"のレストランのみ掲載","汉堡":"バーガー","名称不能为空":"名称は必須です","改动仅存浏览器":"変更はブラウザのみに保存","加入景点":"スポットとして追加","咖啡厅":"カフェ","披萨":"ピザ","地址":"住所","东京晴空塔":"東京スカイツリー","非洲":"アフリカ","丰洲市场":"豊洲市場","日元以下的高分正餐餐厅":"円以下の高評価な食事系レストランは","台湾料理":"台湾料理","鸟取砂丘":"鳥取砂丘","日本环球影城":"ユニバーサル・スタジオ・ジャパン","地铁":"地下鉄","意面":"パスタ","乌冬":"うどん","隐藏非日本料理":"和食以外を隠す","猎奇":"ゲテモノ","搜索超时":"検索がタイムアウトしました","可随时删除":"いつでも削除できます","眺游楼":"眺遊楼","用户自添景点":"カスタムスポット","已删除":"削除しました","韩":"韓","同步数据超过上限":"同期データが上限を超えています","会跨设备同步":"はデバイス間で同期されます","筛选条件太严格了":"絞り込みが厳しすぎます","重新加载":"再読み込み中","倉敷美觀地區":"倉敷美観地区","服务暂不可用":"サービスを一時的にご利用いただけません","读取文件失败":"ファイルの読み込みに失敗しました","会从地图上自动隐藏":"地図から自動的に非表示になります","日式咖喱":"日本式カレー","晚":"ディナー","仓敷美观地区":"倉敷美観地区","地图搜索":"マップ検索","个书签":"件のブックマーク","甜品":"スイーツ","本地模式":"ローカルモード","棄用":"非表示","搜尋餐廳":"レストラン検索","英尺":"フィート","全部":"すべて","预约":"予約","网络不通":"ネットワークに接続できません","取消":"キャンセル","明治神宫":"明治神宮","仅存于本地浏览器":"このブラウザのみに保存","导入":"インポート","翻譯":"翻訳","烘焙":"ベーカリー","翻译失败":"翻訳に失敗","复制":"コピー","眺遊楼":"眺遊楼","按钮里的选择器":"ボタン内のピッカー","菜系":"ジャンル","稍后自动重试":"後で自動再試行します","可粘贴任意":"任意の絵文字を貼り付け可","东南亚料理":"東南アジア料理","隐私与数据":"プライバシーとデータ","名称":"名称","非日本料理":"和食以外","可":"可","书签":"ブックマーク","你在另一个窗口切换了登录":"別のウィンドウでアカウントを切り替えました","已跳过":"スキップ","保存中":"保存中","知道了":"OK","和果子":"和菓子","银座":"銀座","繁體":"繁体字","搜索餐厅":"レストラン検索","中餐":"中華","只显示可以通过":"次のサイト経由で予約可:","放宽条件或重置筛选":"条件をゆるめるか、フィルターをリセットしてください","足立美術館":"足立美術館","改动已存本地":"変更はローカルに保存済み","选择要导入的内容":"インポートする内容を選択","秋葉原":"秋葉原","西餐":"西洋料理","同时清除本设备数据":"この端末のデータも消去しますか","类型":"種類","保存失败":"保存失敗","已改用云端数据":"クラウドのデータに切り替えました","已切换账号":"アカウントを切り替えました","筛选结果":"フィルター結果","小吃":"軽食","城市轨道":"都市鉄道","伴手礼":"お土産","日元以下的高分正餐餐廳":"円以下の高評価な食事系レストランは","淺草寺":"浅草寺","但不再同步到云端":"ただしクラウドには同期されなくなります","海鲜":"海鮮","新干线":"新幹線","餐厅数据无法加载":"レストランデータを読み込めません","中国料理":"中国料理","正在删除":"削除中","和景点一起通过你的":"観光スポットと一緒に、あなたの","其他西餐":"その他洋食","炭火焼鳥正":"炭火焼鳥 正","只看谷歌地图校准过坐标的餐厅":"Googleマップで座標補正済みのみ","屏幕内":"画面内","无法解析该文件":"ファイルを解析できません","炭火烧鸟正":"炭火焼鳥 正","三明治":"サンドイッチ","与默认景点一起在地图上显示":"デフォルトと一緒に地図に表示され","服务器出错":"サーバーエラーが発生しました","退出登录":"サインアウト","皇居":"皇居","东京塔":"東京タワー","登录已过期":"サインイン期限切れ","與默認景點一起在地圖上顯示":"デフォルトと一緒に地図に表示され","没有符合条件的餐厅":"条件に合うお店がありません","云端数据已删除":"クラウドデータを削除しました","日本料理":"日本料理","改动待同步到云端":"クラウド同期待ち","冰品":"アイス","全选":"全選択","本站只收录每个区域评分前":"各エリアで評価上位","築地場外市場":"築地場外市場","日本環球影城":"ユニバーサル・スタジオ・ジャパン","弃用名单":"非表示リスト","全部已存在":"すべて既存","景点":"観光スポット","弃用":"非表示"};
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -1548,6 +1920,34 @@
       navigator.serviceWorker.register('./sw.js').catch(function(err) {
         console.warn('[tabelog] SW registration failed:', err);
       });
+      // M-062 / M-061: two things only the page knows. The popups variant
+      // depends on activeLang (resolved further down, before 'load' fires),
+      // and launcher icons are worth 142KB only to an installed app.
+      try {
+        navigator.serviceWorker.ready.then(function(reg) {
+          var sw = reg && (reg.active || navigator.serviceWorker.controller);
+          if (!sw) return;
+          try { sw.postMessage({type: 'WARM_DATA', url: popupsUrlForLang()}); }
+          catch (_) {}
+          var installed = false;
+          try {
+            installed = (window.matchMedia
+                         && matchMedia('(display-mode: standalone)').matches)
+                        || navigator.standalone === true;
+          } catch (_) {}
+          if (installed) {
+            try { sw.postMessage({type: 'WARM_LAUNCHER_ICONS'}); } catch (_) {}
+          }
+        }).catch(function() {});
+      } catch (_) {}
+    });
+    window.addEventListener('appinstalled', function() {
+      try {
+        navigator.serviceWorker.ready.then(function(reg) {
+          var sw = reg && (reg.active || navigator.serviceWorker.controller);
+          if (sw) sw.postMessage({type: 'WARM_LAUNCHER_ICONS'});
+        }).catch(function() {});
+      } catch (_) {}
     });
   }
 
@@ -1559,9 +1959,9 @@
   // a second tap during the first fetch reuses it rather than racing.
   var popupsMap = null;
   var popupsPromise = null;
-  function loadPopups() {
-    if (popupsMap) return Promise.resolve(popupsMap);
-    if (popupsPromise) return popupsPromise;
+  // M-062: split out of loadPopups so the SW warmup message can name the
+  // exact same (content-hashed) URL the first marker tap will request.
+  function popupsUrlForLang() {
     // Each UI language gets its own popups file:
     //   zh-TW -> popups-tw.json (policy + ribbons via OpenCC s2t)
     //   en    -> popups-en.json (policy overlaid from policy_en.json,
@@ -1575,7 +1975,12 @@
       else if (activeLang === 'en') popupsUrl = 'data/popups-en.json?v=efa37cc2b2';
       else if (activeLang === 'ja') popupsUrl = 'data/popups-ja.json?v=57833eb03b';
     }
-    popupsPromise = fetch(popupsUrl, {cache: 'force-cache'})
+    return popupsUrl;
+  }
+  function loadPopups() {
+    if (popupsMap) return Promise.resolve(popupsMap);
+    if (popupsPromise) return popupsPromise;
+    popupsPromise = fetch(popupsUrlForLang(), {cache: 'force-cache'})
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -1726,12 +2131,20 @@
   "🧘": "1f9d8",
   "🪨": "1faa8"
 };
+  // M-133: alt="" used to be the one attribute that took its argument raw.
+  // Every current call site launders the glyph through sanitizeBookmarkEmoji
+  // first, so nothing is known to reach here dirty — this is the second
+  // layer, so a future call site can't quietly turn it into an injection.
+  function escAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
   function emojiImg(m, extraStyle) {
     var key = EMOJI_MAP[m];
     var src = key
       ? 'emoji/' + key + '.png'
       : 'https://emojicdn.elk.sh/' + encodeURIComponent(m) + '?style=apple';
-    return '<img src="' + src + '" alt="' + m + '" draggable="false" ' +
+    return '<img src="' + src + '" alt="' + escAttr(m) + '" draggable="false" ' +
            'style="height:1em;width:1em;vertical-align:-0.15em;' +
            'display:inline-block;' + (extraStyle || '') + '">';
   }
@@ -1853,6 +2266,24 @@
       return t === undefined ? m : t;
     });
   }
+  // M-104: CJK punctuation looks wrong once the surrounding run has been
+  // translated into English ("Signed in，reloading"). Latin scripts get the
+  // ASCII form; the CJK languages keep the full-width one.
+  function l10nComma() { return activeLang === 'en' ? ', ' : '，'; }
+  function l10nParen(inner) {
+    return activeLang === 'en' ? ' (' + inner + ')' : '（' + inner + '）';
+  }
+  // Join several short zh-CN clauses into one sentence. Each clause is a
+  // whole CJK run, so it survives the tokenizer intact and gets one
+  // hand-written translation in data/i18n/*.json — the alternative (one long
+  // string with punctuation inside) is exactly what produced
+  // "You booked 25 meters In range" in M-103.
+  function l10nSentence(parts) {
+    var sep = activeLang === 'en' ? '. ' : '，';
+    var out = [];
+    for (var i = 0; i < parts.length; i++) out.push(localizeText(parts[i]));
+    return out.join(sep) + (activeLang === 'en' ? '.' : '。');
+  }
   function localizeTree(root) {
     if (!root || !I18N_MAP) return;
     if (root.nodeType !== 1) return;
@@ -1863,7 +2294,12 @@
     for (var p = root; p && p.nodeType === 1; p = p.parentNode) {
       var pt = p.tagName;
       if (pt === 'SCRIPT' || pt === 'STYLE' || pt === 'TEXTAREA' || pt === 'INPUT') return;
-      if (p.getAttribute && p.getAttribute('lang') === 'ja') return;
+      // M-098: lang="ja" is the "this is Japanese source text, don't
+      // translate" sentinel — but in ja mode we also stamp lang="ja" onto
+      // the root element, which made this guard return on the very first
+      // hop and killed every MutationObserver-driven localizeTree. Skip the
+      // root itself; real sentinel subtrees still prune.
+      if (p !== document.documentElement && p.getAttribute && p.getAttribute('lang') === 'ja') return;
     }
     var walker = document.createTreeWalker(
       root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
@@ -1905,16 +2341,80 @@
                  : (nd.nodeType === 3 ? nd.parentNode : null);
           if (!el) continue;
           if (doEmoji) emojify(el);
-          if (i18nOn) localizeTree(el);
+          if (i18nOn) { localizeTree(el); applyAttrL10n(el); }  // M-099
         }
       }
     }).observe(root, {childList: true, subtree: true});
   }
+  // M-099: localizeTree walks TEXT nodes only, so every title / aria-label
+  // stayed in zh-CN in all four languages — 17 of them, including the whole
+  // FAB stack and both modal close buttons. Same shape as PLACEHOLDER_L10N
+  // below (which does the same job for placeholders), except the value is
+  // the zh-CN source string and the per-language text comes from the same
+  // TEXT_*_MAP tables the text pass uses — so a translation lands in exactly
+  // one place (data/i18n/*.json) instead of being duplicated per language.
+  // Selector-keyed (not id-keyed) because several of these are classes with
+  // more than one instance on the page.
+  var ATTR_L10N = [
+    ['#ff-fab',                        'title',      '筛选'],
+    ['.ff-help-trigger[aria-label]',   'aria-label', '说明'],
+    ['.map-fab-stack',                 'aria-label', '图层切换'],
+    ['#fab-locate',                    'title',      '定位到我的位置'],
+    ['#fab-locate',                    'aria-label', '定位到我的位置'],
+    ['#fab-transit-long',              'title',      '新干线 / JR 长途线路'],
+    ['#fab-transit-city',              'title',      '地铁 / 私铁 / 城市轨道'],
+    ['#fab-attractions',               'title',      '景点锚点'],
+    ['#fab-bookmarks',                 'title',      '我的收藏'],
+    ['#ss-clear',                      'aria-label', '清空'],
+    ['#ss-avatar',                     'aria-label', '账户'],
+    ['.bm-close',                      'aria-label', '关闭'],
+    ['.bm-kind-seg',                   'aria-label', '类型'],
+    ['#bm-emoji-more',                 'title',      '打开完整 emoji 选择器'],
+    ['.imp-close',                     'aria-label', '关闭'],
+    ['#ss-menu .ssm-langs',            'aria-label', '语言'],
+    // Built at runtime — reached through observeDynamic below, which runs
+    // this pass over every inserted subtree for exactly these two.
+    ['.rst-close',                     'aria-label', '关闭'],
+    ['.ss-fav',                        'title',      '加入收藏']
+  ];
+  function applyAttrL10n(root) {
+    var scope = root || document;
+    for (var i = 0; i < ATTR_L10N.length; i++) {
+      var sel = ATTR_L10N[i][0], attr = ATTR_L10N[i][1];
+      var txt = localizeText(ATTR_L10N[i][2]);
+      var hits;
+      try {
+        if (scope.nodeType === 1 && scope.matches && scope.matches(sel)) {
+          scope.setAttribute(attr, txt);
+        }
+        hits = scope.querySelectorAll(sel);
+      } catch (_) { continue; }
+      for (var j = 0; j < hits.length; j++) hits[j].setAttribute(attr, txt);
+    }
+  }
+  // M-103: the leaflet-locate popup template used to be a single zh-CN
+  // string whose CJK runs ('你在约' / '范围内') were tokenized and looked up
+  // independently — both tables read the first one as "预约", so English
+  // users got "You booked 25 meters In range". Whole-sentence per-language
+  // override, same pattern as chipText / gcalTxt, plus the unit strings the
+  // plugin otherwise leaves as English "meters" / "feet". The source runs
+  // here are unambiguous ones translated in data/i18n/*.json.
+  var LOCATE_STRINGS = {
+    title:               '显示我的位置',
+    popup:               '距离约 {distance} {unit}',
+    outsideMapBoundsMsg: '当前位置在地图范围之外',
+    metersUnit:          '米',
+    feetUnit:            '英尺'
+  };
+  Object.keys(LOCATE_STRINGS).forEach(function(k) {
+    LOCATE_STRINGS[k] = localizeText(LOCATE_STRINGS[k]);
+  });
   function startDynamicObservers() {
     // One-shot passes over the static page (filter panel, FAB labels,
     // modal titles…) — these never change after load.
     emojify(document.body);
     if (I18N_MAP) localizeTree(document.body);
+    applyAttrL10n();   // M-099
     // Ongoing observers only on the containers that mutate with
     // emoji/CJK-bearing HTML at runtime. Marker divIcons pre-swap their
     // emoji at construction (makeIcon → emojiImg) so they stay unobserved;
@@ -1927,9 +2427,11 @@
     observeDynamic(document.getElementById('ff-sheet-content'), false, true);
     // Reflect onto <html lang> — browsers use it for hyphenation and
     // accessibility (screen readers, especially).
-    if (I18N_MAP) {
-      try { document.documentElement.lang = activeLang; } catch (_) {}
-    }
+    // M-083: unconditional. zh-CN has no I18N_MAP, so the old `if (I18N_MAP)`
+    // guard meant the default page (most visits) never got a lang at all.
+    // The static <html lang="zh-CN"> from main()'s post-processing covers
+    // first paint; this keeps it in sync when a language is selected.
+    try { document.documentElement.lang = activeLang; } catch (_) {}
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startDynamicObservers);
@@ -1964,19 +2466,77 @@
   var API_SESSION = API_BASE + '/session';
   var API_ME = API_BASE + '/me';
 
-  function loadAuth() {
-    try { return JSON.parse(localStorage.getItem(AUTH_KEY) || '{}'); }
-    catch (_) { return {}; }
+  // M-054: every loader below used to trust anything that merely parsed as
+  // JSON. 'null', a number, an object where an array belongs — all parse
+  // fine and then blow up at the first property access or new Set(), taking
+  // the whole boot with them. Each loader now type-checks, and stashes the
+  // unreadable original under "<key>.corrupt" (new key, write-once) so a
+  // hand-recoverable blob isn't silently overwritten by the next save.
+  function keepCorrupt(key, raw) {
+    if (raw == null) return;
+    var ck = (key.indexOf('tabelog.') === 0 ? key : 'tabelog.' + key) + '.corrupt';
+    try {
+      if (localStorage.getItem(ck) === null) localStorage.setItem(ck, raw);
+    } catch (_) { /* private mode / quota — nothing we can do, don't throw */ }
+    console.warn('[tabelog] unreadable ' + key + ' preserved at ' + ck);
   }
-  function saveAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
+  function isPlainObject(x) {
+    return !!x && typeof x === 'object' && !Array.isArray(x);
+  }
+  function loadAuth() {
+    var raw = null;
+    try {
+      raw = localStorage.getItem(AUTH_KEY);
+      var a = JSON.parse(raw || '{}');
+      if (!isPlainObject(a)) { keepCorrupt(AUTH_KEY, raw); return {}; }
+      return a;
+    }
+    catch (_) { keepCorrupt(AUTH_KEY, raw); return {}; }
+  }
+  function saveAuth(a) {
+    // Safari private mode and "block all cookies" both throw here; a dead
+    // write must not take down the caller (sign-in, silent re-auth, pull).
+    try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch (_) {}
+  }
   // Async sign-out: revoke the server cookie first, then clear local state.
   // Survives network errors — we always reload so the page rebuilds in the
   // signed-out state regardless of what the Worker said.
-  function signOut() {
+  // M-041: opts.clearLocal also wipes this device's favorites / blacklist /
+  // bookmarks / merge base. That is one of the very few places allowed to
+  // remove those keys, and only on an explicit user choice: callers that
+  // pass no opts (the legacy account-menu handler) get a confirm() so the
+  // next person to sign in on a shared browser doesn't inherit — and
+  // upload — the previous account's data.
+  function signOut(opts) {
+    var clearLocal = false;
+    if (opts && typeof opts === 'object') {
+      clearLocal = !!opts.clearLocal;
+    } else {
+      try {
+        clearLocal = confirm(localizeText(
+          '同时清除本设备数据？（收藏、弃用、书签会从本设备删除；云端数据不受影响，下次登录会重新下载）'));
+      } catch (_) { clearLocal = false; }
+    }
     var done = false;
+    function wipe() {
+      try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
+      if (clearLocal) {
+        // Literal key for bookmarks: BM_KEY is declared inside initMap.
+        try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
+        try { localStorage.removeItem('tabelog.bookmarks'); } catch (_) {}
+        try { localStorage.removeItem(SYNC_BASE_KEY); } catch (_) {}
+      }
+    }
     function finish() {
       if (done) return; done = true;
-      localStorage.removeItem(AUTH_KEY);
+      wipe();
+      // location.reload() only schedules the navigation: a response that
+      // is already in flight (the boot-time /api/me probe, a pull) can
+      // still run before the document unloads and write the profile /
+      // state back, so the reloaded page would boot signed in again (and
+      // then even try GIS auto-select). Wipe once more at the last
+      // possible moment.
+      window.addEventListener('pagehide', wipe);
       location.reload();
     }
     try {
@@ -1987,21 +2547,144 @@
     setTimeout(finish, 1500);
   }
 
+  // Shape contract (relied on by the sync layer): always returns
+  // {fav: array|null, black: array|null, dirty: bool}. M-054 only tightens
+  // what can come out of it — a non-array fav/black now degrades to null
+  // (same as "no cached state") instead of reaching new Set() and throwing.
   function loadCache() {
+    var raw = null;
     try {
-      var d = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
-      return {fav: d.fav || null, black: d.black || null, dirty: !!d.dirty};
-    } catch (_) { return {fav: null, black: null, dirty: false}; }
+      raw = localStorage.getItem(CACHE_KEY);
+      var d = JSON.parse(raw || '{}');
+      if (!isPlainObject(d)) { keepCorrupt(CACHE_KEY, raw); return {fav: null, black: null, dirty: false}; }
+      var fav   = Array.isArray(d.fav)   ? d.fav   : null;
+      var black = Array.isArray(d.black) ? d.black : null;
+      if ((d.fav != null && fav === null) || (d.black != null && black === null)) {
+        keepCorrupt(CACHE_KEY, raw);
+      }
+      return {fav: fav, black: black, dirty: !!d.dirty};
+    } catch (_) { keepCorrupt(CACHE_KEY, raw); return {fav: null, black: null, dirty: false}; }
   }
-  // Persists state + the dirty flag. Storing dirty across reloads is the
-  // whole point — without it, an unpushed change would be silently
-  // overwritten by the next pull after a refresh.
+  // Three-way merge, keep = (ours ∩ theirs) ∪ (ours − base) ∪ (theirs − base).
+  // Adds from both sides survive; a delete on either side wins unless the
+  // other side re-added. With an empty base (fresh upgrade, cleared
+  // storage) this degrades to a pure union — it may resurrect a
+  // concurrently-deleted entry once, but can never lose one. Pure and
+  // top-level because both the cloud paths (base = syncBase) and the
+  // localStorage paths (base = what this page last wrote) use it.
+  function mergeSets(baseArr, oursSet, theirsArr) {
+    var base   = new Set(Array.isArray(baseArr) ? baseArr : []);
+    var theirs = new Set(Array.isArray(theirsArr) ? theirsArr : []);
+    var out = new Set();
+    oursSet.forEach(function(u) { if (theirs.has(u) || !base.has(u)) out.add(u); });
+    theirs.forEach(function(u) { if (!base.has(u)) out.add(u); });
+    return out;
+  }
+  // Same rule keyed by bookmark id. When both sides carry an id, this
+  // device's object wins — unless we left it byte-identical to the base and
+  // the other side changed it (a Wikidata backfill on another tab, say), in
+  // which case theirs is the edit and ours is just stale. Legacy id-less
+  // entries can't be tracked through the base, so ours are always kept and
+  // theirs are kept unless byte-identical to one of ours — duplication risk
+  // over data loss.
+  function mergeBookmarks(baseArr, oursArr, theirsArr) {
+    var baseById = {};
+    (Array.isArray(baseArr) ? baseArr : []).forEach(function(b) {
+      if (b && b.id) baseById[b.id] = JSON.stringify(b);
+    });
+    var theirsList = Array.isArray(theirsArr) ? theirsArr : [];
+    var theirsById = {};
+    theirsList.forEach(function(b) { if (b && b.id) theirsById[b.id] = b; });
+    var has = function(o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+    var out = [], seen = new Set();
+    oursArr.forEach(function(b) {
+      if (!b) return;
+      if (!b.id) { out.push(b); return; }
+      var inTheirs = has(theirsById, b.id), inBase = has(baseById, b.id);
+      if (inTheirs || !inBase) {
+        var pick = b;
+        if (inTheirs && inBase && baseById[b.id] === JSON.stringify(b)) {
+          pick = theirsById[b.id];
+        }
+        out.push(pick);
+        seen.add(b.id);
+      }
+    });
+    theirsList.forEach(function(b) {
+      if (!b) return;
+      if (!b.id) {
+        var s = JSON.stringify(b);
+        var dup = oursArr.some(function(o) {
+          return o && !o.id && JSON.stringify(o) === s;
+        });
+        if (!dup) out.push(b);
+        return;
+      }
+      if (seen.has(b.id)) return;
+      if (!has(baseById, b.id)) out.push(b);
+    });
+    return out;
+  }
+  function sameStrList(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return a == null && b == null;
+    if (a.length !== b.length) return false;
+    var s = new Set(a);
+    for (var i = 0; i < b.length; i++) if (!s.has(b[i])) return false;
+    return true;
+  }
+  function setEqualsList(set, arr) {
+    if (!Array.isArray(arr) || set.size !== arr.length) return false;
+    for (var i = 0; i < arr.length; i++) if (!set.has(arr[i])) return false;
+    return true;
+  }
+
+  // M-046: a storage write that throws (private mode, quota, site data
+  // blocked) must never break the caller's chain — schedulePush used to
+  // lose its push timer that way. The sync engine installs the hook that
+  // tells the user; until then failures are silent.
+  var storageBlockedHook = null;
+  function storageBlocked(e) {
+    try { if (storageBlockedHook) storageBlockedHook(e); } catch (_) {}
+  }
+  // M-003 / M-004: the localStorage cache is shared by every tab of this
+  // origin, and each tab holds its own in-memory copy. Writes used to be
+  // whole-blob overwrites, so the later tab silently erased the earlier
+  // tab's edits (and its dirty flag). Now every write is a three-way merge:
+  //   base   = what THIS page last wrote or last read (memory only — no new
+  //            localStorage key),
+  //   ours   = this page's state,
+  //   theirs = what is on disk right now.
+  // Not a union: with a base, an entry we removed stays removed instead of
+  // being resurrected by the other tab's older list. dirty is ours alone
+  // while the disk still holds exactly what we wrote; once someone else has
+  // written, dirty = ours || theirs so their unsent edit keeps its mark. The
+  // merged result is adopted into `state` as well — if only the disk got it,
+  // the next write would read the other tab's additions (now in the base but
+  // not in memory) as deletions of ours. Returns true when `state` changed
+  // so the caller can repaint.
+  var lastWrittenCache = null;   // {fav: [], black: [], dirty: bool} | null
   function saveCache(state, dirtyFlag) {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      fav: Array.from(state.fav),
-      black: Array.from(state.black),
-      dirty: !!dirtyFlag,
-    }));
+    var dirty = !!dirtyFlag, changed = false;
+    var disk = loadCache();
+    var base = lastWrittenCache;
+    if (disk.fav && disk.black && base) {
+      var untouched = sameStrList(disk.fav, base.fav)
+                   && sameStrList(disk.black, base.black)
+                   && !!disk.dirty === !!base.dirty;
+      if (!untouched) {
+        var fav   = mergeSets(base.fav   || [], state.fav,   disk.fav);
+        var black = mergeSets(base.black || [], state.black, disk.black);
+        if (!setEqualsList(state.fav,   fav))   { state.fav   = fav;   changed = true; }
+        if (!setEqualsList(state.black, black)) { state.black = black; changed = true; }
+        dirty = dirty || !!disk.dirty;
+      }
+    }
+    var rec = {fav: Array.from(state.fav), black: Array.from(state.black), dirty: dirty};
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(rec));
+      lastWrittenCache = rec;
+    } catch (e) { storageBlocked(e); }
+    return changed;
   }
 
   // Last server state this device has seen, plus the blob version it carried.
@@ -2009,15 +2692,20 @@
   // comes back 409 (another device wrote in between): with it we can tell an
   // add on one side from a delete on the other. Its own key — the state cache
   // above predates it and old pages must keep reading that cache unchanged.
+  // M-002: `w` is the random write id our last PUT carried (or the one we
+  // read back from the server); same v but a different w means our write
+  // was silently overwritten by a concurrent PUT.
   var SYNC_BASE_KEY = 'tabelog.syncBase';
   function emptySyncBase(sub) {
-    return {v: 0, sub: sub || '', favorites: [], blacklist: [], bookmarks: []};
+    return {v: 0, w: '', sub: sub || '', favorites: [], blacklist: [], bookmarks: []};
   }
   function loadSyncBase() {
     try {
       var d = JSON.parse(localStorage.getItem(SYNC_BASE_KEY) || '{}');
+      if (!d || typeof d !== 'object') d = {};
       return {
         v: typeof d.v === 'number' ? d.v : 0,
+        w: typeof d.w === 'string' ? d.w : '',
         // Which Google account this snapshot belongs to. If the user signs
         // into a different account, the base must be discarded (see push) —
         // merging against another account's snapshot would misread all of
@@ -2108,23 +2796,68 @@
   // a dead basemap with zero explanation while a 20 Hz timer spun forever.
   // ~10s covers even a very slow CDN; past that we say so, visibly.
   var initMapAttempts = 0;
-  function showBootFailure() {
-    if (document.getElementById('boot-fail-banner')) return;
+  // M-011 / M-075 / M-168: the one visible failure surface for boot.
+  //   kind 'deps' — Leaflet/MarkerCluster/locate never showed up
+  //   kind 'data' — restaurants.json failed or timed out
+  // Wording splits on navigator.onLine: blaming an ad blocker is a bad
+  // guess when the phone is simply in a tunnel, which is the common case
+  // for this site's on-the-road half. role="alert" makes it reach screen
+  // readers, and the retry button matters most in an installed PWA, which
+  // has no address bar to reload from.
+  function hideBootFailure() {
+    var old = document.getElementById('boot-fail-banner');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+  }
+  function bootFailureText(kind) {
+    var offline = (typeof navigator !== 'undefined' && navigator.onLine === false);
+    if (kind === 'data') {
+      return offline
+        ? '当前处于离线状态 — 餐厅数据无法加载，恢复网络后请重试'
+        : '餐厅数据加载失败 — 请检查网络后刷新';
+    }
+    return offline
+      ? '当前处于离线状态 — 地图组件无法加载，恢复网络后请重试'
+      : '地图组件加载失败（网络问题或广告拦截插件）— 请刷新重试';
+  }
+  function showBootFailure(kind, onRetry) {
+    hideBootFailure();
     var el = document.createElement('div');
     el.id = 'boot-fail-banner';
+    el.setAttribute('role', 'alert');
     el.style.cssText =
       'position:fixed;top:12px;left:50%;transform:translateX(-50%);' +
       'z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;' +
       'border-radius:8px;font:13px -apple-system,BlinkMacSystemFont,' +
       "'Segoe UI',sans-serif;box-shadow:0 4px 12px rgba(0,0,0,0.3);" +
       'max-width:calc(100vw - 32px);text-align:center;';
-    el.textContent = localizeText(
-      '地图组件加载失败（网络问题或广告拦截插件）— 请刷新重试');
+    var msg = document.createElement('span');
+    msg.textContent = localizeText(bootFailureText(kind));
+    el.appendChild(msg);
+    if (typeof onRetry === 'function') {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = localizeText('重试');
+      btn.style.cssText =
+        'margin-left:10px;padding:3px 12px;border:1px solid #fff;' +
+        'border-radius:6px;background:transparent;color:#fff;font:inherit;' +
+        'cursor:pointer;';
+      btn.addEventListener('click', function() {
+        hideBootFailure();
+        try { onRetry(); } catch (e) { console.error('[tabelog] retry failed:', e); }
+      });
+      el.appendChild(btn);
+    }
     document.body.appendChild(el);
   }
   function initMap(data) {
     function again() {
-      if (++initMapAttempts > 200) { showBootFailure(); return; }
+      // M-075: a failed dependency can only be retried by reloading (the
+      // script tags are already spent), but an installed PWA has no
+      // address bar — so the banner carries the button.
+      if (++initMapAttempts > 200) {
+        showBootFailure('deps', function() { location.reload(); });
+        return;
+      }
       setTimeout(function(){ initMap(data); }, 50);
     }
     var mapEl = document.querySelector('.folium-map');
@@ -2135,6 +2868,35 @@
     if (!map) { again(); return; }
     if (typeof L === 'undefined' || !L.markerClusterGroup) { again(); return; }
     if (!L.control.locate) { again(); return; }
+
+    // M-085: Leaflet's zoom/fade/marker animations and every flyTo ran at
+    // full tilt even for a user who asked the OS for reduced motion — a
+    // full-screen map that swoops is exactly the kind of movement that
+    // triggers vestibular symptoms. The map object is built by folium, so
+    // the options are patched here rather than passed at construction;
+    // _zoomAnimated is the flag Leaflet actually consults at zoom time.
+    // flyTo/flyToBounds are swapped for their instant equivalents so every
+    // existing call site (search results, the locate control) lands the
+    // same way without touching any of them. moveend still fires, so the
+    // arrival handlers keep working.
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      map.options.zoomAnimation = false;
+      map.options.fadeAnimation = false;
+      map.options.markerZoomAnimation = false;
+      map._zoomAnimated = false;
+      var noAnim = function(options) {
+        var o = {};
+        if (options) { for (var k in options) o[k] = options[k]; }
+        o.animate = false;
+        return o;
+      };
+      map.flyTo = function(latlng, zoom, options) {
+        return this.setView(latlng, zoom, noAnim(options));
+      };
+      map.flyToBounds = function(bounds, options) {
+        return this.fitBounds(bounds, noAnim(options));
+      };
+    }
 
     // Late-bound emoji observer for Leaflet popups: search-result temp
     // marker and the right-click "加入收藏" popup both inject HTML into
@@ -2201,11 +2963,7 @@
       drawCircle: true,
       drawMarker: true,
       locateOptions: {enableHighAccuracy: true, maximumAge: 600000, watch: false},
-      strings: {
-        title: '显示我的位置',
-        popup: '你在约 {distance} {unit} 范围内',
-        outsideMapBoundsMsg: '当前位置在地图范围之外'
-      }
+      strings: LOCATE_STRINGS
     }).addTo(map);
     // Persist every successful fix so a reopen can paint the last position
     // immediately (before the live fix arrives).
@@ -2247,7 +3005,8 @@
         if (!p || typeof p.then !== 'function') return;
         p.then(function(status) {
           if (status && status.state === 'denied' && locateFab) {
-            locateFab.title = '定位被浏览器禁用，请在浏览器设置中开启';
+            locateFab.title = localizeText('定位被浏览器禁用')
+                            + l10nComma() + localizeText('请在浏览器设置中开启');  // M-099
           }
         }).catch(function() {});
       } catch (_) {}
@@ -2372,29 +3131,74 @@
     // future shape drift. Normalize at every ingress so the raw emoji
     // string never reaches an HTML-string concat site (openBookmarkPopup
     // / emojiImg's alt attribute / bookmarkIconHtml).
+    // M-042: `bm.emoji` used to be tested for truthiness only, so a number
+    // or an object went straight into isPureEmoji → s.replace is not a
+    // function → the exception escaped the enclosing forEach and took every
+    // bookmark AND all 219 built-in landmarks off the map. typeof first.
     function sanitizeBookmarkEmoji(bm) {
-      if (bm && bm.emoji && !isPureEmoji(bm.emoji)) {
+      if (bm && bm.emoji != null
+          && (typeof bm.emoji !== 'string' || !isPureEmoji(bm.emoji))) {
         bm.emoji = '📍';
       }
       return bm;
     }
+    // M-042: one bad entry must cost that entry, never the batch. Objects
+    // are repaired in place where the value is recoverable (numeric strings
+    // for coords, a numeric id) and only entries that carry nothing at all
+    // (null, a bare string/number, a nested array) are dropped — `bookmarks`
+    // is also the push source, so dropping a repairable entry here would
+    // delete it from every other device on the next sync.
+    function sanitizeBookmarkEntry(bm) {
+      if (!bm || typeof bm !== 'object' || Array.isArray(bm)) return null;
+      try {
+        if (typeof bm.id === 'number' && isFinite(bm.id)) bm.id = String(bm.id);
+        if (bm.category != null && typeof bm.category !== 'string') delete bm.category;
+        ['lat', 'lon'].forEach(function(k) {
+          if (typeof bm[k] === 'number') return;
+          var n = (typeof bm[k] === 'string' && bm[k].trim() !== '')
+                ? Number(bm[k]) : NaN;
+          if (isFinite(n)) bm[k] = n; else if (bm[k] != null) delete bm[k];
+        });
+        return sanitizeBookmarkEmoji(bm);
+      } catch (_) { return null; }
+    }
     function sanitizeBookmarkArray(arr) {
-      if (Array.isArray(arr)) arr.forEach(sanitizeBookmarkEmoji);
-      return arr;
+      if (!Array.isArray(arr)) return [];
+      var out = [];
+      for (var i = 0; i < arr.length; i++) {
+        var e = sanitizeBookmarkEntry(arr[i]);
+        if (e) out.push(e);
+      }
+      if (out.length !== arr.length) {
+        console.warn('[tabelog] dropped ' + (arr.length - out.length) +
+                     ' unusable bookmark entr(ies)');
+      }
+      return out;
     }
     var bookmarks = (function() {
+      var raw = null;
       try {
-        var raw = localStorage.getItem(BM_KEY);
+        raw = localStorage.getItem(BM_KEY);
         if (raw === null) {
           // First visit on this device — seed from the embedded baseline
           // and persist it so subsequent edits anchor against that copy.
-          var seed = EMBEDDED_BOOKMARKS.slice();
-          localStorage.setItem(BM_KEY, JSON.stringify(seed));
-          return sanitizeBookmarkArray(seed);
+          var seed = sanitizeBookmarkArray(EMBEDDED_BOOKMARKS.slice());
+          try { localStorage.setItem(BM_KEY, JSON.stringify(seed)); } catch (_) {}
+          return seed;
         }
         var arr = JSON.parse(raw);
-        return sanitizeBookmarkArray(Array.isArray(arr) ? arr : []);
-      } catch (_) { return sanitizeBookmarkArray(EMBEDDED_BOOKMARKS.slice()); }
+        // M-054: a stored blob that isn't an array used to fall through to
+        // [] (or the baseline) and get overwritten by the first save — the
+        // original is stashed instead so it stays recoverable by hand.
+        if (!Array.isArray(arr)) {
+          keepCorrupt(BM_KEY, raw);
+          return sanitizeBookmarkArray(EMBEDDED_BOOKMARKS.slice());
+        }
+        return sanitizeBookmarkArray(arr);
+      } catch (_) {
+        keepCorrupt(BM_KEY, raw);
+        return sanitizeBookmarkArray(EMBEDDED_BOOKMARKS.slice());
+      }
     })();
 
     var bookmarksLayer = L.featureGroup();        // category === 'bookmark'
@@ -2420,8 +3224,51 @@
       });
     }
 
+    // M-003: same three-way discipline as saveCache, keyed by bookmark id,
+    // base = the JSON this page last wrote/read (memory only). If the disk
+    // moved under us, the merged list is adopted in place and the layers are
+    // rebuilt — never a union, so a pin deleted here stays deleted even when
+    // another tab still holds it. null base = "don't merge, overwrite"
+    // (used once, right after an account switch, so the previous account's
+    // pins can't leak into the new one).
+    var lastWrittenBookmarks = JSON.stringify(bookmarks);
+    function rebuildBookmarkLayers() {
+      bookmarksLayer.clearLayers();
+      userAttractionsLayer.clearLayers();
+      bmMarkerById = {};
+      bookmarks.forEach(function(bm) {
+        // M-042: one malformed entry must not abort the rest of the render.
+        try { renderBookmark(bm); } catch (_) {}
+      });
+      rebuildHiddenIds();
+      renderFavoritesBuiltin();
+    }
+    // Merges the on-disk bookmarks into memory (no write). Returns true when
+    // memory changed. Shared by saveBookmarks and the cross-tab reconcile.
+    function mergeDiskBookmarksIntoMemory() {
+      var raw = null;
+      try { raw = localStorage.getItem(BM_KEY); } catch (_) {}
+      if (raw === null || raw === lastWrittenBookmarks || lastWrittenBookmarks === null) return false;
+      var disk = null;
+      try { disk = JSON.parse(raw); } catch (_) {}
+      if (!Array.isArray(disk)) return false;
+      var base = [];
+      try { base = JSON.parse(lastWrittenBookmarks) || []; } catch (_) {}
+      var merged = mergeBookmarks(base, bookmarks.slice(), sanitizeBookmarkArray(disk));
+      lastWrittenBookmarks = raw;
+      if (JSON.stringify(merged) === JSON.stringify(bookmarks)) return false;
+      bookmarks.length = 0;
+      merged.forEach(function(b) { bookmarks.push(b); });
+      rebuildBookmarkLayers();
+      return true;
+    }
     function saveBookmarks() {
-      try { localStorage.setItem(BM_KEY, JSON.stringify(bookmarks)); } catch (_) {}
+      mergeDiskBookmarksIntoMemory();
+      try {
+        var out = JSON.stringify(bookmarks);
+        localStorage.setItem(BM_KEY, out);
+        lastWrittenBookmarks = out;
+      } catch (e) { storageBlocked(e); }   // M-046
     }
     // Pick the right name field for the active UI language.
     //   full schema: { name_src, name_sc, name_tc, name_jp, name_en, ... }
@@ -2567,7 +3414,7 @@
                    + '" target="_blank" rel="noopener" '
                    + 'aria-label="Open in Google Maps" '
                    + 'title="Open in Google Maps">'
-                   + '<img src="img/google-maps.png" alt="Google Maps" '
+                   + '<img src="img/google-maps-v2.png" alt="Google Maps" '
                    + 'width="18" height="18" loading="lazy"></a>';
       // TEMP-ish: "location calibrated by Google" note, shown under the
       // address when this row was Google-calibrated (d.gcal). Hand-tuned per
@@ -2776,11 +3623,34 @@
         if (!del) return;
         del.addEventListener('click', function() {
           var i = bookmarks.findIndex(function(x){ return x.id === bm.id; });
-          if (i >= 0) bookmarks.splice(i, 1);
+          if (i < 0) { map.closePopup(); return; }
+          // M-035: this used to be one irreversible tap on a red button
+          // that also pushed the deletion to every other device. The row is
+          // still removed immediately (no modal in the way), but the exact
+          // object and its position are held for the length of the snackbar
+          // so 撤销 puts it back byte-for-byte — same id, so the other
+          // devices' merge never sees it leave.
+          var removed = bookmarks[i], at = i;
+          bookmarks.splice(i, 1);
           removeBookmarkMarker(bm);
           saveBookmarks();
           schedulePush();
           map.closePopup();
+          showToast(localizeText('已删除') + ' ' + bmDisplayName(bm), {
+            actionLabel: localizeText('撤销'),
+            ms: 9000,
+            onAction: function() {
+              var back = bookmarks.some(function(x) {
+                return x && x.id === removed.id;
+              });
+              if (back) return;   // re-added by a sync while the toast was up
+              bookmarks.splice(Math.min(at, bookmarks.length), 0, removed);
+              renderBookmark(removed);
+              saveBookmarks();
+              schedulePush();
+              announce(localizeText('已恢复') + ' ' + bmDisplayName(removed));
+            }
+          });
         });
       }, 0);
     }
@@ -3470,6 +4340,9 @@
         ssApi.appendChild(empty);
       }
       ssList.classList.add('open');
+      // M-073: lift the whole search box above the bottom sheets while the
+      // dropdown is out (see #ss-box.ss-open).
+      if (ssBox) ssBox.classList.add('ss-open');
       ssInput.setAttribute('aria-expanded', 'true');
     }
     function ssRender(localMatch, apiItems, apiPending) {
@@ -3479,6 +4352,7 @@
     }
     function ssCloseDropdown() {
       ssList.classList.remove('open');
+      if (ssBox) ssBox.classList.remove('ss-open');   // M-073
       ssInput.setAttribute('aria-expanded', 'false');
       ssResetActive();
     }
@@ -3639,6 +4513,22 @@
     // leaving it armed to pop the wrong card on a later pan.
     var ssFlightArrive = null;
     var ssAbort = null;
+    var ssAbortTimer = 0;
+    // M-176: Nominatim labels come back in whatever accept-language asks
+    // for; hard-coding zh-CN handed a simplified-Chinese station name to
+    // every English and Japanese user. Japanese is kept as a fallback
+    // everywhere — OSM's Japan coverage is far denser in ja than in en.
+    function ssAcceptLanguage() {
+      var l = (typeof activeLang === 'undefined') ? 'zh-CN' : activeLang;
+      if (l === 'zh-TW') return 'zh-TW,zh-Hant,zh,ja,en';
+      if (l === 'en')    return 'en,ja';
+      if (l === 'ja')    return 'ja,en';
+      return 'zh-CN,zh,ja,en';
+    }
+    // M-082: Nominatim occasionally accepts a connection and then answers
+    // nothing. fetch never settles, .busy is never cleared, and the spinner
+    // spins until the tab is closed. 9s, then a visible timeout row.
+    var SS_TIMEOUT_MS = 9000;
     function ssSearch(q) {
       var seq = ++ssReqSeq;
       ssWrap.classList.add('busy');
@@ -3649,8 +4539,17 @@
       // completion — ssReqSeq already guards the UI, but the dead fetch
       // was still costing radio time and Nominatim quota.
       if (ssAbort) ssAbort.abort();
+      if (ssAbortTimer) { clearTimeout(ssAbortTimer); ssAbortTimer = 0; }
       var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       ssAbort = ctrl;
+      // Distinguishes "the user typed something newer" (silent) from "we
+      // gave up waiting" (must be shown) — both surface as AbortError.
+      var timedOut = false;
+      ssAbortTimer = setTimeout(function() {
+        ssAbortTimer = 0;
+        timedOut = true;
+        if (ctrl) ctrl.abort();
+      }, SS_TIMEOUT_MS);
       // Japan bbox: lon 122-154, lat 24-46. viewbox order:
       //   x1 (left lon), y1 (top lat), x2 (right lon), y2 (bottom lat)
       // bounded=1 forbids matches outside the box; otherwise OSM happily
@@ -3658,7 +4557,7 @@
       var url = 'https://nominatim.openstreetmap.org/search?'
               + 'format=jsonv2&limit=6&addressdetails=0&namedetails=1'
               + '&viewbox=122,46,154,24&bounded=1'
-              + '&accept-language=zh-CN,zh,ja,en'
+              + '&accept-language=' + ssAcceptLanguage()
               + '&q=' + encodeURIComponent(q);
       fetch(url, {headers: {'Accept': 'application/json'},
                   signal: ctrl && ctrl.signal})
@@ -3667,6 +4566,7 @@
           return r.json();
         })
         .then(function(arr) {
+          if (ssAbortTimer) { clearTimeout(ssAbortTimer); ssAbortTimer = 0; }
           if (seq !== ssReqSeq) return;       // stale response
           ssWrap.classList.remove('busy');
           var items = (Array.isArray(arr) ? arr : [])
@@ -3681,11 +4581,19 @@
           ssFinalize();
         })
         .catch(function(err) {
-          if (err && err.name === 'AbortError') return;   // superseded
+          if (ssAbortTimer) { clearTimeout(ssAbortTimer); ssAbortTimer = 0; }
+          var aborted = err && err.name === 'AbortError';
+          // A superseded request stays silent; a timed-out one must clear
+          // the spinner and say so, or the box spins forever (M-082).
+          if (aborted && !timedOut) return;
           if (seq !== ssReqSeq) return;
           ssWrap.classList.remove('busy');
           if (ssTitleMode) return;
-          ssRenderApi(null, false, '搜索失败: ' + err.message);
+          // Raw Chinese on purpose: #ss-list is under the localizeTree
+          // MutationObserver, same as 搜索中… and 没有匹配的结果.
+          ssRenderApi(null, false, timedOut
+            ? '搜索超时'
+            : '搜索失败: ' + err.message);
           ssFinalize();
         });
     }
@@ -3700,6 +4608,7 @@
       if (!v) {
         ssReqSeq++;
         if (ssAbort) { ssAbort.abort(); ssAbort = null; }
+        if (ssAbortTimer) { clearTimeout(ssAbortTimer); ssAbortTimer = 0; }
         ssLocalMatch = {items: [], total: 0};
         ssWrap.classList.remove('busy');
         ssCloseDropdown();
@@ -3707,7 +4616,7 @@
         return;
       }
       // Restaurant-library match runs synchronously — paint it first so the
-      // user sees results in the same frame, no 300ms wait. The Nominatim
+      // user sees results in the same frame, no debounce wait. The Nominatim
       // call still goes through the debounce, and the 搜索中… row is only
       // painted when that fetch actually fires (ssSearch) — showing it per
       // keystroke advertised a request that kept being cancelled before it
@@ -3715,8 +4624,25 @@
       // zero local hits the dropdown would be blank (or claim "no
       // matches") during the debounce, so the pending row stands in.
       ssLocalMatch = ssMatchLocal(v);
-      ssRender(ssLocalMatch, null, ssLocalMatch.items.length === 0);
-      ssDebounce = setTimeout(function() { ssSearch(v); }, 300);
+      var willQuery = ssShouldQueryApi(v);
+      ssRender(ssLocalMatch, null, willQuery && ssLocalMatch.items.length === 0);
+      // M-055: 300ms per keystroke with no length floor is exactly the
+      // client-side autocomplete pattern the OSM usage policy forbids, and
+      // getting the shared Nominatim instance to block us shows up as
+      // "map search is permanently broken". 800ms + a length floor keeps
+      // one typed query to roughly one request; the local restaurant match
+      // above is unaffected and still paints on every keystroke.
+      if (!willQuery) return;
+      ssDebounce = setTimeout(function() { ssSearch(v); }, 800);
+    }
+    // CJK/kana/hangul are dense enough that 2 characters make a real
+    // query; Latin scripts need 3 before the result set means anything.
+    // The range is spelled with \u escapes rather than literal characters
+    // so the build's CJK-run scanner doesn't read it as untranslated UI.
+    var SS_CJK_RE = /[\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF]/;
+    function ssShouldQueryApi(v) {
+      if (!v) return false;
+      return SS_CJK_RE.test(v) ? v.length >= 2 : v.length >= 3;
     }
     // exitSearch: full bail-out. Used by the × button and Escape — clears
     // text, drops the temp marker + popup, closes the dropdown, and blurs
@@ -3830,7 +4756,19 @@
 
     // ----- Sync engine: pull on load/visible/poll, debounced push on toggle.
     var statusEl = document.getElementById('ff-sync-status');
+    // Single place that knows the sync UI's meaning: text + kind (''/ok/
+    // busy/err) + dirty + signedIn. setStatus and updateNeedsSyncIndicator
+    // only record + paint; anything richer (banner, aria-live) reads this.
+    var syncStatus = {text: '', kind: '', dirty: false, signedIn: false};
+    var STORAGE_BLOCKED_TEXT = '浏览器不允许本站保存数据，收藏只在本次会话有效';
+    var storageBlockedSeen = false;
     function setStatus(text, kind) {
+      // M-046: once a storage write has failed, the resting status stays on
+      // the warning instead of a reassuring "已同步" / "本地模式".
+      if (storageBlockedSeen && kind !== 'err' && kind !== 'busy') {
+        text = STORAGE_BLOCKED_TEXT; kind = 'err';
+      }
+      syncStatus.text = text; syncStatus.kind = kind || '';
       if (!statusEl) return;
       // #ff-sync-status sits outside the i18n MutationObserver's containers,
       // so dynamic writes must localize explicitly (same for every sink in
@@ -3840,6 +4778,23 @@
                            : kind === 'ok'  ? '#16a34a'
                            : kind === 'busy'? '#2563eb' : '#6b7280';
     }
+    storageBlockedHook = function() {
+      storageBlockedSeen = true;
+      setStatus(STORAGE_BLOCKED_TEXT, 'err');
+    };
+    // Not signed in: the resting text is "local mode" — unless writes are
+    // failing, in which case "local" is exactly what the user doesn't have.
+    function setLocalModeStatus() {
+      if (storageBlockedSeen) { setStatus(STORAGE_BLOCKED_TEXT, 'err'); return; }
+      setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式', dirty ? 'err' : '');
+    }
+    // M-003: the merge base for localStorage writes is what this page read
+    // at boot (see saveCache). null fav/black = no cache key yet → union.
+    lastWrittenCache = {
+      fav:   cache.fav   ? cache.fav.slice()   : null,
+      black: cache.black ? cache.black.slice() : null,
+      dirty: !!cache.dirty
+    };
     // dirty is restored from cache so an unpushed change survives a refresh.
     var dirty = cache.dirty || false;
     var pushTimer = null, pollTimer = null;
@@ -3850,6 +4805,10 @@
     var stateGen = 0;
     // Server snapshot backing the 409 three-way merge; see loadSyncBase.
     var syncBase = loadSyncBase();
+    // M-002: the base from just before our last successful PUT. If a pull
+    // later finds our version number with someone else's write id, the
+    // concurrent writer built on THIS, not on syncBase.
+    var prevSyncBase = null;
     // Serialize PUTs. Without this, push A (stale) can land after push B
     // (fresh) and the server silently keeps A's state while the client
     // thinks everything is synced. A push that fires while one is in
@@ -3863,17 +4822,298 @@
     //   signed in     → blue pulse (just informational — push will arrive)
     var fabEl = document.getElementById('ff-fab');
     function updateNeedsSyncIndicator() {
-      if (!fabEl) return;
       var signedIn = !!configured();
       var d = !!dirty;
+      syncStatus.dirty = d; syncStatus.signedIn = signedIn;
+      renderSyncUi();   // M-033/M-034: banners + toast + avatar badge
+      if (!fabEl) return;
       fabEl.classList.toggle('needs-sync',         d && !signedIn);
       fabEl.classList.toggle('needs-sync-pending', d &&  signedIn);
-      fabEl.title = localizeText(d
-        ? (signedIn
-            ? '改动待同步到云端…'
-            : '收藏 / 弃用 / 景点 仅存于本地浏览器，点击登录以跨设备同步')
-        : '筛选');
+      // M-033: this used to read "点击登录以跨设备同步" — but clicking opens
+      // the filter sheet, and a title= is unreachable on touch anyway. The
+      // call to action moved to #sync-hint; the tooltip now describes what
+      // the button actually is.
+      fabEl.title = localizeText('筛选') + (d
+        ? l10nParen(localizeText(signedIn ? '改动待同步到云端'
+                                          : '仅存于本地浏览器'))
+        : '');
+      updateFabAria();
     }
+
+    // ===== M-033 / M-034 / M-089: sync UX surfaces =====
+    // Presentation only. Nothing here decides sync policy, writes the state
+    // blob, or touches the KV contract; the single source of truth is the
+    // syncStatus object maintained by setStatus / updateNeedsSyncIndicator.
+    // One new localStorage key (tabelog.syncHintDismissed) — nothing else in
+    // this block reads or writes persisted state.
+    var SYNC_HINT_KEY = 'tabelog.syncHintDismissed';
+    var srEl        = document.getElementById('sync-sr');
+    var bannerEl    = document.getElementById('sync-banner');
+    var bannerMsgEl = document.getElementById('sync-banner-msg');
+    var bannerXEl   = document.getElementById('sync-banner-x');
+    var hintEl      = document.getElementById('sync-hint');
+    var stackEl     = document.getElementById('sync-stack');
+    var avatarDotEl = document.getElementById('ss-avatar-dot');
+    var syncUiInit  = false;
+
+    // M-089: the one live region every otherwise-silent state change goes
+    // through. #ff-sync-status carries its own role=status, so anything it
+    // already says is NOT repeated here.
+    function announce(text) { if (srEl) srEl.textContent = text; }
+
+    // ---- transient toasts / snackbars -------------------------------------
+    function showToast(text, opts) {
+      opts = opts || {};
+      if (!stackEl) return null;
+      var el = document.createElement('div');
+      el.className = 'sync-toast';
+      var msg = document.createElement('span');
+      msg.className = 'sync-toast-msg';
+      msg.textContent = text;
+      el.appendChild(msg);
+      var timer = null;
+      function dismiss() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (el.parentNode) el.parentNode.removeChild(el);
+      }
+      if (opts.actionLabel) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sync-btn';
+        btn.textContent = opts.actionLabel;
+        btn.addEventListener('click', function() {
+          dismiss();
+          if (opts.onAction) opts.onAction();
+        });
+        el.appendChild(btn);
+      }
+      stackEl.insertBefore(el, stackEl.firstChild);
+      // #sync-stack isn't one of the four observed containers, so a bookmark
+      // name carrying an emoji has to be swapped here (CLAUDE.md).
+      try { emojify(el); } catch (_) {}
+      announce(text);
+      timer = setTimeout(dismiss, opts.ms || 6000);
+      return {close: dismiss};
+    }
+
+    // ---- M-034: failures get a banner, successes stay quiet ---------------
+    // syncStatus.text is the raw zh-CN string the sync engine recorded; map
+    // it onto plain language plus the one thing the user can do next. Three
+    // buckets, matching the three ways a sync actually fails.
+    function syncErrorCopy(text) {
+      if (!text) return null;
+      // Anonymous local-mode is not a failure — that's #sync-hint's job.
+      if (text.indexOf('本地模式') === 0) return null;
+      if (text.indexOf(STORAGE_BLOCKED_TEXT) === 0) return text;
+      if (text.indexOf('登录已过期') === 0) {
+        return l10nSentence(['登录已过期', '请重新登录']);
+      }
+      if (/HTTP 5\d\d/.test(text) || text.indexOf('同步冲突') === 0) {
+        return l10nSentence(['服务器出错', '改动已存在本机', '稍后自动重试']);
+      }
+      if (text.indexOf('同步失败') === 0 || text.indexOf('保存失败') === 0) {
+        return l10nSentence(['网络不通', '改动已存在本机', '恢复后会自动上传']);
+      }
+      if (text.indexOf('同步数据') === 0) return localizeText(text);
+      return null;
+    }
+    var bannerMuted = '';   // copy the user explicitly dismissed
+    function renderSyncBanner() {
+      if (!bannerEl) return;
+      var copy = syncStatus.kind === 'err' ? syncErrorCopy(syncStatus.text) : null;
+      if (!copy) { bannerMuted = ''; bannerEl.hidden = true; return; }
+      if (copy === bannerMuted) { bannerEl.hidden = true; return; }
+      // Unhide first, then write: role=alert announces content that changes
+      // while the region is already rendered.
+      bannerEl.hidden = false;
+      if (bannerMsgEl && bannerMsgEl.textContent !== copy) {
+        bannerMsgEl.textContent = copy;
+      }
+    }
+    if (bannerXEl) bannerXEl.addEventListener('click', function() {
+      bannerMuted = bannerMsgEl ? bannerMsgEl.textContent : '';
+      bannerEl.hidden = true;
+    });
+
+    // ---- M-033: the "sign in to sync" hint --------------------------------
+    function hintDismissed() {
+      try { return localStorage.getItem(SYNC_HINT_KEY) === '1'; }
+      catch (_) { return false; }
+    }
+    var hintSuppressUntil = 0, hintRetryTimer = null;
+    function renderSyncHint() {
+      if (!hintEl) return;
+      var want = syncStatus.dirty && !syncStatus.signedIn && !hintDismissed();
+      // Don't stack the banner on top of the toast that just said the same
+      // thing — let the toast finish, then show it.
+      if (want && Date.now() < hintSuppressUntil) {
+        if (!hintRetryTimer) {
+          hintRetryTimer = setTimeout(function() {
+            hintRetryTimer = null; renderSyncHint();
+          }, (hintSuppressUntil - Date.now()) + 120);
+        }
+        want = false;
+      }
+      hintEl.hidden = !want;
+    }
+    var hintOkEl = document.getElementById('sync-hint-ok');
+    if (hintOkEl) hintOkEl.addEventListener('click', function() {
+      try { localStorage.setItem(SYNC_HINT_KEY, '1'); } catch (_) {}
+      if (hintEl) hintEl.hidden = true;
+    });
+    var hintSigninEl = document.getElementById('sync-hint-signin');
+    if (hintSigninEl) hintSigninEl.addEventListener('click', function() {
+      if (hintEl) hintEl.hidden = true;
+      try { openAvatarMenu(); } catch (_) {}
+    });
+
+    // First anonymous edit of this page load gets an immediate, quiet
+    // explanation instead of a red pill with a tooltip nobody can reach.
+    var anonToastShown = false;
+    var lastDirtySeen = !!dirty;
+    function maybeAnonToast() {
+      if (anonToastShown || lastDirtySeen) return;
+      if (!syncStatus.dirty || syncStatus.signedIn) return;
+      anonToastShown = true;
+      hintSuppressUntil = Date.now() + 6500;
+      showToast(l10nSentence(['已保存在此浏览器', '登录可在其他设备恢复']), {
+        actionLabel: localizeText('登录'),
+        ms: 6000,
+        onAction: function() { try { openAvatarMenu(); } catch (_) {} }
+      });
+    }
+
+    // ---- M-089: the FAB's accessible name has to carry the visible count --
+    function updateFabAria() {
+      if (!fabEl) return;
+      var cnt = fabEl.querySelector('.ff-count');
+      var tot = fabEl.querySelector('.ff-total');
+      var shown = cnt ? cnt.textContent : '';
+      var total = tot ? tot.textContent : '';
+      fabEl.setAttribute('aria-label',
+        localizeText('筛选结果') + ' ' + shown + ' / ' + total);
+    }
+
+    function renderSyncUi() {
+      if (!syncUiInit) return;
+      renderSyncBanner();
+      maybeAnonToast();
+      renderSyncHint();
+      if (avatarDotEl) {
+        avatarDotEl.hidden = !(syncStatus.dirty || syncStatus.kind === 'err');
+      }
+      lastDirtySeen = syncStatus.dirty;
+    }
+
+    // ---- M-028: empty state ----------------------------------------------
+    var emptyMapEl   = document.getElementById('ff-empty-map');
+    var emptyPanelEl = document.getElementById('ff-empty-panel');
+    var emptyAnnounced = false;
+    function updateEmptyState(n) {
+      var zero = n === 0;
+      if (emptyMapEl)   emptyMapEl.hidden = !zero;
+      if (emptyPanelEl) emptyPanelEl.hidden = !zero;
+      var nodes = document.querySelectorAll('.ff-count');
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].classList.toggle('is-zero', zero);
+      }
+      updateFabAria();
+      if (zero && !emptyAnnounced) {
+        emptyAnnounced = true;
+        announce(localizeText('没有符合条件的餐厅'));
+      } else if (!zero) {
+        emptyAnnounced = false;
+      }
+    }
+    ['ff-empty-reset', 'ff-empty-panel-reset', 'ff-panel-reset']
+      .forEach(function(id) {
+        var b = document.getElementById(id);
+        if (b) b.addEventListener('click', function() { resetFilters(); });
+      });
+
+    // ---- M-008: delete my cloud data --------------------------------------
+    // The only place in this file allowed to clear localStorage, and only
+    // after the Worker has confirmed the cloud copy is gone (204). Anything
+    // else — including today's 405 from the not-yet-deployed Worker — leaves
+    // every byte of local state exactly where it is.
+    var delCloudBtn   = document.getElementById('ssm-delete-cloud');
+    var delCloudLabel = document.getElementById('ssm-delete-label');
+    var delCloudMsg   = document.getElementById('ssm-delete-msg');
+    var delArmTimer = null, delBusy = false;
+    function setDelMsg(text, isErr) {
+      if (!delCloudMsg) return;
+      delCloudMsg.textContent = text || '';
+      delCloudMsg.style.color = isErr ? '#b91c1c' : '#6b7280';
+    }
+    function disarmDeleteCloud() {
+      if (delArmTimer) { clearTimeout(delArmTimer); delArmTimer = null; }
+      if (!delCloudBtn) return;
+      delCloudBtn.removeAttribute('data-armed');
+      if (delCloudLabel) delCloudLabel.textContent = localizeText('删除我的云端数据');
+    }
+    if (delCloudBtn) delCloudBtn.addEventListener('click', function() {
+      if (delBusy) return;
+      if (!configured()) {
+        setDelMsg(localizeText('请先登录'), true);
+        return;
+      }
+      if (delCloudBtn.getAttribute('data-armed') !== '1') {
+        // First click arms; second click within 6s commits. Deliberately a
+        // two-step in the menu rather than a confirm() — the destructive
+        // wording has to be readable in the user's own language, and
+        // confirm() text can't be styled or dismissed by Escape on iOS.
+        delCloudBtn.setAttribute('data-armed', '1');
+        if (delCloudLabel) {
+          delCloudLabel.textContent =
+            localizeText('确认删除') + '？' + localizeText('此操作不可撤销');
+        }
+        setDelMsg('', false);
+        delArmTimer = setTimeout(disarmDeleteCloud, 6000);
+        return;
+      }
+      disarmDeleteCloud();
+      delBusy = true;
+      setDelMsg(localizeText('正在删除') + '…', false);
+      fetchAuthed(API, {method: 'DELETE'}).then(function(r) {
+        delBusy = false;
+        if (r.status !== 204 && r.status !== 200) {
+          setDelMsg(l10nSentence(['服务暂不可用', '请稍后再试'])
+                    + ' (HTTP ' + r.status + ')', true);
+          return;
+        }
+        setDelMsg(localizeText('云端数据已删除'), false);
+        // Cloud copy is gone — now, and only now, drop the local mirrors.
+        // syncBase goes too: keeping a base for a blob that no longer
+        // exists would make the next pull look like a remote deletion of
+        // data we still hold.
+        function wipe() {
+          ['omakase_state_cache_v2', 'tabelog.auth',
+           'tabelog.bookmarks', 'tabelog.syncBase'].forEach(function(k) {
+            try { localStorage.removeItem(k); } catch (_) {}
+          });
+        }
+        wipe();
+        // A pull/push already in flight can write a key back between here
+        // and the actual unload (the same race signOut() hits), so wipe
+        // once more at the last possible moment.
+        window.addEventListener('pagehide', wipe);
+        setTimeout(function() { location.reload(); }, 700);
+      }).catch(function() {
+        delBusy = false;
+        setDelMsg(l10nSentence(['服务暂不可用', '请稍后再试']), true);
+      });
+    });
+
+    syncUiInit = true;
+    // Seed the status object from the values loaded at boot BEFORE the first
+    // render: renderSyncUi ends by latching lastDirtySeen, and latching a
+    // stale `false` here would make the first updateNeedsSyncIndicator look
+    // like a fresh user edit and fire the "saved in this browser" toast on
+    // every page load of an already-dirty device.
+    syncStatus.dirty = !!dirty;
+    syncStatus.signedIn = !!configured();
+    renderSyncUi();
+    updateFabAria();
 
     function refreshAllMarkers() {
       // Only the markers that have actually been materialized can have their
@@ -3895,18 +5135,19 @@
     // layers, so the wipe takes them out too — renderFavoritesBuiltin puts
     // them back (after rebuildHiddenIds, so a hide flag set on another
     // device takes effect now). Used by pull() and the 409 merge path.
+    // M-042: build the whole replacement first; a throw while sanitizing
+    // leaves the old array and layers untouched instead of a half-replaced
+    // screen (rebuildBookmarkLayers isolates per-entry render failures).
     function replaceBookmarksArray(arr) {
-      bookmarks.length = 0;
-      bookmarksLayer.clearLayers();
-      userAttractionsLayer.clearLayers();
-      bmMarkerById = {};
-      arr.forEach(function(bm) {
+      var next = [];
+      (Array.isArray(arr) ? arr : []).forEach(function(bm) {
+        if (!bm || typeof bm !== 'object') return;
         sanitizeBookmarkEmoji(bm);
-        bookmarks.push(bm);
-        renderBookmark(bm);   // early-returns on hidden / no-coord
+        next.push(bm);
       });
-      rebuildHiddenIds();
-      renderFavoritesBuiltin();
+      bookmarks.length = 0;
+      next.forEach(function(bm) { bookmarks.push(bm); });
+      rebuildBookmarkLayers();
       saveBookmarks();
     }
     // Deep-copied server snapshot for the merge base. Bookmark objects are
@@ -3918,6 +5159,7 @@
     function snapshotRemote(remote) {
       return {
         v: typeof remote.v === 'number' ? remote.v : 0,
+        w: typeof remote.w === 'string' ? remote.w : '',
         sub: currentSub(),
         favorites: Array.isArray(remote.favorites) ? remote.favorites.slice() : [],
         blacklist: Array.isArray(remote.blacklist) ? remote.blacklist.slice() : [],
@@ -3925,22 +5167,94 @@
           ? JSON.parse(JSON.stringify(remote.bookmarks)) : [],
       };
     }
+    function arrOr(x, fallback) { return Array.isArray(x) ? x : fallback; }
+    // Does memory hold anything the last known server state lacks (or vice
+    // versa)? True after another tab's unsent edit was merged in via the
+    // storage event, or after the M-001 rebase — i.e. content the server
+    // may not have. push() uses the same test to skip a no-op PUT.
+    function contentMatchesBase() {
+      return setEqualsList(state.fav,   syncBase.favorites)
+          && setEqualsList(state.black, syncBase.blacklist)
+          && JSON.stringify(bookmarks) === JSON.stringify(syncBase.bookmarks);
+    }
+    // M-001 (the P0): tabelog.syncBase is shared by every tab, so the base
+    // on disk can be newer than the one in memory — another tab pushed and
+    // rewrote it. Before we build a PUT we adopt it, but ONLY by merging its
+    // CONTENT first (base = our old snapshot, theirs = the disk snapshot).
+    // Taking just its version number would let this tab's stale list pass
+    // the Worker's baseV check with no 409 and no merge, deleting the other
+    // tab's entries from the cloud — never do that; it is M-001 in another
+    // shape. A base that belongs to a different account is never adopted;
+    // an unowned ('' sub, never synced) base merges as a union.
+    function adoptDiskSyncBase() {
+      var disk = loadSyncBase();
+      var sub = currentSub();
+      if (!sub || disk.sub !== sub) return false;
+      if (syncBase.sub === sub && disk.v <= syncBase.v) return false;
+      var base = (syncBase.sub === sub) ? syncBase : emptySyncBase(sub);
+      state.fav   = mergeSets(base.favorites, state.fav,   disk.favorites);
+      state.black = mergeSets(base.blacklist, state.black, disk.blacklist);
+      var bms = mergeBookmarks(base.bookmarks, bookmarks.slice(),
+                               JSON.parse(JSON.stringify(disk.bookmarks)));
+      if (JSON.stringify(bms) !== JSON.stringify(bookmarks)) {
+        bookmarks.length = 0;
+        bms.forEach(function(b) { bookmarks.push(b); });
+        rebuildBookmarkLayers();
+      }
+      syncBase = disk;
+      refreshAllMarkers();
+      return true;
+    }
     // True for the single retry that follows a successful silentReAuth.
     // Prevents an infinite loop in the (rare) case the Worker rejects a
     // freshly-minted token too.
     var pullRetriedAfterSilent = false;
-    function pull() {
+    // M-138 / M-147: one GET at a time, and interval / focus / online /
+    // pageshow can't stack requests within a second of each other.
+    var pullInFlight = false, lastPullAt = 0;
+    function dropAuth() {
+      try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
+    }
+    // M-041: a silent re-auth that lands on a different Google account is
+    // called out; the pull that follows switches to that account's cloud.
+    function silentReAuthWatched(cb) {
+      var before = currentSub();
+      silentReAuth(function(ok) {
+        if (ok && before && currentSub() && currentSub() !== before) {
+          setStatus('已切换账号，已改用云端数据', 'err');
+        }
+        cb(ok);
+      });
+    }
+    // Runs once a GET has been applied (or found nothing new): anything
+    // dirty — or merged in from another tab and not yet on the server —
+    // goes up now. The M-053 fix is exactly that a dirty device keeps
+    // pulling AND re-pushes; push() skips the PUT when there is nothing new.
+    function afterPullSettled() {
+      if (!dirty && !contentMatchesBase()) dirty = true;
+      if (dirty) { push(); return; }
+      setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+    }
+    function pull(force) {
       if (!configured()) {
-        setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式',
-                  dirty ? 'err' : '');
+        setLocalModeStatus();
         updateNeedsSyncIndicator();
         return;
       }
-      // Don't clobber unsent local edits with a stale remote.
-      if (dirty) { updateNeedsSyncIndicator(); return; }
+      // M-053: a dirty device used to bail here, so one whose push kept
+      // failing (413, 5xx, no network at the time) never received anyone
+      // else's changes again. Now the GET always goes out; the response is
+      // three-way merged (base = syncBase, so a remote delete still wins)
+      // and whatever is dirty is re-pushed on top — the 409 path's merge.
+      if (pullInFlight || pushInFlight) return;
+      if (!force && Date.now() - lastPullAt < 1000) return;
+      pullInFlight = true;
+      lastPullAt = Date.now();
       // Snapshot the edit counter: if it moves while the GET is in flight,
       // the response below is stale by definition and gets discarded.
       var genAtStart = stateGen;
+      // For the M-042 rollback: what was on screen before the apply.
+      var pre = null;
       setStatus('同步中…', 'busy');
       fetchAuthed(API)
         .then(function(r) {
@@ -3951,7 +5265,7 @@
             if (pullRetriedAfterSilent) {
               pullRetriedAfterSilent = false;
               setStatus('登录已过期，请重新登录', 'err');
-              localStorage.removeItem(AUTH_KEY);
+              dropAuth();
               updateNeedsSyncIndicator();
               return null;
             }
@@ -3961,14 +5275,14 @@
             // (forcing the user to re-sign-in) if silent re-auth also
             // fails — that's the genuine "Google session is gone" case.
             setStatus('重新连接中…', 'busy');
-            silentReAuth(function(ok) {
+            silentReAuthWatched(function(ok) {
               if (ok) {
                 pullRetriedAfterSilent = true;
-                setTimeout(pull, 100);
+                setTimeout(function() { pull(true); }, 100);
                 return;
               }
               setStatus('登录已过期，请重新登录', 'err');
-              localStorage.removeItem(AUTH_KEY);
+              dropAuth();
               updateNeedsSyncIndicator();
             });
             return null;
@@ -3983,89 +5297,153 @@
           // response would revert it on screen. Drop it; the edit's pending
           // push flushes shortly and the next poll re-pulls fresh state.
           if (stateGen !== genAtStart) return;
-          // Same version we already have → nothing changed remotely, so
-          // skip the full apply (bookmark-layer wipe + setIcon on every
-          // materialized marker + filter recompute + storage writes). The
-          // 60s poll and every tab refocus land here in the common case —
-          // this used to be a per-minute main-thread spike for nothing.
-          if (typeof remote.v === 'number' && remote.v === syncBase.v
-              && syncBase.sub === currentSub()) {
-            setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+          if (typeof remote !== 'object' || Array.isArray(remote)) remote = {};
+          var sub = currentSub();
+          // M-041: the local data belongs to another account → the cloud
+          // copy of the account signed in now replaces it (never a union:
+          // that uploaded the previous person's favorites into this one).
+          if (syncBase.sub && syncBase.sub !== sub) {
+            adoptRemoteWholesale(remote);
+            setStatus('已切换账号，已改用云端数据', 'ok');
             return;
           }
-          // Empty server (new account): server returns {}; nothing to apply.
-          // Server with data: {favorites, blacklist, bookmarks}.
-          if (Array.isArray(remote.favorites)) state.fav   = new Set(remote.favorites);
-          if (Array.isArray(remote.blacklist)) state.black = new Set(remote.blacklist);
-          if (Array.isArray(remote.bookmarks)) {
-            replaceBookmarksArray(remote.bookmarks);
+          var remoteV = typeof remote.v === 'number' ? remote.v : 0;
+          var remoteW = typeof remote.w === 'string' ? remote.w : '';
+          var base = syncBase;
+          if (syncBase.sub === sub && remoteV === syncBase.v) {
+            if (remoteW === syncBase.w && (remoteW || !dirty)) {
+              // Same version, same write id → nothing changed remotely; skip
+              // the full apply (layer wipe + setIcon on every materialized
+              // marker + filter recompute + storage writes). The 60s poll
+              // and every refocus land here in the common case.
+              afterPullSettled();
+              return;
+            }
+            if (!remoteW && !syncBase.w) {
+              // Both w-less while we hold unsent edits: this base was last
+              // confirmed by a pre-2.0 client, and pre-2.0 tabs could leave
+              // the cache and the base inconsistent on disk (M-001's boot
+              // shape: base new, list old). Indistinguishable from a real
+              // local delete, so union once — may resurrect a pending
+              // delete, can never drop the other tab's entry. Never
+              // recurs once a 2.0 write (with w) has landed.
+              base = emptySyncBase(sub);
+            } else {
+              // M-002: same version, different write id → the PUT that gave
+              // us this version was overwritten by a concurrent one (the
+              // Worker's get→put is not atomic) or by an old client that
+              // sends no w. Our base never reached the server, so it is not
+              // an ancestor of what is there: merge against the base from
+              // before our push when it fits (both writers built on it),
+              // otherwise void the base — union may resurrect, never loses.
+              base = (prevSyncBase && prevSyncBase.sub === sub
+                      && prevSyncBase.v === remoteV - 1)
+                ? prevSyncBase : emptySyncBase(sub);
+            }
+          } else if (syncBase.sub !== sub) {
+            // First sign-in on this device ('' base): the local state is
+            // the seed — union with whatever the account already has.
+            base = emptySyncBase(sub);
+          } else if (typeof remote.v !== 'number' && syncBase.v > 0) {
+            // A blob with no version where we remember one: the server
+            // state was wiped or never written. Merging against our base
+            // would read that as "everything deleted" — union instead.
+            base = emptySyncBase(sub);
           }
+          pre = {fav: new Set(state.fav), black: new Set(state.black),
+                 bm: JSON.stringify(bookmarks)};
+          mergeRemoteIntoLocal(remote, base);   // renders first (M-046)…
           syncBase = snapshotRemote(remote);
-          saveSyncBase(syncBase);
-          saveCache(state, false);
-          refreshAllMarkers();
-          setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+          saveSyncBase(syncBase);               // …persists after
+          if (saveCache(state, dirty)) refreshAllMarkers();
+          pre = null;
+          afterPullSettled();
         })
-        .catch(function(e) { setStatus('同步失败: ' + e.message, 'err'); })
-        .finally(function() { updateNeedsSyncIndicator(); });
+        .catch(function(e) {
+          setStatus('同步失败: ' + e.message, 'err');
+          // M-042: the apply blew up midway → put back exactly what was on
+          // screen before it, not a half-applied mix.
+          if (pre) {
+            try {
+              state.fav = pre.fav; state.black = pre.black;
+              if (JSON.stringify(bookmarks) !== pre.bm) {
+                replaceBookmarksArray(JSON.parse(pre.bm));
+              }
+              refreshAllMarkers();
+            } catch (_) {}
+          }
+        })
+        .finally(function() {
+          pullInFlight = false;
+          updateNeedsSyncIndicator();
+        });
     }
-    // Three-way merge, base = syncBase (the last server state this device
-    // saw): keep = (ours ∩ theirs) ∪ (ours − base) ∪ (theirs − base).
-    // Adds from both sides survive; a delete on either side wins unless the
-    // other side re-added. With an empty base (fresh upgrade, cleared
-    // storage) this degrades to a pure union — it may resurrect a
-    // concurrently-deleted entry once, but can never lose one.
-    function mergeSets(baseArr, oursSet, theirsArr) {
-      var base   = new Set(baseArr);
-      var theirs = new Set(Array.isArray(theirsArr) ? theirsArr : []);
-      var out = new Set();
-      oursSet.forEach(function(u) { if (theirs.has(u) || !base.has(u)) out.add(u); });
-      theirs.forEach(function(u) { if (!base.has(u)) out.add(u); });
-      return out;
-    }
-    // Same rule keyed by bookmark id; when both sides carry an id, this
-    // device's object wins (deterministic, and it's the one the user just
-    // touched). Legacy id-less entries can't be tracked through the base,
-    // so ours are always kept and theirs are kept unless byte-identical to
-    // one of ours — duplication risk over data loss.
-    function mergeBookmarks(baseArr, oursArr, theirsArr) {
-      var baseIds = new Set();
-      baseArr.forEach(function(b) { if (b && b.id) baseIds.add(b.id); });
-      var theirsList = Array.isArray(theirsArr) ? theirsArr : [];
-      var theirsIds = new Set();
-      theirsList.forEach(function(b) { if (b && b.id) theirsIds.add(b.id); });
-      var out = [], seen = new Set();
-      oursArr.forEach(function(b) {
-        if (!b) return;
-        if (!b.id) { out.push(b); return; }
-        if (theirsIds.has(b.id) || !baseIds.has(b.id)) {
-          out.push(b);
-          seen.add(b.id);
-        }
-      });
-      theirsList.forEach(function(b) {
-        if (!b) return;
-        if (!b.id) {
-          var s = JSON.stringify(b);
-          var dup = oursArr.some(function(o) {
-            return o && !o.id && JSON.stringify(o) === s;
-          });
-          if (!dup) out.push(b);
-          return;
-        }
-        if (seen.has(b.id)) return;
-        if (!baseIds.has(b.id)) out.push(b);
-      });
-      return out;
-    }
-    function mergeRemoteIntoLocal(theirs) {
-      state.fav   = mergeSets(syncBase.favorites, state.fav,   theirs.favorites);
-      state.black = mergeSets(syncBase.blacklist, state.black, theirs.blacklist);
-      replaceBookmarksArray(
-        mergeBookmarks(syncBase.bookmarks, bookmarks.slice(), theirs.bookmarks));
+    // Three-way merge of a server blob into memory (mergeSets/mergeBookmarks
+    // are top-level now — the localStorage writers use them too). base
+    // defaults to syncBase; the callers that know the base is untrustworthy
+    // (wiped server, overwritten write, first sign-in) pass an empty one so
+    // the merge unions. A missing array on their side means "unknown", not
+    // "empty" — treated as unchanged relative to the base, i.e. ours stands.
+    // Renders before anything is persisted (M-046).
+    function mergeRemoteIntoLocal(theirs, base) {
+      base = base || syncBase;
+      var fav   = mergeSets(base.favorites, state.fav,
+                            arrOr(theirs.favorites, base.favorites));
+      var black = mergeSets(base.blacklist, state.black,
+                            arrOr(theirs.blacklist, base.blacklist));
+      var bms   = mergeBookmarks(base.bookmarks, bookmarks.slice(),
+                    JSON.parse(JSON.stringify(arrOr(theirs.bookmarks, base.bookmarks))));
+      state.fav = fav; state.black = black;
+      replaceBookmarksArray(bms);
       refreshAllMarkers();
     }
+    // M-041: signed into a different account than the local data belongs
+    // to → the cloud copy replaces local state outright. The previous
+    // account's favorites/pins must not be merged (= uploaded) into this
+    // one, so both localStorage merge bases are voided before the write.
+    function adoptRemoteWholesale(remote) {
+      state.fav   = new Set(arrOr(remote.favorites, []));
+      state.black = new Set(arrOr(remote.blacklist, []));
+      var bms = Array.isArray(remote.bookmarks)
+        ? JSON.parse(JSON.stringify(remote.bookmarks))
+        : JSON.parse(JSON.stringify(EMBEDDED_BOOKMARKS));   // fresh-device seed
+      dirty = false;
+      lastWrittenCache = null;
+      lastWrittenBookmarks = null;
+      replaceBookmarksArray(bms);
+      refreshAllMarkers();
+      syncBase = snapshotRemote(remote);
+      saveSyncBase(syncBase);
+      saveCache(state, false);
+    }
     var pushRetriedAfterSilent = false;
+    // M-002: 12 hex chars of randomness per PUT. The Worker stores the body
+    // as-is, so `w` rides along in the blob and comes back on GET.
+    function randomWriteId() {
+      try {
+        var a = new Uint8Array(6);
+        crypto.getRandomValues(a);
+        var s = '';
+        for (var i = 0; i < a.length; i++) s += ('0' + a[i].toString(16)).slice(-2);
+        return s;
+      } catch (_) {
+        return (Date.now().toString(16) + Math.random().toString(16).slice(2)).slice(0, 12);
+      }
+    }
+    // The PUT body is always built from scratch: the three arrays the
+    // Worker stores, the version we're building on, and the write id.
+    // Nothing else may be added at the top level — the Worker replaces the
+    // blob wholesale, so any extra field would need M-044 first.
+    function buildBody(w) {
+      return JSON.stringify({
+        favorites: Array.from(state.fav),
+        blacklist: Array.from(state.black),
+        bookmarks: bookmarks,
+        baseV: syncBase.v,
+        w: w,
+      });
+    }
+    var BODY_WARN_CHARS = 180000;   // the Worker rejects > 200,000 (M-053)
     function push(conflictDepth) {
       conflictDepth = conflictDepth || 0;
       // Local mode (not signed in): nothing to push, but keep dirty=true so
@@ -4073,9 +5451,8 @@
       // they haven't enabled sync. Indicator clears once they sign in and
       // a real push succeeds.
       if (!configured()) {
-        saveCache(state, dirty);
-        setStatus(dirty ? '本地模式（改动仅存浏览器）' : '本地模式',
-                  dirty ? 'err' : '');
+        if (saveCache(state, dirty)) refreshAllMarkers();
+        setLocalModeStatus();
         updateNeedsSyncIndicator();
         return;
       }
@@ -4084,25 +5461,41 @@
         pushQueuedDepth = Math.max(pushQueuedDepth, conflictDepth);
         return;
       }
-      // Signed into a different account than the base snapshot belongs to →
-      // discard it. An empty base can never propagate deletions, and if this
-      // account already has a remote blob the version mismatch 409s into a
-      // safe union merge.
-      if (syncBase.sub !== currentSub()) {
-        syncBase = emptySyncBase(currentSub());
+      var sub = currentSub();
+      // M-041: the base belongs to another account → this device still
+      // holds that account's data. Don't upload it; pull() swaps in the
+      // cloud copy of the account that is signed in now.
+      if (syncBase.sub && syncBase.sub !== sub) { pull(true); return; }
+      // M-001: rebase onto a newer base another tab left on disk — by
+      // merging its content, see adoptDiskSyncBase.
+      adoptDiskSyncBase();
+      if (syncBase.sub !== sub) {
+        // Never synced ('' sub): an empty base can't propagate deletions,
+        // and if this account already has a blob the version mismatch 409s
+        // into a union merge — the first-sign-in seed upload.
+        syncBase = emptySyncBase(sub);
         saveSyncBase(syncBase);
+      }
+      // Nothing the server doesn't already have (another tab uploaded it,
+      // or a keepalive flush landed) → don't spend a KV write on it.
+      if (syncBase.v > 0 && contentMatchesBase()) {
+        dirty = false;
+        if (saveCache(state, false)) refreshAllMarkers();
+        setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+        updateNeedsSyncIndicator();
+        return;
       }
       pushInFlight = true;
       setStatus('保存中…', 'busy');
       // Snapshot: if an edit lands while the PUT is in flight, the response
       // must not clear dirty — the queued follow-up push flushes it.
       var genAtPush = stateGen;
-      var body = JSON.stringify({
-        favorites: Array.from(state.fav),
-        blacklist: Array.from(state.black),
-        bookmarks: bookmarks,
-        baseV: syncBase.v,
-      });
+      var w = randomWriteId();
+      var body = buildBody(w);
+      var baseBeforePush = syncBase;
+      if (body.length > BODY_WARN_CHARS) {
+        setStatus('同步数据接近上限，请删减收藏或书签', 'err');
+      }
       fetchAuthed(API, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
@@ -4113,7 +5506,7 @@
             if (pushRetriedAfterSilent) {
               pushRetriedAfterSilent = false;
               setStatus('登录已过期，请重新登录', 'err');
-              localStorage.removeItem(AUTH_KEY);
+              dropAuth();
               updateNeedsSyncIndicator();
               return;
             }
@@ -4122,14 +5515,14 @@
             // the next user edit) actually flushes our pending changes.
             setStatus('重新连接中…', 'busy');
             saveCache(state, true);
-            silentReAuth(function(ok) {
+            silentReAuthWatched(function(ok) {
               if (ok) {
                 pushRetriedAfterSilent = true;
                 setTimeout(push, 100);
                 return;
               }
               setStatus('登录已过期，请重新登录', 'err');
-              localStorage.removeItem(AUTH_KEY);
+              dropAuth();
               updateNeedsSyncIndicator();
             });
             return;
@@ -4146,22 +5539,27 @@
               return;
             }
             return r.json().then(function(theirs) {
-              if (!theirs || typeof theirs !== 'object') theirs = {};
+              if (!theirs || typeof theirs !== 'object' || Array.isArray(theirs)) theirs = {};
               // A conflicting blob with no version means the server state
               // was wiped or never written (a real mass-delete from another
               // device would carry v). Merging against our old base would
               // read that as "everything deleted" and drop local data —
               // instead void the base so the merge unions and re-uploads.
-              if (typeof theirs.v !== 'number') {
-                syncBase = emptySyncBase(currentSub());
-              }
-              mergeRemoteIntoLocal(theirs);
+              var base = (typeof theirs.v !== 'number') ? emptySyncBase(sub) : syncBase;
+              mergeRemoteIntoLocal(theirs, base);
               syncBase = snapshotRemote(theirs);
               saveSyncBase(syncBase);
               saveCache(state, true);   // still dirty until the re-push lands
               pushQueued = true;
               pushQueuedDepth = Math.max(pushQueuedDepth, conflictDepth + 1);
             });
+          }
+          if (r.status === 413) {
+            // M-053: over the Worker's 200,000-char cap. Nothing to retry
+            // until the user trims; the data stays local and dirty.
+            saveCache(state, true);
+            setStatus('同步数据超过上限，未能保存到云端', 'err');
+            return;
           }
           if (!r.ok) throw new Error('HTTP ' + r.status);
           pushRetriedAfterSilent = false;
@@ -4174,21 +5572,23 @@
               if (j && typeof j.v === 'number') newV = j.v;
             } catch (_) {}
             var sent = JSON.parse(body);
+            prevSyncBase = baseBeforePush;
             syncBase = {
               v: newV,
-              sub: currentSub(),
+              w: w,
+              sub: sub,
               favorites: sent.favorites || [],
               blacklist: sent.blacklist || [],
               bookmarks: sent.bookmarks || [],
             };
             saveSyncBase(syncBase);
             dirty = (stateGen !== genAtPush);
-            saveCache(state, dirty);
+            if (saveCache(state, dirty)) refreshAllMarkers();
             if (!dirty) {
               setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
             }
             // Still dirty → an edit raced the PUT; its own scheduled push
-            // (or the queue below) uploads it within ~500ms.
+            // (or the queue below) uploads it within ~2.5 s.
           });
         })
         .catch(function(e) {
@@ -4213,10 +5613,45 @@
     function schedulePush() {
       stateGen++;   // invalidates any pull/push response currently in flight
       dirty = true;
-      saveCache(state, true);
+      // M-003: the write merges in whatever another tab saved meanwhile;
+      // M-046: it can no longer throw, so the timer below is always set.
+      if (saveCache(state, true)) refreshAllMarkers();
       updateNeedsSyncIndicator();
       clearTimeout(pushTimer);
-      pushTimer = setTimeout(push, 500);
+      // M-039: 2.5 s (was 500 ms) so a burst of taps costs one KV write.
+      pushTimer = setTimeout(push, 2500);
+    }
+    // M-045: an edit still inside the debounce window when the tab is
+    // backgrounded / closed used to stay local until the next visit. Flush
+    // it with a keepalive PUT. Fire-and-forget: the response can't be
+    // observed, so dirty and the persisted base are NOT touched — if it
+    // landed, the next pull sees v+1 and push() finds nothing new to send;
+    // if it didn't, the next push 409s and merges as usual. Not sendBeacon
+    // (POST only → 405 on /api/state). keepalive bodies are capped at
+    // 64 KB — bigger ones stay on the timer path.
+    var lastFlushGen = -1;
+    function flushOnHide() {
+      if (!dirty || pushInFlight || !configured()) return;
+      // pagehide and visibilitychange→hidden both fire on a close; one
+      // flush per edit generation is enough.
+      if (stateGen === lastFlushGen) return;
+      var sub = currentSub();
+      if (syncBase.sub && syncBase.sub !== sub) return;   // M-041
+      adoptDiskSyncBase();                                // M-001
+      if (syncBase.sub !== sub) syncBase = emptySyncBase(sub);
+      var body = buildBody(randomWriteId());
+      var bytes = body.length * 3;
+      try { bytes = new TextEncoder().encode(body).length; } catch (_) {}
+      if (bytes > 60000) return;
+      lastFlushGen = stateGen;
+      clearTimeout(pushTimer); pushTimer = null;
+      var headers = {'Content-Type': 'application/json'};
+      var a = loadAuth();
+      if (a && a.id_token) headers['Authorization'] = 'Bearer ' + a.id_token;
+      try {
+        fetch(API, {method: 'PUT', keepalive: true, credentials: 'include',
+                    headers: headers, body: body}).catch(function() {});
+      } catch (_) {}
     }
     // True when startSync's initial pull/push ran with a live session —
     // tryRestoreSession's success path checks it so a signed-in boot does
@@ -4229,23 +5664,95 @@
       // localStorage shows up before the first push/pull lands.
       updateNeedsSyncIndicator();
       bootSyncedAuthed = !!configured();
-      // If a previous session left an unpushed change, retry pushing it
-      // *before* pulling; otherwise pull would just confirm the remote
-      // state (which still lacks the change) and the user would see "已同步"
-      // while their edit is actually still local-only.
-      if (dirty) push(); else pull();
+      // pull() first, always: it merges (never clobbers) and ends by
+      // re-pushing anything dirty, so a boot with an unsent edit still
+      // uploads it — after learning what the server has. The old push-first
+      // order never pulled while that push kept failing (M-053).
+      pull(true);
       clearInterval(pollTimer);
-      // dirty → retry the unsent push (a failed PUT used to strand edits
-      // for the whole session: pull() bails when dirty, so nothing ever
-      // retried until the next user edit). Clean → refresh from remote.
+      // C-2: the poll stays at 60 s; freshness between polls comes from the
+      // storage / pageshow / online events below, not from a faster timer.
       pollTimer = setInterval(function() {
         if (document.visibilityState !== 'visible') return;
-        if (dirty) push(); else pull();
+        pull();
       }, 60000);
     }
     document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden') { flushOnHide(); return; }
       if (document.visibilityState !== 'visible') return;
-      if (dirty) push(); else pull();
+      pull();
+    });
+    window.addEventListener('pagehide', flushOnHide);
+
+    // M-047 / M-124 / M-125 / M-138 / M-147: one reconcile() for every "the
+    // world may have moved while we weren't looking" signal — a storage
+    // event from another tab (300 ms debounce, our four keys only), a
+    // bfcache restore, coming back online. Receive path only: it merges
+    // disk → memory and repaints, and NEVER calls schedulePush()/push() —
+    // two tabs would otherwise mark each other dirty and double every KV
+    // write. Whatever it merged in is uploaded by the tab that made the
+    // edit, by the next boot (the disk dirty flag), or by this tab's next
+    // own push / poll (afterPullSettled → contentMatchesBase).
+    var WATCHED_KEYS = [CACHE_KEY, BM_KEY, SYNC_BASE_KEY, AUTH_KEY];
+    var lastSeenSub = currentSub();
+    var reconcileTimer = null;
+    function reconcile() {
+      var changed = false;
+      // Auth changed in another tab (M-124): a sign-out used to drop this
+      // tab into local mode silently. A sign-in / switch is picked up by
+      // the next pull (its M-041 branch handles a different account).
+      var sub = currentSub();
+      if (sub !== lastSeenSub) {
+        var was = lastSeenSub;
+        lastSeenSub = sub;
+        try { refreshAuthUI(); } catch (_) {}
+        if (!sub) setStatus('你在另一个窗口退出了登录', 'err');
+        else if (was) setStatus('你在另一个窗口切换了登录', 'err');
+        else setStatus('你在另一个窗口登录了', '');
+      }
+      // Favorites / blacklist: same three-way rule as saveCache, no write.
+      var disk = loadCache();
+      if (disk.fav && disk.black) {
+        var base = lastWrittenCache;
+        var untouched = !!base && sameStrList(disk.fav, base.fav)
+                     && sameStrList(disk.black, base.black)
+                     && !!disk.dirty === !!base.dirty;
+        if (!untouched) {
+          var fav   = mergeSets(base ? base.fav   || [] : [], state.fav,   disk.fav);
+          var black = mergeSets(base ? base.black || [] : [], state.black, disk.black);
+          if (!setEqualsList(state.fav,   fav))   { state.fav   = fav;   changed = true; }
+          if (!setEqualsList(state.black, black)) { state.black = black; changed = true; }
+          lastWrittenCache = {fav: disk.fav.slice(), black: disk.black.slice(),
+                              dirty: !!disk.dirty};
+        }
+      }
+      if (mergeDiskBookmarksIntoMemory()) changed = true;
+      var adopted = adoptDiskSyncBase();   // repaints by itself when it applies
+      if (changed && !adopted) refreshAllMarkers();
+      updateNeedsSyncIndicator();
+    }
+    window.addEventListener('storage', function(e) {
+      var k = e ? e.key : null;   // null key = localStorage.clear()
+      if (k !== null && WATCHED_KEYS.indexOf(k) < 0) return;
+      clearTimeout(reconcileTimer);
+      reconcileTimer = setTimeout(reconcile, 300);
+    });
+    // bfcache restore (M-125): JS memory comes back exactly as it was, but
+    // another tab may have written localStorage meanwhile.
+    window.addEventListener('pageshow', function(e) {
+      if (!e || !e.persisted) return;
+      reconcile();
+      pull();
+    });
+    // Back online (M-147): one jittered, de-duplicated pull instead of
+    // waiting out the rest of the poll interval.
+    var onlineTimer = null;
+    window.addEventListener('online', function() {
+      if (onlineTimer) return;
+      onlineTimer = setTimeout(function() {
+        onlineTimer = null;
+        pull();
+      }, 300 + Math.floor(Math.random() * 1200));
     });
 
     function toggleFav(url) {
@@ -4393,6 +5900,10 @@
     function syncFavButton(btn, d) {
       var label = btn.querySelector('.ff-fav-label');
       if (!label) return;
+      // M-089: the on/off state was carried by background colour alone —
+      // invisible to a screen reader and to anyone who can't tell #fef3c7
+      // from #f9fafb (WCAG 1.4.1).
+      btn.setAttribute('aria-pressed', isFav(d) ? 'true' : 'false');
       if (isFav(d)) {
         label.textContent = '⭐ 已收藏';
         btn.style.background = '#fef3c7';
@@ -4406,6 +5917,7 @@
     function syncBlackButton(btn, d) {
       var label = btn.querySelector('.ff-black-label');
       if (!label) return;
+      btn.setAttribute('aria-pressed', isBlack(d) ? 'true' : 'false');  // M-089
       if (isBlack(d)) {
         label.textContent = '✕ 已弃用';
         btn.style.background = '#fee2e2';
@@ -4600,6 +6112,51 @@
     // in this initMap closure) can toggle it.
     bsBanner = document.getElementById('bs-banner');
 
+    // M-014: every path that opens a card centres the restaurant in the
+    // *geometric* middle of the viewport (flyTo/setView), and then the card
+    // slides up over the bottom 75-85% of the screen — so the marker the
+    // card describes is usually hidden behind the card. Measured on real
+    // card heights this happened in 4 of 4 viewports, desktop 1440x900
+    // included. Fix: after the sheet has its final height, pan the marker
+    // into the middle of the strip of map that is still visible above it.
+    //
+    // Deliberately measures offsetHeight, not getBoundingClientRect().top:
+    // the sheet is bottom-anchored and slides in with a transform, so its
+    // laid-out height is already final while the transition is still
+    // running — no need to wait for transitionend.
+    //
+    // Note: panBy fires moveend, which (as before) refreshes the persisted
+    // tabelog.mapView and schedules a marker recompute. That is the
+    // existing behaviour of every other programmatic pan on this page.
+    var bsPanTimer = 0;
+    var bsClearTimer = 0;   // M-141: post-close DOM teardown
+    function keepSelectionVisible() {
+      var d = bsActive;
+      if (!d || typeof d.lat !== 'number' || typeof d.lon !== 'number') return;
+      var container = map.getContainer();
+      if (!container) return;
+      var mrect = container.getBoundingClientRect();
+      var sheetTop = window.innerHeight - bsSheet.offsetHeight;
+      var band = sheetTop - mrect.top;          // visible map above the card
+      // Under ~140px there is no room worth panning into — moving the map
+      // would only trade one hidden marker for a cramped sliver.
+      if (band < 140) return;
+      var target = band / 2;
+      var dy = map.latLngToContainerPoint([d.lat, d.lon]).y - target;
+      if (Math.abs(dy) < 24) return;            // already where we want it
+      var reduce = window.matchMedia
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      map.panBy([0, dy], {animate: !reduce, duration: 0.3});
+    }
+    // Coalesces the calls from openSheet + paint() (which land in the same
+    // tick on the fast path) into one pan, and lets the async
+    // popups.json paint issue a second, corrective one once the card grows
+    // from the placeholder to its real height.
+    function scheduleKeepSelectionVisible() {
+      clearTimeout(bsPanTimer);
+      bsPanTimer = setTimeout(keepSelectionVisible, 60);
+    }
+
     function openSheet(d, opts) {
       var peek = !!(opts && opts.peek);
       setHighlight(d);
@@ -4641,6 +6198,9 @@
         if (favBtn)   syncFavButton(favBtn, d);
         if (blackBtn) syncBlackButton(blackBtn, d);
         bsContent.scrollTop = 0;
+        // M-014: the card's height is what decides how much map is left, so
+        // re-check after every repaint (placeholder -> real card grows it).
+        scheduleKeepSelectionVisible();
       }
       if (popupsMap) {
         paint(renderPopup(d, popupsMap[d.detail_url]));
@@ -4659,7 +6219,7 @@
         loadPopups().then(function(map) { paint(renderPopup(d, map[d.detail_url])); })
                     .catch(function() {
                       paint('<div class="rst-card"><div class="rst-title"><span lang="ja">' + name +
-                            '</span></div><div style="margin-top:10px;color:#dc2626;">加载失败,请检查网络</div></div>');
+                            '</span></div><div style="margin-top:10px;color:#dc2626;">加载失败，请检查网络</div></div>');
                     });
       }
       // Force reflow so the transition runs even on rapid reopen.
@@ -4667,6 +6227,7 @@
       bsSheet.classList.add('bs-open');
       bsBackdrop.classList.add('bs-open');
       bsSheet.setAttribute('aria-hidden', 'false');
+      scheduleKeepSelectionVisible();   // M-014
     }
     function closeSheet() {
       bsSheet.classList.remove('bs-open');
@@ -4697,6 +6258,17 @@
       }
       var ffbtn = document.getElementById('ff-fab');
       if (ffbtn) ffbtn.hidden = false;
+      // M-014: nothing to pan into view any more.
+      clearTimeout(bsPanTimer);
+      // M-141: the sheet only slides out of view — its DOM stayed, so a
+      // photo whose request never resolved kept its shimmer running (and
+      // the whole card kept holding memory) after the card was dismissed.
+      // Drop the content once the slide-out has finished; the bsActive
+      // guard makes a re-open inside those 300ms a no-op.
+      clearTimeout(bsClearTimer);
+      bsClearTimer = setTimeout(function() {
+        if (!bsActive) bsContent.innerHTML = '';
+      }, 300);
     }
     // Close the bottom sheet when the card's × is tapped — mirrors the
     // search box's clear control and the bs-grip swipe-to-dismiss. Delegated
@@ -4707,6 +6279,11 @@
     function expandSheet() {
       if (bsSheet.classList.contains('bs-peek')) {
         bsSheet.classList.remove('bs-peek');
+        // M-014: peek -> full is the single biggest height jump the card
+        // makes, so this is where the marker most often disappears behind
+        // it. Removing .bs-peek re-shows the photo grid; there is no height
+        // transition to wait for, but rAF lets layout settle first.
+        requestAnimationFrame(scheduleKeepSelectionVisible);
       }
     }
     // Backdrop is inert (no pointer events) — this listener is dead in
@@ -5061,6 +6638,7 @@
       if (addLayers.length) cluster.addLayers(addLayers);
 
       setCountText('ff-count', desired.size);
+      updateEmptyState(desired.size);   // M-028
       // Filter/viewport changed — re-evaluate whether the active highlight
       // should be the cluster marker (visible) or the gray ghost (hidden).
       syncHighlight();
@@ -5099,12 +6677,31 @@
         document.querySelectorAll('input[name=ff-genre]:checked').forEach(function(c){ genres.push(c.value); });
         var awards = [];
         document.querySelectorAll('input[name=ff-award]:checked').forEach(function(c){ awards.push(c.value); });
+        // M-016: price/cuisine buckets default to *checked*, so persisting
+        // the checked list makes the saved state a closed world — the day
+        // map_data.py grows a bucket, every returning user has it silently
+        // unchecked and those restaurants vanish from their map for good
+        // (apply() writes the truncated list straight back). Persist the
+        // complement instead: "everything except what I turned off" stays
+        // correct however the bucket list grows. The legacy checked lists
+        // are still written so an older build — or an older tab still open
+        // on another screen — reads exactly what it always did.
+        // Awards are NOT in this list on purpose: they default to
+        // *unchecked* ("no award constraint"), so a checked list is already
+        // the forward-compatible shape for them — a new award slug should
+        // arrive unchecked, and it does.
+        var uncheckedPrices = [];
+        document.querySelectorAll('input[name=ff-price]:not(:checked)').forEach(function(c){ uncheckedPrices.push(c.value); });
+        var uncheckedGenres = [];
+        document.querySelectorAll('input[name=ff-genre]:not(:checked)').forEach(function(c){ uncheckedGenres.push(c.value); });
         var bEl = document.getElementById('ff-bookable-only');
         var gcEl = document.getElementById('ff-gcal-only');
         localStorage.setItem(STATE_KEY_FILTER, JSON.stringify({
           rating: parseFloat(ratingSlider.value),
           prices: prices,
           genres: genres,
+          uncheckedPrices: uncheckedPrices,
+          uncheckedGenres: uncheckedGenres,
           awards: awards,
           bookableOnly: bEl ? bEl.checked : false,
           onlyFav: onlyFavEl.checked,
@@ -5120,12 +6717,28 @@
       catch (e) { return; }
       if (!s) return;
       if (typeof s.rating === 'number') ratingSlider.value = String(s.rating);
-      if (Array.isArray(s.prices)) {
+      // M-016: prefer the "unchecked" complement written by this build —
+      // start from all-checked (the default) and only untick what the user
+      // actually turned off, so a bucket that did not exist when the state
+      // was saved arrives checked instead of silently hiding its
+      // restaurants. Fall back to the legacy checked lists for state
+      // written before this build. Unknown values in either list are
+      // ignored, and a missing/!Array field just leaves the defaults —
+      // nothing here throws on a shape it doesn't recognise.
+      if (Array.isArray(s.uncheckedPrices)) {
+        var upSet = {};
+        s.uncheckedPrices.forEach(function(v){ upSet[v] = 1; });
+        document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = !upSet[c.value]; });
+      } else if (Array.isArray(s.prices)) {
         var pSet = {};
         s.prices.forEach(function(v){ pSet[v] = 1; });
         document.querySelectorAll('input[name=ff-price]').forEach(function(c){ c.checked = !!pSet[c.value]; });
       }
-      if (Array.isArray(s.genres)) {
+      if (Array.isArray(s.uncheckedGenres)) {
+        var ugSet = {};
+        s.uncheckedGenres.forEach(function(v){ ugSet[v] = 1; });
+        document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = !ugSet[c.value]; });
+      } else if (Array.isArray(s.genres)) {
         var gSet = {};
         s.genres.forEach(function(v){ gSet[v] = 1; });
         document.querySelectorAll('input[name=ff-genre]').forEach(function(c){ c.checked = !!gSet[c.value]; });
@@ -5305,20 +6918,21 @@
     function onGoogleCredential(resp) {
       if (!resp || !resp.credential) {
         cfgMsg.style.color = '#dc2626';
-        cfgMsg.textContent = '登录被取消';
+        cfgMsg.textContent = localizeText('登录被取消');  // M-104
         return;
       }
       cfgMsg.style.color = '';
-      cfgMsg.textContent = '登录中…';
+      cfgMsg.textContent = localizeText('登录中') + '…';  // M-104
       exchangeForSession(resp.credential, function(ok, profile) {
         if (!ok || !profile) {
           cfgMsg.style.color = '#dc2626';
-          cfgMsg.textContent = '登录处理失败';
+          cfgMsg.textContent = localizeText('登录处理失败');  // M-104
           return;
         }
         saveSessionProfile(profile);
         cfgMsg.style.color = '#16a34a';
-        cfgMsg.textContent = '✓ 登录成功，重新加载…';
+        cfgMsg.textContent = '✓ ' + localizeText('登录成功') + l10nComma()
+                           + localizeText('重新加载') + '…';  // M-104
         setTimeout(function() { location.reload(); }, 600);
       });
     }
@@ -5498,7 +7112,8 @@
       if (!window.google || !google.accounts || !google.accounts.id) {
         if (attempt > 30) {
           cfgMsg.style.color = '#dc2626';
-          cfgMsg.textContent = 'Google 登录脚本未加载（检查网络）';
+          cfgMsg.textContent = 'Google ' + localizeText('登录脚本未加载')
+                             + l10nParen(localizeText('检查网络'));  // M-104
           return;
         }
         clearTimeout(gisRetryTimer);
@@ -5570,7 +7185,7 @@
     // and lazily renders Google's sign-in button into ssm-signin-btn the
     // first time the signed-out pane shows (renderSignInButton is internally
     // guarded against double-renders + retries while the GIS script loads).
-    var DEFAULT_AVATAR = 'img/default-avatar.png';
+    var DEFAULT_AVATAR = 'img/default-avatar-v2.png';
     function refreshAuthUI() {
       var a = configured();
       if (a) {
@@ -5754,7 +7369,22 @@
       reader.readAsText(file);
     });
 
+    // M-042 / M-133: the import path walks arbitrary user-supplied JSON. An
+    // exception halfway through used to escape into the click handler,
+    // leaving the modal open, the layers half-rebuilt and nothing on screen
+    // to explain it. Nothing here is atomic, but the damage now stops at a
+    // message the user can act on.
     function doImport() {
+      try {
+        doImportInner();
+      } catch (e) {
+        console.error('[tabelog] import failed:', e);
+        try {
+          impError.textContent = localizeText('导入失败，请检查文件内容');
+        } catch (_) {}
+      }
+    }
+    function doImportInner() {
       if (!pendingImport) return;
       if (!impFavCb.checked && !impBlackCb.checked && !impBmCb.checked) {
         impError.textContent = localizeText('请至少选择一项');
@@ -5778,17 +7408,31 @@
         if (db) changed = true;
       }
       if (impBmCb.checked) {
-        var existing = {};
-        bookmarks.forEach(function(bm) { if (bm && bm.id) existing[bm.id] = true; });
-        var added = 0;
+        // M-133: a plain {} inherits Object.prototype, so an entry whose id
+        // was 'constructor' / 'toString' / '__proto__' read back truthy and
+        // was silently skipped as a duplicate. A Set has no such keys.
+        var existing = new Set();
+        bookmarks.forEach(function(bm) { if (bm && bm.id) existing.add(bm.id); });
+        var added = 0, rejected = 0;
         pendingImport.bookmarks.forEach(function(bm) {
-          if (!bm.id || existing[bm.id]) return;   // dedup by id; skip id-less junk
-          existing[bm.id] = true;
+          if (!bm.id || existing.has(bm.id)) return;   // dedup; skip id-less junk
+          // M-133: coordinates from a hand-edited or foreign export were
+          // never checked, so junk pins rode straight up to the cloud.
+          // "hidden" tombstones legitimately carry no coordinates at all.
+          if (bm.category !== 'hidden') {
+            if (!(Number.isFinite(bm.lat) && Math.abs(bm.lat) <= 90 &&
+                  Number.isFinite(bm.lon) && Math.abs(bm.lon) <= 180)) {
+              rejected++;
+              return;
+            }
+          }
+          existing.add(bm.id);
           sanitizeBookmarkEmoji(bm);
           bookmarks.push(bm);
           added++;
         });
         report.push('书签 +' + added);
+        if (rejected) report.push('已跳过 ' + rejected);
         if (added) {
           changed = true;
           // Full rebuild of both bookmark layers from the merged array —
@@ -5943,7 +7587,15 @@
     // first tap (seconds of 加载中… on cold 4G). Idle-scheduled so it
     // never competes with the boot critical path; skipped for users who
     // asked to save data.
-    if (!(navigator.connection && navigator.connection.saveData)) {
+    // M-063: 1.3MB transferred (6.4MB decompressed) is a fine trade on a
+    // fast link and a bad one on 3g in a Japanese basement, so the warmup
+    // now also skips when the connection reports anything below '4g'.
+    // Browsers without the Network Information API (Safari/iOS) report
+    // nothing at all — treated as fast, since "unknown" there is usually
+    // Wi-Fi and the on-tap fallback still works either way.
+    var netInfo = navigator.connection || null;
+    var netFast = !netInfo || !netInfo.effectiveType || netInfo.effectiveType === '4g';
+    if (!(netInfo && netInfo.saveData) && netFast) {
       var warmPopups = function() { loadPopups(); };
       if ('requestIdleCallback' in window) {
         requestIdleCallback(warmPopups, {timeout: 8000});
@@ -5995,21 +7647,57 @@
       }
     } catch (_) {}
   }
+  // M-075: a hung request used to sit on 加载中… forever, because fetch has
+  // no timeout of its own. 9s is past the p99 for this 3MB payload on 4G
+  // and well short of the browser's own ~2min give-up.
+  var BOOT_TIMEOUT_MS = 9000;
+  var bootPending = false;
   function boot() {
     function setTotals(text) {
       var nodes = document.querySelectorAll('.ff-total');
       for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
     }
+    if (bootPending) return;          // double-tap on 重试
+    bootPending = true;
+    hideBootFailure();
     setTotals(localizeText('加载中…'));
-    fetch('data/restaurants.json?v=04ae94e0d1', {cache: 'force-cache'})
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timedOut = false;
+    var timer = setTimeout(function() {
+      timedOut = true;
+      if (ctrl) ctrl.abort();
+    }, BOOT_TIMEOUT_MS);
+    fetch('data/restaurants.json?v=04ae94e0d1',
+          {cache: 'force-cache', signal: ctrl && ctrl.signal})
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
-      .then(function(data) { initMap(data); })
+      .then(function(data) {
+        clearTimeout(timer);
+        bootPending = false;
+        // M-054: an exception out of initMap is an initialisation bug, not
+        // a network failure — saying "check your network" about it (and
+        // offering a retry that re-downloads 3MB to hit the same bug) sent
+        // people chasing the wrong problem.
+        try {
+          initMap(data);
+        } catch (e) {
+          console.error('[tabelog] map initialisation failed:', e);
+          setTotals(localizeText('初始化失败'));
+          showBootFailure('deps', function() { location.reload(); });
+        }
+      })
       .catch(function(e) {
-        console.error('[tabelog] restaurants.json load failed:', e);
+        clearTimeout(timer);
+        bootPending = false;
+        console.error('[tabelog] restaurants.json load failed' +
+                      (timedOut ? ' (timeout)' : '') + ':', e);
         setTotals(localizeText('加载失败'));
+        // M-075 / M-168: visible, announced, and retryable in place — the
+        // old handler wrote "加载失败" into a counter inside a drawer that
+        // is collapsed by default.
+        showBootFailure('data', boot);
       });
   }
   if (document.readyState !== 'loading') boot();
@@ -6017,14 +7705,14 @@
 })();
 </script>
     
-            <div class="folium-map" id="map_e16962fa0ae1d5ca1cbb2743eb5ba560" ></div>
+            <div class="folium-map" id="map_4155b3266603a105321692f024fb6ce6" ></div>
         
 </body>
 <script>
     
     
-            var map_e16962fa0ae1d5ca1cbb2743eb5ba560 = L.map(
-                "map_e16962fa0ae1d5ca1cbb2743eb5ba560",
+            var map_4155b3266603a105321692f024fb6ce6 = L.map(
+                "map_4155b3266603a105321692f024fb6ce6",
                 {
                     center: [36.2048, 138.2529],
                     crs: L.CRS.EPSG3857,
@@ -6041,7 +7729,7 @@
 
         
     
-            var tile_layer_5438dcddbf43f54280881179c8ca2328 = L.tileLayer(
+            var tile_layer_523aa9254bf7511218051d0a5859a147 = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=cb1_2x1u_1_c4779020cbbb3d72f50dc858",
                 {
   "minZoom": 0,
@@ -6060,16 +7748,16 @@
             );
         
     
-            tile_layer_5438dcddbf43f54280881179c8ca2328.addTo(map_e16962fa0ae1d5ca1cbb2743eb5ba560);
+            tile_layer_523aa9254bf7511218051d0a5859a147.addTo(map_4155b3266603a105321692f024fb6ce6);
         
     
-            var marker_cluster_7b2302ac6f100e12fecaed2b05c2b04b = L.markerClusterGroup(
+            var marker_cluster_7c2c6c86d4fdc2ebc912c3ff9a2a0e97 = L.markerClusterGroup(
                 {
 }
             );
         
     
-            marker_cluster_7b2302ac6f100e12fecaed2b05c2b04b.addTo(map_e16962fa0ae1d5ca1cbb2743eb5ba560);
+            marker_cluster_7c2c6c86d4fdc2ebc912c3ff9a2a0e97.addTo(map_4155b3266603a105321692f024fb6ce6);
         
 </script>
 </html>

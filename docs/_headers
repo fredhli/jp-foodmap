@@ -1,9 +1,15 @@
 # Cloudflare Pages headers config.
-# /emoji/* PNGs are content-addressed (hex codepoint filenames) and rebuilt
+# /emoji/*.png are content-addressed (hex codepoint filenames) and rebuilt
 # only when the source emoji changes, so the URL changing implies the bytes
 # changing. Safe to cache forever at the browser.
-/emoji/*
+# M-150: scoped to *.png on purpose — the old /emoji/* also matched
+# _manifest.json, whose name is fixed and whose contents change on every
+# build_emoji_cache.py run. Nothing requests it at runtime today (it is
+# inlined at build time), but "immutable" on a mutable file is a trap.
+/emoji/*.png
   Cache-Control: public, max-age=31536000, immutable
+/emoji/_manifest.json
+  Cache-Control: public, max-age=300, must-revalidate
 
 # Service worker must never be stale or rollouts get stuck on old code.
 /sw.js
@@ -21,22 +27,35 @@
 /apple-touch-icon-japan-emoji-v2.png
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
-# Big payloads (restaurants.json, popups-*.json). The SW busts its own
-# cache by VERSION on each deploy, so the HTTP layer only needs a short
-# freshness window with a long SWR tail. Returning users hit disk before
-# the SW even activates.
+# M-068: UI chrome images (avatar placeholder, the Google Maps glyph).
+# Content changes ship under a new filename (-v2), so a week of browser
+# cache with a month of SWR behind it is safe.
+/img/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+
+# Big payloads (restaurants.json, popups-*.json).
+# M-069: every one of these is requested as <path>?v=<content-hash>, so the
+# URL *is* the version — max-age=300 bought nothing but a revalidation
+# round-trip on the three largest requests of a cold start. Immutable now.
+# The SW's activate GC drops superseded ?v= entries, so nothing piles up.
+# NOTE: Cache-Control alone does not make the Cloudflare edge cache these
+# (br-compressed responses are DYNAMIC on this zone) — a Cache Rule in the
+# dashboard is still required. See worker/DEPLOY-PENDING.md.
 /data/*
-  Cache-Control: public, max-age=300, stale-while-revalidate=86400
+  Cache-Control: public, max-age=31536000, immutable
 
 # transit-layer.js ships with each redeploy but isn't version-stamped,
 # so keep it short-cached + revalidated like the data payloads.
 /transit-layer.js
   Cache-Control: public, max-age=3600, stale-while-revalidate=86400
 
-# The HTML shell must be revalidated each visit so the SW version stamp
-# and any rolled-out template tweak land immediately. Cloudflare edge can
-# still cache it briefly; the must-revalidate keeps the browser honest.
+# M-059: max-age=0 + must-revalidate was meant to cost a ~200-byte 304, but
+# Pages sends neither ETag nor Last-Modified for the root document, so every
+# single visit re-downloaded the whole 129 KB shell. A 60-second freshness
+# window with a day of stale-while-revalidate keeps rollouts effectively
+# immediate (sw.js is still no-cache and checks for updates on every load)
+# while making a same-minute reload free.
 /
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: public, max-age=60, stale-while-revalidate=86400
 /index.html
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: public, max-age=60, stale-while-revalidate=86400

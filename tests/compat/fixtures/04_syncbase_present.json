@@ -1,0 +1,7 @@
+{
+  "__note__": "tabelog.syncBase as written by the 2026-07-28 sync-versioning release: the common ancestor for the three-way merge that runs when a PUT comes back 409. Boot must not clear it — without the base, a conflict degrades to last-writer-wins and one device's additions are lost. Paired here with a matching state cache so it looks like a real signed-in-then-signed-out device.",
+  "localStorage": {
+    "tabelog.syncBase": "{\"v\":7,\"w\":\"abc123\",\"sub\":\"1234567890\",\"favorites\":[\"https://tabelog.com/tottori/A3101/A310101/31000300/\"],\"blacklist\":[],\"bookmarks\":[]}",
+    "omakase_state_cache_v2": "{\"fav\":[\"https://tabelog.com/tottori/A3101/A310101/31000300/\"],\"black\":[],\"dirty\":false}"
+  }
+}

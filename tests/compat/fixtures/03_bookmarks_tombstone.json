@@ -1,0 +1,7 @@
+{
+  "__note__": "Pre-2.0 tabelog.bookmarks holding a hide-tombstone for a built-in landmark ({id:'fb-*', category:'hidden'}) plus one ordinary personal pin. The tombstone shape has ridden the same cloud blob since built-in hiding shipped; the built-in it names must still not appear on the map.",
+  "localStorage": {
+    "tabelog.showAttractions": "1",
+    "tabelog.bookmarks": "[{\"id\":\"fb-tokyo-tower\",\"category\":\"hidden\"},{\"id\":\"bm-legacy-1\",\"name\":\"老书签\",\"emoji\":\"📍\",\"lat\":35.6812,\"lon\":139.7671,\"category\":\"bookmark\"}]"
+  }
+}

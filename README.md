@@ -29,7 +29,9 @@ open docs/index.html
 ```
 
 The build pulls geocodes via GSI AddressSearch (cached locally in
-`data/cache/`) and embeds the payload directly into `docs/index.html`.
+`data/cache/`), writes the page to `docs/index.html` and the per-marker
+payload to the sidecar `docs/data/restaurants.json` (fetched at runtime, so
+it caches separately from the HTML).
 
 `data/` is mostly gitignored — only `data/favorites_builtin.json` and
 `data/i18n/*.json` are committed (build-time inputs).

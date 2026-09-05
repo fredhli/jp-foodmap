@@ -32,6 +32,7 @@ import csv
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
@@ -43,7 +44,13 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from deep_translator import GoogleTranslator
 from playwright.async_api import async_playwright
 from tabelog.browser import get_or_spawn_chrome
-from tabelog.paths import INTERMEDIATE_DIR, TABELOG_CSV, TABELOG_DIR
+from tabelog.paths import (
+    INTERMEDIATE_DIR,
+    SCRAPE_FAILED_LEDGER,
+    TABELOG_CSV,
+    TABELOG_DIR,
+    atomic_write_csv,
+)
 
 BASE_TEMPLATE = "https://tabelog.com/{region}/rstLst/{page}/?Srt=D&SrtT=rt&sort_mode=1"
 LIST_PAGE_DELAY_S = 2.0
@@ -65,7 +72,31 @@ FIELDS = [
     "detail_url", "source_page",
     "lat", "lon",
     "photo1_url", "photo2_url", "photo3_url",
+    # M-096: per-row scrape timestamp (UTC, ISO-8601). Rows written before
+    # this column existed keep an empty value — append_and_dedupe already
+    # unions fieldnames, so adding it is a no-op for the existing corpus.
+    # map.py prints age quantiles over the rows that do carry one.
+    "scraped_at",
 ]
+
+# M-019: columns whose old value must survive a re-scrape that came back
+# empty. lat/lon are never produced by phase 1 at all (M-172); photos and the
+# translated policy come from phase 2 / the translate pass and go blank on any
+# detail-page failure. Everything NOT listed here (rating, awards, price, ...)
+# is overwritten by the new value even when that value is empty — otherwise an
+# award that lapsed could never be cleared.
+PRESERVE_IF_EMPTY = (
+    "lat", "lon",
+    "photo1_url", "photo2_url", "photo3_url",
+    "reservation_policy_chinese",
+)
+
+# M-019: a phase-2 failure (HTTP error, or a 200 whose '住所' row moved and the
+# selector silently returned null) leaves address empty. Merging such a row
+# would drop the restaurant out of restaurants.json for good, so the row is
+# rejected. If more than this share of the scraped batch is address-less, the
+# scrape itself is broken (Tabelog redesign) and the master CSV is not touched.
+MAX_EMPTY_ADDRESS_PCT = 5.0
 
 CARDS_JS = r"""
 () => {
@@ -311,6 +342,7 @@ async def scrape_list_page(session: Session, region: str, page_num: int) -> tupl
             "seat_count": "", "address": "", "reservation_policy": "",
             "reservation_policy_chinese": "", "tabelog_bookable": "",
             "detail_url": c["detailUrl"], "source_page": page_num,
+            "scraped_at": _now_iso(),  # M-096
         })
     return rows, raw.get("total")
 
@@ -474,22 +506,109 @@ async def translate_reservation_policy(rows: list[dict], checkpoint: Path) -> No
 
 
 def write_intermediate(rows: list[dict], path: Path) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, "") for k in FIELDS})
+    # M-020: atomic — a Ctrl-C during a checkpoint used to leave a truncated
+    # intermediate CSV, which the resume path then read as "fewer rows".
+    atomic_write_csv(
+        path,
+        [{k: r.get(k, "") for k in FIELDS} for r in rows],
+        FIELDS,
+    )
 
 
-def append_and_dedupe(new_rows: list[dict], csv_path: Path) -> None:
-    """Append new_rows to csv_path then dedupe by detail_url, keep-last.
+def _now_iso() -> str:
+    """UTC, second precision, ISO-8601 with a trailing Z (M-096)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _blank(value) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def merge_row(old: dict, new: dict, fieldnames: list[str]) -> dict:
+    """M-019 / M-172: keep-last, except for the PRESERVE_IF_EMPTY columns
+    where an empty new value falls back to the old one.
+
+    Deliberately NOT a blanket "fill every missing key from old": `awards`,
+    `rating`, `dinner_upper` etc. must be able to go back to empty when the
+    restaurant genuinely lost the award / delisted the price.
+    """
+    merged: dict = {}
+    for k in fieldnames:
+        nv = new.get(k, "")
+        nv = "" if nv is None else nv
+        if k in PRESERVE_IF_EMPTY and _blank(nv):
+            ov = old.get(k, "")
+            merged[k] = "" if ov is None else ov
+        else:
+            merged[k] = nv
+    return merged
+
+
+def record_failed_rows(rows: list[dict], reason: str,
+                       ledger_path: Path | None = None) -> None:
+    """M-019: append-only JSONL trail of rows the merge refused. Never raises
+    — a ledger problem must not abort a scrape that otherwise succeeded."""
+    if not rows:
+        return
+    # Resolved at call time (not as a default arg) so tests can redirect the
+    # ledger by patching the module constant.
+    ledger_path = ledger_path or SCRAPE_FAILED_LEDGER
+    try:
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = _now_iso()
+        with ledger_path.open("a", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps({
+                    "at": stamp,
+                    "reason": reason,
+                    "region": r.get("region", ""),
+                    "name": r.get("name", ""),
+                    "detail_url": r.get("detail_url", ""),
+                    "source_page": r.get("source_page", ""),
+                }, ensure_ascii=False) + "\n")
+        print(f"  recorded {len(rows)} rejected row(s) -> {ledger_path}")
+    except OSError as e:
+        print(f"  WARNING: could not write failed ledger {ledger_path}: {e}")
+
+
+def append_and_dedupe(new_rows: list[dict], csv_path: Path,
+                      max_empty_address_pct: float = MAX_EMPTY_ADDRESS_PCT) -> None:
+    """Append new_rows to csv_path then dedupe by detail_url, keep-last with
+    the M-019 guards:
+
+      1. a new row with an empty `address` is dropped entirely (the old row
+         survives) and logged to the failed ledger — an address-less row is
+         excluded from restaurants.json and would never self-heal;
+      2. per-column, an empty new value for lat/lon/photo*/policy_zh keeps the
+         old value (M-172), everything else is overwritten as before;
+      3. if more than `max_empty_address_pct` of the batch is address-less the
+         scrape itself is broken — the master CSV is left untouched and the
+         process exits non-zero.
 
     Existing CSV may have a different (older) column set; we widen the union
     of fieldnames so nothing gets dropped. New rows always carry FIELDS.
     """
+    n_new = len(new_rows)
+    empty_addr = [r for r in new_rows if _blank(r.get("address"))]
+    empty_pct = (100.0 * len(empty_addr) / n_new) if n_new else 0.0
+    if n_new and empty_pct > max_empty_address_pct:
+        # M-019: the "HTTP 200 but the selector broke" case. Silently merging
+        # here is how a Tabelog redesign wipes a whole region with exit code 0.
+        record_failed_rows(empty_addr, "batch_rejected_empty_address")
+        raise SystemExit(
+            f"\nREFUSING to write {csv_path}: {len(empty_addr)}/{n_new} scraped "
+            f"rows ({empty_pct:.1f}%) have an empty address, over the "
+            f"{max_empty_address_pct:g}% threshold. That normally means the "
+            f"detail-page selectors stopped matching (Tabelog redesign), not "
+            f"that the restaurants lost their addresses. The master CSV was "
+            f"NOT modified; the intermediate CSV is still on disk. Inspect "
+            f"DETAIL_JS in scrape_all.py, then re-run."
+        )
+
     existing: list[dict] = []
     existing_fields: list[str] = []
-    if csv_path.exists():
+    had_existing = csv_path.exists()
+    if had_existing:
         with csv_path.open(encoding="utf-8-sig", newline="") as f:
             r = csv.DictReader(f)
             existing_fields = list(r.fieldnames or [])
@@ -500,28 +619,59 @@ def append_and_dedupe(new_rows: list[dict], csv_path: Path) -> None:
         if k not in fieldnames:
             fieldnames.append(k)
 
-    combined = existing + [{k: ("" if r.get(k) is None else r.get(k, ""))
-                            for k in fieldnames} for r in new_rows]
-
-    seen: dict[str, dict] = {}
+    by_url: dict[str, dict] = {}
     order: list[str] = []
-    for row in combined:
+    for row in existing:
         url = row.get("detail_url") or ""
         if not url:
             url = f"__no_url__{len(order)}"
-        if url not in seen:
+        if url not in by_url:
             order.append(url)
-        seen[url] = row
+        by_url[url] = {k: ("" if row.get(k) is None else row.get(k, ""))
+                       for k in fieldnames}
 
-    deduped = [seen[u] for u in order]
+    n_updated = 0
+    n_added = 0
+    rejected: list[dict] = []
+    for row in new_rows:
+        url = row.get("detail_url") or ""
+        normalized = {k: ("" if row.get(k) is None else row.get(k, ""))
+                      for k in fieldnames}
+        if _blank(row.get("address")):
+            # Guard 1: never let a blank detail page erase a good row. When the
+            # URL is new there is nothing to protect, but the row would be
+            # invisible on the map anyway, so it is rejected either way.
+            rejected.append(row)
+            continue
+        if not url:
+            url = f"__no_url__{len(order)}"
+        if url in by_url:
+            by_url[url] = merge_row(by_url[url], normalized, fieldnames)
+            n_updated += 1
+        else:
+            order.append(url)
+            by_url[url] = normalized
+            n_added += 1
 
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        w.writeheader()
-        w.writerows(deduped)
+    deduped = [by_url[u] for u in order]
 
-    print(f"\nWrote {len(deduped)} rows ({len(combined) - len(deduped)} duplicates "
-          f"collapsed) -> {csv_path}")
+    # M-020: tmp + fsync + rename, with a one-generation .prev backup. The
+    # master CSV is gitignored; before this there was no undo path at all.
+    atomic_write_csv(csv_path, deduped, fieldnames, keep_prev=True)
+
+    print(f"\nWrote {len(deduped)} rows -> {csv_path} "
+          f"({n_added} new, {n_updated} updated in place, "
+          f"{len(rejected)} rejected)")
+    if had_existing:
+        print(f"  previous version kept at {csv_path.name}.prev")
+    if rejected:
+        print(f"  {len(rejected)} scraped row(s) had no address and were "
+              f"discarded (old rows kept):")
+        for r in rejected[:10]:
+            print(f"    - {r.get('name')!r} {r.get('detail_url')}")
+        if len(rejected) > 10:
+            print(f"    ... and {len(rejected) - 10} more")
+        record_failed_rows(rejected, "empty_address")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

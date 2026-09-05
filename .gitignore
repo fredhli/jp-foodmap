@@ -65,3 +65,19 @@ src/tabelog/scrape/transit_audit.py
 # referenced by the build.
 docs/transit/japan*.geojson
 docs/transit/okayama.geojson
+
+# Audit / implementation reports and screenshots (hundreds of MB) — kept
+# local, never part of the deployed site.
+audit_outputs/
+
+# WSL venv symlink + stray root-level screenshots
+.venv
+/*.jpg
+/*.png
+
+# The build-contract checker IS part of the release gate — un-ignore it
+# from the ad-hoc scripts/ rule above.
+!scripts/
+scripts/*
+!scripts/verify_build.py
+!scripts/verify_baseline.json

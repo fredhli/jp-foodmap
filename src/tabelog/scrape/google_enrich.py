@@ -77,7 +77,13 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import httpx
 import pykakasi
 
-from tabelog.paths import GOOGLE_PLACES_CACHE, GOOGLE_PLACES_CSV, TABELOG_CSV
+from tabelog.paths import (
+    GOOGLE_PLACES_CACHE,
+    GOOGLE_PLACES_CSV,
+    TABELOG_CSV,
+    atomic_write_csv,
+    atomic_write_json,
+)
 
 # --- API endpoints + field masks -------------------------------------------
 
@@ -549,26 +555,38 @@ def write_results(results: dict[str, dict]) -> None:
     order = {"accepted": 0, "review": 1, "unmatched": 2, "error": 3}
     rows = sorted(results.values(), key=lambda r: (
         r.get("region", ""), order.get(r.get("status", ""), 9), r.get("detail_url", "")))
-    with open(GOOGLE_PLACES_CSV, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, "") for k in FIELDNAMES})
+    # M-020: the ledger is the record of every paid Google call ever made —
+    # a truncated write here means re-spending real money. tmp + fsync + rename,
+    # and keep one .prev generation.
+    atomic_write_csv(
+        GOOGLE_PLACES_CSV,
+        [{k: r.get(k, "") for k in FIELDNAMES} for r in rows],
+        FIELDNAMES,
+        extrasaction="ignore",
+        keep_prev=True,
+    )
 
 
 def load_cache() -> dict:
     if GOOGLE_PLACES_CACHE.exists():
         try:
             return json.loads(GOOGLE_PLACES_CACHE.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return {}
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # M-020: falling back to {} here silently re-issues every Google
+            # Places call — that is billed money, not just time. Stop instead.
+            raise SystemExit(
+                f"{GOOGLE_PLACES_CACHE} is not valid JSON ({e}). Refusing to "
+                f"continue with an empty cache: that would re-pay for every "
+                f"Places lookup. Restore the file (a '.tmp' sibling may hold "
+                f"the interrupted write) or delete it deliberately."
+            )
     return {}
 
 
 def save_cache(cache: dict) -> None:
-    GOOGLE_PLACES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    GOOGLE_PLACES_CACHE.write_text(json.dumps(cache, ensure_ascii=False),
-                                   encoding="utf-8")
+    # M-020: 14 MB of raw Google responses, rewritten in place every
+    # checkpoint. Atomic now, so an interruption can't leave it unparseable.
+    atomic_write_json(GOOGLE_PLACES_CACHE, cache)
 
 
 def make_meta(row: dict) -> dict:
