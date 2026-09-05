@@ -76,8 +76,12 @@ audit_outputs/
 /*.png
 
 # The build-contract checker IS part of the release gate — un-ignore it
-# from the ad-hoc scripts/ rule above.
+# from the ad-hoc scripts/ rule above. fetch_vendor.py carries the sha256
+# pins for everything in docs/vendor/ — it is the only record of where those
+# bytes came from and the only way to re-fetch or upgrade them, so it ships
+# with them (M-006 / M-011).
 !scripts/
 scripts/*
 !scripts/verify_build.py
 !scripts/verify_baseline.json
+!scripts/fetch_vendor.py

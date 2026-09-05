@@ -41,7 +41,22 @@
 # NOTE: Cache-Control alone does not make the Cloudflare edge cache these
 # (br-compressed responses are DYNAMIC on this zone) — a Cache Rule in the
 # dashboard is still required. See worker/DEPLOY-PENDING.md.
+# M-131: the page reads these same-origin (relative URLs), so no site of
+# ours needs a cross-origin grant. Naming the apex explicitly instead of
+# leaving the door open means a third-party page can't hoover up the 3 MB
+# corpus from a visitor's browser. www.jpfoodmap.com does not resolve today,
+# so the apex is the whole story — recheck if a www or a second custom
+# domain is ever added (a *.pages.dev preview is unaffected: it fetches its
+# own origin, and same-origin requests skip the CORS check entirely).
 /data/*
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: https://jpfoodmap.com
+
+# M-006/M-011: self-hosted front-end dependencies (scripts/fetch_vendor.py).
+# The package version is part of the directory name and the page requests
+# them as <path>?v=<content-hash>, so an upgrade always changes the URL —
+# `immutable` here is honest in a way it would not be for a bare filename.
+/vendor/*
   Cache-Control: public, max-age=31536000, immutable
 
 # transit-layer.js ships with each redeploy but isn't version-stamped,
@@ -59,3 +74,45 @@
   Cache-Control: public, max-age=60, stale-while-revalidate=86400
 /index.html
   Cache-Control: public, max-age=60, stale-while-revalidate=86400
+
+# ===== M-131: security response headers =====
+# Applied to every response. Cloudflare Pages merges all matching rules, so
+# the Cache-Control rules above keep their values; only header names that
+# appear in exactly one rule are set here.
+#
+# HSTS: deliberately a ONE-DAY max-age and deliberately no `preload`.
+# Preloading is a one-way door — getting off the browser preload list takes
+# months — and a personal site with one custom domain has nothing to gain
+# from it. Raise the max-age later, in steps, once this has ridden along
+# for a few weeks without surprises. includeSubDomains covers
+# api. / assets.jpfoodmap.com, both already HTTPS-only behind Cloudflare.
+#
+# Permissions-Policy: the locate FAB is the only feature that needs a
+# powerful API. Camera and microphone are named explicitly so an injected
+# iframe can't ask for them either.
+#
+# CSP is Report-Only for now — two weeks of real traffic before enforcing.
+# Report-Only means violations print in the console and change nothing, so a
+# missed host degrades into a console message rather than a broken map.
+# Notes on the allowlist:
+#   * script-src no longer names a CDN: M-006/M-011 moved Leaflet,
+#     MarkerCluster, the locate plugin and emoji-picker-element into
+#     /vendor/ on this origin. accounts.google.com is the last third party,
+#     and it can't take an SRI hash (gsi/client is unversioned).
+#   * 'unsafe-inline' is unavoidable today: folium emits the map bootstrap
+#     inline and the whole app is one inlined <script>. Dropping it needs
+#     nonces, which needs the HTML to stop being a static file.
+#   * connect-src covers the sync API, the R2 transit tiles, Nominatim
+#     search, the unofficial Google translate endpoint, Wikidata lookups
+#     for bookmark names, and the basemap/emoji hosts the service worker
+#     re-fetches from inside its own worker context.
+#   * img-src data:/blob: are for the inline SVG favicon, the locate
+#     plugin's data-URI icons, and canvas-rendered marker bitmaps.
+#   * frame-src is the Google Sign-In button/iframe. No report-uri: there
+#     is nothing collecting reports, and the console is where this gets
+#     read.
+/*
+  Strict-Transport-Security: max-age=86400; includeSubDomains
+  X-Frame-Options: SAMEORIGIN
+  Permissions-Policy: geolocation=(self), camera=(), microphone=()
+  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' data: blob: https://emojicdn.elk.sh https://tblg.k-img.com https://*.basemaps.cartocdn.com https://*.googleusercontent.com https://*.gstatic.com https://accounts.google.com; font-src 'self' data:; connect-src 'self' https://api.jpfoodmap.com https://assets.jpfoodmap.com https://nominatim.openstreetmap.org https://translate.googleapis.com https://www.wikidata.org https://accounts.google.com https://*.basemaps.cartocdn.com https://emojicdn.elk.sh; frame-src https://accounts.google.com; worker-src 'self'; manifest-src 'self'

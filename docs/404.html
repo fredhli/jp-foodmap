@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>页面不存在 · Japan Foodmap</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🗾</text></svg>'>
+<!-- M-049: Cloudflare Pages answers an unknown path with 200 + the full
+     index.html shell. Two problems: /emoji/does-not-exist.png came back as a
+     200 text/html document with `immutable` on it (a poisoned cache entry
+     that never expires), and a mistyped URL silently booted the whole 600 KB
+     app instead of saying "not found". Pages serves this file with a real
+     404 status for any unmatched path once it exists.
+     Hand-written standalone page, like privacy.html — not a map.py build
+     output, and deliberately free of vendor/ or any other asset so it
+     renders from an empty cache with the network down. All three UI
+     languages are printed at once rather than switched at runtime: there is
+     no JS here, and nothing to key a language off on an unknown URL. -->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --card: #ffffff;
+    --ink: #1d1d1f;
+    --muted: #6b6b70;
+    --rule: #e3e3e0;
+    --link: #b23b2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a;
+      --card: #1f2024;
+      --ink: #ececef;
+      --muted: #a2a2a9;
+      --rule: #313238;
+      --link: #ff9a8b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 64px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-text-size-adjust: 100%;
+    display: flex;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+  }
+  main {
+    max-width: 460px;
+    width: 100%;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 28px 24px;
+    text-align: center;
+  }
+  .glyph { font-size: 40px; line-height: 1; margin-bottom: 10px; }
+  h1 { font-size: 20px; margin: 0 0 10px; }
+  p { margin: 0 0 6px; }
+  .alt { color: var(--muted); font-size: 14px; }
+  a.home {
+    display: inline-block;
+    margin-top: 20px;
+    padding: 9px 20px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    color: var(--link);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="glyph">🗾</div>
+  <h1>页面不存在</h1>
+  <p>这个地址在 Japan Foodmap 上没有对应的内容。</p>
+  <p class="alt">This page doesn’t exist on Japan Foodmap.</p>
+  <p class="alt">このページは存在しません。</p>
+  <a class="home" href="/">返回地图 · Back to the map</a>
+</main>
+</body>
+</html>

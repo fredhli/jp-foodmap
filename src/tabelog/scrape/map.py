@@ -90,7 +90,44 @@ from opencc import OpenCC
 # 後 or 后, etc.). The trade-off: we can't ship the full OpenCC engine
 # to the browser (~hundreds of KB), so we precompute every CJK run that
 # appears on the rendered page and ship the {simp:trad} lookup table.
-_S2T = OpenCC("s2t")
+#
+# M-102: s2t is glyph-only — it produced mainland vocabulary in Traditional
+# clothes (登錄 / 導出 / 設置 / 屏幕 / 搜索 / 數據) and picked the wrong
+# default for one-simplified-to-many-traditional chars (知牀國立公園,
+# 首裏城, 吉野裏遺址). s2twp adds the Taiwan phrase + vocabulary pass and
+# fixes all of those in one step.
+_S2T = OpenCC("s2twp")
+# s2twp still gets a handful wrong, in both directions. Applied as literal
+# replacements AFTER the conversion, so build_text_trad_map's "did this run
+# change?" test sees the final string — a run the fixups restore to its
+# input (御台場, 夫婦岩) drops out of the shipped map entirely instead of
+# being converted and then corrected at runtime.
+#   • proper nouns s2twp over-converts: 台/岩/林 inside Japanese place
+#     names must stay as written (栗林公園, not 慄林公園).
+#   • 型別 / 專案 are Taiwanese *software* jargon; on this page 類型 means
+#     "kind of pin" and 項目 is a Japanese-source string, so both are wrong.
+#   • 賬 is the mainland form; Taiwan writes 帳戶 / 帳號.
+_TRAD_FIXUPS: tuple[tuple[str, str], ...] = (
+    ("慄林公園", "栗林公園"),
+    ("夫婦巖", "夫婦岩"),
+    ("御臺場", "御台場"),
+    ("時計臺", "時計台"),
+    ("賬戶", "帳戶"),
+    ("賬號", "帳號"),
+    ("型別", "類型"),
+    ("專案", "項目"),
+)
+
+
+def to_trad(s: str) -> str:
+    """M-102: OpenCC s2twp + the hand-maintained fixup table. Every
+    Simplified -> Traditional conversion in this file goes through here;
+    calling _S2T.convert directly skips the corrections."""
+    out = _S2T.convert(s)
+    for wrong, right in _TRAD_FIXUPS:
+        if wrong in out:
+            out = out.replace(wrong, right)
+    return out
 # Matches a maximal contiguous run of CJK ideographs (BMP + Ext A + the
 # compatibility block). Excludes kana / punctuation / latin so the runs
 # we look up at build time match exactly what the JS regex finds at run
@@ -122,11 +159,12 @@ def _scan_cjk_runs(html: str) -> set[str]:
 
 def build_text_trad_map(html: str) -> dict[str, str]:
     """Scan the rendered page for every distinct CJK run, run each one
-    through full OpenCC s2t, and keep only the runs whose translation
-    differs from the source. Keys / values are unicode strings."""
+    through to_trad (OpenCC s2twp + fixups, M-102), and keep only the runs
+    whose translation differs from the source. Keys / values are unicode
+    strings."""
     out: dict[str, str] = {}
     for run in _scan_cjk_runs(html):
-        conv = _S2T.convert(run)
+        conv = to_trad(run)
         if conv != run:
             out[run] = conv
     return out
@@ -170,9 +208,9 @@ def trad_popup_array(arr: list) -> list:
     passed through unchanged."""
     a = list(arr)
     if len(a) > 6 and isinstance(a[6], str) and a[6]:
-        a[6] = _S2T.convert(a[6])
+        a[6] = to_trad(a[6])
     if len(a) > 8 and isinstance(a[8], str) and a[8]:
-        a[8] = _S2T.convert(a[8])
+        a[8] = to_trad(a[8])
     return a
 
 
@@ -206,7 +244,13 @@ def load_google_places() -> dict[str, dict]:
     """Map detail_url -> Google-calibrated fields, for status=='accepted'
     rows only. review / unmatched are not trusted for auto-replacement (see
     scrape/google_enrich.py). Missing file => empty map (no calibration, the
-    build falls back to GSI coords + the Tabelog address everywhere)."""
+    build falls back to GSI coords + the Tabelog address everywhere).
+
+    M-093: `biz_status` carries Google's businessStatus verbatim
+    (OPERATIONAL / CLOSED_TEMPORARILY / CLOSED_PERMANENTLY / "" when the
+    column is absent or the row predates it). The build turns it into the
+    optional `closed` flag on the payload row — closed restaurants keep
+    their marker, they just get labelled."""
     if not GOOGLE_PLACES_CSV.exists():
         return {}
     out: dict[str, dict] = {}
@@ -227,6 +271,7 @@ def load_google_places() -> dict[str, dict]:
                 "addr_ja": (r.get("g_address_ja") or "").strip(),
                 "addr_en": (r.get("g_address_en") or "").strip(),
                 "place_id": (r.get("place_id") or "").strip(),
+                "biz_status": (r.get("g_business_status") or "").strip(),  # M-093
             }
     return out
 
@@ -236,7 +281,7 @@ def load_google_places() -> dict[str, dict]:
 # other piece of static UI text) can't reorder words, fix
 # capitalisation, or swap fullwidth punctuation — fine for short
 # subtitle labels, bad for sentences. zh-TW is auto-derived from
-# zh-CN via OpenCC s2t at build time. The JS bundle gets the whole
+# zh-CN via to_trad (OpenCC s2twp, M-102) at build time. The JS bundle gets the whole
 # table inlined via the __HELP_COPY__ placeholder, and each
 # `.ff-help-section[data-help-for=...]` overrides its textContent
 # from this table on boot (bypassing the localizer).
@@ -266,7 +311,7 @@ HELP_COPY: dict[str, dict[str, str]] = {
 
 def build_help_copy_json() -> str:
     """Inflate the per-popover language map: take zh-CN as the canonical
-    source, derive zh-TW via OpenCC s2t (same engine the rest of the
+    source, derive zh-TW via to_trad (same engine the rest of the
     page uses), pass en / ja through untouched. Serialised compactly
     for inlining into the FILTER_JS_TEMPLATE bundle."""
     out: dict[str, dict[str, str]] = {}
@@ -274,7 +319,7 @@ def build_help_copy_json() -> str:
         out[key] = dict(langs)
         cn = langs.get("zh-CN")
         if cn and "zh-TW" not in langs:
-            out[key]["zh-TW"] = _S2T.convert(cn)
+            out[key]["zh-TW"] = to_trad(cn)
     return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -444,6 +489,43 @@ def admin_tokens_with_suffix(addr: str) -> list[str]:
         if not tok.endswith("郡"):
             out.append(tok[:-1])
     return out
+
+
+# BUG-07 / M-025: KNOWN_LOCS used to be built purely from the 都道府県/市/区/町/村
+# admin tokens _ADMIN_RE can peel off the front of an address. Every famous
+# Japanese *neighbourhood* (池袋, 六本木, 秋葉原 …) is a 丁目-level name that never
+# appears in that prefix, so "拉面 池袋" fell out of location mode, got glued
+# into the single name query "拉面池袋", and returned zero rows. These names are
+# unioned into KNOWN_LOCS (so the trailing token is recognised) and, for the
+# rows whose address actually contains one, appended to that row's loc_norm
+# (so the constraint can match). Multi-character only — a one-char stem like
+# 栄 would fire on far too many restaurant names.
+NEIGHBORHOOD_LOCS = [
+    # 東京
+    "池袋", "六本木", "秋葉原", "日本橋", "恵比寿", "浅草", "豊洲", "中目黒",
+    "麻布", "西麻布", "銀座", "新橋", "有楽町", "丸の内", "表参道", "原宿",
+    "代官山", "自由が丘", "神楽坂", "三軒茶屋", "下北沢", "吉祥寺", "二子玉川",
+    "赤坂", "青山", "神保町", "人形町", "築地", "月島", "門前仲町", "五反田",
+    "大井町", "蒲田", "上野", "御徒町", "錦糸町", "北千住", "神田", "門前",
+    "お台場", "汐留", "虎ノ門", "水道橋", "四谷", "荻窪", "高円寺",
+    # 大阪 / 京都 / 神戸
+    "難波", "梅田", "心斎橋", "京橋", "北新地", "天王寺", "祇園", "河原町",
+    "先斗町", "三宮", "元町", "北野",
+    # 名古屋 / 福岡 / 札幌 / 横浜
+    "大須", "中洲", "天神", "薄野", "すすきの", "桜木町", "関内", "みなとみらい",
+]
+_NEIGHBORHOOD_CANON = [c for c in (canon_str(t) for t in NEIGHBORHOOD_LOCS) if c]
+
+
+def neighborhood_tokens(addr: str) -> list[str]:
+    """Canonical neighbourhood stems that literally occur in `addr`. Feeds both
+    the KNOWN_LOCS whitelist and the per-row loc_norm suffix."""
+    if not addr:
+        return []
+    ac = canon_str(addr)
+    if not ac:
+        return []
+    return [t for t in _NEIGHBORHOOD_CANON if t in ac]
 
 
 GSI_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
@@ -660,6 +742,29 @@ def _cache_store_miss(cache: dict, addr: str) -> None:
     }
 
 
+# M-021: GSI already tells us how precise its answer is — properties.title
+# echoes the address level it actually matched, and we store it in the cache
+# as `display`. A title with no house / block number in it (either ASCII or
+# — much more common in GSI's output — full-width digits, e.g.
+# "大阪府大阪市北区西天満三丁目１１番４号" vs the bare "大阪府大阪市北区天神橋")
+# means the geocoder only resolved the 町 / 丁目 centroid, which is a median
+# 724 m from the real front door. Those rows get `approx: 1` so the card can
+# say so instead of implying a rooftop-accurate pin.
+# NOTE: the character class MUST include ０-９. Matching only [0-9] flags
+# almost every row as approximate.
+_APPROX_DIGIT_RE = re.compile(r"[0-9０-９]")
+
+
+def is_block_level(display: str) -> bool:
+    """M-021: True when a GSI `display` string carries no street number, i.e.
+    the coordinate is a 町 / 丁目 centroid. An empty / missing display means
+    "we don't know" — never approximate, because a false positive puts a
+    disclaimer on a perfectly precise pin."""
+    if not display:
+        return False
+    return _APPROX_DIGIT_RE.search(display) is None
+
+
 _FLOOR_RE = re.compile(r"\s*[BbＢ]?[\d０-９]{1,2}\s*(?:[FfＦ]|階).*$")
 _BUILDING_KW = ("ビル", "メゾン", "ハイツ", "マンション", "別邸", "アネックス")
 
@@ -853,17 +958,58 @@ _GENRE_TO_CAT = {tok: cat for cat, toks in GENRE_CATEGORIES.items() for tok in t
 _GENRE_SPLIT_RE = re.compile(r"[、,，]")
 
 
+# M-095: Tabelog genre strings are ordered by the restaurant's own listing,
+# and several of them lead with a container word that says nothing about the
+# food ("レストラン、フレンチ" is a French restaurant, not an 其他). These
+# tokens all live in the 其他 bucket, so taking them first threw away the
+# only informative token on the row. They're skipped on the first pass and
+# only accepted if nothing else matches.
+_GENERIC_TOKENS = frozenset(
+    {"その他", "レストラン", "ビュッフェ", "ファミレス", "ホテル", "売店"}
+)
+
+
+def genre_tokens(genre_str: str) -> list[str]:
+    """Split a Tabelog genre string into its trimmed tokens."""
+    if not genre_str:
+        return []
+    return [t.strip() for t in _GENRE_SPLIT_RE.split(genre_str) if t.strip()]
+
+
 def categorize_genre(genre_str: str) -> list[str]:
     """Single-tag: scan tokens left-to-right, return the first that maps to a
     known bucket. Falls through to '其他' if no token matches. Returns a list
-    (length 0 or 1) so downstream iteration keeps working."""
-    if not genre_str:
+    (length 0 or 1) so downstream iteration keeps working.
+
+    M-095: two passes — the first skips _GENERIC_TOKENS so a container word
+    can't outrank the real cuisine; the second allows them so a row whose
+    only mapped token IS generic still lands in 其他 rather than nowhere."""
+    toks = genre_tokens(genre_str)
+    if not toks:
         return []
-    for tok in (t.strip() for t in _GENRE_SPLIT_RE.split(genre_str) if t.strip()):
+    for tok in toks:
+        if tok in _GENERIC_TOKENS:
+            continue
+        cat = _GENRE_TO_CAT.get(tok)
+        if cat:
+            return [cat]
+    for tok in toks:
         cat = _GENRE_TO_CAT.get(tok)
         if cat:
             return [cat]
     return ["其他"]
+
+
+def genre_buckets_all(genre_str: str) -> set[str]:
+    """M-095: every bucket ANY token on the row maps to. Used only to decide
+    whether the row counts as non-Japanese cuisine — under the old
+    "first token wins" rule that verdict depended on Tabelog's listing order,
+    so 中華料理、ラーメン was hidden by the 隐藏非日本料理 toggle while
+    ラーメン、中華料理 was not. The per-row `categories` payload is still
+    single-tag; this only feeds the `foreign` flag."""
+    return {
+        _GENRE_TO_CAT[tok] for tok in genre_tokens(genre_str) if tok in _GENRE_TO_CAT
+    }
 
 
 # Filterable award tags — slug, label, emoji. Order = display order in the
@@ -1037,6 +1183,7 @@ def build_filter_panel_html(
     cat_counts: dict[str, int],
     award_counts: dict[str, int],
     gcal_count: int = 0,
+    foreign_count: int | None = None,  # M-095
 ) -> str:
     price_rows = "\n".join(
         f'      <label style="display:block;margin:1px 0;">'
@@ -1087,7 +1234,13 @@ def build_filter_panel_html(
     genre_rows = "\n".join(
         _genre_section(group, buckets) for group, buckets in MEAL_GROUPS.items()
     )
-    foreign_count = sum(cat_counts.get(c, 0) for c in DEFAULT_OFF_GENRES)
+    # M-095: this is the count the 隐藏非日本料理 checkbox actually hides, so
+    # it has to be the any-token verdict main() computes, not the sum of the
+    # foreign buckets in cat_counts — those only see the single winning tag,
+    # and a row tagged ラーメン、中華料理 is hidden without being counted in
+    # 饺子·中餐. Falls back to the old sum when the caller doesn't pass one.
+    if foreign_count is None:
+        foreign_count = sum(cat_counts.get(c, 0) for c in DEFAULT_OFF_GENRES)
     return f"""
 <style>
   /* Filter bottom-sheet — same visual treatment as the restaurant detail
@@ -1103,8 +1256,12 @@ def build_filter_panel_html(
   #ff-backdrop.ff-open {{ opacity: 1; pointer-events: auto; }}
   #ff-sheet {{
     position: fixed; left: 0; right: 0; bottom: 0;
+    /* M-152: single horizontal axis at every width — see #bs-sheet. */
+    margin-left: auto; margin-right: auto;
     z-index: 10002;
-    max-height: 75vh; max-height: 75dvh;
+    /* M-091: percentage cap plus an absolute floor for the map below. */
+    max-height: min(75vh, calc(100vh - 132px));
+    max-height: min(75dvh, calc(100dvh - 132px));
     background: #fff;
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
@@ -1116,15 +1273,15 @@ def build_filter_panel_html(
   }}
   #ff-sheet.ff-open {{ transform: translateY(0); }}
   @media (min-width: 700px) {{
-    #ff-sheet {{ left: 50%; transform: translate(-50%, 100%);
-                 width: min(560px, calc(100vw - 32px)); right: auto;
-                 max-height: 80vh; max-height: 80dvh;
+    #ff-sheet {{ width: min(560px, calc(100vw - 32px));
+                 max-height: min(80vh, calc(100vh - 132px));
+                 max-height: min(80dvh, calc(100dvh - 132px));
                  border-radius: 14px 14px 0 0; }}
-    #ff-sheet.ff-open {{ transform: translate(-50%, 0); }}
   }}
   @media (min-width: 1100px) {{
     #ff-sheet {{ width: min(640px, calc(100vw - 32px));
-                 max-height: 85vh; max-height: 85dvh; }}
+                 max-height: min(85vh, calc(100vh - 132px));
+                 max-height: min(85dvh, calc(100dvh - 132px)); }}
   }}
   #ff-grip {{
     position: relative;
@@ -1176,13 +1333,57 @@ def build_filter_panel_html(
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     line-height: 1;
   }}
-  #ff-fab:hover {{ background: #f9fafb;
-                   box-shadow: 0 4px 10px rgba(0,0,0,0.18); }}
+  /* M-160: every decorative :hover on this page is gated on a real pointer.
+     A touch tap leaves the hover state stuck on the button until the next
+     tap elsewhere, which on the FABs is indistinguishable from the blue
+     .active "layer is on" state. :active stays outside the gate (touch
+     needs press feedback) and so does :focus-visible. Keeping the rules
+     rather than deleting them is deliberate: a Fold in DeX, or any tablet
+     with a mouse, reports (hover: hover) and gets the affordance back. */
+  @media (hover: hover) and (pointer: fine) {{
+    #ff-fab:hover {{ background: #f9fafb;
+                     box-shadow: 0 4px 10px rgba(0,0,0,0.18); }}
+  }}
   #ff-fab[hidden] {{ display: none; }}
   #ff-fab .ff-fab-ic {{ display: inline-flex; align-items: center; }}
   #ff-fab .ff-fab-ic svg {{ display: block; }}
   #ff-fab .ff-fab-count {{ font-variant-numeric: tabular-nums; }}
   #ff-fab .ff-fab-count b {{ color: #2563eb; }}
+  /* M-022: the pill used to read "46 / 9807" where 46 was viewport-cropped
+     and 9807 was the whole corpus — two different questions joined by a
+     slash, which is why the same filter showed 46/46/14/13/0 depending only
+     on where the map happened to sit. Two labelled segments now: 命中 = the
+     full-dataset match count (viewport-independent), 视野内 = what is
+     actually on screen. The labels shrink away below 420px so the pill
+     never collides with the right-hand FAB stack. */
+  #ff-fab .ff-fab-lbl {{
+    font-size: 10px; font-weight: 600; color: #9ca3af;
+    margin-right: 3px; letter-spacing: 0.02em;
+  }}
+  #ff-fab .ff-fab-lbl.ff-fab-lbl2 {{ margin-left: 9px; }}
+  #ff-fab .ff-fab-dot {{ display: none; color: #d1d5db; margin: 0 5px; }}
+  #ff-fab .ff-inview {{ color: #6b7280; font-weight: 600; }}
+  #ff-fab.needs-sync .ff-fab-lbl, #ff-fab.needs-sync .ff-inview,
+  #ff-fab.needs-sync-pending .ff-fab-lbl,
+  #ff-fab.needs-sync-pending .ff-inview {{ color: #fff; opacity: 0.85; }}
+  @media (max-width: 420px) {{
+    #ff-fab .ff-fab-lbl {{ display: none; }}
+    #ff-fab .ff-fab-dot {{ display: inline; }}
+  }}
+  /* M-022: "已启用" chips under the sheet title. Only the hide-foreign one
+     for now — it is the single filter that is on by default and silently
+     removes ~1/6 of the corpus. */
+  #ff-active-chips {{ margin: 0 0 8px; }}
+  #ff-active-chips[hidden] {{ display: none; }}
+  .ff-chip {{
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px;
+    border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8;
+    font-size: 11px; line-height: 1.5;
+  }}
+  .ff-chip b {{ font-variant-numeric: tabular-nums; }}
+  /* display:inline-flex beats the UA [hidden] rule — spell it out. */
+  .ff-chip[hidden] {{ display: none; }}
   /* Unsynced-changes alerts. Two flavours so the colour matches the
      user's actual situation:
        .needs-sync         — red. Not signed in, so edits live only in
@@ -1229,11 +1430,15 @@ def build_filter_panel_html(
   #ff-fab.needs-sync > *, #ff-fab.needs-sync-pending > * {{
     position: relative; z-index: 1;
   }}
-  #ff-fab.needs-sync:hover::after, #ff-fab.needs-sync-pending:hover::after {{
-    animation-play-state: paused; opacity: 0;
+  /* M-160: pointer-gated — on a touch device the pulse would stay paused
+     after a tap, which is exactly the state the animation is warning about. */
+  @media (hover: hover) and (pointer: fine) {{
+    #ff-fab.needs-sync:hover::after, #ff-fab.needs-sync-pending:hover::after {{
+      animation-play-state: paused; opacity: 0;
+    }}
+    #ff-fab.needs-sync:hover {{ background: #dc2626; }}
+    #ff-fab.needs-sync-pending:hover {{ background: #2563eb; }}
   }}
-  #ff-fab.needs-sync:hover {{ background: #dc2626; }}
-  #ff-fab.needs-sync-pending:hover {{ background: #2563eb; }}
   #ff-fab.needs-sync .ff-fab-count b {{ color: #fff; }}
   #ff-fab.needs-sync .ff-fab-count {{ color: #fff; }}
   #ff-fab.needs-sync-pending .ff-fab-count b {{ color: #fff; }}
@@ -1257,9 +1462,13 @@ def build_filter_panel_html(
     vertical-align: 1px;
     transition: background 0.12s ease-out, color 0.12s ease-out;
   }}
-  .ff-help-trigger:hover,
+  /* M-160: :focus-visible keeps its own (ungated) rule — keyboard focus is
+     not a pointer state and must survive on every device. */
   .ff-help-trigger:focus-visible {{
     background: #d1d5db; color: #111827; outline: none;
+  }}
+  @media (hover: hover) and (pointer: fine) {{
+    .ff-help-trigger:hover {{ background: #d1d5db; color: #111827; }}
   }}
 </style>
 <!-- M-089: no static aria-label — it wins over the element's own content,
@@ -1267,7 +1476,8 @@ def build_filter_panel_html(
      updateFabAria() writes an aria-label that carries the count. -->
 <button id="ff-fab" type="button" title="筛选">
   <span class="ff-fab-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
-  <span class="ff-fab-count"><b class="ff-count">–</b> / <span class="ff-total">–</span></span>
+  <!-- M-022: 命中 = full-corpus match count, 视野内 = what is on screen. -->
+  <span class="ff-fab-count"><span class="ff-fab-lbl">命中</span><b class="ff-count">–</b><span class="ff-fab-dot">·</span><span class="ff-fab-lbl ff-fab-lbl2">视野内</span><span class="ff-inview">–</span></span>
 </button>
 <div id="ff-backdrop"></div>
 <div id="ff-sheet" role="dialog" aria-modal="true" aria-hidden="true"
@@ -1278,8 +1488,20 @@ def build_filter_panel_html(
        style="display:flex;justify-content:space-between;align-items:center;
               border-bottom:1px solid #e5e7eb;padding:2px 0 8px;margin-bottom:10px;">
     <span id="ff-sheet-title" style="font-weight:700;font-size:15px;">筛选</span>
+    <!-- M-022: same two-segment reading as the FAB. .ff-total (the corpus
+         size) stays in the DOM — setCountText('ff-total') still writes it and
+         it is the only place the denominator is still meaningful. -->
     <span style="font-size:12px;color:#6b7280;">
-      显示 <b class="ff-count">–</b> / <span class="ff-total">–</span>
+      命中 <b class="ff-count">–</b> · 视野内 <span class="ff-inview">–</span>
+      / <span class="ff-total">–</span>
+    </span>
+  </div>
+
+  <!-- M-022: default-on filters that silently remove rows get a visible chip
+       so "why do I only see N" has an answer without opening the panel. -->
+  <div id="ff-active-chips" hidden>
+    <span class="ff-chip" id="ff-chip-foreign" hidden>
+      <span>已启用：隐藏非日本料理</span><b id="ff-chip-foreign-n">0</b>
     </span>
   </div>
 
@@ -1433,15 +1655,14 @@ HEAD_BRANDING = """
 <!-- Pre-warm TCP/TLS to the cross-origin hosts the page hits early.
      A preconnect only matches requests of the same CORS-ness: the
      `crossorigin` ones cover CORS fetches (GIS, the sync API), the bare
-     ones cover classic tags — leaflet.js/.css from jsDelivr and
-     MarkerCluster from cdnjs are render-blocking and were paying a cold
-     TCP+TLS handshake before first paint. (No crossorigin jsDelivr
-     preconnect: its only CORS consumer, emoji-picker-element, is now a
-     lazy import.) Tile subdomains get dns-prefetch only: four extra
-     sockets up front would compete with the critical path on slow links,
-     but resolving the DNS early is free. -->
-<link rel="preconnect" href="https://cdn.jsdelivr.net">
-<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+     ones cover classic tags. M-006/M-011: the jsDelivr and cdnjs
+     preconnects are gone with the CDNs themselves — Leaflet,
+     MarkerCluster, the locate plugin and emoji-picker-element are all
+     served from vendor/ on this origin now, so the render-blocking
+     handshake they were paying for no longer exists at all. Tile
+     subdomains get dns-prefetch only: four extra sockets up front would
+     compete with the critical path on slow links, but resolving the DNS
+     early is free. -->
 <link rel="preconnect" href="https://emojicdn.elk.sh" crossorigin>
 <link rel="preconnect" href="https://accounts.google.com" crossorigin>
 <link rel="preconnect" href="https://api.jpfoodmap.com" crossorigin>
@@ -1453,9 +1674,17 @@ HEAD_BRANDING = """
 <!-- The 3MB marker payload used to start downloading only when the boot
      script ran at DOMContentLoaded — seconds after the HTML arrived. The
      preload starts it with the document; boot()'s fetch then picks the
-     response out of the preload/HTTP cache (same-origin + same
-     credentials mode, so it matches). -->
-<link rel="preload" href="data/restaurants.json" as="fetch">
+     response out of the preload cache.
+     M-139: `crossorigin` is not optional here, and the old comment had
+     the reason backwards. A preload entry is only reused by a later
+     request whose mode AND credentials mode match. Without the
+     attribute, `as="fetch"` is a no-cors/include request; boot() calls
+     plain fetch(), which is cors/same-origin — different keys, so the
+     preload sat unclaimed and the browser logged the "preloaded but not
+     used" warning. With `crossorigin` (anonymous) the link becomes a
+     CORS request, which is what fetch() looks for. Same-origin, so no
+     extra CORS response headers are needed on our side. -->
+<link rel="preload" href="data/restaurants.json" as="fetch" crossorigin>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 """
 HEAD_BRANDING = HEAD_BRANDING.replace("__MANIFEST_V__", MANIFEST_VERSION)  # M-150
@@ -1469,8 +1698,16 @@ GOOGLE_CLIENT_ID = "536198170238-me7dpu2og75tseuekl3pu8rjjgo2ig2p.apps.googleuse
 LOCATE_ASSETS = """
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.css"/>
-<script defer src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.79.0/dist/L.Control.Locate.min.js"></script>
+<!-- M-006/M-011: self-hosted from docs/vendor/ (scripts/fetch_vendor.py),
+     same 0.79.0 build jsDelivr was serving. The version is in the
+     directory name so /vendor/* can be immutable-cached honestly. The
+     ?v= content stamp is appended by the data_vers pass in main() —
+     don't hand-write one here. `defer` and the id are load-bearing:
+     initMap no longer treats this plugin as a boot dependency (BUG-01),
+     it waits for this tag's load event and hides the locate FAB if the
+     file never arrives. -->
+<link rel="stylesheet" href="vendor/leaflet.locatecontrol-0.79.0/L.Control.Locate.min.css"/>
+<script id="locate-plugin-js" defer src="vendor/leaflet.locatecontrol-0.79.0/L.Control.Locate.min.js"></script>
 <script defer src="transit-layer.js"></script>
 <style>
   /* Suppress iOS long-press callout + text-selection on the map so the
@@ -1502,12 +1739,41 @@ MAP_FAB_HTML = """
   /* Floating layer-control replacement (Google-Maps-style pills, bottom-right).
      Container is pointer-events:none so the gaps don't block map drags;
      each button re-enables pointer events. */
+  /* M-071 / AUTO-05: the restaurant detail card is fixed to the bottom of
+     the viewport and covers this whole corner, so with a card open none of
+     the five layer buttons could be tapped (measured reachability: 0/5 on
+     416x657, 616x816, 657x416 and 393x852). openSheet() publishes the
+     card's live height as --sheet-h and both this stack and the basemap
+     credit ride on top of it; the JS zeroes the variable again when
+     lifting would leave under 60px of map (buttons squeezed against the
+     top edge of a near-fullscreen card are worse than buttons behind it). */
   .map-fab-stack {
     position: fixed;
-    bottom: calc(18px + env(safe-area-inset-bottom)); right: 14px;
+    bottom: calc(18px + env(safe-area-inset-bottom) + var(--sheet-h, 0px));
+    right: 14px;
     z-index: 9995;
     display: flex; flex-direction: column; gap: 8px;
     pointer-events: none;
+    transition: bottom 0.25s ease-out;
+  }
+  /* AUTO-05: OSM / CARTO attribution has to stay visible — on 28 of the
+     tested viewports the detail card buried it completely. It rides on
+     --attr-h rather than --sheet-h because a one-line credit always fits
+     in the band the card leaves, so it takes the full lift even where the
+     tall FAB stack has to settle for less.
+     AUTO-12: it is right-anchored, directly under the FAB column, and at
+     246px (Fold split-screen) it wrapped straight across the bottom edge
+     and was overprinted by the buttons. --fab-w is the column's live width
+     (JS publishes it), so the credit now stops short of it at every size.
+     !important because Leaflet writes the control's own margins. */
+  .leaflet-control-attribution {
+    margin-bottom: var(--attr-h, 0px) !important;
+    margin-right: calc(var(--fab-w, 0px) + 20px) !important;
+    max-width: calc(100vw - var(--fab-w, 0px) - 44px);
+    transition: margin-bottom 0.25s ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .map-fab-stack, .leaflet-control-attribution { transition: none; }
   }
   .map-fab {
     pointer-events: auto;
@@ -1525,16 +1791,25 @@ MAP_FAB_HTML = """
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     line-height: 1;
   }
-  .map-fab:hover { background: #f9fafb;
-                   box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
+  /* M-160: pointer-gated. This stack is where a stuck hover hurt most — the
+     tinted "hovered" pill reads exactly like the blue .active "layer is on"
+     pill, so after a tap the user could not tell which layers were live. */
+  @media (hover: hover) and (pointer: fine) {
+    .map-fab:hover { background: #f9fafb;
+                     box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
+  }
   .map-fab.active { background: #2563eb; color: #fff;
                     border-color: #2563eb; }
-  .map-fab.active:hover { background: #1d4ed8; }
+  @media (hover: hover) and (pointer: fine) {
+    .map-fab.active:hover { background: #1d4ed8; }
+  }
   /* Third state for fab-attractions only — "show all including hidden".
      Amber/orange signals "extra/special mode" without alarming like red. */
   .map-fab.show-all { background: #f59e0b; color: #fff;
                       border-color: #f59e0b; }
-  .map-fab.show-all:hover { background: #d97706; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .map-fab.show-all:hover { background: #d97706; }
+  }
   /* Built-in landmarks the user has hidden via the popup. Default state:
      hidden entirely. When the body carries .attr-show-all (fab-attractions
      in its third state) they re-appear ghosted so they can be un-hidden. */
@@ -1582,6 +1857,30 @@ MAP_FAB_HTML = """
     .map-fab { padding: 9px 10px; }
     .map-fab-label { display: none; }
     .map-fab-ic { font-size: 17px; }
+  }
+  /* M-193 / BUG-16: a transit LOD file is 1-4 MB. The FAB used to turn blue
+     the moment it was clicked and stay blue whether the download was still
+     running, had failed, or had legitimately drawn nothing in this viewport.
+     Same ring as #ss-spinner, but drawn ON TOP of the icon (absolute, the
+     glyph goes transparent) so it costs no width — the stack is a column of
+     stretched flex items, and a spinner that took layout space would jog
+     every other FAB sideways for the duration of the load. */
+  .map-fab.loading .map-fab-ic { position: relative; color: transparent; }
+  .map-fab.loading .map-fab-ic img { opacity: 0.12; }
+  .map-fab.loading .map-fab-ic::after {
+    content: ''; position: absolute; left: 50%; top: 50%;
+    width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px;
+    border: 2px solid rgba(0,0,0,0.14); border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: fab-spin 0.8s linear infinite;
+  }
+  .map-fab.active.loading .map-fab-ic::after {
+    border-color: rgba(255,255,255,0.35); border-top-color: #fff;
+  }
+  @keyframes fab-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    /* Slower, not stopped — a frozen spinner reads as "hung". */
+    .map-fab.loading .map-fab-ic::after { animation-duration: 2.4s; }
   }
 </style>
 <div class="map-fab-stack" role="group" aria-label="图层切换">
@@ -1676,7 +1975,11 @@ SEARCH_BOX_HTML = """
     display: none;
     -webkit-tap-highlight-color: transparent;
   }
-  #ss-clear:hover, #ss-clear:active { color: #1f2937; }
+  /* M-160: :active is the touch press feedback and stays ungated. */
+  #ss-clear:active { color: #1f2937; }
+  @media (hover: hover) and (pointer: fine) {
+    #ss-clear:hover { color: #1f2937; }
+  }
   #ss-input-wrap.has-text #ss-clear,
   #ss-input-wrap.searching #ss-clear { display: block; }
   #ss-spinner {
@@ -1712,7 +2015,19 @@ SEARCH_BOX_HTML = """
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
-  #ss-list.open { display: block; }
+  /* M-024 / M-105: the three sections live in fixed DOM order (genre, local,
+     api) and are re-ordered visually with `order`, so an async Nominatim
+     answer never has to move nodes around. Default reading order is
+     菜系 → 餐厅库 → 地图搜索; when the whole query is a known place name
+     (KNOWN_LOCS hit) .ss-loc-first lifts 地图搜索 above 餐厅库, because
+     someone who typed a ward name wants the ward, not the 11 restaurants whose
+     name happens to contain it. */
+  #ss-list.open { display: flex; flex-direction: column; }
+  #ss-genre { order: 1; }
+  #ss-local { order: 2; }
+  #ss-api   { order: 3; }
+  #ss-list.ss-loc-first #ss-api   { order: 2; }
+  #ss-list.ss-loc-first #ss-local { order: 3; }
   #ss-list .ss-row {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px;
@@ -1721,7 +2036,12 @@ SEARCH_BOX_HTML = """
     transition: background 0.1s ease-out;
   }
   #ss-list .ss-row:last-child { border-bottom: none; }
-  #ss-list .ss-row:hover { background: #f9fafb; }
+  /* M-158: #f9fafb is under 2% off white — on a real monitor the mouse
+     highlight was invisible next to the keyboard highlight's #eff6ff.
+     #f3f4f6 is the shade .ssm-row / .rst-btn already hover to. */
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ss-list .ss-row:hover { background: #f3f4f6; }
+  }
   /* Keyboard-highlighted row — slightly stronger than hover so both can
      coexist without ambiguity about which one Enter will pick. */
   #ss-list .ss-row.ss-active { background: #eff6ff; }
@@ -1729,7 +2049,11 @@ SEARCH_BOX_HTML = """
     cursor: default; color: #6b7280; font-size: 12px;
     justify-content: center; padding: 14px 10px;
   }
-  #ss-list .ss-row.ss-empty:hover { background: transparent; }
+  /* M-160: must live in the same gate as .ss-row:hover — it exists only to
+     cancel it, so outside the media query it would be dead weight. */
+  @media (hover: hover) and (pointer: fine) {
+    #ss-list .ss-row.ss-empty:hover { background: transparent; }
+  }
   #ss-list .ss-row.ss-error { color: #b91c1c; }
   #ss-list .ss-text { flex: 1; min-width: 0; }
   #ss-list .ss-name {
@@ -1748,7 +2072,9 @@ SEARCH_BOX_HTML = """
     font-size: 14px; line-height: 1;
     padding: 5px 8px; color: #374151;
   }
-  #ss-list .ss-fav:hover { background: #fef3c7; border-color: #facc15; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ss-list .ss-fav:hover { background: #fef3c7; border-color: #facc15; }
+  }
   #ss-list .ss-icon {
     flex-shrink: 0; font-size: 16px; line-height: 1; width: 20px;
     text-align: center; color: #6b7280;
@@ -1771,6 +2097,43 @@ SEARCH_BOX_HTML = """
   #ss-list .ss-rating {
     flex-shrink: 0; font-size: 11px; font-weight: 600;
     color: #b45309; padding: 0 6px;
+  }
+  /* M-025 / BUG-07: the "name location" constraint used to be invisible and
+     silently self-cancelling — "寿司 東京" quietly fell back to the whole
+     country when no Tokyo shop was literally called 寿司. It is a removable
+     chip now, so the user can see the constraint, see how many rows it
+     keeps, and drop it in one tap. */
+  #ss-list .ss-locbar {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    padding: 6px 10px;
+    background: #f8fafc; border-bottom: 1px solid #f3f4f6;
+  }
+  #ss-list .ss-locchip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 4px 2px 9px; border-radius: 999px;
+    border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8;
+    font-size: 11px; font-weight: 600; line-height: 1.6;
+  }
+  #ss-list .ss-locchip-x {
+    border: none; background: transparent; cursor: pointer;
+    color: #1d4ed8; font-size: 13px; line-height: 1;
+    padding: 2px 5px; border-radius: 999px;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ss-list .ss-locchip-x:hover { background: #dbeafe; }
+  }
+  #ss-list .ss-locnote {
+    font-size: 11px; color: #6b7280;
+  }
+  /* M-105: cuisine-bucket shortcut rows. Same row chrome, tinted so the
+     "this changes the filter, it does not fly the map" difference reads. */
+  #ss-list .ss-row.ss-genre-row { background: #fffbeb; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ss-list .ss-row.ss-genre-row:hover { background: #fef3c7; }
+  }
+  #ss-list .ss-genre-hint {
+    flex-shrink: 0; font-size: 10px; color: #92400e;
+    border: 1px solid #fde68a; border-radius: 999px; padding: 2px 7px;
   }
   /* M-081 (hard prerequisite for M-018): iOS Safari zooms the page in on
      focus whenever an input renders below 16px, and never zooms back out.
@@ -1801,7 +2164,9 @@ SEARCH_BOX_HTML = """
     -webkit-tap-highlight-color: transparent;
     transition: box-shadow 0.15s ease-out;
   }
-  #ss-avatar:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.22); }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ss-avatar:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.22); }
+  }
   #ss-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
   /* Account / settings dropdown opened from #ss-avatar. Anchored to the
      search box's right edge so it lines up under the avatar on both desktop
@@ -1843,7 +2208,9 @@ SEARCH_BOX_HTML = """
     font: inherit; text-align: left; width: 100%;
     -webkit-tap-highlight-color: transparent;
   }
-  .ssm-row:hover { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .ssm-row:hover { background: #f3f4f6; }
+  }
   .ssm-acct img {
     width: 32px; height: 32px; border-radius: 50%;
     flex-shrink: 0; background: #e5e7eb; object-fit: cover;
@@ -1871,7 +2238,9 @@ SEARCH_BOX_HTML = """
     text-align: center;
   }
   #ssm-signout { color: #b91c1c; }
-  #ssm-signout:hover { background: #fef2f2; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ssm-signout:hover { background: #fef2f2; }
+  }
   .ssm-divider { height: 1px; background: #f3f4f6; margin: 6px 0; }
   .ssm-section-lbl { font-size: 11px; color: #6b7280; padding: 4px 8px 2px; }
   .ssm-langs { display: flex; gap: 4px; padding: 0 4px 4px; }
@@ -1881,7 +2250,9 @@ SEARCH_BOX_HTML = """
     border-radius: 6px; cursor: pointer;
     font: inherit; font-size: 11px; color: #374151;
   }
-  .ssm-langs button:hover { background: #eef2ff; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .ssm-langs button:hover { background: #eef2ff; }
+  }
   .ssm-langs button.on { background: #2563eb; color: #fff; border-color: #2563eb; }
   /* Keep ff-sync-status's id so the existing JS that mutates its text
      ("本地模式" / "已同步" / etc.) doesn't have to be rewired — only its
@@ -1976,7 +2347,9 @@ SEARCH_BOX_HTML = """
   <!-- Two sub-containers so the async Nominatim response only rewrites its
        own section — the local restaurant rows (and the list's scroll
        position) survive untouched. -->
-  <div id="ss-list" role="listbox"><div id="ss-local"></div><div id="ss-api"></div></div>
+  <!-- M-105 adds #ss-genre (cuisine-bucket shortcuts). DOM order is fixed;
+       CSS `order` decides what the user reads first — see #ss-list.open. -->
+  <div id="ss-list" role="listbox"><div id="ss-genre"></div><div id="ss-local"></div><div id="ss-api"></div></div>
 </div>
 """
 
@@ -2008,6 +2381,11 @@ HELP_POPOVER_HTML = """
     padding: 9px 11px;
     border-radius: 7px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.32);
+    /* M-156: last-resort clamp for a bubble taller than the viewport — the
+       JS pins it to the bottom edge and this lets the text be scrolled. */
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
     opacity: 0;
     transform: translateY(-2px);
     transition: opacity 0.13s ease-out, transform 0.13s ease-out;
@@ -2025,6 +2403,15 @@ HELP_POPOVER_HTML = """
     border-width: 0 5px 5px 5px;
     border-color: transparent transparent #1f2937 transparent;
   }
+  /* M-156: set by place() when there was no room below the trigger, so the
+     bubble sits above it — the arrow has to point down instead of up. */
+  #ff-help-pop.ff-help-above::before {
+    top: auto; bottom: -5px;
+    border-width: 5px 5px 0 5px;
+    border-color: #1f2937 transparent transparent transparent;
+  }
+  #ff-help-pop.ff-help-above { transform: translateY(2px); }
+  #ff-help-pop.ff-help-above.ff-help-show { transform: translateY(0); }
   .ff-help-section[hidden] { display: none; }
 </style>
 <div id="ff-help-pop" role="tooltip" aria-live="polite" hidden>
@@ -2079,7 +2466,9 @@ BOOKMARKS_MODAL_HTML = """
     font-size: 20px; line-height: 1; color: #9ca3af;
     padding: 2px 6px;
   }
-  #bm-modal .bm-close:hover { color: #374151; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal .bm-close:hover { color: #374151; }
+  }
   #bm-modal .bm-body {
     padding: 12px 14px; font-size: 13px;
     overflow-y: auto; flex: 1 1 auto; min-height: 0;
@@ -2142,8 +2531,10 @@ BOOKMARKS_MODAL_HTML = """
     padding: 4px 7px;
     font-family: inherit;
   }
-  #bm-modal .bm-quick-list button:hover {
-    background: #eff6ff; border-color: #93c5fd;
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal .bm-quick-list button:hover {
+      background: #eff6ff; border-color: #93c5fd;
+    }
   }
   /* Full-picker toggle sits inside .bm-quick-list as a 7th chip, but
      tinted blue so it reads as "open a different surface" rather than
@@ -2151,13 +2542,19 @@ BOOKMARKS_MODAL_HTML = """
   #bm-modal #bm-emoji-more {
     background: #eff6ff; border-color: #bfdbfe;
   }
-  #bm-modal #bm-emoji-more:hover {
-    background: #dbeafe; border-color: #93c5fd;
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal #bm-emoji-more:hover {
+      background: #dbeafe; border-color: #93c5fd;
+    }
   }
   #bm-modal #bm-emoji-picker {
     display: none;
     width: 100%;
-    height: 280px;
+    /* M-155: a flat 280px is taller than the whole modal body once the soft
+       keyboard is up on a short screen, so the picker opened entirely below
+       the fold. Cap it against the viewport as well. */
+    height: min(280px, 45vh);
+    height: min(280px, 45dvh);
     margin-top: 8px;
     /* Tokens consumed by emoji-picker-element's shadow DOM. */
     --background: #fff;
@@ -2185,8 +2582,10 @@ BOOKMARKS_MODAL_HTML = """
   #bm-modal .bm-foot button.bm-save {
     background: #2563eb; border-color: #2563eb; color: #fff;
   }
-  #bm-modal .bm-foot button.bm-save:hover { background: #1d4ed8; }
-  #bm-modal .bm-foot button.bm-cancel:hover { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal .bm-foot button.bm-save:hover { background: #1d4ed8; }
+    #bm-modal .bm-foot button.bm-cancel:hover { background: #f3f4f6; }
+  }
   /* 类型 segmented control: two buttons sharing one rounded shell, the
      active one paints blue. Same shell width as a single text input so
      it lines up with the rest of the form. */
@@ -2208,8 +2607,10 @@ BOOKMARKS_MODAL_HTML = """
   #bm-modal .bm-kind-seg button + button {
     border-left: 1px solid #d1d5db;
   }
-  #bm-modal .bm-kind-seg button:hover:not(.active) {
-    background: #f9fafb; color: #374151;
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal .bm-kind-seg button:hover:not(.active) {
+      background: #f9fafb; color: #374151;
+    }
   }
   #bm-modal .bm-kind-seg button.active {
     background: #2563eb; color: #fff;
@@ -2269,7 +2670,17 @@ BOOKMARKS_MODAL_HTML = """
       </div>
     </div>
 
-    <emoji-picker id="bm-emoji-picker"></emoji-picker>
+    <!-- M-006: emoji-picker-element ships no emoji data of its own — on
+         first open it fetches ~430 KB of emojibase JSON, and its default
+         source is another jsDelivr URL (a floating `@^1` range at that).
+         Self-hosted like the module itself; data-source is read when the
+         element upgrades, so it has to be an attribute rather than a
+         property set afterwards. No ?v= stamp: the version is already in
+         the path, and the picker stores its IndexedDB copy keyed by this
+         URL — a hash that changed on every build would orphan the local
+         database each deploy. -->
+    <emoji-picker id="bm-emoji-picker"
+      data-source="vendor/emoji-picker-element-data-1.8.0/en/emojibase/data.json"></emoji-picker>
 
     <div class="bm-error" id="bm-error" aria-live="polite"></div>
   </div>
@@ -2318,7 +2729,9 @@ BOOKMARKS_MODAL_HTML = """
     padding: 9px 10px; margin-bottom: 6px;
     border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer;
   }
-  #imp-modal .imp-opt:hover { background: #f9fafb; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #imp-modal .imp-opt:hover { background: #f9fafb; }
+  }
   #imp-modal .imp-opt input { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
   #imp-modal .imp-opt-label { flex: 1; font-size: 13px; color: #1f2937; font-weight: 600; }
   #imp-modal .imp-opt-count { font-size: 12px; color: #6b7280; flex-shrink: 0; }
@@ -2336,8 +2749,10 @@ BOOKMARKS_MODAL_HTML = """
     background: #f9fafb; color: #1f2937; font-family: inherit;
   }
   #imp-modal .imp-foot button.imp-confirm { background: #2563eb; border-color: #2563eb; color: #fff; }
-  #imp-modal .imp-foot button.imp-confirm:hover { background: #1d4ed8; }
-  #imp-modal .imp-foot button.imp-cancel:hover { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #imp-modal .imp-foot button.imp-confirm:hover { background: #1d4ed8; }
+    #imp-modal .imp-foot button.imp-cancel:hover { background: #f3f4f6; }
+  }
 </style>
 <div id="imp-backdrop"></div>
 <div id="imp-modal" role="dialog" aria-modal="true" aria-hidden="true"
@@ -2487,8 +2902,18 @@ MOBILE_UX_ASSETS = """
   }
   #bs-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
+    /* M-152: the tablet breakpoint used to switch the horizontal axis
+       itself (left:50% + translateX(-50%)), so rotating a Fold across
+       700px with the card open animated it ~340px across the screen in
+       200ms. Auto margins between left:0 and right:0 center the sheet on
+       the same axis at every width, and the breakpoint only sets a width. */
+    margin-left: auto; margin-right: auto;
     z-index: 10002;
-    max-height: 75vh; max-height: 75dvh;
+    /* M-091: the cap was a bare percentage, so on a 416px-tall landscape
+       Fold the expanded card left a 116px sliver of map. Keep whichever of
+       the two is smaller — the fraction, or "the viewport minus 132px". */
+    max-height: min(75vh, calc(100vh - 132px));
+    max-height: min(75dvh, calc(100dvh - 132px));
     background: #fff;
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
@@ -2501,30 +2926,45 @@ MOBILE_UX_ASSETS = """
   #bs-sheet.bs-open { transform: translateY(0); }
   /* Tablet: cap width and center; still bottom-anchored. The explicit
      width keeps the sheet at a stable size regardless of content — without
-     it, `left: 50%; right: auto` makes the sheet shrink-to-fit, so swapping
-     the bottom-sheet content (e.g., loading placeholder → full card) would
-     make it jump wider. */
+     it the sheet would shrink-to-fit, so swapping the bottom-sheet content
+     (e.g., loading placeholder → full card) would make it jump wider.
+     M-152: width only — left/right/transform stay exactly as the base rule
+     set them, so crossing this breakpoint never re-animates the sheet. */
   @media (min-width: 700px) {
-    #bs-sheet { left: 50%; transform: translate(-50%, 100%);
-                width: min(680px, calc(100vw - 32px)); right: auto;
-                max-height: 80vh; max-height: 80dvh;
+    #bs-sheet { width: min(680px, calc(100vw - 32px));
+                max-height: min(80vh, calc(100vh - 132px));
+                max-height: min(80dvh, calc(100dvh - 132px));
                 border-radius: 14px 14px 0 0; }
-    #bs-sheet.bs-open { transform: translate(-50%, 0); }
   }
   /* Desktop: roomier sheet so the 2-column popup layout has space. */
   @media (min-width: 1100px) {
     #bs-sheet { width: min(880px, calc(100vw - 32px));
-                max-height: 85vh; max-height: 85dvh; }
+                max-height: min(85vh, calc(100vh - 132px));
+                max-height: min(85dvh, calc(100dvh - 132px)); }
   }
+  /* M-188: a real <button> (disclosure) rather than a bare <div> — it is
+     focusable, announces its state via aria-expanded, and carries the peek
+     hint as DOM text. touch-action:none keeps the drag gesture intact;
+     the button resets below stop the UA stylesheet from restyling it. */
   #bs-grip {
     position: relative;
+    display: block; width: 100%;
     padding: 9px 0 6px; flex-shrink: 0;
     cursor: grab; touch-action: none;
+    background: none; border: 0; margin: 0;
+    font: inherit; color: inherit; text-align: center;
+    -webkit-appearance: none; appearance: none;
   }
   #bs-grip::before {
     content: ''; display: block;
     width: 38px; height: 4px; margin: 0 auto;
     background: #d1d5db; border-radius: 2px;
+  }
+  /* M-152 / M-153: parked on the sheets + the bookmark modal for two frames
+     around a viewport resize (Fold open/close, rotation, split-view drag) so
+     a breakpoint change lands instantly instead of animating across. */
+  #bs-sheet.no-anim, #ff-sheet.no-anim, #bm-modal.no-anim {
+    transition: none !important;
   }
   #bs-content {
     overflow-y: auto;
@@ -2544,13 +2984,31 @@ MOBILE_UX_ASSETS = """
   #bs-sheet.bs-peek .rst-info,
   #bs-sheet.bs-peek .rst-policy,
   #bs-sheet.bs-peek .rst-footer { display: none; }
-  #bs-sheet.bs-peek #bs-grip { padding-bottom: 2px; }
+  /* M-188: 44px in peek — this is the state whose whole job is to say
+     "there is more, act on me", so it gets a real touch target. The full
+     state keeps its original 19px so the card layout is unchanged. */
+  #bs-sheet.bs-peek #bs-grip {
+    padding-bottom: 2px;
+    min-height: 44px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
   #bs-sheet.bs-peek #bs-grip::before { background: #9ca3af; }
-  #bs-sheet.bs-peek #bs-grip::after {
-    content: '上滑查看详情';
+  /* M-157 / M-188: this hint used to be a CSS `content:` string, which the
+     localizer's TreeWalker(SHOW_TEXT) cannot reach — EN / JA / TW visitors
+     all got the Simplified Chinese line. It is real DOM now, so localizeTree
+     translates it like everything else. Both wordings ship; the media query
+     picks, because "swipe up" is wrong on a desktop where the card expands
+     on click (M-188). */
+  #bs-grip-hint { display: none; }
+  #bs-sheet.bs-peek #bs-grip-hint {
     display: block; text-align: center;
     font-size: 10px; color: #6b7280;
     margin-top: 3px; letter-spacing: 0.5px;
+  }
+  #bs-grip-hint .bs-hint-tap { display: none; }
+  @media (hover: hover) and (pointer: fine) {
+    #bs-grip-hint .bs-hint-swipe { display: none; }
+    #bs-grip-hint .bs-hint-tap { display: inline; }
   }
   /* The whole peek card is a tap-to-expand surface (handled in JS). The
      cursor hint is for desktop; buttons inside override it back to pointer
@@ -2602,7 +3060,9 @@ MOBILE_UX_ASSETS = """
                border: 1px solid #d1d5db; border-radius: 5px;
                background: #f9fafb;
                transition: background 0.15s; }
-  .rst-gmaps:hover { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .rst-gmaps:hover { background: #f3f4f6; }
+  }
   .rst-gmaps img { width: 18px; height: 18px; display: block; }
   /* Square × that mirrors the search box's clear control, sitting after
      收藏/弃用 in the card header so the sheet can be dismissed without
@@ -2614,7 +3074,11 @@ MOBILE_UX_ASSETS = """
                background: #f9fafb; color: #6b7280;
                font: 700 20px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  .rst-close:hover, .rst-close:active { background: #f3f4f6; color: #1f2937; }
+  /* M-160: :active is the touch press feedback and stays ungated. */
+  .rst-close:active { background: #f3f4f6; color: #1f2937; }
+  @media (hover: hover) and (pointer: fine) {
+    .rst-close:hover { background: #f3f4f6; color: #1f2937; }
+  }
   .rst-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
   .rst-photos { display: grid; grid-template-columns: repeat(3, 1fr);
                 gap: 6px; margin-bottom: 10px; }
@@ -2647,13 +3111,21 @@ MOBILE_UX_ASSETS = """
                   line-height: 1.45; }
   .rst-info-row .rst-label { color: #9ca3af; flex-shrink: 0;
                              font-size: 12px; min-width: 38px; }
+  /* M-161: 38px fits 晚 / 车站 / 地址 but not Dinner / Station / Address or
+     夕食 / 最寄駅 / 住所, so the value column zig-zagged in EN and JA. The
+     runtime sets documentElement.lang, so widen the gutter for exactly
+     those two — zh-CN / zh-TW keep the tighter original. */
+  html[lang="en"] .rst-info-row .rst-label,
+  html[lang="ja"] .rst-info-row .rst-label { min-width: 66px; }
   .rst-info-row .rst-value { color: #1f2937; min-width: 0;
                              overflow-wrap: anywhere; }
   .rst-tx-btn { background: none; border: none; padding: 0;
                 margin-left: 6px; color: #2563eb; cursor: pointer;
                 font-family: inherit; font-size: 12px; line-height: 1.45;
                 flex-shrink: 0; }
-  .rst-tx-btn:hover { color: #1d4ed8; text-decoration: underline; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .rst-tx-btn:hover { color: #1d4ed8; text-decoration: underline; }
+  }
   .rst-tx-btn:disabled { color: #9ca3af; cursor: default;
                          text-decoration: none; }
   .rst-policy { font-size: 12px; color: #6b7280; line-height: 1.5;
@@ -2661,14 +3133,18 @@ MOBILE_UX_ASSETS = """
   .rst-footer { display: flex; justify-content: space-between;
                 align-items: center; gap: 8px; flex-wrap: wrap; }
   .rst-footer a { color: #2563eb; text-decoration: none; font-size: 13px; }
-  .rst-footer a:hover { text-decoration: underline; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .rst-footer a:hover { text-decoration: underline; }
+  }
   .rst-chip { background: #3b9c4f; color: #fff; padding: 2px 8px;
               border-radius: 4px; font-size: 11px; font-weight: 500; }
   .rst-chip.rst-chip-off { background: #9ca3af; }
   .rst-btn { padding: 4px 10px; font-size: 12px; cursor: pointer;
              border: 1px solid #d1d5db; border-radius: 5px;
              background: #f9fafb; color: #1f2937; }
-  .rst-btn:hover { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .rst-btn:hover { background: #f3f4f6; }
+  }
   /* Tablet+: tighter title, larger photos */
   @media (min-width: 700px) {
     .rst-card { font-size: 14px; }
@@ -2708,6 +3184,27 @@ MOBILE_UX_ASSETS = """
     animation: mk-pulse 1.6s ease-out 5;
     pointer-events: none;
   }
+  /* ---- M-021: block-level coordinate ---- */
+  /* Dashed ring around the halo. Reads as "roughly here" at a glance and,
+     unlike a badge, costs no extra glyph in a 36px box that already carries
+     an emoji plus a possible ⭐ / ✕. */
+  .mk-approx-ring {
+    position: absolute; inset: 2px; border-radius: 50%;
+    border: 1.5px dashed #374151; opacity: 0.7;
+    pointer-events: none;
+  }
+  .rst-approx { font-size: 11px; color: #6b7280; margin: 4px 0 0; }
+  /* ---- M-093: permanently / temporarily closed ---- */
+  /* The marker is desaturated but never removed — a favourited restaurant
+     that vanishes from the map reads as lost data, not as a closed shop. */
+  .mk-closed { filter: grayscale(1); }
+  .rst-closed {
+    display: inline-block; margin: 8px 0 0;
+    padding: 2px 9px; border-radius: 999px;
+    background: #e5e7eb; color: #4b5563;
+    font-size: 12px; font-weight: 700; line-height: 1.7;
+  }
+  .rst-closed-temp { background: #fef3c7; color: #92400e; }
 </style>"""
 
 
@@ -2734,7 +3231,8 @@ SYNC_UI_HTML = """
      `[hidden] { display: none }` — without this rule `el.hidden = true`
      would leave them on screen. */
   #sync-banner[hidden], #sync-hint[hidden], #ff-empty-map[hidden],
-  #ff-empty-panel[hidden], #ss-avatar-dot[hidden] { display: none; }
+  #ff-empty-panel[hidden], #ss-avatar-dot[hidden],
+  #sw-update[hidden], #net-offline[hidden] { display: none; }
 
   /* Visually hidden but readable by assistive tech. */
   .sr-only {
@@ -2767,7 +3265,9 @@ SYNC_UI_HTML = """
     color: #991b1b; font: 700 18px/1 -apple-system, sans-serif;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
-  #sync-banner-x:hover { background: rgba(220,38,38,0.12); }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #sync-banner-x:hover { background: rgba(220,38,38,0.12); }
+  }
 
   /* ---- M-033: bottom stack (toasts + sign-in hint) ---- */
   #sync-stack {
@@ -2802,14 +3302,50 @@ SYNC_UI_HTML = """
     font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
-  .sync-btn:hover { background: rgba(255,255,255,0.14); }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .sync-btn:hover { background: rgba(255,255,255,0.14); }
+  }
   .sync-btn.primary {
     border-color: #60a5fa; background: #2563eb; color: #fff;
   }
-  .sync-btn.primary:hover { background: #1d4ed8; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .sync-btn.primary:hover { background: #1d4ed8; }
+  }
   #sync-hint-btns { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* ---- M-012 / M-070: neutral notices in the same bottom stack ----
+     Deliberately NOT the red failure palette: "a new build exists" and
+     "you are offline" are both states the app handles fine — the page is
+     still fully usable from cache. Blue = actionable, grey = informational. */
+  #sw-update, #net-offline {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 10px;
+    font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  }
+  #sw-update {
+    background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe;
+  }
+  #net-offline {
+    background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb;
+  }
+  #sw-update-msg, #net-offline-msg { flex: 1; min-width: 0; }
+  #sw-update-btns { display: flex; gap: 6px; flex-shrink: 0; }
+  #sw-update .sync-btn { border-color: #c7d2fe; color: #1e3a8a; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #sw-update .sync-btn:hover { background: rgba(30,58,138,0.09); }
+  }
+  #sw-update .sync-btn.primary {
+    border-color: #2563eb; background: #2563eb; color: #fff;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #sw-update .sync-btn.primary:hover { background: #1d4ed8; }
+  }
+
   @media (prefers-reduced-motion: no-preference) {
-    .sync-toast, #sync-hint { animation: sync-rise 0.18s ease-out; }
+    .sync-toast, #sync-hint, #sw-update, #net-offline {
+      animation: sync-rise 0.18s ease-out;
+    }
   }
   @keyframes sync-rise {
     from { opacity: 0; transform: translateY(8px); }
@@ -2851,7 +3387,9 @@ SYNC_UI_HTML = """
     font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
-  .ffe-reset:hover { background: #1d4ed8; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .ffe-reset:hover { background: #1d4ed8; }
+  }
   /* Panel-top twin: same copy, flat card, no shadow. */
   #ff-empty-panel {
     margin: 0 0 10px; padding: 10px 12px;
@@ -2875,16 +3413,26 @@ SYNC_UI_HTML = """
     font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
-  #ff-panel-reset:hover { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ff-panel-reset:hover { background: #f3f4f6; }
+  }
 
   /* ---- M-008: privacy + delete-my-cloud-data rows in the account menu ---- */
   #ssm-privacy-link { color: #2563eb; text-decoration: none; }
-  #ssm-privacy-link:hover { text-decoration: underline; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #ssm-privacy-link:hover { text-decoration: underline; }
+  }
   #ssm-delete-cloud { color: #b91c1c; }
   #ssm-delete-cloud[data-armed="1"] { background: #fef2f2; font-weight: 700; }
   #ssm-delete-msg {
     font-size: 10px; line-height: 1.5; color: #6b7280;
     padding: 2px 0 4px; min-height: 0;
+  }
+
+  /* ---- M-013: storage usage / persistence readout in the account menu ---- */
+  #ssm-storage {
+    font-size: 10px; line-height: 1.55; color: #6b7280;
+    padding: 2px 2px 4px; word-break: break-word;
   }
 </style>
 <!-- M-034: only failures reach this banner; success stays in the quiet
@@ -2903,12 +3451,43 @@ SYNC_UI_HTML = """
       <button id="sync-hint-ok" class="sync-btn" type="button">知道了</button>
     </span>
   </div>
+  <!-- M-012: a waiting service worker never takes over on its own any more.
+       The user decides when to reload, so an unsaved edit can't be swept
+       away by a background swap. -->
+  <div id="sw-update" hidden>
+    <span id="sw-update-msg">有新版本</span>
+    <span id="sw-update-btns">
+      <button id="sw-update-go" class="sync-btn primary" type="button">重新载入</button>
+      <button id="sw-update-later" class="sync-btn" type="button">稍后</button>
+    </span>
+  </div>
+  <!-- M-070: connectivity was completely unobservable — a traveller on a
+       dead SIM saw a normal-looking map and no explanation of why search
+       and photos had stopped working. Informational, never alarming. -->
+  <div id="net-offline" hidden>
+    <!-- M-104: " · " rather than "，" — this is static text that localizeTree
+         translates run-by-run, and a full-width comma left between two
+         English clauses looks broken. -->
+    <span id="net-offline-msg">当前离线 · 显示的是本机缓存的数据</span>
+  </div>
 </div>
 <!-- M-028 -->
 <div id="ff-empty-map" hidden>
-  <div class="ffe-title">没有符合条件的餐厅</div>
-  <div class="ffe-sub">筛选条件太严格了。放宽条件或重置筛选。</div>
-  <button id="ff-empty-reset" class="ffe-reset" type="button">重置筛选</button>
+  <div id="ffe-none">
+    <div class="ffe-title">没有符合条件的餐厅</div>
+    <div class="ffe-sub">筛选条件太严格了。放宽条件或重置筛选。</div>
+    <button id="ff-empty-reset" class="ffe-reset" type="button">重置筛选</button>
+  </div>
+  <!-- M-022: the other kind of empty. The filter matches plenty of places,
+       they are just all off-screen — the old card told the user to loosen a
+       filter that was not the problem. -->
+  <div id="ffe-offscreen" hidden>
+    <div class="ffe-title"><b id="ffe-off-n">0</b> <span>家不在当前视野</span></div>
+    <!-- No trailing 。 on purpose: the CJK-run localizer only replaces the
+         run, so a period left in the markup survives into the EN string. -->
+    <div class="ffe-sub">当前视野里没有匹配的餐厅</div>
+    <button id="ff-empty-zoomall" class="ffe-reset" type="button">缩放到全部结果</button>
+  </div>
 </div>
 <!-- M-089: every announcement that has no visible-text equivalent (or whose
      visible text lives in a container screen readers don't watch) is written
@@ -2925,7 +3504,12 @@ BOTTOM_SHEET_HTML = """
      pannable behind every sheet state, so claiming modality would tell
      screen readers the rest of the page is unreachable when it isn't. -->
 <div id="bs-sheet" role="dialog" aria-hidden="true">
-  <div id="bs-grip"></div>
+  <!-- M-188: disclosure button, not a div — keyboard-reachable, and the
+       peek hint below is real DOM so the i18n walker can translate it
+       (M-157). aria-expanded is kept in sync by bsSetPeek(). -->
+  <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content">
+    <span id="bs-grip-hint"><span class="bs-hint-swipe">上滑查看详情</span><span class="bs-hint-tap">点击查看详情</span></span>
+  </button>
   <div id="bs-banner" hidden></div>
   <div id="bs-content"></div>
 </div>
@@ -2939,10 +3523,16 @@ BOTTOM_SHEET_HTML = """
 #     the page requests payloads as  data/foo.json?v=<content-hash>, so an
 #     unchanged file survives any number of deploys with zero re-download
 #     (the old scheme wiped everything and re-fetched ~10MB per deploy)
-#   /transit/*.geojson              → stale-while-revalidate (huge, rarely
-#     changes, not ?v-addressed because its URL lives inside transit-layer.js)
-#   third-party CDN (emojicdn, jsdelivr) → stale-while-revalidate, LRU-capped
-#   anything else (tiles, Nominatim, jpfoodmap API) → browser default
+#   basemap tiles (cartocdn / OSM)  → stale-while-revalidate in their own
+#     cache, LRU-capped at 70 so opaque tiles can't eat the origin's quota
+#   third-party CDN (emojicdn, jsdelivr, cdnjs)
+#                                   → stale-while-revalidate, capped at 120,
+#     separate from tiles so a pan can't evict the MarkerCluster bundle
+#   anything else (Nominatim, jpfoodmap API) → browser default
+# The transit overlay is NOT handled here any more — it moved off-origin to
+# assets.jpfoodmap.com (R2), so it never reaches this worker's same-origin
+# branch. Install is all-or-nothing over the boot-critical set (M-012) and
+# the new worker waits for an explicit SKIP_WAITING message from the page.
 SW_JS_TEMPLATE = r"""// Auto-generated by src/tabelog/scrape/map.py — do not edit by hand.
 // Build version: __BUILD_VERSION__
 const VERSION = '__BUILD_VERSION__';
@@ -2950,8 +3540,16 @@ const VERSION = '__BUILD_VERSION__';
 // deploys — their entries are content-addressed (?v= hash) or immutable.
 const SHELL_CACHE = 'tabelog-shell-' + VERSION;
 const DATA_CACHE  = 'tabelog-data-v1';
-const EXT_CACHE   = 'tabelog-ext-v1';
-const KEEP = [SHELL_CACHE, DATA_CACHE, EXT_CACHE];
+// M-006: bumped to v2 alongside the M-058 tile-regex fix. A cache NAME is not
+// a localStorage key — no user data lives here, and activate() drops v1.
+const EXT_CACHE   = 'tabelog-ext-v2';
+// M-144 + M-011: basemap tiles get their OWN cache. They were sharing
+// EXT_CACHE with MarkerCluster's JS/CSS, and once M-058 made the tile
+// pattern actually match, a minute of panning pushed 70+ tiles through the
+// LRU and evicted the very CDN assets M-011 put there so an offline boot
+// could still build the cluster layer. Measured: 72/72 entries were tiles.
+const TILE_CACHE  = 'tabelog-tiles-v1';
+const KEEP = [SHELL_CACHE, DATA_CACHE, EXT_CACHE, TILE_CACHE];
 
 // Versioned with SHELL_CACHE so launcher metadata and icons update with a
 // deploy. Caching the root document during install makes the very first
@@ -2977,28 +3575,47 @@ const LAUNCHER_ICON_URLS = [
 // superseded versions and get dropped so 6MB payloads don't pile up).
 const PRECACHE_URLS = __PRECACHE_URLS__;
 const CURRENT_VERSIONED_URLS = __ALL_VERSIONED_URLS__;
+// M-012: the minimum set this build needs in order to boot with no network.
+// Vendored boot-critical assets are appended to this list at build time.
+// Anything in here (plus APP_SHELL_URLS) is all-or-nothing during install.
+const CRITICAL_URLS = __CRITICAL_URLS__;
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    try {
-      const shell = await caches.open(SHELL_CACHE);
-      await Promise.all(APP_SHELL_URLS.map(async (u) => {
-        try {
-          // M-061: no cache:'reload' for './' — the navigation that just
-          // registered this worker already wrote the very same HTML into
-          // this very same cache via networkFirst, and 'reload' explicitly
-          // bypasses the HTTP cache, so it was a guaranteed second full
-          // download of the document on every deploy.
-          const resp = await fetch(u);
-          if (resp && (resp.ok || resp.type === 'opaque')) await shell.put(u, resp);
-        } catch (_) {}
-      }));
-    } catch (_) { /* opening the shell cache failed — install still proceeds */ }
+    // M-012: this used to swallow every per-URL failure and then call
+    // skipWaiting() unconditionally, so a deploy fetched during a captive
+    // portal / 5xx window produced an EMPTY shell cache that immediately
+    // activated and had activate() delete the last working one — offline
+    // cold start went white. Now the boot-critical set is atomic: any
+    // rejection here rejects install, the new worker never activates, and
+    // the previous worker + its caches stay exactly as they were.
+    const bootCritical = [];
+    APP_SHELL_URLS.concat(CRITICAL_URLS).forEach((u) => {
+      if (bootCritical.indexOf(u) === -1) bootCritical.push(u);
+    });
+    // Fetch everything before opening the cache, so a rejected install
+    // doesn't even leave an empty tabelog-shell-<version> behind.
+    const fetched = await Promise.all(bootCritical.map(async (u) => {
+      // M-061: no cache:'reload' for './' — the navigation that just
+      // registered this worker already wrote the very same HTML into
+      // this very same cache via networkFirst, and 'reload' explicitly
+      // bypasses the HTTP cache, so it was a guaranteed second full
+      // download of the document on every deploy.
+      const resp = await fetch(u);
+      if (!resp || !resp.ok) {
+        throw new Error('sw install: ' + u + ' -> ' +
+                        (resp ? resp.status : 'no response'));
+      }
+      return [u, resp];
+    }));
+    const shell = await caches.open(SHELL_CACHE);
+    await Promise.all(fetched.map(([u, resp]) => shell.put(u, resp)));
     try {
       const cache = await caches.open(DATA_CACHE);
       // Content-addressed: if the hash matches an entry we already hold,
       // the file didn't change — skip the network entirely. Fail-soft per
-      // URL; a miss just falls back to cacheFirst on first fetch.
+      // URL (these are big optional payloads, not the boot path); a miss
+      // just falls back to cacheFirst on first fetch.
       await Promise.all(PRECACHE_URLS.map(async (u) => {
         try {
           if (await cache.match(u)) return;
@@ -3007,16 +3624,34 @@ self.addEventListener('install', (event) => {
         } catch (_) {}
       }));
     } catch (_) { /* opening the cache failed — install still proceeds */ }
-    await self.skipWaiting();
+    // M-012: no skipWaiting() here. The new worker sits in `waiting` until
+    // the page shows "a new version is available" and the user accepts;
+    // only then does it get a SKIP_WAITING message (see the message
+    // handler). An unattended swap can drop an in-flight edit.
   })());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    // M-012: never delete the previous shell on the strength of a shell
+    // cache that does not actually hold the document. If './' is missing,
+    // keep every other shell cache around — a stale page beats a blank one.
+    let shellOk = false;
+    try {
+      const shell = await caches.open(SHELL_CACHE);
+      shellOk = !!(await shell.match('./'));
+    } catch (_) {}
     const keys = await caches.keys();
-    await Promise.all(
-      keys.filter(k => KEEP.indexOf(k) === -1).map(k => caches.delete(k)));
-    // GC superseded ?v= entries. Plain-URL entries (emoji PNGs, geojson,
+    const doomed = keys.filter(k => KEEP.indexOf(k) === -1);
+    if (shellOk) {
+      await Promise.all(doomed.map(k => caches.delete(k)));
+    } else {
+      console.warn('[sw] shell cache holds no "./" — keeping older shells');
+      await Promise.all(doomed
+        .filter(k => k.indexOf('tabelog-shell-') !== 0)
+        .map(k => caches.delete(k)));
+    }
+    // GC superseded ?v= entries. Plain-URL entries (emoji PNGs,
     // requests from a not-yet-refreshed old page) are left alone.
     try {
       const wanted = new Set(CURRENT_VERSIONED_URLS.map(
@@ -3058,6 +3693,9 @@ async function warmInto(cacheName, hrefs) {
 self.addEventListener('message', (event) => {
   const d = event.data;
   if (!d || typeof d !== 'object') return;
+  // M-012: the ONLY way a waiting worker takes over. Sent by the page after
+  // the user taps "reload" on the update prompt.
+  if (d.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
   if (d.type === 'WARM_DATA' && typeof d.url === 'string') {
     event.waitUntil((async () => {
       try {
@@ -3091,10 +3729,10 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(cacheFirst(req, SHELL_CACHE));
       return;
     }
-    if (url.pathname.indexOf('/transit/') !== -1) {
-      event.respondWith(staleWhileRevalidate(req, DATA_CACHE, false));
-      return;
-    }
+    // M-058: the /transit/ branch used to send docs/transit/japan.geojson
+    // through stale-while-revalidate. That file moved to R2
+    // (assets.jpfoodmap.com) long ago, so the branch has been dead code —
+    // removed rather than left as a trap for the next reader.
     event.respondWith(cacheFirst(req));
     return;
   }
@@ -3102,18 +3740,25 @@ self.addEventListener('fetch', (event) => {
   // CDN assets we serve from cache on revisit but refresh in the
   // background, with an LRU cap so opaque entries (which Chrome pads to
   // ~7MB each for quota accounting) can't silently exhaust origin quota.
-  // Anything outside this list (map tiles, Nominatim search, jpfoodmap
-  // sync API) passes straight through to the browser default.
+  // Anything outside this list (Nominatim search, jpfoodmap sync API)
+  // passes straight through to the browser default.
   // M-011: cdnjs serves MarkerCluster's JS + both its stylesheets, and a
   // host that isn't listed here never reaches respondWith at all — so an
   // offline/blocked cdnjs left the boot hard-stuck on L.markerClusterGroup
   // with nothing in Cache Storage to fall back to.
-  if (/(\.tile\.openstreetmap\.org$)|(^[a-c]\.tile\.)/i.test(url.hostname) ||
-      url.hostname === 'emojicdn.elk.sh' ||
+  // M-058: the old tile pattern (`^[a-c]\.tile\.` / `.tile.openstreetmap.org`)
+  // never matched a single request — the basemap has been
+  // {s}.basemaps.cartocdn.com for as long as this worker has existed, so
+  // offline panning showed grey squares even where tiles had been fetched.
+  // M-135: unpkg.com dropped — nothing in this build requests it.
+  if (/(\.tile\.openstreetmap\.org$)|(\.basemaps\.cartocdn\.com$)/i.test(url.hostname)) {
+    event.respondWith(staleWhileRevalidate(req, TILE_CACHE, TILE_CACHE_MAX));
+    return;
+  }
+  if (url.hostname === 'emojicdn.elk.sh' ||
       url.hostname === 'cdn.jsdelivr.net' ||
-      url.hostname === 'cdnjs.cloudflare.com' ||
-      url.hostname === 'unpkg.com') {
-    event.respondWith(staleWhileRevalidate(req, EXT_CACHE, true));
+      url.hostname === 'cdnjs.cloudflare.com') {
+    event.respondWith(staleWhileRevalidate(req, EXT_CACHE, EXT_CACHE_MAX));
   }
 });
 
@@ -3123,7 +3768,38 @@ function cacheable(resp) {
   return !!resp && (resp.ok || resp.type === 'opaque');
 }
 
-const EXT_CACHE_MAX_ENTRIES = 200;
+// M-049: a static host answers an unknown path with the 200 HTML of an error
+// page. Cached under data/foo.json?v=… that becomes a permanent poison entry
+// — JSON.parse throws forever, and the ?v= hash means it is never refetched.
+// Extension says asset, content-type says document ⇒ refuse to store it.
+const ASSET_PATH_RE = /\.(json|png|jpg|jpeg|webp|js|css)$/i;
+function cacheableAsset(req, resp) {
+  if (!resp) return false;
+  if (resp.type === 'opaque') return true;   // cross-origin: nothing to read
+  if (!resp.ok) return false;
+  try {
+    if (ASSET_PATH_RE.test(new URL(req.url).pathname)) {
+      const ct = resp.headers.get('content-type') || '';
+      if (/^\s*text\/html/i.test(ct)) return false;
+    }
+  } catch (_) {}
+  return true;
+}
+
+// M-144: fixing the M-058 tile regex makes every panned tile an opaque
+// cross-origin entry, and Chrome bills opaque responses at a ~7MB padded
+// size — the old shared cap of 200 is ~1.4GB of nominal quota, enough to get
+// the whole origin (localStorage favorites included) evicted. 70 keeps a
+// screenful or two of tiles while staying an order of magnitude under any
+// device quota. The CDN cache gets its own, larger cap: its entries are real
+// CORS responses billed at their true size (a few KB each) and they include
+// the boot-critical MarkerCluster bundle, which must not be evicted by a pan.
+const TILE_CACHE_MAX = 70;
+const EXT_CACHE_MAX  = 120;
+// ...and the trim itself can't be a 2% coin flip any more: at 70 entries a
+// run of unlucky rolls overshoots the cap by hundreds. Deterministic counter.
+const TRIM_EVERY = 10;
+let extPutCount = 0;
 async function trimCache(cacheName, max) {
   try {
     const cache = await caches.open(cacheName);
@@ -3137,7 +3813,7 @@ async function cacheFirst(req, cacheName = DATA_CACHE) {
   const cached = await cache.match(req);
   if (cached) return cached;
   const fresh = await fetch(req);
-  if (cacheable(fresh)) cache.put(req, fresh.clone());
+  if (cacheableAsset(req, fresh)) cache.put(req, fresh.clone());   // M-049
   return fresh;
 }
 
@@ -3150,8 +3826,14 @@ async function cacheFirst(req, cacheName = DATA_CACHE) {
 const NAV_TIMEOUT_MS = 3500;
 async function networkFirst(req, event) {
   const cache = await caches.open(SHELL_CACHE);
+  // M-149: every navigation renders the same document, so keying the cache
+  // entry by the full URL stored one full copy of index.html per query-string
+  // permutation (/?lang=en, /?r=<slug>, …). Navigations all collapse onto
+  // './'; the read below still tries the exact request first, so entries
+  // written by an older worker keep resolving.
+  const key = (req.mode === 'navigate') ? './' : req;
   const fetchP = fetch(req).then((fresh) => {
-    if (cacheable(fresh)) cache.put(req, fresh.clone());
+    if (cacheable(fresh)) cache.put(key, fresh.clone());
     return fresh;
   });
   if (event) event.waitUntil(fetchP.catch(() => {}));
@@ -3162,7 +3844,11 @@ async function networkFirst(req, event) {
   let timer;
   try {
     return await Promise.race([
-      fetchP.catch(() => cached),
+      // M-151: a 5xx resolves like any other response, so the old code
+      // handed Cloudflare's error page to the navigation while a perfectly
+      // good cached document sat one line away. Only an ok response wins.
+      fetchP.then((fresh) => (fresh && fresh.ok) ? fresh : cached)
+            .catch(() => cached),
       new Promise((res) => { timer = setTimeout(() => res(cached), NAV_TIMEOUT_MS); }),
     ]);
   } finally {
@@ -3170,16 +3856,20 @@ async function networkFirst(req, event) {
   }
 }
 
-async function staleWhileRevalidate(req, cacheName, capped) {
+async function staleWhileRevalidate(req, cacheName, maxEntries) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(req);
   const fresh = fetch(req).then(resp => {
-    if (cacheable(resp)) {
+    if (cacheableAsset(req, resp)) {   // M-049
       cache.put(req, resp.clone());
-      // Amortized trim — keys() on every put would be pure overhead.
-      if (capped && Math.random() < 0.02) trimCache(cacheName, EXT_CACHE_MAX_ENTRIES);
+      // M-144: amortized trim — keys() on every put would be pure overhead,
+      // but a deterministic every-Nth beats the old Math.random() < 0.02.
+      if (maxEntries && (++extPutCount % TRIM_EVERY === 0)) {
+        trimCache(cacheName, maxEntries);
+      }
     }
-    return resp;
+    // M-151: never let a 5xx displace a good cached copy.
+    return (resp && (resp.ok || resp.type === 'opaque')) ? resp : (cached || resp);
   }).catch(() => cached);
   return cached || fresh;
 }
@@ -3220,8 +3910,10 @@ FILTER_JS_TEMPLATE = r"""
   var GOOGLE_CLIENT_ID = '__GOOGLE_CLIENT_ID__';
   // Build-time Simplified -> Traditional lookup. Keys are exact CJK
   // runs that appear anywhere on the rendered page; values are their
-  // OpenCC s2t conversion (full multi-char rules applied at build, so
-  // 拉面->拉麵 and 内脏->內臟 land correctly). localizeTree() walks text
+  // OpenCC s2twp conversion (full multi-char + Taiwan vocabulary rules
+  // applied at build, plus the M-102 fixup table, so both the glyphs and
+  // the vocabulary land correctly —
+  // 拉面->拉麵 and 内脏->內臟). localizeTree() walks text
   // nodes and runs the CJK-run regex over each, replacing matched runs
   // via this table; runs without an entry are passed through unchanged.
   // Subtrees marked lang="ja" are skipped wholesale so Japanese names,
@@ -3251,13 +3943,90 @@ FILTER_JS_TEMPLATE = r"""
     if (d._nm == null) d._nm = normalizeForSearch(d.name || '');
     return d._nm;
   }
+  // ===== M-012: service-worker update prompt =============================
+  // The waiting worker never activates by itself (install no longer calls
+  // skipWaiting), so a deploy can't swap the running code out from under an
+  // edit that hasn't been pushed yet. Instead the page offers a reload and
+  // the user picks the moment. Nothing here calls push()/schedulePush() or
+  // touches tabelog.syncBase — saveCache()/saveBookmarks() already wrote
+  // every pending edit to localStorage synchronously, so a user-initiated
+  // reload is lossless and an ignored prompt costs nothing.
+  var swReloading = false;
+  // Reload ONLY after the user pressed 重新载入. controllerchange also fires
+  // on a first-ever visit (activate → clients.claim() adopts this very
+  // uncontrolled page), and reloading there would cost every new visitor a
+  // second full boot; it fires again if the worker swaps for any other
+  // reason, which is exactly the unattended refresh M-012 exists to prevent.
+  var swUpdateAccepted = false;
+  // #sync-sr is the page's one aria-live region (M-089). The richer
+  // announce() lives inside the sync-UI scope further down; these two
+  // top-level notices need the same region before that scope exists.
+  function srSay(text) {
+    var el = document.getElementById('sync-sr');
+    if (el) el.textContent = text || '';
+  }
+  function showSwUpdatePrompt(reg) {
+    var box = document.getElementById('sw-update');
+    if (!box || box.dataset.shown === '1') return;
+    box.dataset.shown = '1';
+    box.hidden = false;
+    try { srSay(document.getElementById('sw-update-msg').textContent); }
+    catch (_) {}
+    var go = document.getElementById('sw-update-go');
+    var later = document.getElementById('sw-update-later');
+    if (later) later.addEventListener('click', function() { box.hidden = true; });
+    if (go) go.addEventListener('click', function() {
+      box.hidden = true;
+      swUpdateAccepted = true;
+      var w = reg && reg.waiting;
+      if (!w) { swReloading = true; location.reload(); return; }
+      try { w.postMessage({type: 'SKIP_WAITING'}); } catch (_) {
+        swReloading = true; location.reload();
+      }
+      // If the worker never takes over (message lost, activate stalled) the
+      // user pressed a button that did nothing. Reload anyway after a beat.
+      setTimeout(function() {
+        if (!swReloading) { swReloading = true; location.reload(); }
+      }, 4000);
+    });
+  }
+  function watchForSwUpdate(reg) {
+    if (!reg) return;
+    // Already waiting when we got here (installed during a previous visit).
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      showSwUpdatePrompt(reg);
+    }
+    reg.addEventListener('updatefound', function() {
+      var inst = reg.installing;
+      if (!inst) return;
+      inst.addEventListener('statechange', function() {
+        // No controller ⇒ this is the very first install on this origin;
+        // there is nothing to replace and nothing to warn about.
+        if (inst.state === 'installed' && navigator.serviceWorker.controller) {
+          showSwUpdatePrompt(reg);
+        }
+      });
+    });
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', function() {
+      // Only the user's own "reload" gets to refresh the page (see
+      // swUpdateAccepted above), and only once — Chrome fires this again on
+      // the reloaded page.
+      if (!swUpdateAccepted || swReloading) return;
+      swReloading = true;
+      location.reload();
+    });
+  }
   // Service worker registration. Caches restaurants.json, popups.json,
-  // transit GeoJSON, map tiles + emoji CDN on first fetch so repeat visits
-  // (and second-tab loads) skip the network for the heavy bits. Failures
-  // are non-fatal — the page works without it (e.g. file:// preview).
+  // map tiles + emoji CDN on first fetch so repeat visits (and second-tab
+  // loads) skip the network for the heavy bits. Failures are non-fatal —
+  // the page works without it (e.g. file:// preview).
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
-      navigator.serviceWorker.register('./sw.js').catch(function(err) {
+      navigator.serviceWorker.register('./sw.js').then(function(reg) {
+        watchForSwUpdate(reg);   // M-012
+      }).catch(function(err) {
         console.warn('[tabelog] SW registration failed:', err);
       });
       // M-062 / M-061: two things only the page knows. The popups variant
@@ -3291,6 +4060,31 @@ FILTER_JS_TEMPLATE = r"""
     });
   }
 
+  // ===== M-070: connectivity state =======================================
+  // navigator.onLine was never read anywhere in this codebase, so a traveller
+  // whose SIM had died got a map that silently stopped fetching photos,
+  // popups and search results with no explanation. This is an INFORMATIONAL
+  // bar, not an error: everything already cached still works, and blaming a
+  // "network or ad blocker" (the wording used elsewhere for real failures)
+  // would be wrong here.
+  function renderOfflineBar() {
+    var el = document.getElementById('net-offline');
+    if (!el) return;
+    var off = (navigator.onLine === false);
+    if (el.hidden !== !off) {
+      el.hidden = !off;
+      if (off) {
+        var msg = document.getElementById('net-offline-msg');
+        srSay(msg ? msg.textContent : '');
+      } else {
+        srSay('');
+      }
+    }
+  }
+  window.addEventListener('online', renderOfflineBar);
+  window.addEventListener('offline', renderOfflineBar);
+  window.addEventListener('load', renderOfflineBar);
+
   // ===== Lazy popup loader =====
   // The rendered popup HTML for all restaurants lives in docs/data/popups.json
   // (one entry per Tabelog detail_url). It's ~4 MB gzipped, so we don't pull
@@ -3303,7 +4097,7 @@ FILTER_JS_TEMPLATE = r"""
   // exact same (content-hashed) URL the first marker tap will request.
   function popupsUrlForLang() {
     // Each UI language gets its own popups file:
-    //   zh-TW -> popups-tw.json (policy + ribbons via OpenCC s2t)
+    //   zh-TW -> popups-tw.json (policy + ribbons via OpenCC s2twp)
     //   en    -> popups-en.json (policy overlaid from policy_en.json,
     //            falls back to Chinese for untranslated entries)
     //   zh-CN -> popups.json (the default)
@@ -3358,7 +4152,13 @@ FILTER_JS_TEMPLATE = r"""
     var src = key
       ? 'emoji/' + key + '.png'
       : 'https://emojicdn.elk.sh/' + encodeURIComponent(m) + '?style=apple';
-    return '<img src="' + src + '" alt="' + escAttr(m) + '" draggable="false" ' +
+    // M-144: emojicdn answers with Access-Control-Allow-Origin:*, so asking
+    // for CORS turns what would be an OPAQUE cache entry (billed at ~7MB of
+    // quota apiece by Chrome) into a normal one billed at its real ~4KB.
+    // Local /emoji/ PNGs are same-origin and must NOT carry the attribute.
+    var cors = key ? '' : ' crossorigin="anonymous"';
+    return '<img src="' + src + '"' + cors + ' alt="' + escAttr(m) +
+           '" draggable="false" ' +
            'style="height:1em;width:1em;vertical-align:-0.15em;' +
            'display:inline-block;' + (extraStyle || '') + '">';
   }
@@ -3380,6 +4180,9 @@ FILTER_JS_TEMPLATE = r"""
       ? 'emoji/' + key + '.png'
       : 'https://emojicdn.elk.sh/' + encodeURIComponent(m) + '?style=apple';
     var img = document.createElement('img');
+    // M-144: see emojiImg — CORS instead of opaque for the CDN fallback so
+    // the SW's ext cache is billed real bytes. Must be set before .src.
+    if (!key) img.crossOrigin = 'anonymous';
     img.src = src;
     img.alt = m;
     img.draggable = false;
@@ -4081,7 +4884,78 @@ FILTER_JS_TEMPLATE = r"""
     var map = window[mapId];
     if (!map) { again(); return; }
     if (typeof L === 'undefined' || !L.markerClusterGroup) { again(); return; }
-    if (!L.control.locate) { again(); return; }
+    // BUG-01: the locate plugin used to be gated here too. It is an
+    // OPTIONAL feature — one FAB — but a single missing file held the whole
+    // page hostage: initMap spun for ~10s (200 x 50ms), then showed the red
+    // "地图组件加载失败" banner and stopped retrying for good, so no markers,
+    // no filters, no search. The plugin is now wired up below inside a
+    // capability check, with a late attach for the slow-network case.
+
+    // ===== M-015: back-button history stack for floating layers =====
+    // Nothing on this page ever pushed a history entry, so in the installed
+    // PWA (display:standalone — no address bar, no refresh button) Android's
+    // back gesture went straight to "leave the app" even with a detail card
+    // open. Every overlay now pushes one state-only entry: pushState is
+    // called WITHOUT a url argument, so location.search never changes and
+    // readLangParam() / setLanguage()'s full navigation are untouched, and
+    // the user's map position never leaks into the address bar.
+    // The search dropdown is deliberately NOT in here — typing is not
+    // navigation. URL deep links (M-032) are a separate feature.
+    var uiStack = [];        // kinds currently open, topmost last
+    var uiClosers = {};      // kind -> function that closes it
+    var uiSuppress = 0;      // popstate events caused by our own back()
+    var uiEatPending = 0;    // entries freed by a close, not yet consumed
+    var uiEatTimer = 0;
+    var uiSafetyTimer = 0;
+    function uiFlushEat() {
+      uiEatTimer = 0;
+      while (uiEatPending > 0) {
+        uiEatPending--;
+        uiSuppress++;
+        try { history.back(); } catch (_) { uiSuppress--; }
+      }
+      // If a back() ever fails to produce a popstate, don't let the counter
+      // swallow a genuine back press for the rest of the session.
+      clearTimeout(uiSafetyTimer);
+      uiSafetyTimer = setTimeout(function() { uiSuppress = 0; }, 1500);
+    }
+    function uiRegister(kind, closer) { uiClosers[kind] = closer; }
+    function uiPush(kind) {
+      if (uiStack.indexOf(kind) >= 0) return;   // one entry per overlay, max
+      uiStack.push(kind);
+      try {
+        if (uiEatPending > 0) {
+          // Another overlay closed earlier in this same tick already freed
+          // an entry (openFilterSheet closes the detail card first, and
+          // vice versa). Reuse it — queueing back() and pushState() together
+          // makes the two race for the same history slot.
+          uiEatPending--;
+          if (!uiEatPending && uiEatTimer) { clearTimeout(uiEatTimer); uiEatTimer = 0; }
+          history.replaceState({tabelogUi: kind}, '');
+        } else {
+          history.pushState({tabelogUi: kind}, '');
+        }
+      } catch (_) { /* history unavailable (file://, hardened browsers) */ }
+    }
+    function uiDrop(kind) {
+      var i = uiStack.lastIndexOf(kind);
+      if (i < 0) return;     // already popped by popstate — nothing to eat
+      uiStack.splice(i, 1);
+      uiEatPending++;
+      if (!uiEatTimer) uiEatTimer = setTimeout(uiFlushEat, 0);
+    }
+    window.addEventListener('popstate', function() {
+      if (uiSuppress > 0) { uiSuppress--; return; }
+      var kind = uiStack.pop();
+      if (!kind) return;     // nothing of ours is open — ordinary navigation
+      var fn = uiClosers[kind];
+      // The closer calls uiDrop(kind), which is a no-op now that the kind is
+      // off the stack — so closing from here eats no extra history entry.
+      // Note we never OPEN anything from history state: after a bfcache
+      // restore history.state.tabelogUi may name an overlay that is not on
+      // screen, and re-opening it would be wrong.
+      if (fn) { try { fn(); } catch (_) {} }
+    });
 
     // M-085: Leaflet's zoom/fade/marker animations and every flyTo ran at
     // full tilt even for a user who asked the OS for reduced motion — a
@@ -4166,21 +5040,19 @@ FILTER_JS_TEMPLATE = r"""
     // maximumAge 10min lets the OS hand back a recent cached fix without
     // re-summoning the GPS subsystem — on iOS Safari this is what
     // suppresses the "Allow location" prompt on every reopen.
-    var locateCtl = L.control.locate({
-      position: 'topleft',
-      flyTo: true,
-      setView: 'untilPan',
-      initialZoomLevel: 16,
-      keepCurrentZoomLevel: false,
-      cacheLocation: true,
-      showCompass: true,
-      drawCircle: true,
-      drawMarker: true,
-      locateOptions: {enableHighAccuracy: true, maximumAge: 600000, watch: false},
-      strings: LOCATE_STRINGS
-    }).addTo(map);
+    //
+    // BUG-01: the plugin is optional, so everything below degrades instead
+    // of throwing. attachLocate() is a no-op until L.control.locate exists;
+    // until then the FAB is hidden (a dead button that does nothing when
+    // tapped is worse than no button at all). The <script> is `defer`red,
+    // so on a slow link it can genuinely land after initMap — hence the
+    // load listener plus a bounded ~10s poll as a belt-and-braces retry.
+    var locateFab = document.getElementById('fab-locate');
+    var locateCtl = null;
     // Persist every successful fix so a reopen can paint the last position
-    // immediately (before the live fix arrives).
+    // immediately (before the live fix arrives). Registered on the map, not
+    // on the control, so it binds exactly once whenever — or whether — the
+    // plugin turns up.
     var LAST_LOC_KEY = 'tabelog.lastLocation';
     map.on('locationfound', function(e) {
       try {
@@ -4192,18 +5064,54 @@ FILTER_JS_TEMPLATE = r"""
         }));
       } catch (_) {}
     });
-    var locateFab = document.getElementById('fab-locate');
-    if (locateFab) {
-      locateFab.addEventListener('click', function() {
-        // _active is the plugin's "currently tracking" flag. Toggle so a
-        // second tap turns it off, matching Google Maps' behavior.
-        if (locateCtl._active) locateCtl.stop(); else locateCtl.start();
-      });
-      // Paint the FAB blue while the plugin is tracking. The plugin emits
-      // these events on the map; locatedeactivate fires on .stop() and on
-      // permission denial.
-      map.on('locateactivate',   function() { locateFab.classList.add('locating'); });
-      map.on('locatedeactivate', function() { locateFab.classList.remove('locating'); });
+    function attachLocate() {
+      if (locateCtl) return true;
+      if (typeof L === 'undefined' || !L.control ||
+          typeof L.control.locate !== 'function') return false;
+      locateCtl = L.control.locate({
+        position: 'topleft',
+        flyTo: true,
+        setView: 'untilPan',
+        initialZoomLevel: 16,
+        keepCurrentZoomLevel: false,
+        cacheLocation: true,
+        showCompass: true,
+        drawCircle: true,
+        drawMarker: true,
+        locateOptions: {enableHighAccuracy: true, maximumAge: 600000, watch: false},
+        strings: LOCATE_STRINGS
+      }).addTo(map);
+      if (locateFab) {
+        // .map-fab sets display:inline-flex, which beats the [hidden] UA
+        // rule — toggle the inline style instead.
+        locateFab.style.display = '';
+        locateFab.removeAttribute('aria-hidden');
+        locateFab.addEventListener('click', function() {
+          // _active is the plugin's "currently tracking" flag. Toggle so a
+          // second tap turns it off, matching Google Maps' behavior.
+          if (locateCtl._active) locateCtl.stop(); else locateCtl.start();
+        });
+        // Paint the FAB blue while the plugin is tracking. The plugin emits
+        // these events on the map; locatedeactivate fires on .stop() and on
+        // permission denial.
+        map.on('locateactivate',   function() { locateFab.classList.add('locating'); });
+        map.on('locatedeactivate', function() { locateFab.classList.remove('locating'); });
+      }
+      return true;
+    }
+    if (!attachLocate()) {
+      if (locateFab) {
+        locateFab.style.display = 'none';
+        locateFab.setAttribute('aria-hidden', 'true');
+      }
+      var locateTag = document.getElementById('locate-plugin-js');
+      if (locateTag) {
+        locateTag.addEventListener('load', function() { attachLocate(); });
+      }
+      var locateTries = 0;
+      var locatePoll = setInterval(function() {
+        if (attachLocate() || ++locateTries > 100) clearInterval(locatePoll);
+      }, 100);
     }
 
     // Permissions API: surface a tooltip hint when location is denied so the
@@ -4266,6 +5174,10 @@ FILTER_JS_TEMPLATE = r"""
       if (btn) {
         btn.classList.toggle('active', on);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        // M-193: turning a bucket off cancels its download (onRemove aborts),
+        // and an abort fires no lodload/lodloaderror — clear the spinner here
+        // so it can't be left running on a dark FAB.
+        if (!on) btn.classList.remove('loading');
       }
       if (!transitLayer) return;
       var anyOn = transitBuckets.long || transitBuckets.city;
@@ -4276,9 +5188,13 @@ FILTER_JS_TEMPLATE = r"""
         if (map.hasLayer(transitLayer)) map.removeLayer(transitLayer);
       }
     }
+    // BUG-16: the two FABs, so the load-state handlers below can reach the
+    // buttons (and their storage keys) without another getElementById.
+    var transitFabs = {};
     function wireTransitFab(btnId, key, storageKey, defaultOn) {
       var btn = document.getElementById(btnId);
       if (!btn) return;
+      transitFabs[key] = { btn: btn, storageKey: storageKey };
       var on = defaultOn;
       try {
         var v = localStorage.getItem(storageKey);
@@ -4286,13 +5202,51 @@ FILTER_JS_TEMPLATE = r"""
       } catch (e) {}
       applyTransitBucket(btn, key, on);
       btn.addEventListener('click', function() {
-        on = !on;
-        applyTransitBucket(btn, key, on);
-        try { localStorage.setItem(storageKey, on ? '1' : '0'); } catch (e) {}
+        // BUG-16: read the live bucket, not a closure copy — a failed load
+        // rolls the bucket back and the next click has to see that.
+        var next = !transitBuckets[key];
+        applyTransitBucket(btn, key, next);
+        try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch (e) {}
       });
     }
     wireTransitFab('fab-transit-long', 'long', 'tabelog.showTransitLong', false);
     wireTransitFab('fab-transit-city', 'city', 'tabelog.showTransitCity', false);
+
+    // M-193 / BUG-16: LOD download state -> FAB. transit-layer.js's _loading
+    // flag was request de-duplication only and drove no UI at all, so a slow
+    // or failed 1-4 MB LOD looked exactly like "this area has no lines".
+    function transitFabsLoading(on) {
+      ['long', 'city'].forEach(function(k) {
+        var rec = transitFabs[k];
+        if (!rec || !rec.btn) return;
+        rec.btn.classList.toggle('loading', !!(on && transitBuckets[k]));
+      });
+    }
+    if (transitLayer && typeof transitLayer.on === 'function') {
+      transitLayer.on('lodloadstart', function() { transitFabsLoading(true); });
+      transitLayer.on('lodload',      function() { transitFabsLoading(false); });
+      transitLayer.on('lodloaderror', function(e) {
+        transitFabsLoading(false);
+        // A failed UPGRADE on top of an LOD that is already drawing stays a
+        // toast only — lines are on screen, so the lit FAB is not a lie.
+        // Nothing rendered at all -> bounce the toggles back so the user can
+        // retry, and persist '0': the keys keep their '1'/'0' semantics, they
+        // just never record a state that never made it onto the map.
+        if (!e || !e.hasData) {
+          ['long', 'city'].forEach(function(k) {
+            if (!transitBuckets[k]) return;
+            var rec = transitFabs[k];
+            if (!rec) return;
+            applyTransitBucket(rec.btn, k, false);
+            try { localStorage.setItem(rec.storageKey, '0'); } catch (_) {}
+          });
+        }
+        // showToast() announces into the #sync-sr live region itself, so the
+        // screen-reader path is covered by the same call.
+        try { showToast(l10nSentence(['交通图层加载失败', '请稍后再试'])); }
+        catch (_) {}
+      });
+    }
 
     function applyToggle(btn, layers, on) {
       if (!btn) return;
@@ -4554,7 +5508,25 @@ FILTER_JS_TEMPLATE = r"""
     // popups.json positional array:
     //   [genre, dinner, lunch, seat, station, address, policy, photos]
     function renderPopup(d, p) {
-      if (!d || !p) return '';
+      // BUG-10: returning '' here painted a 33px white strip with a grip and
+      // nothing else — no name, no close button, no way to tell what went
+      // wrong. A row whose detail_url is missing from popups.json (a fresh
+      // scrape, a half-written deploy) still has a name and a rating, so
+      // render the minimum readable card instead of an empty sheet.
+      if (!d) return '';
+      if (!p) {
+        return '<div class="rst-card">'
+          + '<div class="rst-header">'
+            + '<div class="rst-title"><span lang="ja">'
+              + escapeHtml(d.name || '') + '</span>'
+              + '<span class="rst-rating">★'
+              + (d.rating == null ? '' : escapeHtml(d.rating)) + '</span></div>'
+            + '<div class="rst-actions">'
+              + '<button class="rst-close" type="button" aria-label="关闭">×</button>'
+            + '</div>'
+          + '</div>'
+        + '</div>';
+      }
       var genre   = p[0], dinner  = p[1], lunch   = p[2], seat    = p[3],
           station = p[4], addr    = p[5], policy  = p[6], photos  = p[7] || [];
       // Slot 8 is server-rendered ribbon HTML — safe to inline as-is
@@ -4645,8 +5617,30 @@ FILTER_JS_TEMPLATE = r"""
         gcalNote = '<div class="rst-gcal" style="font-size:11px;color:#16a34a;'
                  + 'margin:4px 0 0;">🛰️ ' + gcalTxt + '</div>';
       }
+      // M-021: this row's coordinate is a street-block centroid, not a door
+      // — GSI never matched a house number for it (median error 724 m). Say so
+      // instead of letting the pin imply precision it doesn't have.
+      // M-093: Google reports the business as shut. The marker deliberately
+      // stays on the map (a favourited URL that disappears reads as data
+      // loss), so the card carries the label instead.
+      // Both labels are pure-CJK zh-CN literals: the #bs-content
+      // MutationObserver runs localizeTree over inserted nodes, so en / ja
+      // come from data/i18n and zh-TW from TEXT_TRAD_MAP. No per-language
+      // string literals to keep in sync (unlike gcalTxt above, which has to
+      // be hand-tuned only because it embeds the Latin word "Google").
+      var approxNote = d.approx
+        ? '<div class="rst-approx">坐标为街区级近似</div>'
+        : '';
+      var closedBadge = '';
+      if (d.closed === 1 || d.closed === 2) {
+        closedBadge = '<div class="rst-closed'
+                    + (d.closed === 2 ? ' rst-closed-temp' : '') + '">'
+                    + (d.closed === 1 ? '已永久歇业' : '暂停营业')
+                    + '</div>';
+      }
       return '<div class="rst-card">'
         + ribbons
+        + closedBadge
         + '<div class="rst-header">'
           + '<div class="rst-title"><span lang="ja">' + name + '</span>'
             + '<span class="rst-rating">★' + rating + '</span></div>'
@@ -4669,6 +5663,7 @@ FILTER_JS_TEMPLATE = r"""
           + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value" lang="ja">' + escapeHtml(addr) + '</span>' + txBtn('addr', addr) + '</div>'
         + '</div>'
         + gcalNote
+        + approxNote
         + (policy ? '<div class="rst-policy">' + escapeHtml(policy) + '</div>' : '')
         + '<div class="rst-footer">'
           + chip
@@ -4992,6 +5987,7 @@ FILTER_JS_TEMPLATE = r"""
       bmBackdrop.classList.add('bm-open');
       bmModal.classList.add('bm-open');
       bmModal.setAttribute('aria-hidden', 'false');
+      uiPush('bookmark');                // M-015
       // Pull focus into the name field after the open transition starts so
       // mobile keyboards pop up immediately.
       setTimeout(function(){ bmNameInput.focus(); }, 50);
@@ -5003,7 +5999,9 @@ FILTER_JS_TEMPLATE = r"""
       bmCollapsePicker();
       bmShowError('');
       bmPending = null;
+      uiDrop('bookmark');                // M-015
     }
+    uiRegister('bookmark', closeBookmarkModal);   // M-015
     function commitBookmark() {
       if (!bmPending) return;
       var name = (bmNameInput.value || '').trim();
@@ -5103,16 +6101,21 @@ FILTER_JS_TEMPLATE = r"""
         bmShowError('');
       });
     });
-    // The full picker module loads on first expand only. Pinned to the
-    // exact version the old `@^1` range URL was serving (immutable CDN
-    // path, no redirect); the <emoji-picker> tag upgrades in place once
+    // The full picker module loads on first expand only. Still the exact
+    // 1.27.0 build the old `@^1` range URL resolved to, but M-006/M-011
+    // moved it to vendor/ on this origin — index.js is a re-export shim,
+    // so picker.js + database.js are fetched by the module loader from
+    // the same directory. The <emoji-picker> tag upgrades in place once
     // the module registers the custom element. Failure allows retry on
     // the next click — the six quick chips keep working regardless.
     var bmPickerLoaded = null;
     function ensurePickerModule() {
       if (!bmPickerLoaded) {
         bmPickerLoaded =
-          import('https://cdn.jsdelivr.net/npm/emoji-picker-element@1.27.0/index.js')
+          // Leading './' is required: a dynamic import() specifier that
+          // doesn't start with / ./ or ../ is a *bare* specifier and needs
+          // an import map to resolve.
+          import('./vendor/emoji-picker-element-1.27.0/index.js')
             .catch(function(e) {
               bmPickerLoaded = null;
               console.warn('[tabelog] emoji picker load failed:', e);
@@ -5126,6 +6129,15 @@ FILTER_JS_TEMPLATE = r"""
       bmPicker.classList.toggle('bm-show', nowOpen);
       bmEmojiMore.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
       bmEmojiMore.textContent = nowOpen ? '🔼' : '🔽';
+      // M-155: the picker is the last block in a scrollable modal body, so
+      // on a short viewport (or with the keyboard up) it expanded entirely
+      // below the fold and looked like nothing had happened.
+      if (nowOpen) {
+        requestAnimationFrame(function() {
+          try { bmPicker.scrollIntoView({block: 'nearest'}); }
+          catch (_) { bmPicker.scrollIntoView(false); }
+        });
+      }
     });
     // emoji-picker-element fires 'emoji-click' with detail.unicode as the
     // rendered glyph. Setting the input + closing the picker mirrors what
@@ -5209,6 +6221,7 @@ FILTER_JS_TEMPLATE = r"""
     var ssList    = document.getElementById('ss-list');
     var ssLocal   = document.getElementById('ss-local');
     var ssApi     = document.getElementById('ss-api');
+    var ssGenre   = document.getElementById('ss-genre');   // M-105
     // While a render helper is filling a DocumentFragment, the ssAppend*
     // builders write here instead of straight into the live list — one
     // batched insertion per section instead of a reflow-observable append
@@ -5278,29 +6291,51 @@ FILTER_JS_TEMPLATE = r"""
       if (a.len !== b.len) return a.len - b.len;
       return (b.d.rating || 0) - (a.d.rating || 0);
     }
-    function ssMatchLocal(q) {
+    // M-025 / BUG-07 / M-024: the location half of the query is now a first-
+    // class, *visible* constraint instead of a silent re-ranking hint.
+    //   dropLoc=true  — the user clicked the chip's ✕; re-run name-only.
+    // The returned object carries everything the renderer needs to explain
+    // itself: locToken (as typed, for the chip), locHit (how many rows the
+    // constraint actually keeps) and locEmpty (constraint matched nothing,
+    // so the list below it is the unconstrained fallback).
+    var SS_EMPTY_MATCH = {items: [], total: 0, locToken: '', locHit: 0,
+                          locEmpty: false, wholeIsLoc: false,
+                          inViewportCount: null};
+    function ssMatchLocal(q, dropLoc) {
       // Tokenize on raw whitespace BEFORE canonicalization (canon strips
       // whitespace, so we'd lose the split point otherwise).
       var tokens = q.split(/\s+/).filter(function(t) { return t.length > 0; });
-      if (tokens.length === 0) return {items: [], total: 0};
-      var nameQN = '', locQN = '';
+      if (tokens.length === 0) return SS_EMPTY_MATCH;
+      var nameQN = '', locQN = '', locToken = '';
+      // M-024: a query that is ENTIRELY a place name (a ward, a city) is a
+      // map question, not a restaurant-name question. Flagged here; the
+      // renderer uses it to lift 地图搜索 above 餐厅库 and to boost the rows
+      // that are actually in that place.
+      var wholeQN = normalizeForSearch(q);
+      var wholeIsLoc = !!wholeQN && KNOWN_LOCS.has(wholeQN);
       if (tokens.length >= 2) {
         // Location mode is opt-in: only entered when the trailing token is
-        // a known city/ward/prefecture stem. Otherwise the spaces are noise
-        // and we treat the whole input as one restaurant-name query — that
-        // way "炭火烧鸟 正" looks for the literal "炭火烧鸟正" in names and
-        // 炭火焼鳥正ざわ stays #1.
+        // a known city/ward/prefecture/neighbourhood stem. Otherwise the
+        // spaces are noise and we treat the whole input as one restaurant-
+        // name query — that way "炭火烧鸟 正" looks for the literal
+        // "炭火烧鸟正" in names and 炭火焼鳥正ざわ stays #1.
         var lastCanon = normalizeForSearch(tokens[tokens.length - 1]);
         if (lastCanon && KNOWN_LOCS.has(lastCanon)) {
-          locQN  = lastCanon;
+          // dropLoc still splits the token off — "remove the place filter"
+          // means search the NAME half everywhere, not search for the two
+          // halves glued together (which matches nothing).
+          if (!dropLoc) {
+            locQN  = lastCanon;
+            locToken = tokens[tokens.length - 1];
+          }
           nameQN = normalizeForSearch(tokens.slice(0, -1).join(''));
         } else {
           nameQN = normalizeForSearch(tokens.join(''));
         }
       } else {
-        nameQN = normalizeForSearch(tokens[0]);
+        nameQN = normalizeForSearch(tokens.join(''));
       }
-      if (!nameQN) return {items: [], total: 0};
+      if (!nameQN) return SS_EMPTY_MATCH;
 
       // Pass 1: name-match candidates.
       var candidates = [];
@@ -5311,8 +6346,12 @@ FILTER_JS_TEMPLATE = r"""
         if (idx >= 0) candidates.push({d: d, idx: idx, len: nm.length});
       }
 
+      var locHit = 0, locEmpty = false;
       if (locQN) {
-        // Partition by location match; boost matched to top.
+        // Partition by location match. Both halves are kept and both are
+        // labelled: hit rows first, then an "<elsewhere>" sub-header over the
+        // rest. When the constraint keeps nothing at all the renderer says
+        // so out loud rather than pretending the whole country was asked for.
         var hit = [], miss = [];
         for (var j = 0; j < candidates.length; j++) {
           var lv = candidates[j].d.loc_norm || '';
@@ -5320,7 +6359,19 @@ FILTER_JS_TEMPLATE = r"""
         }
         hit.sort(relevanceSort);
         miss.sort(relevanceSort);
-        candidates = hit.length > 0 ? hit.concat(miss) : miss;
+        locHit = hit.length;
+        locEmpty = hit.length === 0;
+        candidates = hit.concat(miss);
+      } else if (wholeIsLoc) {
+        // Rows that are IN the named place outrank rows merely named after it.
+        var inLoc = [], outLoc = [];
+        for (var w = 0; w < candidates.length; w++) {
+          var wv = candidates[w].d.loc_norm || '';
+          (wv.indexOf(wholeQN) >= 0 ? inLoc : outLoc).push(candidates[w]);
+        }
+        inLoc.sort(relevanceSort);
+        outLoc.sort(relevanceSort);
+        candidates = inLoc.concat(outLoc);
       } else {
         candidates.sort(relevanceSort);
       }
@@ -5330,9 +6381,13 @@ FILTER_JS_TEMPLATE = r"""
       // else. The split is stable, so each bucket keeps the relevance order
       // from the tier sort above. Below the zoom threshold this is a no-op
       // and inViewportCount stays null — the renderer falls back to one
-      // flat 餐厅库 list.
+      // flat 餐厅库 list. Skipped whenever the query names a place: an
+      // an explicit place name beats "wherever the map is parked", and
+      // re-partitioning here is exactly what put an Osaka shop first for
+      // a single-ward query (M-024).
       var inViewportCount = null;
-      if (map.getZoom() >= VIEWPORT_BIAS_ZOOM && candidates.length > 0) {
+      if (!locQN && !wholeIsLoc &&
+          map.getZoom() >= VIEWPORT_BIAS_ZOOM && candidates.length > 0) {
         var b = map.getBounds().pad(0.1);
         var W = b.getWest(), E = b.getEast(),
             S = b.getSouth(), N = b.getNorth();
@@ -5360,7 +6415,57 @@ FILTER_JS_TEMPLATE = r"""
         inViewportCount = Math.min(inViewportCount, items.length);
       }
       return {items: items, total: candidates.length,
-              inViewportCount: inViewportCount};
+              inViewportCount: inViewportCount,
+              locToken: locToken, locHit: locHit, locEmpty: locEmpty,
+              wholeIsLoc: wholeIsLoc};
+    }
+
+    // ---- M-105: cuisine-bucket shortcuts ---------------------------------
+    // The search index only ever covered restaurant *names*, so "sushi"
+    // returned the 8 shops with "sushi" in the name while the 寿司·海鲜
+    // bucket sat there with 1224. Buckets are matched on both their source
+    // (zh-CN) label and their label in the active UI language, so the same
+    // query works in all four.
+    var ssGenreCounts = null;
+    var ssGenreIndex  = null;
+    function ssBuildGenreIndex() {
+      if (ssGenreIndex) return;
+      ssGenreCounts = {};
+      for (var i = 0; i < data.length; i++) {
+        var cats = data[i].categories || [];
+        for (var c = 0; c < cats.length; c++) {
+          ssGenreCounts[cats[c]] = (ssGenreCounts[cats[c]] || 0) + 1;
+        }
+      }
+      ssGenreIndex = [];
+      for (var bucket in ssGenreCounts) {
+        if (!Object.prototype.hasOwnProperty.call(ssGenreCounts, bucket)) continue;
+        var keys = [normalizeForSearch(bucket)];
+        var loc = localizeText(bucket);
+        if (loc && loc !== bucket) keys.push(normalizeForSearch(loc));
+        ssGenreIndex.push({bucket: bucket, keys: keys,
+                           n: ssGenreCounts[bucket]});
+      }
+      // Biggest bucket first — with several matches the fat one is almost
+      // always what the user meant.
+      ssGenreIndex.sort(function(a, b) { return b.n - a.n; });
+    }
+    var SS_GENRE_LIMIT = 3;
+    function ssMatchGenres(q) {
+      // One character matches half the buckets; two is the floor for CJK and
+      // three for Latin, same rule the Nominatim gate uses.
+      if (!q || (SS_CJK_RE.test(q) ? q.length < 2 : q.length < 3)) return [];
+      ssBuildGenreIndex();
+      var qn = normalizeForSearch(q);
+      if (!qn) return [];
+      var out = [];
+      for (var i = 0; i < ssGenreIndex.length && out.length < SS_GENRE_LIMIT; i++) {
+        var g = ssGenreIndex[i];
+        for (var k = 0; k < g.keys.length; k++) {
+          if (g.keys[k] && g.keys[k].indexOf(qn) >= 0) { out.push(g); break; }
+        }
+      }
+      return out;
     }
 
     // Two-section render. `localItems` are restaurant-library hits (row
@@ -5379,10 +6484,73 @@ FILTER_JS_TEMPLATE = r"""
       h.textContent = label;
       (ssTarget || ssList).appendChild(h);
     }
-    // Render the restaurant section, splitting into 屏幕内 / 其他区域 when
-    // ssMatchLocal flagged a viewport bias. Used by both ssRender (full
-    // dropdown) and ssShowError (Nominatim-unreachable variant).
-    function ssAppendRestaurantSection(items, ivc) {
+    // M-025: place names are Japanese and must not be run through the
+    // simplified→traditional / EN / JA converters, so every one of them goes
+    // into its own lang="ja" span; the surrounding Chinese stays a bare text
+    // node so localizeTree still translates it.
+    function ssJaSpan(txt) {
+      var s = document.createElement('span');
+      s.setAttribute('lang', 'ja');
+      s.textContent = txt;
+      return s;
+    }
+    // The removable location-constraint chip (+ the explicit "that place has
+    // nothing" note). Replaces the old silent fallback: hit=0 used to drop
+    // the constraint without a word, hit>0 used to append the misses without
+    // a label, and either way the user could not tell what had happened.
+    function ssAppendLocBar(m) {
+      var bar = document.createElement('div');
+      bar.className = 'ss-locbar';
+      var chip = document.createElement('span');
+      chip.className = 'ss-locchip';
+      chip.appendChild(ssJaSpan(m.locToken));
+      var n = document.createElement('b');
+      n.textContent = m.locHit;
+      chip.appendChild(n);
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'ss-locchip-x';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', localizeText('去掉地点约束'));
+      x.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        ssDropLoc();
+      });
+      chip.appendChild(x);
+      bar.appendChild(chip);
+      var note = document.createElement('span');
+      note.className = 'ss-locnote';
+      if (m.locEmpty) {
+        note.appendChild(ssJaSpan(m.locToken));
+        note.appendChild(document.createTextNode('内没有匹配的餐厅 · 已显示全部结果'));
+      } else {
+        note.textContent = '地点内匹配';
+      }
+      bar.appendChild(note);
+      (ssTarget || ssList).appendChild(bar);
+    }
+    function ssAppendLocSubHead(token, n) {
+      var h = document.createElement('div');
+      h.className = 'ss-subsection-head';
+      h.appendChild(ssJaSpan(token));
+      h.appendChild(document.createTextNode('以外的区域 (' + n + ')'));
+      (ssTarget || ssList).appendChild(h);
+    }
+    // Render the restaurant section. Three shapes: location-constrained
+    // (chip + hits + "<place> 以外的区域"), viewport-biased (屏幕内 /
+    // 其他区域), or a flat list. Used by both ssRender (full dropdown) and
+    // ssShowError (Nominatim-unreachable variant).
+    function ssAppendRestaurantSection(items, ivc, m) {
+      if (m && m.locToken) {
+        ssAppendLocBar(m);
+        var hit = Math.min(m.locHit, items.length);
+        for (var h = 0; h < hit; h++) ssAppendRestaurantRow(items[h]);
+        if (hit < items.length) {
+          if (hit > 0) ssAppendLocSubHead(m.locToken, items.length - hit);
+          for (var o = hit; o < items.length; o++) ssAppendRestaurantRow(items[o]);
+        }
+        return;
+      }
       if (ivc == null) {
         items.forEach(ssAppendRestaurantRow);
         return;
@@ -5395,6 +6563,37 @@ FILTER_JS_TEMPLATE = r"""
         ssAppendSubSectionHead('其他区域 (' + (items.length - ivc) + ')');
         for (var j = ivc; j < items.length; j++) ssAppendRestaurantRow(items[j]);
       }
+    }
+    // M-105: one row per matching cuisine bucket. Clicking it is a filter
+    // action, not a map flight — it narrows the cuisine checkboxes to that
+    // bucket and closes the dropdown.
+    function ssAppendGenreRow(g) {
+      var row = document.createElement('div');
+      row.className = 'ss-row ss-genre-row';
+      row.setAttribute('role', 'option');
+      var icon = document.createElement('span');
+      icon.className = 'ss-icon';
+      icon.innerHTML = emojiImg(GENRE_EMOJI[g.bucket] || '🍽️');
+      var text = document.createElement('div');
+      text.className = 'ss-text';
+      var n = document.createElement('div');
+      n.className = 'ss-name';
+      n.textContent = g.bucket;          // localizeTree translates this run
+      var a = document.createElement('div');
+      a.className = 'ss-addr';
+      // Foreign buckets have no checkbox of their own (they are gated by the
+      // single 隐藏非日本料理 toggle), so promise "show", not "only".
+      a.textContent = FOREIGN_GENRES.has(g.bucket) ? '显示这个菜系'
+                                                   : '只看这个菜系';
+      text.appendChild(n); text.appendChild(a);
+      var cnt = document.createElement('span');
+      cnt.className = 'ss-genre-hint';
+      cnt.textContent = g.n;
+      row.appendChild(icon);
+      row.appendChild(text);
+      row.appendChild(cnt);
+      row.addEventListener('click', function() { ssApplyGenre(g.bucket); });
+      (ssTarget || ssList).appendChild(row);
     }
     function ssAppendRestaurantRow(d) {
       var row = document.createElement('div');
@@ -5480,14 +6679,33 @@ FILTER_JS_TEMPLATE = r"""
     // every re-render (the rows are new nodes); Enter falls back to the
     // first row when nothing is highlighted, matching the old behavior.
     var ssActiveIdx = -1;
+    // M-024: DOM order is fixed but the *visual* order is set with CSS
+    // `order`, so a plain querySelectorAll over #ss-list would walk the rows
+    // in a different order than the eye does. Collect per section, in the
+    // order the sections are actually painted.
     function ssNavRows() {
-      return ssList.querySelectorAll('.ss-row:not(.ss-empty)');
+      var secs = ssList.classList.contains('ss-loc-first')
+               ? [ssGenre, ssApi, ssLocal]
+               : [ssGenre, ssLocal, ssApi];
+      var out = [];
+      for (var s = 0; s < secs.length; s++) {
+        if (!secs[s]) continue;
+        var rows = secs[s].querySelectorAll('.ss-row:not(.ss-empty)');
+        for (var i = 0; i < rows.length; i++) out.push(rows[i]);
+      }
+      return out;
     }
+    // BUG-04: this used to drop ssActiveIdx and the aria pointer but leave
+    // the blue .ss-active background painted on whatever row had it. When
+    // the Nominatim answer landed and re-rendered the API section, the user
+    // was looking at a highlighted row #2 while Enter opened row #1.
     function ssResetActive() {
       ssActiveIdx = -1;
+      var rows = ssNavRows();
+      for (var i = 0; i < rows.length; i++) rows[i].classList.remove('ss-active');
       ssInput.removeAttribute('aria-activedescendant');
     }
-    function ssSetActive(idx) {
+    function ssSetActive(idx, noScroll) {
       var rows = ssNavRows();
       if (!rows.length) { ssResetActive(); return; }
       if (idx < 0) idx = rows.length - 1;
@@ -5498,7 +6716,22 @@ FILTER_JS_TEMPLATE = r"""
       ssActiveIdx = idx;
       if (!rows[idx].id) rows[idx].id = 'ss-opt-' + idx;
       ssInput.setAttribute('aria-activedescendant', rows[idx].id);
-      rows[idx].scrollIntoView({block: 'nearest'});
+      if (!noScroll) rows[idx].scrollIntoView({block: 'nearest'});
+    }
+    // BUG-04, other half: an API-only re-render must not silently move the
+    // keyboard selection. The local rows are the same DOM nodes afterwards,
+    // so remember the element and put the highlight back on it (its index
+    // may have shifted when the API section grew above/below it).
+    function ssActiveRow() {
+      var rows = ssNavRows();
+      return (ssActiveIdx >= 0 && rows[ssActiveIdx]) ? rows[ssActiveIdx] : null;
+    }
+    function ssRestoreActive(el) {
+      if (!el || !el.parentNode) return;
+      var rows = ssNavRows();
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i] === el) { ssSetActive(i, true); return; }
+      }
     }
     // Section renderers. Each builds its rows into a DocumentFragment and
     // swaps its own sub-container in one insertion — and, crucially, the
@@ -5507,13 +6740,17 @@ FILTER_JS_TEMPLATE = r"""
     // rebuilt a second time when the network answer lands.
     function ssRenderLocal(localMatch) {
       ssResetActive();
+      // M-024: a whole-query place name flips 地图搜索 to the top. Set on the
+      // list (not on a section) so ssNavRows() and the CSS agree.
+      ssList.classList.toggle('ss-loc-first',
+        !!(localMatch && localMatch.wholeIsLoc));
       var frag = document.createDocumentFragment();
       ssTarget = frag;
       var items = (localMatch && localMatch.items) || [];
       var total = (localMatch && localMatch.total) || 0;
       if (items.length > 0) {
         ssAppendSectionHead('餐厅库');
-        ssAppendRestaurantSection(items, localMatch.inViewportCount);
+        ssAppendRestaurantSection(items, localMatch.inViewportCount, localMatch);
         if (total > items.length) {
           var more = document.createElement('div');
           more.className = 'ss-row ss-empty';
@@ -5526,7 +6763,21 @@ FILTER_JS_TEMPLATE = r"""
       ssLocal.innerHTML = '';
       ssLocal.appendChild(frag);
     }
+    // M-105: cuisine shortcuts. Own section so it can be rebuilt (and
+    // ordered) independently of the other two.
+    function ssRenderGenres(genres) {
+      var frag = document.createDocumentFragment();
+      ssTarget = frag;
+      if (genres && genres.length) {
+        ssAppendSectionHead('菜系');
+        genres.forEach(ssAppendGenreRow);
+      }
+      ssTarget = null;
+      ssGenre.innerHTML = '';
+      ssGenre.appendChild(frag);
+    }
     function ssRenderApi(apiItems, apiPending, errMsg) {
+      var keep = ssActiveRow();      // BUG-04
       ssResetActive();
       var frag = document.createDocumentFragment();
       ssTarget = frag;
@@ -5545,6 +6796,7 @@ FILTER_JS_TEMPLATE = r"""
       ssTarget = null;
       ssApi.innerHTML = '';
       ssApi.appendChild(frag);
+      ssRestoreActive(keep);
     }
     // Opens the dropdown and, when both sections came up genuinely empty,
     // shows the no-results placeholder. Every render path ends here.
@@ -5561,10 +6813,44 @@ FILTER_JS_TEMPLATE = r"""
       if (ssBox) ssBox.classList.add('ss-open');
       ssInput.setAttribute('aria-expanded', 'true');
     }
-    function ssRender(localMatch, apiItems, apiPending) {
+    function ssRender(localMatch, apiItems, apiPending, genres) {
+      ssRenderGenres(genres);      // M-105
       ssRenderLocal(localMatch);
       ssRenderApi(apiItems, apiPending, null);
       ssFinalize();
+    }
+    // M-025: the chip's ✕. Re-runs the same query with the location half
+    // switched off; the flag is per-query and is cleared by the next
+    // keystroke (ssOnInput), so it never becomes sticky hidden state.
+    var ssLocOff = false;
+    function ssDropLoc() {
+      if (ssLocOff) return;
+      ssLocOff = true;
+      var q = ssQuery || ssInput.value.trim();
+      if (!q) return;
+      ssLocalMatch = ssMatchLocal(q, true);
+      ssRender(ssLocalMatch, ssLastApi, false, ssMatchGenres(q));
+      ssInput.focus();
+    }
+    // M-105: "show me the whole 寿司·海鲜 bucket". Narrows the cuisine
+    // checkboxes to that one bucket and re-applies — the same thing the user
+    // would have done by hand in the filter panel, which is why it goes
+    // through apply() and therefore through saveFilterState().
+    function ssApplyGenre(bucket) {
+      ssCloseDropdown();
+      if (FOREIGN_GENRES.has(bucket)) {
+        // A foreign bucket has no checkbox of its own — it is gated by the
+        // single 隐藏非日本料理 toggle, so all we can honestly do is turn
+        // that off. Nothing else is touched (the row promises "show", not "only").
+        var hf = document.getElementById('ff-hide-foreign');
+        if (hf && hf.checked) hf.checked = false;
+      } else {
+        document.querySelectorAll('input[name=ff-genre]').forEach(function(c) {
+          c.checked = (c.value === bucket);
+        });
+      }
+      apply();
+      try { announce(localizeText(bucket)); } catch (_) {}
     }
     function ssCloseDropdown() {
       ssList.classList.remove('open');
@@ -5643,6 +6929,24 @@ FILTER_JS_TEMPLATE = r"""
       map.on('moveend', onArrive);
       map.flyTo(latlng, targetZoom, {duration: 0.8});
     }
+    // M-026: how tight to land for a place of this kind. Nominatim's
+    // addresstype (jsonv2) is the authoritative field; type/class are the
+    // fallbacks for the handful of rows that omit it. 16 is the POI default
+    // — tight enough to read shop signs — and everything administrative
+    // steps back from there.
+    var SS_TYPE_ZOOM = {
+      country: 8, state: 8, region: 8, province: 8, prefecture: 8,
+      county: 10, island: 10,
+      city: 12, municipality: 12, town: 13, village: 14,
+      city_district: 14, district: 14, borough: 14, ward: 14,
+      suburb: 14, quarter: 15, neighbourhood: 15, postcode: 14
+    };
+    function ssTargetZoom(it) {
+      var k = it.addresstype || it.type || '';
+      var z = SS_TYPE_ZOOM[k];
+      if (z == null && it.category === 'boundary') z = 12;
+      return z == null ? 16 : z;
+    }
     function ssGoto(it) {
       ssCloseDropdown();
       ssInput.value = it.name;
@@ -5650,9 +6954,23 @@ FILTER_JS_TEMPLATE = r"""
       ssTitleMode = true;
       ssInput.blur();        // dismiss the on-screen keyboard on mobile
       var latlng = L.latLng(it.lat, it.lon);
-      // 16 is tight enough to read shop signs without losing context. flyTo
-      // animates; Leaflet caps the duration so it's never jarring.
-      map.flyTo(latlng, Math.max(map.getZoom(), 16), {duration: 0.8});
+      // M-026: every result used to land at Math.max(getZoom(), 16), so
+      // a whole city dropped the user onto one block of it and — because of
+      // the Math.max — searching for something *bigger* could never zoom the
+      // map back out. Use the bbox Nominatim already sends when it is
+      // usable, capped at the zoom this kind of place deserves; otherwise
+      // fly to that zoom outright.
+      var zoom = ssTargetZoom(it);
+      var bb = it.bbox;
+      var flown = false;
+      if (bb && bb[0] < bb[1] && bb[2] < bb[3]) {
+        try {
+          map.flyToBounds([[bb[0], bb[2]], [bb[1], bb[3]]],
+                          {maxZoom: zoom, padding: [28, 28], duration: 0.8});
+          flown = true;
+        } catch (_) { flown = false; }
+      }
+      if (!flown) map.flyTo(latlng, zoom, {duration: 0.8});
       ssRemoveTempMarker();
       var iconHtml =
         '<div style="position:relative;transform:translate(-50%,-100%);' +
@@ -5670,6 +6988,11 @@ FILTER_JS_TEMPLATE = r"""
       ssTempMarker = L.marker(latlng, {
         icon: L.divIcon({className: 'empty', iconSize: [0,0], iconAnchor: [0,0], html: iconHtml})
       }).addTo(map);
+      // M-026: the lat/lon bubble is meaningless for a whole city — the pin
+      // sits on an arbitrary centroid and the coordinates are noise. Only
+      // POI-level results (zoom 16) get the bookmark bubble; the label under
+      // the 📍 already names everything else.
+      if (zoom < 16) return;
       // Small popup attached so the user can immediately bookmark the
       // searched place without scrolling back to the dropdown.
       var popHtml =
@@ -5703,16 +7026,32 @@ FILTER_JS_TEMPLATE = r"""
       var name = nd['name:zh'] || nd['name:zh-Hans'] || nd['name:zh-Hant']
               || nd['name:ja'] || r.name || nd.name
               || (r.display_name || '').split(',')[0].trim();
+      // M-026: boundingbox and addresstype were being thrown away, which is
+      // why every result landed at the same zoom. jsonv2 sends both by
+      // default — the URL does not need to change. boundingbox is four
+      // strings in S,N,W,E order; keep it only when all four parse.
+      var bb = null;
+      if (Array.isArray(r.boundingbox) && r.boundingbox.length === 4) {
+        var s = parseFloat(r.boundingbox[0]), n2 = parseFloat(r.boundingbox[1]),
+            w = parseFloat(r.boundingbox[2]), e = parseFloat(r.boundingbox[3]);
+        if (!isNaN(s) && !isNaN(n2) && !isNaN(w) && !isNaN(e)) {
+          bb = [s, n2, w, e];
+        }
+      }
       return {
         lat: parseFloat(r.lat),
         lon: parseFloat(r.lon),
         name: name || '未命名',
-        address: r.display_name || ''
+        address: r.display_name || '',
+        bbox: bb,
+        addresstype: r.addresstype || '',
+        type: r.type || '',
+        category: r.category || r.class || ''
       };
     }
     // Latest local match for the current query; held in module scope so the
     // API callback can re-render with the same restaurant section on top.
-    var ssLocalMatch = {items: [], total: 0};
+    var ssLocalMatch = SS_EMPTY_MATCH;
     // The input doubles as the selected restaurant's title bar. ssQuery is
     // the user's own typed text, tracked separately so selections can't eat
     // it: openSheet switches the display to the name (title mode),
@@ -5825,7 +7164,9 @@ FILTER_JS_TEMPLATE = r"""
         ssReqSeq++;
         if (ssAbort) { ssAbort.abort(); ssAbort = null; }
         if (ssAbortTimer) { clearTimeout(ssAbortTimer); ssAbortTimer = 0; }
-        ssLocalMatch = {items: [], total: 0};
+        ssLocalMatch = SS_EMPTY_MATCH;
+        ssLocOff = false;                      // M-025
+        if (ssGenre) ssGenre.innerHTML = '';   // M-105
         ssWrap.classList.remove('busy');
         ssCloseDropdown();
         ssRemoveTempMarker();
@@ -5839,9 +7180,16 @@ FILTER_JS_TEMPLATE = r"""
       // was sent, making map-search look perpetually slow. Exception: with
       // zero local hits the dropdown would be blank (or claim "no
       // matches") during the debounce, so the pending row stands in.
+      // M-025: a new keystroke re-arms the location constraint — the chip's
+      // ✕ applies to the query the user was looking at, never to the next one.
+      ssLocOff = false;
       ssLocalMatch = ssMatchLocal(v);
+      var ssGenreHits = ssMatchGenres(v);   // M-105
       var willQuery = ssShouldQueryApi(v);
-      ssRender(ssLocalMatch, null, willQuery && ssLocalMatch.items.length === 0);
+      ssRender(ssLocalMatch, null,
+               willQuery && ssLocalMatch.items.length === 0 &&
+                 ssGenreHits.length === 0,
+               ssGenreHits);
       // M-055: 300ms per keystroke with no length floor is exactly the
       // client-side autocomplete pattern the OSM usage policy forbids, and
       // getting the shared Nominatim instance to block us shows up as
@@ -5866,7 +7214,9 @@ FILTER_JS_TEMPLATE = r"""
     function ssExitSearch() {
       ssReqSeq++;
       if (ssAbort) { ssAbort.abort(); ssAbort = null; }
-      ssLocalMatch = {items: [], total: 0};
+      ssLocalMatch = SS_EMPTY_MATCH;
+      ssLocOff = false;                 // M-025
+      if (ssGenre) ssGenre.innerHTML = '';   // M-105
       ssQuery = '';
       ssTitleMode = false;
       ssLastApi = null;
@@ -5888,7 +7238,7 @@ FILTER_JS_TEMPLATE = r"""
       if (ssTitleMode && ssQuery) {
         ssTitleMode = false;
         ssInput.value = ssQuery;
-        ssRender(ssLocalMatch, ssLastApi, false);
+        ssRender(ssLocalMatch, ssLastApi, false, ssMatchGenres(ssQuery));
       } else if (ssTitleMode) {
         ssInput.select();
       }
@@ -6157,6 +7507,7 @@ FILTER_JS_TEMPLATE = r"""
       catch (_) { return false; }
     }
     var hintSuppressUntil = 0, hintRetryTimer = null;
+    var hintMsgEl = document.getElementById('sync-hint-msg');
     function renderSyncHint() {
       if (!hintEl) return;
       var want = syncStatus.dirty && !syncStatus.signedIn && !hintDismissed();
@@ -6171,7 +7522,143 @@ FILTER_JS_TEMPLATE = r"""
         want = false;
       }
       hintEl.hidden = !want;
+      // M-013: the copy is rebuilt every time rather than read from the
+      // static HTML — it grows a count once the local-only pile is big
+      // enough to be worth losing, and a durability caveat when the browser
+      // refused to make this origin persistent.
+      if (want && hintMsgEl) hintMsgEl.textContent = localOnlyHintText();
     }
+
+    // ---- M-013 / GAP-2-13: is local state actually durable? ---------------
+    // Nothing in this codebase had ever called navigator.storage.*, so a
+    // signed-out user's entire favorites list sat in localStorage under the
+    // browser's default "best effort" policy — evictable under storage
+    // pressure, including pressure this site's own tile cache creates.
+    // persist() asks the browser to exempt the origin (Chrome grants it
+    // silently for engaged sites, Firefox prompts, Safari ignores it). A
+    // refusal is not an error; it only decides which sentence we show.
+    // GAP-2-13: private/incognito windows can't be detected reliably, so
+    // the fallback wording covers them instead of trying to sniff.
+    var PERSIST_ASKED_KEY = 'tabelog.persistAsked';   // new key; nothing reads it but us
+    var FAV_LOCAL_WARN_AT = 20;
+    var persistGranted = null;      // null = unknown, true/false = answered
+    var persistAskedThisLoad = false;
+    var storageEstimate = null;
+    function l10nDot() { return activeLang === 'en' ? '. ' : '。'; }
+    function localOnlyHintText() {
+      var n = 0;
+      try { n = state.fav.size; } catch (_) {}
+      var out;
+      if (n >= FAV_LOCAL_WARN_AT) {
+        out = localizeText('收藏已有') + ' ' + n + ' ' + localizeText('家店')
+            + l10nDot() + localizeText('只存在这台设备')
+            + l10nDot() + localizeText('登录后可跨设备同步');
+      } else {
+        out = localizeText('收藏只存在这台设备')
+            + l10nDot() + localizeText('登录后可在其它设备看到');
+      }
+      if (persistGranted === false) {
+        out += l10nDot() + localizeText('浏览器清理时可能删除本地收藏')
+             + l10nDot() + localizeText('无痕窗口关闭即失');
+      }
+      return out + (activeLang === 'en' ? '.' : '。');
+    }
+    function refreshPersisted() {
+      try {
+        if (!navigator.storage || !navigator.storage.persisted) {
+          renderStorageInfo(); return;
+        }
+        navigator.storage.persisted().then(function(ok) {
+          persistGranted = !!ok;
+          renderStorageInfo();
+          renderSyncHint();
+        }).catch(function() {});
+      } catch (_) {}
+    }
+    // Called the first time this browser has anything of its own to lose.
+    function requestPersistOnce() {
+      if (persistAskedThisLoad) return;
+      try {
+        if (localStorage.getItem(PERSIST_ASKED_KEY) === '1') {
+          persistAskedThisLoad = true; return;
+        }
+      } catch (_) { persistAskedThisLoad = true; return; }
+      persistAskedThisLoad = true;
+      try { localStorage.setItem(PERSIST_ASKED_KEY, '1'); } catch (_) {}
+      try {
+        if (!navigator.storage || !navigator.storage.persist) return;
+        navigator.storage.persist().then(function(ok) {
+          persistGranted = !!ok;    // a refusal is fine — silently noted
+          renderStorageInfo();
+          renderSyncHint();
+        }).catch(function() {});
+      } catch (_) {}
+    }
+    // ---- the same numbers, spelled out in the account menu ----------------
+    var storageInfoEl = null;
+    (function mountStorageInfo() {
+      // Built here rather than in SEARCH_BOX_HTML so the menu markup stays
+      // owned by one place; the styles live in SYNC_UI_HTML.
+      var menu = document.getElementById('ss-menu');
+      if (!menu) return;
+      var sep = document.createElement('div');
+      sep.className = 'ssm-divider';
+      var lbl = document.createElement('div');
+      lbl.className = 'ssm-section-lbl';
+      lbl.textContent = localizeText('本地存储');
+      var box = document.createElement('div');
+      box.id = 'ssm-storage';
+      box.setAttribute('role', 'status');
+      box.textContent = '—';
+      var anchor = document.getElementById('ff-sync-status');
+      if (anchor && anchor.parentNode === menu) {
+        menu.insertBefore(sep, anchor);
+        menu.insertBefore(lbl, anchor);
+        menu.insertBefore(box, anchor);
+      } else {
+        menu.appendChild(sep); menu.appendChild(lbl); menu.appendChild(box);
+      }
+      storageInfoEl = box;
+    })();
+    function fmtBytes(n) {
+      if (typeof n !== 'number' || !isFinite(n) || n < 0) return '—';
+      var u = ['B', 'KB', 'MB', 'GB'], i = 0;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return (i === 0 || n >= 100 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
+    }
+    function renderStorageInfo() {
+      if (!storageInfoEl) return;
+      var parts = [];
+      if (storageEstimate) {
+        parts.push(localizeText('已用') + ' ' + fmtBytes(storageEstimate.usage)
+                   + ' / ' + fmtBytes(storageEstimate.quota));
+      } else {
+        parts.push(localizeText('浏览器未提供存储用量'));
+      }
+      parts.push(localizeText('持久化') + ' ' + localizeText(
+        persistGranted === true ? '已开启'
+        : persistGranted === false ? '未开启' : '状态未知'));
+      storageInfoEl.textContent = parts.join(' · ');
+    }
+    function refreshStorageEstimate() {
+      try {
+        if (!navigator.storage || !navigator.storage.estimate) {
+          renderStorageInfo(); return;
+        }
+        navigator.storage.estimate().then(function(est) {
+          storageEstimate = est || null;
+          renderStorageInfo();
+        }).catch(function() {});
+      } catch (_) {}
+    }
+    // Refresh the numbers whenever the menu is about to be looked at. A
+    // listener rather than a hook inside openAvatarMenu() so this block
+    // stays self-contained.
+    var avatarBtnEl = document.getElementById('ss-avatar');
+    if (avatarBtnEl) avatarBtnEl.addEventListener('click', function() {
+      refreshStorageEstimate();
+      refreshPersisted();
+    });
     var hintOkEl = document.getElementById('sync-hint-ok');
     if (hintOkEl) hintOkEl.addEventListener('click', function() {
       try { localStorage.setItem(SYNC_HINT_KEY, '1'); } catch (_) {}
@@ -6200,14 +7687,20 @@ FILTER_JS_TEMPLATE = r"""
     }
 
     // ---- M-089: the FAB's accessible name has to carry the visible count --
+    // M-022: the label now reads the two segments the pill actually shows —
+    // 命中 (full-corpus matches) and 视野内 (what is on screen) — instead of
+    // "<viewport-cropped> / <corpus size>", two different questions joined
+    // by a slash.
     function updateFabAria() {
       if (!fabEl) return;
       var cnt = fabEl.querySelector('.ff-count');
-      var tot = fabEl.querySelector('.ff-total');
+      var inv = fabEl.querySelector('.ff-inview');
       var shown = cnt ? cnt.textContent : '';
-      var total = tot ? tot.textContent : '';
+      var inview = inv ? inv.textContent : '';
       fabEl.setAttribute('aria-label',
-        localizeText('筛选结果') + ' ' + shown + ' / ' + total);
+        localizeText('筛选结果') + ' ' +
+        localizeText('命中') + ' ' + shown + ' · ' +
+        localizeText('视野内') + ' ' + inview);
     }
 
     function renderSyncUi() {
@@ -6215,6 +7708,10 @@ FILTER_JS_TEMPLATE = r"""
       renderSyncBanner();
       maybeAnonToast();
       renderSyncHint();
+      // M-013: `dirty` is exactly "this browser now holds state of its own"
+      // — the first favorite, the first blacklist entry, the first bookmark
+      // all land here. One shot per browser, guarded by tabelog.persistAsked.
+      if (syncStatus.dirty) requestPersistOnce();
       if (avatarDotEl) {
         avatarDotEl.hidden = !(syncStatus.dirty || syncStatus.kind === 'err');
       }
@@ -6224,10 +7721,23 @@ FILTER_JS_TEMPLATE = r"""
     // ---- M-028: empty state ----------------------------------------------
     var emptyMapEl   = document.getElementById('ff-empty-map');
     var emptyPanelEl = document.getElementById('ff-empty-panel');
+    var emptyNoneEl  = document.getElementById('ffe-none');       // M-022
+    var emptyOffEl   = document.getElementById('ffe-offscreen');  // M-022
+    var emptyOffNEl  = document.getElementById('ffe-off-n');      // M-022
     var emptyAnnounced = false;
-    function updateEmptyState(n) {
-      var zero = n === 0;
-      if (emptyMapEl)   emptyMapEl.hidden = !zero;
+    // M-022: two genuinely different empties.
+    //   matched === 0  → the filter really does exclude everything.
+    //   matched  >  0 but inView === 0 → the filter is fine, the map is
+    //     parked somewhere else. The old card told this user to loosen a
+    //     filter that was not the problem; now it offers the zoom instead.
+    function updateEmptyState(matched, inView) {
+      if (inView == null) inView = matched;
+      var zero    = matched === 0;
+      var offOnly = !zero && inView === 0;
+      if (emptyNoneEl) emptyNoneEl.hidden = !zero;
+      if (emptyOffEl)  emptyOffEl.hidden  = !offOnly;
+      if (emptyOffNEl && offOnly) emptyOffNEl.textContent = matched;
+      if (emptyMapEl)   emptyMapEl.hidden   = !(zero || offOnly);
       if (emptyPanelEl) emptyPanelEl.hidden = !zero;
       var nodes = document.querySelectorAll('.ff-count');
       for (var i = 0; i < nodes.length; i++) {
@@ -6246,6 +7756,12 @@ FILTER_JS_TEMPLATE = r"""
         var b = document.getElementById(id);
         if (b) b.addEventListener('click', function() { resetFilters(); });
       });
+    // M-022: "缩放到全部结果". recompute() keeps the bounding box of every
+    // matching row (viewport-independent), so this is a plain flyToBounds.
+    (function() {
+      var b = document.getElementById('ff-empty-zoomall');
+      if (b) b.addEventListener('click', function() { zoomToAllMatches(); });
+    })();
 
     // ---- M-008: delete my cloud data --------------------------------------
     // The only place in this file allowed to clear localStorage, and only
@@ -6330,6 +7846,8 @@ FILTER_JS_TEMPLATE = r"""
     syncStatus.signedIn = !!configured();
     renderSyncUi();
     updateFabAria();
+    refreshPersisted();          // M-013
+    refreshStorageEstimate();    // M-013
 
     function refreshAllMarkers() {
       // Only the markers that have actually been materialized can have their
@@ -7008,10 +8526,16 @@ FILTER_JS_TEMPLATE = r"""
       var pulse = highlighted
         ? '<div class="mk-pulse-ring"></div>'
         : '';
-      var html = '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;' +
+      // M-021: dashed ring = the coordinate is a street-block centroid, not
+      // a door. M-093: closed businesses go gray but keep their marker.
+      var approxRing = d.approx ? '<div class="mk-approx-ring"></div>' : '';
+      var wrapCls = d.closed ? ' class="mk-closed"' : '';
+      if (d.closed === 1) opacity = Math.min(opacity, 0.55);
+      var html = '<div' + wrapCls + ' style="position:relative;width:' + size + 'px;height:' + size + 'px;' +
                  'display:flex;align-items:center;justify-content:center;' +
                  'opacity:' + opacity + ';">' +
                  pulse +
+                 approxRing +
                  // Tighter halo than before (fade-out ends at 75% instead of
                  // filling the whole 36px box) — with hundreds of markers in
                  // a city view the fat fuzzy discs bled into each other and
@@ -7154,6 +8678,14 @@ FILTER_JS_TEMPLATE = r"""
     var bsContent  = document.getElementById('bs-content');
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
+
+    // M-188: the grip disclosure button announces which state the card is
+    // in, so every place that flips .bs-peek goes through here rather than
+    // touching the class directly. Peek = collapsed = aria-expanded false.
+    function bsSetPeek(on) {
+      bsSheet.classList.toggle('bs-peek', !!on);
+      if (bsGrip) bsGrip.setAttribute('aria-expanded', on ? 'false' : 'true');
+    }
 
     // Per-field translate buttons in the detail card. Uses the unofficial
     // translate.googleapis.com "gtx" endpoint — CORS-open, no key, returns
@@ -7373,6 +8905,77 @@ FILTER_JS_TEMPLATE = r"""
       bsPanTimer = setTimeout(keepSelectionVisible, 60);
     }
 
+    // M-071 / AUTO-05: publish the card's real height so the FAB stack and
+    // the basemap attribution (CSS above, in MAP_FAB_HTML) can sit on top of
+    // it instead of underneath. Zeroed again when lifting the controls would
+    // leave less than 60px of map — at that point the card owns the screen
+    // and pinning the buttons to its top edge helps nobody.
+    var fabStackEl = null;
+    function syncSheetOffset() {
+      var h = 0;
+      if (bsSheet.classList.contains('bs-open')) {
+        // offsetHeight, not getBoundingClientRect(): the slide-in transform
+        // must not be read as a height change mid-animation.
+        h = bsSheet.offsetHeight;
+        if (window.innerHeight - h < 60) h = 0;
+      }
+      // The one-line credit always fits in whatever band is left, so it gets
+      // the full lift. The FAB stack is 200-220px tall and does not: on a
+      // short landscape viewport (657x416) a full lift would push its top
+      // clean off the screen, which is worse than sitting behind the card.
+      // Cap that one at "the stack still starts below the top edge".
+      var attrH = h;
+      if (!fabStackEl) fabStackEl = document.querySelector('.map-fab-stack');
+      if (h && fabStackEl) {
+        var maxLift = window.innerHeight - fabStackEl.offsetHeight - 26;
+        if (maxLift < 0) maxLift = 0;
+        if (h > maxLift) h = maxLift;
+      }
+      try {
+        var rs = document.documentElement.style;
+        rs.setProperty('--sheet-h', h + 'px');
+        rs.setProperty('--attr-h', attrH + 'px');
+        // AUTO-12: the credit is right-anchored, straight under the FAB
+        // column. Publish the column's live width (icon-only at ≤416px,
+        // labelled above that) so the credit can stop short of it instead
+        // of being overprinted by five buttons.
+        if (fabStackEl) rs.setProperty('--fab-w', fabStackEl.offsetWidth + 'px');
+      } catch (_) {}
+    }
+    // Peek <-> full, the placeholder growing into the real card, a photo
+    // grid arriving late — every one of those changes the height, so watch
+    // the element rather than trying to enumerate the call sites. The FAB
+    // stack is watched too: a transit FAB appearing changes both the height
+    // the lift has to clear and the width the credit has to dodge.
+    if (window.ResizeObserver) {
+      try {
+        var bsRO = new ResizeObserver(syncSheetOffset);
+        bsRO.observe(bsSheet);
+        var stk = document.querySelector('.map-fab-stack');
+        if (stk) bsRO.observe(stk);
+      } catch (_) {}
+    }
+    window.addEventListener('resize', syncSheetOffset);
+    syncSheetOffset();   // publish --fab-w before the first card ever opens
+    // M-152 / M-153: crossing a breakpoint (Fold unfold, rotation, split-view
+    // drag) re-evaluates rules the sheets/modal transition on. Suppress the
+    // transition for two frames so the layout change lands instantly instead
+    // of flying across the screen.
+    var noAnimTimer = 0;
+    window.addEventListener('resize', function() {
+      var els = [bsSheet, document.getElementById('ff-sheet'),
+                 document.getElementById('bm-modal')];
+      els.forEach(function(el) { if (el) el.classList.add('no-anim'); });
+      clearTimeout(noAnimTimer);
+      noAnimTimer = setTimeout(function() {
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            els.forEach(function(el) { if (el) el.classList.remove('no-anim'); });
+          });
+        });
+      }, 120);
+    });
+
     function openSheet(d, opts) {
       var peek = !!(opts && opts.peek);
       setHighlight(d);
@@ -7386,8 +8989,9 @@ FILTER_JS_TEMPLATE = r"""
         ffs.setAttribute('aria-hidden', 'true');
         var ffb = document.getElementById('ff-fab');
         if (ffb) ffb.hidden = false;
+        uiDrop('filter');               // M-015
       }
-      bsSheet.classList.toggle('bs-peek', peek);
+      bsSetPeek(peek);
       bsActive = d;
       // Reflect the selection in the top search box (title mode — the
       // user's typed query survives in ssQuery and comes back when the
@@ -7417,6 +9021,7 @@ FILTER_JS_TEMPLATE = r"""
         // M-014: the card's height is what decides how much map is left, so
         // re-check after every repaint (placeholder -> real card grows it).
         scheduleKeepSelectionVisible();
+        syncSheetOffset();   // M-071 (belt-and-braces; the RO covers it too)
       }
       if (popupsMap) {
         paint(renderPopup(d, popupsMap[d.detail_url]));
@@ -7444,15 +9049,19 @@ FILTER_JS_TEMPLATE = r"""
       bsBackdrop.classList.add('bs-open');
       bsSheet.setAttribute('aria-hidden', 'false');
       scheduleKeepSelectionVisible();   // M-014
+      syncSheetOffset();                // M-071
+      uiPush('sheet');                  // M-015
     }
     function closeSheet() {
       bsSheet.classList.remove('bs-open');
       // Leave .bs-peek in place during the slide-out so the photos/info
       // section doesn't flash into view mid-animation. The next openSheet
-      // call resets the class explicitly via toggle(.., peek).
+      // call resets the class explicitly via bsSetPeek(peek).
       bsBackdrop.classList.remove('bs-open');
       bsSheet.setAttribute('aria-hidden', 'true');
       bsActive = null;
+      syncSheetOffset();                // M-071: let the FABs drop back
+      uiDrop('sheet');                  // M-015
       // Release the search-nav pin so the next pan can reap the marker.
       pinnedRow = null;
       clearHighlight();
@@ -7492,9 +9101,10 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('click', function(e) {
       if (e.target.closest('.rst-close')) closeSheet();
     });
+    uiRegister('sheet', closeSheet);   // M-015: Android back closes the card
     function expandSheet() {
       if (bsSheet.classList.contains('bs-peek')) {
-        bsSheet.classList.remove('bs-peek');
+        bsSetPeek(false);
         // M-014: peek -> full is the single biggest height jump the card
         // makes, so this is where the marker most often disappears behind
         // it. Removing .bs-peek re-shows the photo grid; there is no height
@@ -7511,7 +9121,7 @@ FILTER_JS_TEMPLATE = r"""
       // Same staged dismiss as the swipe-down gesture: Full → Peek → Closed.
       if (e.key !== 'Escape' || !bsActive) return;
       if (bsSheet.classList.contains('bs-peek')) closeSheet();
-      else bsSheet.classList.add('bs-peek');
+      else bsSetPeek(true);
     });
 
     // Grip drag handler. Downward swipe always dismisses the sheet (80px or
@@ -7535,9 +9145,9 @@ FILTER_JS_TEMPLATE = r"""
       if (raw >= 0) dy = raw;
       else if (peek) dy = Math.max(raw / 2, -40);
       else dy = 0;
-      var prefix = window.innerWidth >= 700 ? 'translate(-50%, ' + dy + 'px)'
-                                            : 'translateY(' + dy + 'px)';
-      bsSheet.style.transform = prefix;
+      // M-152: the sheet is centered with auto margins now, not with a
+      // translateX(-50%), so the drag transform is the same at every width.
+      bsSheet.style.transform = 'translateY(' + dy + 'px)';
     }
     function bsDragEnd(e) {
       if (!bsDrag) return;
@@ -7554,7 +9164,7 @@ FILTER_JS_TEMPLATE = r"""
         // peek and keeps the restaurant selected (marker stays highlighted,
         // map stays pannable); second swipe deselects + closes.
         if (peek) closeSheet();
-        else bsSheet.classList.add('bs-peek');
+        else bsSetPeek(true);
       } else if (peek && upward) {
         expandSheet();
       } else if (peek && Math.abs(dy) < 5 && dt < 250) {
@@ -7579,6 +9189,17 @@ FILTER_JS_TEMPLATE = r"""
       document.addEventListener('mousemove', bsDragMove);
       document.addEventListener('mouseup',   bsMouseUp);
     });
+    // M-188: the grip is a real <button> now, so it is keyboard-reachable and
+    // can carry the "swipe up / click for details" hint as DOM text instead
+    // of a CSS ::after (which the i18n TreeWalker could never see, M-157).
+    // Pointer taps are still handled by bsDragEnd above — this listener only
+    // has to cover keyboard activation, hence the detail===0 gate. Without
+    // it the button would swallow nothing but would double-fire on tap.
+    bsGrip.addEventListener('click', function(e) {
+      if (e.detail !== 0) return;      // 0 == Enter/Space, not a real click
+      if (bsSheet.classList.contains('bs-peek')) expandSheet();
+      else bsSetPeek(true);
+    });
 
     // Whole-peek-card tap to expand. Clicks on the grip have already been
     // handled by bsDragEnd (which removes .bs-peek before this fires), so
@@ -7599,7 +9220,7 @@ FILTER_JS_TEMPLATE = r"""
     map.on('click', function(){
       if (!bsActive) return;
       if (bsSheet.classList.contains('bs-peek')) return;
-      bsSheet.classList.add('bs-peek');
+      bsSetPeek(true);
     });
 
     // ===== Viewport-driven marker construction =====
@@ -7698,6 +9319,20 @@ FILTER_JS_TEMPLATE = r"""
       if (blackBtn) syncBlackButton(blackBtn, d);
     });
 
+    // M-015: the right-click coordinate bubble and the search-result bubble
+    // are Leaflet popups; the back button closes those too. Only one popup
+    // can be open at a time, so this is a single stack entry. Leaflet fires
+    // popupclose-then-popupopen when one popup replaces another — deferring
+    // the drop by a tick lets the replacement keep the same entry instead of
+    // burning a back()/pushState pair on every swap.
+    var uiPopupN = 0;
+    map.on('popupopen',  function() { uiPopupN++; uiPush('popup'); });
+    map.on('popupclose', function() {
+      uiPopupN = Math.max(0, uiPopupN - 1);
+      setTimeout(function() { if (uiPopupN === 0) uiDrop('popup'); }, 0);
+    });
+    uiRegister('popup', function() { map.closePopup(); });
+
     // One delegated handler for both ⭐ and 🚫 clicks anywhere in the DOM.
     document.addEventListener('click', function(e) {
       var favBtn   = e.target.closest && e.target.closest('.ff-fav-btn');
@@ -7784,7 +9419,11 @@ FILTER_JS_TEMPLATE = r"""
       // they're gated entirely by hideForeignEl. When shown, they appear
       // regardless of which Japanese-cuisine boxes are checked.
       var cats = d.categories || [];
-      var isForeign = cats.length > 0 && FOREIGN_GENRES.has(cats[0]);
+      // M-095: d.foreign is the build-time verdict over ALL genre tokens.
+      // The cats[0] test stays as the fallback so a payload without the new
+      // field (an old cached restaurants.json) filters exactly as before.
+      var isForeign = (d.foreign === 1)
+                   || (cats.length > 0 && FOREIGN_GENRES.has(cats[0]));
       if (isForeign) {
         if (fs.hideForeign) return false;
       } else {
@@ -7853,11 +9492,68 @@ FILTER_JS_TEMPLATE = r"""
       });
       if (addLayers.length) cluster.addLayers(addLayers);
 
-      setCountText('ff-count', desired.size);
-      updateEmptyState(desired.size);   // M-028
+      // M-022: the honest headline number. `desired` is cropped to
+      // getBounds().pad(0.25), which is why the same filter used to read
+      // 46 / 46 / 14 / 13 / 0 depending only on where the map sat. One extra
+      // pass over the whole corpus (~9.8k plain property tests, well under a
+      // frame) gives the viewport-independent count, plus the bounding box
+      // the "缩放到全部结果" button needs.
+      var matchTotal = 0;
+      var mS = 90, mN = -90, mW = 180, mE = -180;
+      for (var mi = 0; mi < data.length; mi++) {
+        var md = data[mi];
+        if (!passesFilter(md)) continue;
+        matchTotal++;
+        if (md.lat < mS) mS = md.lat;
+        if (md.lat > mN) mN = md.lat;
+        if (md.lon < mW) mW = md.lon;
+        if (md.lon > mE) mE = md.lon;
+      }
+      matchBounds = matchTotal > 0 ? [[mS, mW], [mN, mE]] : null;
+      lastMatchTotal = matchTotal;
+
+      setCountText('ff-count', matchTotal);
+      setCountText('ff-inview', desired.size);
+      updateEmptyState(matchTotal, desired.size);   // M-028 / M-022
       // Filter/viewport changed — re-evaluate whether the active highlight
       // should be the cluster marker (visible) or the gray ghost (hidden).
       syncHighlight();
+    }
+    // M-022: bounds of every currently-matching row, refreshed by recompute().
+    var matchBounds = null;
+    var lastMatchTotal = 0;
+    function zoomToAllMatches() {
+      if (!matchBounds) return;
+      map.flyToBounds(matchBounds, {maxZoom: 14, padding: [40, 40],
+                                    duration: 0.9});
+    }
+    // M-022: "隐藏非日本料理" is on by default and silently removes ~1/6 of
+    // the corpus — the audit's "27% is hidden by default" claim turned out
+    // to be the viewport crop, but the ~1638 rows this one toggle drops are
+    // real and were never stated anywhere. The number is DERIVED (run
+    // passesFilter with the toggle flipped and diff), never hard-coded, so
+    // it stays correct when the definition of "foreign" changes.
+    var chipsBoxEl    = document.getElementById('ff-active-chips');
+    var chipForeignEl = document.getElementById('ff-chip-foreign');
+    var chipForeignN  = document.getElementById('ff-chip-foreign-n');
+    function updateActiveChips() {
+      if (!chipsBoxEl || !chipForeignEl) return;
+      var on = !!filterState.hideForeign;
+      if (on) {
+        var saved = filterState.hideForeign;
+        filterState.hideForeign = false;
+        var withForeign = 0;
+        for (var i = 0; i < data.length; i++) {
+          if (passesFilter(data[i])) withForeign++;
+        }
+        filterState.hideForeign = saved;
+        var hiddenN = withForeign - lastMatchTotal;
+        if (hiddenN < 0) hiddenN = 0;
+        if (chipForeignN) chipForeignN.textContent = hiddenN;
+        on = hiddenN > 0;
+      }
+      chipForeignEl.hidden = !on;
+      chipsBoxEl.hidden = !on;
     }
 
     // rAF-coalesce moveend so a long pan with many fired events still maps
@@ -7876,6 +9572,7 @@ FILTER_JS_TEMPLATE = r"""
       readFilterInputs();
       updateGenreSummary();
       recompute();
+      updateActiveChips();   // M-022 — filter-dependent only, so not in recompute()
       saveFilterState();
     }
 
@@ -8046,13 +9743,16 @@ FILTER_JS_TEMPLATE = r"""
       ffBackdrop.classList.add('ff-open');
       ffSheet.setAttribute('aria-hidden', 'false');
       ffFab.hidden = true;
+      uiPush('filter');                  // M-015
     }
     function closeFilterSheet() {
       ffSheet.classList.remove('ff-open');
       ffBackdrop.classList.remove('ff-open');
       ffSheet.setAttribute('aria-hidden', 'true');
       ffFab.hidden = false;
+      uiDrop('filter');                  // M-015
     }
+    uiRegister('filter', closeFilterSheet);   // M-015
     function ffIsOpen() { return ffSheet.classList.contains('ff-open'); }
 
     ffFab.addEventListener('click', openFilterSheet);
@@ -8073,9 +9773,8 @@ FILTER_JS_TEMPLATE = r"""
         if (!drag) return;
         var p = e.touches ? e.touches[0] : e;
         var dy = Math.max(0, p.clientY - drag.y0);
-        var prefix = window.innerWidth >= 700 ? 'translate(-50%, ' + dy + 'px)'
-                                              : 'translateY(' + dy + 'px)';
-        sheet.style.transform = prefix;
+        // M-152: auto-margin centering, so one transform at every width.
+        sheet.style.transform = 'translateY(' + dy + 'px)';
       }
       function end(e) {
         if (!drag) return;
@@ -8434,11 +10133,14 @@ FILTER_JS_TEMPLATE = r"""
       refreshAuthUI();
       ssMenu.hidden = false;
       ssMenu.classList.add('open');
+      uiPush('account');                 // M-015
     }
     function closeAvatarMenu() {
       ssMenu.classList.remove('open');
       ssMenu.hidden = true;
+      uiDrop('account');                 // M-015
     }
+    uiRegister('account', closeAvatarMenu);   // M-015
     ssAvatar.addEventListener('click', function(e) {
       e.stopPropagation();
       if (ssMenu.classList.contains('open')) closeAvatarMenu();
@@ -8556,13 +10258,16 @@ FILTER_JS_TEMPLATE = r"""
       impBackdrop.classList.add('imp-open');
       impModal.classList.add('imp-open');
       impModal.setAttribute('aria-hidden', 'false');
+      uiPush('import');                  // M-015
     }
     function closeImportModal() {
       impBackdrop.classList.remove('imp-open');
       impModal.classList.remove('imp-open');
       impModal.setAttribute('aria-hidden', 'true');
       pendingImport = null;
+      uiDrop('import');                  // M-015
     }
+    uiRegister('import', closeImportModal);   // M-015
 
     document.getElementById('ssm-import').addEventListener('click', function() {
       impFile.click();
@@ -8719,13 +10424,43 @@ FILTER_JS_TEMPLATE = r"""
         var left = Math.max(8,
                             Math.min(window.innerWidth - max_w - 8, r.left - 4));
         pop.style.left = left + 'px';
-        pop.style.top  = (r.bottom + 8) + 'px';
+        // M-156: only `left` was ever clamped — `top` was unconditionally
+        // r.bottom + 8, so on a short viewport (Fold cover screen, any
+        // landscape phone) the bubble ran ~58px past the bottom edge with
+        // no way to scroll it back. Measure the real height first, then
+        // flip above the trigger when it doesn't fit below; .ff-help-above
+        // flips the ::before arrow to match.
+        pop.classList.remove('ff-help-above');
+        var wasHidden = pop.hidden;
+        if (wasHidden) {
+          // Measure without a flash: no paint happens between these two
+          // toggles because they land inside one task.
+          pop.style.visibility = 'hidden';
+          pop.hidden = false;
+        }
+        var h = pop.offsetHeight;
+        if (wasHidden) { pop.hidden = true; pop.style.visibility = ''; }
+        var below = r.bottom + 8;
+        var top;
+        if (below + h + 8 <= window.innerHeight) {
+          top = below;
+        } else if (r.top - 8 - h >= 8) {
+          top = r.top - 8 - h;
+          pop.classList.add('ff-help-above');
+        } else {
+          // Taller than either gap — pin it to the bottom edge and let the
+          // max-height + overflow-y in the stylesheet do the rest.
+          top = Math.max(8, window.innerHeight - h - 8);
+        }
+        pop.style.top = top + 'px';
       }
       function hide() {
         pop.classList.remove('ff-help-show');
         pop.hidden = true;
         openFor = null;
+        uiDrop('help');                  // M-015
       }
+      uiRegister('help', hide);          // M-015
       function show(key, trigger) {
         sections.forEach(function(s) {
           s.hidden = s.getAttribute('data-help-for') !== key;
@@ -8737,6 +10472,7 @@ FILTER_JS_TEMPLATE = r"""
         void pop.offsetWidth;
         pop.classList.add('ff-help-show');
         openFor = trigger;
+        uiPush('help');                  // M-015
       }
       document.querySelectorAll('.ff-help-trigger').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
@@ -8759,12 +10495,18 @@ FILTER_JS_TEMPLATE = r"""
       document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape' && openFor) hide();
       });
-      // The filter sheet scrolls internally; if the user scrolls or the
-      // viewport resizes, the absolute pixel anchor we computed is stale.
-      // Easiest is to hide on either signal.
+      // The filter sheet scrolls internally, which moves the trigger out
+      // from under the absolute pixel anchor we computed — nothing to do
+      // but dismiss.
       var sheetContent = document.getElementById('ff-sheet-content');
       if (sheetContent) sheetContent.addEventListener('scroll', hide);
-      window.addEventListener('resize', hide);
+      // M-154: a resize used to dismiss it as well, so unfolding the phone
+      // (or dragging a split-view divider) killed the explanation the user
+      // had just opened. The trigger is still on screen — re-anchor to it.
+      // place() already clamps to the new viewport in both axes.
+      window.addEventListener('resize', function() {
+        if (openFor) place(openFor);
+      });
     })();
 
     // Language picker. activeLang was resolved on boot from ?lang= and
@@ -8869,8 +10611,12 @@ FILTER_JS_TEMPLATE = r"""
   var BOOT_TIMEOUT_MS = 9000;
   var bootPending = false;
   function boot() {
+    // M-022: 加载中… / 加载失败 used to land in .ff-total, which was the FAB's
+    // second number. The FAB now shows 命中 / 视野内 and .ff-total only lives
+    // inside the (closed) filter sheet, so the status has to reach .ff-inview
+    // too or boot progress becomes invisible.
     function setTotals(text) {
-      var nodes = document.querySelectorAll('.ff-total');
+      var nodes = document.querySelectorAll('.ff-total, .ff-inview');
       for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
     }
     if (bootPending) return;          // double-tap on 重试
@@ -9275,6 +11021,9 @@ def main(argv: list[str] | None = None) -> None:
     cat_counts: dict[str, int] = {cat: 0 for cat in GENRE_CATEGORIES}
     award_counts: dict[str, int] = {slug: 0 for slug, _, _ in AWARD_TAGS}
     unmapped_tokens: set[str] = set()
+    approx_count = 0            # M-021
+    closed_perm = closed_temp = 0   # M-093
+    foreign_any = foreign_first = 0  # M-095
     for row, loc in geocoded:
         bkey, _blabel, _bcolor = price_bucket(row)
         try:
@@ -9331,17 +11080,57 @@ def main(argv: list[str] | None = None) -> None:
             # Google Maps button uses it to deep-link straight to the place page.
             if gcal["place_id"]:
                 entry["gpid"] = gcal["place_id"]
+            # M-093: Google says this place is shut. The marker STAYS on the
+            # map (a favourited URL that silently vanishes reads as "my
+            # favourites got lost"); the card and the marker just say so.
+            # 1 = permanently, 2 = temporarily. Absent = open / unknown.
+            biz = gcal.get("biz_status") or ""
+            if biz == "CLOSED_PERMANENTLY":
+                entry["closed"] = 1
+                closed_perm += 1
+            elif biz == "CLOSED_TEMPORARILY":
+                entry["closed"] = 2
+                closed_temp += 1
         # Pre-canonicalized location string (prefecture + city + ward) for
         # the "name location" search syntax. Skipped when the address has no
         # extractable admin prefix — JS treats absent as "won't match any
         # location query," which is the correct behavior.
         addr_raw = row.get("address") or ""
         loc_norm = canon_str(parse_admin_prefix(addr_raw))
+        # BUG-07: append the famous-neighbourhood stems that occur further
+        # down the address (池袋 / 六本木 / 難波 …) so a query like "拉面 池袋"
+        # has something to match. '|' separates segments so a query can never
+        # straddle two of them; the JS side does a plain indexOf.
+        hoods = neighborhood_tokens(addr_raw)
+        if hoods:
+            loc_norm = "|".join([loc_norm] + hoods) if loc_norm else "|".join(hoods)
         if loc_norm:
             entry["loc_norm"] = loc_norm
         city = extract_city(addr_raw)
         if city:
             entry["city"] = city
+        # M-021: block-level coordinate disclaimer. Only for rows we did NOT
+        # replace with a Google POI coordinate — a calibrated row is precise
+        # by construction. Almost every row here was skipped by the geocode
+        # loop (its lat/lon was already in the CSV), so `loc` carries an
+        # empty display; the verdict has to come from the cache entry the
+        # original GSI call left behind. No cache entry = no claim.
+        if not gcal:
+            _resolved, _hit = _cache_lookup(cache, addr_raw)
+            if _hit and is_block_level(_hit.get("display") or ""):
+                entry["approx"] = 1
+                approx_count += 1
+        # M-095: "is this non-Japanese cuisine?" now looks at every genre
+        # token, not just the one that won the single-tag race, so the
+        # 隐藏非日本料理 toggle stops depending on Tabelog's listing order.
+        # New optional field — an old cached page that never reads it falls
+        # back to the categories[0] test and behaves exactly as before.
+        all_buckets = genre_buckets_all(row.get("genre") or "")
+        if all_buckets & DEFAULT_OFF_GENRES:
+            entry["foreign"] = 1
+            foreign_any += 1
+        if cats and cats[0] in DEFAULT_OFF_GENRES:
+            foreign_first += 1
         core_rows.append(entry)
         if url:
             parr = popup_data(row)
@@ -9353,6 +11142,33 @@ def main(argv: list[str] | None = None) -> None:
             popups_map[url] = parr
     if unmapped_tokens:
         print(f"  unmapped genre tokens (fell into 其他): {sorted(unmapped_tokens)}")
+    # M-021: self-check. ~9,900 cached GSI hits, ~970 of them block-level,
+    # minus the ones Google later calibrated, lands in the 650-800 band. A
+    # number far above that means the digit test broke (the classic way: a
+    # [0-9] character class that misses GSI's full-width ０-９) and we would
+    # be stamping "approximate" on the entire map. Refuse to publish that.
+    print(f"  approx (block-level GSI coords, M-021): {approx_count}")
+    if approx_count > 1500:
+        raise SystemExit(
+            f"M-021: {approx_count} rows flagged as block-level approximate, "
+            f"expected roughly 650-800. is_block_level() is almost certainly "
+            f"matching the wrong thing (GSI writes its house numbers in "
+            f"full-width digits ０-９). Refusing to publish a map where every "
+            f"pin claims to be approximate."
+        )
+    # M-093: closed restaurants keep their marker; these two numbers are the
+    # only place the build says how many there are.
+    print(
+        f"  closed (Google businessStatus, M-093): "
+        f"{closed_perm} permanently / {closed_temp} temporarily"
+    )
+    # M-095: the 隐藏非日本料理 toggle now hides `foreign_any` rows instead of
+    # `foreign_first`. The in-panel chip count is computed live in JS, so it
+    # follows this number without a template change.
+    print(
+        f"  foreign cuisine (M-095): {foreign_any} rows by any-token "
+        f"(was {foreign_first} by first-token)"
+    )
     n_fav = sum(1 for p in core_rows if p["favorited"])
     n_black = sum(1 for p in core_rows if p["blacklisted"])
     print(
@@ -9419,7 +11235,9 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     gcal_count = sum(1 for e in core_rows if e.get("gcal"))
-    panel_html = build_filter_panel_html(cat_counts, award_counts, gcal_count)
+    panel_html = build_filter_panel_html(
+        cat_counts, award_counts, gcal_count, foreign_any  # M-095
+    )
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
     bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
     favorites_builtin_json = json.dumps(load_favorites_builtin(), ensure_ascii=False)
@@ -9460,6 +11278,11 @@ def main(argv: list[str] | None = None) -> None:
             cn = canon_str(tok)
             if cn:
                 known_locs.add(cn)
+    # BUG-07: union in the neighbourhood stems (same canon_str normalization,
+    # or the JS-side Set lookup would never hit). Only the ones that actually
+    # occur in the corpus, so the table stays honest.
+    for row, _loc in geocoded:
+        known_locs.update(neighborhood_tokens(row.get("address") or ""))
     known_locs_json = json.dumps(sorted(known_locs), ensure_ascii=False)
     print(
         f"  known_locs:       {len(known_locs)} tokens, "
@@ -9493,6 +11316,29 @@ def main(argv: list[str] | None = None) -> None:
         "data/popups-ja.json": _content_v(popups_ja_bytes),
         "transit-layer.js": _content_v(transit_layer_bytes),
     }
+    # M-006/M-011: the self-hosted vendor bundles ride the same mechanism —
+    # the ?v= stamping pass rewrites their references in the page, and
+    # all_versioned_urls keeps them off activate()'s GC list. Only files the
+    # PAGE references belong here: the .map sidecars and emoji-picker's
+    # picker.js/database.js are pulled from inside the bundles themselves,
+    # where a query string we invented would not be appended anyway.
+    VENDOR_PAGE_FILES = [
+        "vendor/leaflet-1.9.3/leaflet.js",
+        "vendor/leaflet-1.9.3/leaflet.css",
+        "vendor/leaflet.markercluster-1.1.0/leaflet.markercluster.js",
+        "vendor/leaflet.markercluster-1.1.0/MarkerCluster.css",
+        "vendor/leaflet.markercluster-1.1.0/MarkerCluster.Default.css",
+        "vendor/leaflet.locatecontrol-0.79.0/L.Control.Locate.min.js",
+        "vendor/leaflet.locatecontrol-0.79.0/L.Control.Locate.min.css",
+        "vendor/emoji-picker-element-1.27.0/index.js",
+    ]
+    for _vp in VENDOR_PAGE_FILES:
+        _vf = DOCS_DIR / _vp
+        if not _vf.exists():
+            raise SystemExit(
+                f"missing vendor asset {_vf} — run: uv run python scripts/fetch_vendor.py"
+            )
+        data_vers[_vp] = _content_v(_vf.read_bytes())
     all_versioned_urls = [f"{path}?v={v}" for path, v in data_vers.items()]
     # M-062: popups is one ~6.4MB file per UI language, and the language is
     # only known at runtime — precaching a build-time guess (zh-CN) made
@@ -9505,6 +11351,34 @@ def main(argv: list[str] | None = None) -> None:
         f"data/restaurants.json?v={data_vers['data/restaurants.json']}",
         f"transit-layer.js?v={data_vers['transit-layer.js']}",
     ]
+    # M-006: same-origin assets are answered out of DATA_CACHE (cacheFirst),
+    # so the vendor bundles have to be precached there as well as counted in
+    # the install-critical set below — CRITICAL_URLS writes into the shell
+    # cache, which the fetch handler never consults for /vendor/*. The locate
+    # plugin is precached but deliberately NOT critical: it is optional (see
+    # BUG-01), and a 404 on it must not be able to reject an install.
+    _vendor_boot = [
+        "vendor/leaflet-1.9.3/leaflet.js",
+        "vendor/leaflet-1.9.3/leaflet.css",
+        "vendor/leaflet.markercluster-1.1.0/leaflet.markercluster.js",
+        "vendor/leaflet.markercluster-1.1.0/MarkerCluster.css",
+        "vendor/leaflet.markercluster-1.1.0/MarkerCluster.Default.css",
+    ]
+    _vendor_optional = [
+        "vendor/leaflet.locatecontrol-0.79.0/L.Control.Locate.min.js",
+        "vendor/leaflet.locatecontrol-0.79.0/L.Control.Locate.min.css",
+    ]
+    precache_urls += [f"{p}?v={data_vers[p]}" for p in _vendor_boot + _vendor_optional]
+    # M-012: the all-or-nothing set. If ANY of these can't be fetched during
+    # install the whole install rejects and the previous worker (with its
+    # working caches) stays in charge. Keep it to what a cold offline boot
+    # genuinely cannot render without — every addition is another way for a
+    # flaky network to block an otherwise fine deploy from installing.
+    # M-006: Leaflet + MarkerCluster qualify — they used to come from two
+    # CDNs the worker could only stale-while-revalidate, so a cold offline
+    # boot had nothing to render the map with. Self-hosted, they are ours to
+    # guarantee: install now either has all five or does not activate.
+    critical_urls = ["./"] + [f"{p}?v={data_vers[p]}" for p in _vendor_boot]
 
     # Service worker — the shell cache is stamped per build; the data and
     # CDN caches persist and are managed by content hash. Unix seconds is
@@ -9515,6 +11389,7 @@ def main(argv: list[str] | None = None) -> None:
         SW_JS_TEMPLATE.replace("__BUILD_VERSION__", build_version)
         .replace("__MANIFEST_V__", MANIFEST_VERSION)  # M-150
         .replace("__PRECACHE_URLS__", json.dumps(precache_urls))
+        .replace("__CRITICAL_URLS__", json.dumps(critical_urls))  # M-012
         .replace("__ALL_VERSIONED_URLS__", json.dumps(all_versioned_urls)),
     )
     print(f"  sw.js:            build {build_version}")
@@ -9576,6 +11451,47 @@ def main(argv: list[str] | None = None) -> None:
         stripped_lines.append(line)
     saved_html = "".join(stripped_lines)
     print(f"  stripped {stripped_count} folium-injected dead-dep lines")
+
+    # M-006 / M-011 / BUG-01: point Leaflet + MarkerCluster at docs/vendor/.
+    # folium hard-codes these CDN URLs in its own template, so unlike
+    # LOCATE_ASSETS (ours, already rewritten at the source) they can only be
+    # moved after render. Same pinned builds, byte-for-byte — scripts/
+    # fetch_vendor.py downloads them and verifies each sha256; nothing is
+    # upgraded here, because MarkerCluster's object graph is what the
+    # duck-typed FAB attractions-layer detection keys off (see CLAUDE.md).
+    # Count-checked one by one: if a folium upgrade renames a URL we want a
+    # loud WARNING, not a silent fallback to the CDN we just removed from
+    # the CSP allowlist.
+    VENDOR_REWRITES = (
+        ("https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js",
+         "vendor/leaflet-1.9.3/leaflet.js"),
+        ("https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css",
+         "vendor/leaflet-1.9.3/leaflet.css"),
+        ("https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js",
+         "vendor/leaflet.markercluster-1.1.0/leaflet.markercluster.js"),
+        ("https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css",
+         "vendor/leaflet.markercluster-1.1.0/MarkerCluster.css"),
+        ("https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css",
+         "vendor/leaflet.markercluster-1.1.0/MarkerCluster.Default.css"),
+    )
+    vendor_rewritten = 0
+    for _cdn_url, _local in VENDOR_REWRITES:
+        # MarkerCluster.css is a prefix of MarkerCluster.Default.css, so
+        # count the URL as it appears in the tag (quote-terminated).
+        _hits = saved_html.count(_cdn_url + '"')
+        if _hits == 1:
+            saved_html = saved_html.replace(_cdn_url + '"', _local + '"')
+            vendor_rewritten += 1
+        else:
+            print(f"  WARNING: expected 1 tag for {_cdn_url}, found {_hits} "
+                  f"— still loading from the CDN")
+    print(f"  vendored {vendor_rewritten}/{len(VENDOR_REWRITES)} folium CDN tags "
+          f"-> docs/vendor/")
+    for _dead_host in ("cdn.jsdelivr.net", "cdnjs.cloudflare.com"):
+        _left = saved_html.count(f'src="https://{_dead_host}') + \
+                saved_html.count(f'href="https://{_dead_host}')
+        if _left:
+            print(f"  WARNING: {_left} tag(s) still point at {_dead_host}")
 
     # Let installed iOS/Android web apps use the full screen while exposing
     # safe-area insets to the fixed controls and bottom sheets.
@@ -9663,7 +11579,13 @@ def main(argv: list[str] | None = None) -> None:
         "return o.call(L,id,opts);};"
         "}catch(e){}})();</script>"
     )
-    leaflet_tag_re = re.compile(r'<script src="[^"]*/leaflet(?:\.min)?\.js"></script>')
+    # M-006: the src is now `vendor/leaflet-1.9.3/leaflet.js?v=<hash>` — the
+    # stamping pass above runs first, so the anchor has to tolerate a query
+    # string or this injection silently stops happening (one WARNING, and
+    # every boot flashes the z6 default before the restore).
+    leaflet_tag_re = re.compile(
+        r'<script src="[^"]*/leaflet(?:\.min)?\.js(?:\?[^"]*)?"></script>'
+    )
     tag_match = leaflet_tag_re.search(saved_html)
     if tag_match:
         saved_html = (
@@ -9680,7 +11602,8 @@ def main(argv: list[str] | None = None) -> None:
     # on the page (static UI, bucket names, attraction labels, AND the
     # Chinese string literals inside the inlined <script> blocks — those
     # produce text nodes too once the JS that builds them runs), feed
-    # each to full OpenCC s2t, and inject the {simp: trad} map. The JS
+    # each to to_trad (OpenCC s2twp + M-102 fixups), and inject the
+    # {simp: trad} map. The JS
     # side reads this at runtime to do precise per-segment conversion;
     # we ship the precomputed answers instead of a converter so the
     # browser doesn't need to load OpenCC's dictionaries.

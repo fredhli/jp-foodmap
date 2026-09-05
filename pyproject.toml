@@ -8,6 +8,10 @@ dependencies = [
     "httpx>=0.28.1",
     "opencc-python-reimplemented>=0.1.7",
     "osmium>=4.3.1",
+    # M-060: build_emoji_cache.py resamples the 160px CDN emoji down to 64px.
+    # Optional at runtime — the script degrades to the original bytes with a
+    # warning if the import fails.
+    "pillow>=11.0.0",
     "playwright>=1.59.0",
     "python-dotenv>=1.1.1",
     "pykakasi>=2.3.0",

@@ -204,6 +204,10 @@
 
   // ---- the layer -------------------------------------------------------
 
+  // M-009: detail ordering of the three LOD files, so a "cap" can be
+  // expressed as "never go finer than this" without a pile of if/else.
+  var LOD_RANK = { low: 0, mid: 1, high: 2 };
+
   L.TransitLayer = L.Layer.extend({
     options: {
       // Legacy single-file mode. Used iff lodUrls is not set.
@@ -235,6 +239,10 @@
       // in this map; switching back is just a pointer swap, no refetch.
       this._lodCache = {};
       this._lodInflight = {};
+      // M-010: one AbortController per in-flight LOD, so a toggle-off or a
+      // zoom that moves the target elsewhere cancels the transfer instead
+      // of paying for megabytes nobody will ever render.
+      this._lodAbort = {};
       this._currentLodKey = null;
       // Which buckets the renderer is currently allowed to draw. Both
       // default on so a bare addTo() keeps the historical behavior; map.py
@@ -316,7 +324,37 @@
       this._lastZoom = null;
       this._lastDrawCasing = null;
       this._map = null;
+      // M-010: the parsed LOD data is by far the biggest thing this layer
+      // holds (tens of MB of coordinate arrays for the high LOD). Keeping it
+      // across a toggle-off meant "off" gave back exactly zero memory —
+      // measured 43.1 MB before AND after closing the layer. Since M-009 the
+      // LOD files are gzipped, content-hashed, immutable R2 objects, so
+      // re-opening re-reads them from the browser's HTTP cache: cheap enough
+      // to trade for the heap.
+      this._abortLods(null);
+      this._lodCache = {};
+      this._lodInflight = {};
+      this._allLines = [];
+      this._allStations = [];
+      this._lineIndex = new Map();
+      this._currentLodKey = null;
+      this._loaded = false;
+      this._loading = false;
       return this;
+    },
+
+    // M-010: abort every in-flight LOD fetch except `keep` (pass null to
+    // abort all). The aborted promise settles through the catch below,
+    // which swallows AbortError.
+    _abortLods: function(keep) {
+      var keys = Object.keys(this._lodAbort || {});
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k === keep) continue;
+        try { this._lodAbort[k].abort(); } catch (_) {}
+        delete this._lodAbort[k];
+        delete this._lodInflight[k];
+      }
     },
 
     // Detach polylines for everything currently on the map and drop the
@@ -374,6 +412,14 @@
     // temporarily swap it to the target index — keeps the existing
     // indexing logic intact whether we're loading the legacy single
     // file or one LOD into its own cache slot.
+    // M-010: neither branch keeps the source feature. Holding the parsed
+    // GeoJSON objects kept the whole OSM property bag (kind / ref /
+    // route_ref / operator / both name pairs) and, for stations, the
+    // [lon,lat] geometry wrapper alive for the life of the layer. Lines get
+    // a throwaway carrier that _indexLine strips down to its derived fields;
+    // stations get a flat record holding only what _redraw reads. The field
+    // list below is the complete set of `.properties.` / `.geometry.` reads
+    // in this file — grep before adding one.
     _parseInto: function(gj, lines, stations, lineIndex) {
       var savedIndex = this._lineIndex;
       this._lineIndex = lineIndex;
@@ -382,10 +428,26 @@
           var f = gj.features[i];
           if (!f.geometry) continue;
           if (f.geometry.type === 'LineString') {
-            lines.push(f);
-            this._indexLine(f);
+            // _indexLine nulls .geometry / .properties once it has derived
+            // _latlngs / _bbox / _class / _bucket / _color / _imp / _label.
+            var line = { geometry: f.geometry, properties: f.properties || {} };
+            lines.push(line);
+            this._indexLine(line);
           } else if (f.geometry.type === 'Point') {
-            stations.push(f);
+            var p = f.properties || {};
+            var c = f.geometry.coordinates || [];
+            stations.push({
+              lon: +c[0],
+              lat: +c[1],
+              name: p.name,                     // pickStationName
+              name_en: p.name_en,               // pickStationName (en)
+              railway: p.railway,               // tram_stop styling
+              line_count: p.line_count | 0,     // hub sizing + label suffix
+              // Left undefined when absent on purpose: _redraw's legacy
+              // fallback keys off `typeof ... === 'undefined'`.
+              has_long_line: p.has_long_line,
+              has_city_line: p.has_city_line
+            });
           }
         }
       } finally {
@@ -393,15 +455,47 @@
       }
     },
 
-    // Pick the LOD whose zoom band the map is currently in. Returns null
-    // if LOD mode isn't configured (caller falls back to legacy load).
+    // Pick the LOD whose zoom band the map is currently in, then cap it by
+    // what is actually renderable and what the connection can afford.
+    // Returns null if LOD mode isn't configured (caller falls back to legacy
+    // load).
     _targetLodKey: function() {
       if (!this._map || !this.options.lodBreaks) return null;
       var z = this._map.getZoom();
       var b = this.options.lodBreaks;
-      if (b.high != null && z >= b.high) return 'high';
-      if (b.mid  != null && z >= b.mid)  return 'mid';
-      return 'low';
+      var key = 'low';
+      if (b.high != null && z >= b.high) key = 'high';
+      else if (b.mid != null && z >= b.mid) key = 'mid';
+
+      // M-009: zoom alone used to decide this, so a user with ONLY the
+      // long-haul FAB on still pulled the 4.2 MB 'high' file at z15 —
+      // everything it adds over 'mid' is city-bucket geometry and city
+      // station detail that _redraw immediately culls.
+      //
+      // The cap is 'mid', not 'low', and that is deliberate: the low LOD
+      // written by transit_postprocess.py::_write_lods carries long-haul
+      // LINES ONLY (verified: 51,598 LineStrings, 0 Points in
+      // docs/transit/japan-low.geojson), so capping there would silently
+      // delete every station dot and label above z12 — and its
+      // LOD_LOW_EPSILON of 0.015 deg (~1.5 km) is several hundred px of
+      // geometry error at z14+.
+      var cap = null;
+      if (!this._buckets.city) cap = 'mid';
+      // Data saver / slow link: never auto-escalate to the biggest file.
+      if (this._slowLink()) cap = 'mid';
+      if (cap && LOD_RANK[key] > LOD_RANK[cap]) key = cap;
+      return key;
+    },
+
+    // M-009: navigator.connection is Chromium-only — absent in Safari and
+    // Firefox, where we just behave as before.
+    _slowLink: function() {
+      var c = navigator.connection || navigator.mozConnection ||
+              navigator.webkitConnection;
+      if (!c) return false;
+      if (c.saveData === true) return true;
+      var et = c.effectiveType;
+      return et === 'slow-2g' || et === '2g' || et === '3g';
     },
 
     // Fetch + parse one LOD into the cache. If the LOD is already cached
@@ -416,26 +510,47 @@
       }
       if (this._lodInflight[key]) return this._lodInflight[key];
       var self = this;
-      var p = fetch(this.options.lodUrls[key])
+      // M-010: cancellable transfer (see _abortLods).
+      var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+      if (ctrl) this._lodAbort[key] = ctrl;
+      // M-193: the three lifecycle events map.py's FAB wiring listens on.
+      // _loading was request de-duplication only and drove no UI at all, so
+      // a slow or failed LOD looked exactly like "this area has no lines".
+      this.fire('lodloadstart', { key: key });
+      var p = fetch(this.options.lodUrls[key], ctrl ? { signal: ctrl.signal } : undefined)
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
         })
         .then(function(gj) {
+          delete self._lodInflight[key];
+          delete self._lodAbort[key];
+          // M-010: the layer was removed while this was in flight (its
+          // caches are already cleared) — parsing now would re-inflate the
+          // heap we just gave back, for data nobody is looking at.
+          if (!self._map) { self.fire('lodload', { key: key }); return; }
           var data = { lines: [], stations: [], lineIndex: new Map() };
           self._parseInto(gj, data.lines, data.stations, data.lineIndex);
           self._lodCache[key] = data;
-          delete self._lodInflight[key];
           // Only activate if the user is still in this LOD's zoom band.
           // Otherwise just cache for when they come back — activating
           // out-of-band would briefly render the wrong detail level.
-          if (self._map && self._targetLodKey() === key) {
+          if (self._targetLodKey() === key) {
             self._activateLod(key);
           }
+          self.fire('lodload', { key: key });
         })
         .catch(function(e) {
-          console.error('[TransitLayer] LOD ' + key + ' load failed:', e);
           delete self._lodInflight[key];
+          delete self._lodAbort[key];
+          // M-010: a cancel is a decision we made, not a failure — no
+          // console noise, no error event, no FAB rollback.
+          if (e && e.name === 'AbortError') return;
+          console.error('[TransitLayer] LOD ' + key + ' load failed:', e);
+          // BUG-16: hasData says whether anything is still on screen. A
+          // failed upgrade over a working LOD must not knock the FAB out.
+          self.fire('lodloaderror',
+                    { key: key, error: e, hasData: !!self._currentLodKey });
         });
       this._lodInflight[key] = p;
       return p;
@@ -471,6 +586,16 @@
       if (!this.options.lodUrls || !this.options.lodBreaks) return;
       var target = this._targetLodKey();
       if (!target || target === this._currentLodKey) return;
+      // M-009: never spend a download to move to a COARSER LOD. Zooming out
+      // from z15 to z8, or switching the city FAB off at z15, used to refetch
+      // a file strictly less detailed than the one already parsed. If the
+      // coarse LOD is already cached the swap is free (and worth it — the
+      // renderer walks fewer candidates); if it isn't, keep what we have.
+      if (this._currentLodKey &&
+          LOD_RANK[target] < LOD_RANK[this._currentLodKey] &&
+          !this._lodCache[target]) return;
+      // M-010: whatever else was downloading is now dead weight.
+      this._abortLods(target);
       this._loadLod(target);
     },
 
@@ -498,7 +623,9 @@
       var ll = new Array(coords.length);
       for (var j = 0; j < coords.length; j++) ll[j] = [coords[j][1], coords[j][0]];
       f._latlngs = ll;
-      f.geometry = null;  // free the [lon,lat] copy
+      f.geometry = null;    // free the [lon,lat] copy
+      f.properties = null;  // M-010: every field above is now derived; the
+                            // OSM property bag has no reader left
 
       var GRID = this.options.grid;
       var gx0 = Math.floor(minX / GRID), gx1 = Math.floor(maxX / GRID);
@@ -671,22 +798,22 @@
         var labelAll  = zoom >= 15;
         var labelHubs = zoom >= 14;
         for (var s = 0; s < this._allStations.length; s++) {
-          var stn = this._allStations[s];
-          var lon = stn.geometry.coordinates[0];
-          var lat = stn.geometry.coordinates[1];
+          var stn = this._allStations[s];   // M-010: flat record from _parseInto
+          var lon = stn.lon;
+          var lat = stn.lat;
           if (lon < W2 || lon > E2 || lat < S2 || lat > N2) continue;
           // Hide the dot if its only nearby lines belong to a bucket that's
           // off. Legacy stations without the per-bucket flags fall back to
           // "show if any bucket is on" so old geojsons keep working.
-          var sHasLong = stn.properties.has_long_line;
-          var sHasCity = stn.properties.has_city_line;
+          var sHasLong = stn.has_long_line;
+          var sHasCity = stn.has_city_line;
           var hasFlags = (typeof sHasLong !== 'undefined') ||
                          (typeof sHasCity !== 'undefined');
           var visibleByBucket = hasFlags
             ? ((sHasLong && bk.long) || (sHasCity && bk.city))
             : (bk.long || bk.city);
           if (!visibleByBucket) continue;
-          var lc = stn.properties.line_count | 0;
+          var lc = stn.line_count | 0;
           var radius;
           if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;
           else if (lc >= 3) radius = zoom >= 15 ? 6 : zoom >= 13 ? 5   : 4.2;
@@ -719,8 +846,8 @@
           stLayer.removeLayer(rec.marker);
           stOn.delete(stn);
         }
-        var lc2 = stn.properties.line_count | 0;
-        var isTram = stn.properties.railway === 'tram_stop';
+        var lc2 = stn.line_count | 0;
+        var isTram = stn.railway === 'tram_stop';
         var isHub = lc2 >= 3;
         var dot = L.circleMarker([p.lat, p.lon], {
           radius: p.radius,
@@ -730,7 +857,7 @@
           fillOpacity: op2,
           opacity: op2
         });
-        var nm = pickStationName(stn.properties);
+        var nm = pickStationName(stn);   // M-010: reads .name / .name_en
         if (nm) {
           var opts = { className: 'transit-station-label' };
           if (p.showLabel) {
