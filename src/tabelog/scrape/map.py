@@ -4241,9 +4241,11 @@ FILTER_JS_TEMPLATE = r"""
     var transitLayer = (typeof L.transitLayer === 'function')
       ? L.transitLayer({
           lodUrls: {
-            low:  'https://assets.jpfoodmap.com/japan-low.geojson',
-            mid:  'https://assets.jpfoodmap.com/japan-mid.geojson',
-            high: 'https://assets.jpfoodmap.com/japan.geojson'
+            // M-009: content-hashed, gzip-encoded R2 objects — 1.06 / 2.55 / 4.2 MB on
+            // the wire instead of 18.9 / 36.9 / 42.4 (old plain objects kept in the bucket).
+            low:  'https://assets.jpfoodmap.com/japan-low.3df7fc5442.geojson',
+            mid:  'https://assets.jpfoodmap.com/japan-mid.b12465fa7b.geojson',
+            high: 'https://assets.jpfoodmap.com/japan.0f546984b1.geojson'
           },
           lodBreaks: { mid: 9, high: 14 },
           opacity: 0.4,
