@@ -248,6 +248,163 @@ def t06_filterstate_bad_region(page, base):
         raise AssertionError("an out-of-range region emptied the map")
 
 
+@case("07_bookmarks_with_meta.json")
+def t07_bookmarks_with_meta(page, base):
+    """M-031 / E2 sub-collection rows share the bookmarks array with real
+    pins and hide-tombstones: they paint no marker, don't tombstone anything,
+    survive an unrelated save untouched, and only the orphaned member is
+    swept."""
+    page.wait_for_function(
+        "() => document.querySelectorAll('.bm-mk-attraction').length > 0",
+        timeout=30000,
+    )
+    # 219 built-in landmarks + the one real personal pin. The three metadata
+    # entries must produce no marker at all — renderBookmark's numeric-coord
+    # guard is what stops them becoming pins at (undefined, undefined).
+    eq(page.eval_on_selector_all(".bm-mk", "els => els.length"), 220,
+       "marker count: 219 built-ins + 1 personal pin, metadata paints none")
+    eq(page.eval_on_selector_all(".bm-mk-hidden", "els => els.length"), 1,
+       "only the fb-* tombstone hides a built-in — 'meta' is not 'hidden'")
+    eq(page.eval_on_selector_all(".bm-mk-bookmark", "els => els.length"), 1,
+       "the ordinary personal pin still renders")
+
+    # The data layer reads the fixture back.
+    lists = page.evaluate("() => window.__flLists()")
+    eq(len(lists), 1, "one sub-collection")
+    eq(lists[0]["id"], "list:k7f2x", "list id read back verbatim")
+    eq(lists[0]["name"], "京都", "list name read back verbatim")
+    live = "https://tabelog.com/kyoto/A2601/A260302/26000305/"
+    orphan = "https://tabelog.com/tokyo/A1301/A130101/13000000/"
+    eq(page.evaluate("() => window.__flMembers('list:k7f2x')"), [live],
+       "the orphaned member is hidden on read, the starred one is not")
+    eq(page.evaluate("(u) => window.__flListsOf(u)", live), ["list:k7f2x"],
+       "reverse lookup finds the list")
+    eq(page.evaluate("(u) => window.__flListsOf(u)", orphan), ["list:k7f2x"],
+       "reverse lookup is not orphan-filtered — the row is still there")
+
+    before = json.loads(page.evaluate(
+        "() => localStorage.getItem('tabelog.bookmarks')"))
+    eq(len(before), 5, "nothing was rewritten by a pure page load")
+
+    # An unrelated write (a brand-new list) must leave every pre-existing
+    # entry byte-identical and take exactly the orphan with it.
+    page.evaluate("() => window.__flCreate('无关', '📁')")
+    page.wait_for_timeout(200)
+    after = json.loads(page.evaluate(
+        "() => localStorage.getItem('tabelog.bookmarks')"))
+    kept = {json.dumps(b, sort_keys=True, ensure_ascii=False) for b in after}
+    for b in before:
+        blob = json.dumps(b, sort_keys=True, ensure_ascii=False)
+        is_orphan = b.get("ref") == orphan
+        if is_orphan and blob in kept:
+            raise AssertionError("the orphaned member row was not swept")
+        if not is_orphan and blob not in kept:
+            raise AssertionError(f"entry rewritten by an unrelated save: {blob}")
+    eq(len(after), 5, "4 survivors + the new list body")
+
+    # The favourite behind the live member is untouched by all of this.
+    cache = json.loads(page.evaluate(
+        "() => localStorage.getItem('omakase_state_cache_v2')"))
+    if live not in (cache.get("fav") or []):
+        raise AssertionError("sweeping an orphan must not touch state.fav")
+
+    # Deleting a list takes its members and nothing else.
+    page.evaluate("() => window.__flDelete('list:k7f2x')")
+    page.wait_for_timeout(200)
+    left = json.loads(page.evaluate(
+        "() => localStorage.getItem('tabelog.bookmarks')"))
+    eq([b["id"] for b in left if b.get("list") == "list:k7f2x"], [],
+       "members of a deleted list go with it")
+    eq(len([b for b in left if b.get("id") == "bm-legacy-9"]), 1,
+       "the personal pin is untouched")
+    eq(len([b for b in left if b.get("category") == "hidden"]), 1,
+       "the built-in tombstone is untouched")
+    cache = json.loads(page.evaluate(
+        "() => localStorage.getItem('omakase_state_cache_v2')"))
+    if live not in (cache.get("fav") or []):
+        raise AssertionError("deleting a list must not un-star its members")
+
+
+@case("08_export_legacy.json")
+def t08_export_legacy(page, base):
+    """A pre-2.0 favorites.json (favorites/blacklist = plain URL strings)
+    still imports, and the M-032 object export round-trips back in."""
+    import tempfile
+
+    blob = json.loads((FIXTURES / "08_export_legacy.json").read_text(
+        encoding="utf-8"))["exportFile"]
+    tmp = Path(tempfile.mkdtemp()) / "favorites.json"
+    tmp.write_text(json.dumps(blob, ensure_ascii=False), encoding="utf-8")
+
+    # The file input is hidden behind 导入 in the avatar menu; set_input_files
+    # drives it the same way the OS picker would.
+    page.set_input_files("#ssm-import-file", str(tmp))
+    page.wait_for_selector("#imp-modal.imp-open", timeout=15000)
+    fav_row = page.eval_on_selector("#imp-fav-n", "el => el.textContent")
+    if "3" not in fav_row:
+        raise AssertionError(f"legacy string array not counted: {fav_row!r}")
+    page.eval_on_selector("#imp-modal .imp-confirm", "el => el.click()")
+    page.wait_for_selector("#imp-modal.imp-open", state="hidden", timeout=15000)
+
+    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
+    eq(int("".join(c for c in fav_txt if c.isdigit()) or 0), 3,
+       "favorites imported from the legacy string-array export")
+
+    # The in-memory / on-disk state is still a set of URL STRINGS. The KV
+    # blob shape depends on this — buildBody() serializes state.fav directly.
+    cache = json.loads(page.evaluate(
+        "() => localStorage.getItem('omakase_state_cache_v2')"))
+    eq(len(cache.get("fav") or []), 3, "three favorites in the cache")
+    if not all(isinstance(u, str) for u in cache["fav"]):
+        raise AssertionError(f"state.fav must stay strings, got {cache['fav']!r}")
+    if not all(isinstance(u, str) for u in (cache.get("black") or [])):
+        raise AssertionError("state.black must stay strings")
+    bms = json.loads(page.evaluate("() => localStorage.getItem('tabelog.bookmarks')"))
+    if not any(b.get("id") == "bm-legacy-1" for b in bms):
+        raise AssertionError("the legacy export's bookmark did not import")
+
+    # M-032 export: objects carrying url/name/rating/city. Captured at
+    # URL.createObjectURL rather than through the download machinery — the
+    # bytes are what matters, not the browser's save dialog.
+    page.evaluate(
+        "() => { window.__exported = null;"
+        "  const orig = URL.createObjectURL.bind(URL);"
+        "  URL.createObjectURL = function(b) {"
+        "    b.text().then(t => { window.__exported = t; });"
+        "    return orig(b); }; }"
+    )
+    page.eval_on_selector("#ssm-export", "el => el.click()")
+    page.wait_for_function("() => window.__exported !== null", timeout=15000)
+    exported = json.loads(page.evaluate("() => window.__exported"))
+    eq(exported.get("schema"), 1,
+       "schema stays 1 — no reader gates on it and bumping it can only break "
+       "older builds")
+    favs = exported["favorites"]
+    eq(len(favs), 3, "three favorites exported")
+    for f in favs:
+        if not isinstance(f, dict):
+            raise AssertionError(f"export entry should be an object, got {f!r}")
+        for k in ("url", "name", "rating", "city"):
+            if k not in f:
+                raise AssertionError(f"export entry missing {k}: {f!r}")
+    if not any(f["name"] for f in favs):
+        raise AssertionError("export entries carry no names at all")
+
+    # And the new shape imports back: everything is already there, so the
+    # merge reports nothing new rather than duplicating or throwing.
+    tmp2 = tmp.with_name("favorites-new.json")
+    tmp2.write_text(json.dumps(exported, ensure_ascii=False), encoding="utf-8")
+    page.set_input_files("#ssm-import-file", str(tmp2))
+    page.wait_for_selector("#imp-modal.imp-open", timeout=15000)
+    eq(page.eval_on_selector("#imp-fav-n", "el => el.textContent").strip(),
+       "3 家餐厅", "the object export is counted the same as the string one")
+    page.eval_on_selector("#imp-modal .imp-confirm", "el => el.click()")
+    page.wait_for_selector("#imp-modal.imp-open", state="hidden", timeout=15000)
+    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
+    eq(int("".join(c for c in fav_txt if c.isdigit()) or 0), 3,
+       "re-importing the object export adds nothing and loses nothing")
+
+
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str]) -> int:

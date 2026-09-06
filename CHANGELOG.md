@@ -13,6 +13,16 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.0.0] - 2026-09-06
+
+The 2026-09-05 audit release: the whole 198-item punch list from
+`audit_outputs/integrated-2026-09-05/`, worked through in four milestones.
+Highlights — a wide-screen workbench layout, sub-collections inside 收藏,
+self-hosted front-end dependencies, a versioned sync protocol with a real
+three-way merge, and the project's first tests.
+
 ### Added
 
 - A region filter. `#ff-region` at the top of the filter panel lists all 47
@@ -284,9 +294,242 @@ carry the mechanism, the evidence and the red lines for each change.
   these are `divIcon`s — so every marker was an unnamed button in the tab
   order. Each one now announces "name ★rating". Cluster bubbles are
   unchanged. (M-164)
+- Shareable restaurant links. `?r=<id>` opens the map straight onto one
+  restaurant's card, where `<id>` is the trailing numeric segment of its
+  Tabelog URL in base36 (all 9,807 rows have one, all distinct, ≤5
+  characters — nothing extra is baked into `restaurants.json`). The
+  parameter is consumed once and removed with `replaceState` before the
+  card opens, so the address bar stays clean, the card is the only new
+  history entry, and one back press closes it without leaving the site. An
+  unknown or malformed id is ignored in silence rather than shown as an
+  error. A language-switch reload takes priority, so switching language
+  with a card open cannot open it twice. `window.__shareUrlFor(row)` builds
+  the link from origin + pathname only — never from `location.href`, which
+  would carry `?lang` and permanently overwrite the recipient's UI
+  language — and `window.__shareRestaurant(row, ev)` offers it through
+  `navigator.share` (synchronously, inside the click, or the browser
+  rejects it), falling back to the clipboard with a 已复制链接 toast and
+  then to `execCommand`. Deliberately NOT shareable: user pins, the map
+  view, the filter state, the user's location. (M-032)
+- Exported `favorites.json` entries carry context. `favorites` and
+  `blacklist` are now `[{url, name, rating, city}]` instead of bare
+  tabelog.com URLs, so the file can be read by a person or opened in a
+  spreadsheet. `schema` deliberately stays `1` (nothing gates on it, and
+  bumping it could only make an older build refuse a file it can read),
+  and files exported before this — plain string arrays — still import
+  unchanged; `tests/compat/fixtures/08_export_legacy.json` locks that
+  down. The KV sync body is untouched: `buildBody()` still sends plain
+  URL-string arrays. (M-032)
+
+- Sub-collections — one flat level of named lists over the places already
+  saved, with the data layer behind `window.__flLists / __flListsOf /
+  __flMembers / __flCreate / __flRename / __flDelete / __flAdd / __flRemove`
+  and a shared name+icon dialog behind `__flEditModal`, plus an `fl:change`
+  event on `document` after every mutation. **No new storage anywhere**: a
+  list is `{id:'list:<k>', category:'meta', kind:'list', name, emoji,
+  created}` and each membership is its own `{id:'lm:<k>:<ref>',
+  category:'meta', kind:'member', list, ref}` row, both appended to the
+  existing `bookmarks` array — so they ride the existing `bookmarks` field
+  of the KV blob and need no new localStorage key and no new top-level
+  field (which the Worker's whole-blob replace would have required M-044
+  for). One row per member, never a `members[]` array, because
+  `mergeBookmarks()` merges by id: two devices adding different restaurants
+  to the same list both survive. `category` is `'meta'`, never `'hidden'` —
+  `rebuildHiddenIds()` keeps meaning exactly "built-in landmark tombstone".
+  A restaurant added to a list is also starred (through the existing
+  `toggleFav`), so a client that knows nothing about lists still shows it
+  as saved; removing it from a list, or deleting the list, never un-stars
+  it. Rows whose target is no longer saved are hidden on read and swept on
+  the next write only — never on a read path, and the on-disk favorites
+  cache counts as "still saved" so a cross-tab race cannot delete a live
+  membership. `renderBookmark()`'s existing numeric-coordinate guard is
+  what keeps all of this off the map. `tests/compat/fixtures/
+  07_bookmarks_with_meta.json` locks the round trip down, and
+  `scripts/verify_build.py` gained a `subcollections` check asserting the
+  four invariants the scheme rests on. (M-031, design §4.1 / E2)
+- Sub-collections can be reached from the two places a restaurant is
+  actually decided on. The detail card gains a 加入子收藏夹 row just above
+  its action bar — one 32px/44px-hit-area chip per list plus a ＋ that opens
+  the shared new-list dialog and files the restaurant into whatever it
+  creates. Tapping a chip stars the restaurant as a side effect (the ⭐
+  button, the favourites counter, the marker icon and the filter all update
+  in the same tick); un-ticking it only leaves the list — it never un-stars.
+  The row repaints itself on `fl:change` instead of repainting the card, so
+  the card keeps its scroll position, and it is hidden in the outer-screen
+  peek state where only the decision tiles belong. The pin dialog gets the
+  same chip row under the emoji presets; picks are held in memory and only
+  written once 保存 succeeds, after the `bm-*` pin exists, so a cancelled
+  dialog cannot leave a membership row pointing at nothing. (E11 / M-031)
+- The search dropdown puts restaurants you have already saved in their own
+  已收藏 section above 餐厅库, without repeating them below it, and tags
+  every restaurant row with the sub-collections it is filed under (two
+  names, then `+N`). With no saved hits the dropdown renders exactly as
+  before — same single section, same 屏幕内 / 其他区域 split, same
+  `.ss-loc-first` promotion of 地图搜索. (G3 / M-031)
+- A 分享 button on the detail card, beside the Google Maps square: 44×44,
+  `navigator.share` where the browser has it and a clipboard copy with a
+  「已复制链接」 toast where it does not. It hands out the `?r=<id>` deep
+  link with no `lang` attached, so a shared link never rewrites the
+  recipient's UI language. User pins have no share entry point at all.
+  (M-032)
+- A **收藏 tab** beside 结果 in the left column, with the saved count on it.
+  It lists every favourite grouped **按城市** (Japanese city name, rating
+  descending inside each group) or **按子收藏夹**, and it is the one view on
+  the page that **ignores the filter panel entirely** — tightening the rating
+  to ≥4.3 and ticking 隐藏非日本料理 removes nothing from it, because a
+  favourite that silently disappears reads as lost data. Favourites whose URL
+  is no longer in the corpus get their own 不在当前数据里 group and can still
+  be un-starred. Which tab you were on rides in the existing
+  `tabelog.listView` as one additive `tab` field — no new localStorage key,
+  and a state written before this build simply opens on 结果. (E1 / B9 /
+  M-031)
+- Sub-collection management in that tab: a collapsible group per collection
+  (icon, name, count) with 重命名 / 复制清单文本 / 只看这个 / 删除 behind its
+  ⋯, a ＋新建子收藏夹 button, and a per-row ⋯ that ticks the collections a
+  place belongs to — one place can sit in several at once. Everything reads
+  and writes through the `window.__fl*` data layer; the `bookmarks` array is
+  never touched directly. Deleting a collection is undoable for 9 seconds and
+  never changes any member's ⭐. Built-in landmarks (`fb-*`) and personal pins
+  (`bm-*`) show up as members too and fly the map to themselves when clicked.
+  Selecting rows enables 移到… / 从子收藏夹移除 / 弃用, and a batch 弃用 of N
+  rows costs exactly one `omakase_state_cache_v2` write and one debounced
+  PUT. (E2 / M-031)
+- **复制清单文本** on any collection and on the whole favourites list:
+  plain text, one line per place as `店名 · ★评分 · <Tabelog URL>` under a
+  `清单名 · N 家` header, via `navigator.clipboard` with an `execCommand`
+  fallback. No CSV. (E8 / M-120)
+- **只看这个** crops the map to one collection's restaurants: 命中, 视野内,
+  the markers and the result list all agree, and a 正在看 … 显示全部 bar
+  floats over the map (tracking the workbench insets) so the state can never
+  be mistaken for a broken filter. It is one line at the top of
+  `passesFilter`, so ordinary filters still apply on top of it. (E9 / M-031)
+- A first-visit value bar: one dismissible row under the search box saying
+  what the site is, with **选一个地区开始** (opens the filter panel with the
+  focus already on the region select) and **地图怎么看**. Not a tour, not a
+  scrim, and deliberately no automatic geolocation — most sessions are trip
+  planning from outside Japan, and a `locate()` on boot would also throw away
+  the restored `tabelog.mapView`. Dismissing it writes the new local-only key
+  `tabelog.seenIntro` and it never returns. (M-109)
+- An on-demand map legend (`#legend-pop`), reachable from the value bar and
+  from a new 地图图例 row in the account menu. Four sections: all **seven**
+  price tiers with their real marker colours (generated from `PRICE_BUCKETS`
+  at runtime, so the legend cannot drift), what the emoji in a marker means,
+  what the number in a cluster bubble counts, and ⭐ / ✕. The price wording
+  says "价格区间上限" because that is what the buckets actually are, and the
+  cluster wording never claims the bubble's *size* encodes anything — it
+  does not. (M-109 / M-110)
+- 关于本站 (`#about-modal`), also from the account menu: data source
+  (Tabelog, scraped 2026-05-19), coordinates (GSI + Google Maps), base map
+  (OpenStreetMap / CARTO), the curation rule (reusing the one authored
+  wording from the price-curation help popover), the "check the original
+  listing" disclaimer, the version, a link to the privacy policy, and an
+  entry point for deleting cloud data that hands off to the existing
+  `#ssm-delete-cloud` rather than reimplementing deletion. New `APP_VERSION`
+  / `DATA_SCRAPED_AT` constants in `map.py` feed it. (M-119)
+- Install-as-an-app, three ways. `beforeinstallprompt` is captured at module
+  scope (it fires long before the payload lands) and spent by a 安装为应用
+  row in the account menu; browsers that never fire it get a text card
+  instead — iOS share-sheet steps (all iOS browsers are WebKit, so no
+  "switch to Safari" advice), the Chromium desktop menu path, or a neutral
+  fallback that claims neither support nor its absence. After a visitor's
+  **first** favourite, a bottom snackbar offers the same thing once, with
+  安装 / 稍后 / 不再提示. Frequency lives in the new local-only key
+  `tabelog.installHint` (once per session, 30 days after 稍后 or a dismissed
+  system prompt, at most 3 offers per 90 days, permanent after 不再提示 or
+  `appinstalled`). Everything disappears in standalone display mode. Neither
+  new key is in the sync blob, `buildBody()`, or KV. (M-066 / M-145 / M-197)
+- `manifest.webmanifest` gains two `shortcuts`. Both point at `/` — the site
+  has no routes other than `start_url`, so a shortcut can only pre-name the
+  intent, not deep-link to it. `id` / `start_url` / `scope` are untouched
+  (changing `id` orphans every installed icon) and no `theme_color` was
+  re-added. `verify_build.py` now asserts all three, plus that the About
+  sheet really carries `v2.0.0` and `2026-05-19`. (M-145 / M-119)
+- A results / collections drawer on the phone. Below 520px the workbench
+  left column never existed, so the Fold's outer screen — the 30% of use
+  that happens in Japan, on the move — had no list at all. A ⭐ pill now
+  sits one step above the 筛选 pill and slides `#wb-left` up from the bottom
+  as a 66dvh drawer: the *same* element, the same 结果 / 收藏 tabs, the same
+  rows, the same handlers. It is an overlay, not a layout change (the map
+  keeps its box); the FAB stack and both pills step aside while it is up,
+  exactly as they already do for the filter sheet. The drawer and the
+  filter panel are mutually exclusive, it joins the overlay stack so
+  Android back closes it instead of leaving the site, Tab is trapped inside
+  it with the background `inert`, and Esc / the scrim / the × all hand
+  focus back to the pill. With favourites it opens on 收藏, without them on
+  结果 — and once the reader has picked a tab themselves, that choice wins
+  (it rides in the existing `tabelog.listView`; no new storage key). No
+  automatic geolocation, ever. (F1 / M-031)
+- Sorting by distance is offered only after the reader has actually tapped
+  ⊙ and a fix came back — and it then measures from *their* position, not
+  from the map centre, relabelling itself 距我的位置. Until then the option
+  is not in the menu at all, because "距地图中心" answered a question nobody
+  asked. Nothing on the page ever calls `locate()` on its own. (F1)
 
 ### Changed
 
+- One word per concept, in all four languages (M-106). 「收藏」 used to mean
+  both a starred restaurant and a user-made map pin, and English had split
+  the reject list across *Hide*, *Hidden*, *Discard*, *Discarded* and
+  *excluded*. The vocabulary is now: starred restaurant = 收藏 / 收藏 /
+  **Saved** / お気に入り; user pin = 书签 / 書籤 / **Pins** / ピン; reject
+  list = 弃用 / 棄用 / **Hidden** / 除外; built-in tourist anchor = 景点 /
+  景點 / **Landmarks** / 名所; the Google-corrected-coordinate filter =
+  校准 / **Google-verified** / Google 補正. In Japanese `非表示` stays the
+  generic "hide" so it no longer collides with the reject list, and in
+  English `Hide` survives only as the verb on the button. The pin dialog,
+  its delete action, the 收藏 workbench chips, the layer popover subtitle and
+  the three help popovers say 书签 where they used to say 收藏. **Only
+  display strings changed** — `omakase_state_cache_v2`, `tabelog.bookmarks`,
+  the `category` values and every id are byte-identical, so nothing about
+  stored or synced state moved.
+- `data/i18n/en.json` and `data/i18n/ja.json` now hold **identical key sets**
+  (1,033 each; `日本語` was previously English-only), and the untranslated-run
+  count fell to EN 478 / JA 478 against the 488 / 489 baseline.
+- `README.md` rewritten for 2.0.0: what `.env` needs, the `flock`ed build
+  command, every test suite and what it covers, the fact that the avatar
+  menu's 导出 favorites.json is the **only** user-data backup path (M-005),
+  the pipeline's atomic writes and `.prev` generation (M-020), and the
+  Cloudflare Pages / Workers rollback procedure. (M-051)
+- `CLAUDE.md` brought back in line with the code (M-051): the data-flow
+  section now lists every build output and the 12 positional `popups*.json`
+  slots, `docs/vendor/` and the R2 transit overlay; the Worker is described
+  as the 652-line cookie-session + `baseV`/409 + read-modify-write service it
+  actually is; the localStorage section is an exhaustive, grouped table of
+  all 17 keys plus the one `sessionStorage` key, calling out `tabelog.syncBase`
+  as unclearable and `tabelog.showTransitLong` / `…City` as the real names;
+  a new section documents how sub-collections live inside the `bookmarks`
+  array and why nothing goes to the KV blob's top level; and a new "Build
+  gate" section explains `verify_build.py` and the i18n baseline.
+- MarkerCluster's default bubbles were green / yellow / orange by size — a
+  third colour scale competing with the price halos (green→red) and the
+  filter chips, saying "many restaurants" in the hue that everywhere else
+  means "expensive". All three sizes are now one neutral blue-grey; the
+  number inside already says how many. Overridden with a two-class selector
+  so it outranks the vendor stylesheet without `!important`. (M-110)
+- The signed-out account pane answered none of the three questions people
+  actually have about signing in. It is now three ≥12px lines — what syncs
+  (收藏 / 弃用 / 书签 / 子收藏夹), that we read only the email and avatar,
+  and that the data is hosted on Cloudflare and can be exported or deleted —
+  plus "不想登录也完全可用". Each line is a single CJK run with its own
+  `data/i18n/{en,ja}.json` entry, so the per-language hand-override that used
+  to patch the old one-liner is gone. No sign-in logic changed. (M-118)
+- The bottom-right FAB column is three controls instead of seven. The four
+  layer toggles (长途 / 市内 / 景点 / 收藏) moved into a 图层 popover with a
+  count badge; the zoom pair (≥700px) and the round locate button stay where
+  they were. Each row is 44px with a one-line explanation and a switch, and
+  the 景点 third state ("also show sights I hid") gets its own checkbox
+  instead of being reachable only by clicking twice more. The panel is
+  non-modal — it closes on Escape, on a click anywhere outside it, and on
+  Android's back gesture — and hands focus back to the 图层 pill. Nothing
+  about the toggles themselves changed: same four button ids, same click
+  handlers, same `aria-pressed`, and the same four localStorage keys with
+  the same `'0'` / `'1'` / `'2'` values, so a browser that had transit on
+  and 收藏 off yesterday comes back exactly that way. Measured across eight
+  viewports × four states (no card / detail card / filter open / split panel
+  at 75%), every FAB that paints is hit-testable — the two reachability
+  regressions the M3 gate found are fixed by construction, since a 96-200px
+  stack can no longer collide with a card the way a 252-356px one did.
+  (A11, on top of M-071)
 - The filter panel's option rows are real touch targets: 40px on a mouse,
   44px under a coarse pointer, 18px checkboxes. The inline `display:block`
   that made this impossible to fix from a stylesheet is gone from the
@@ -529,6 +772,22 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ### Fixed
 
+- The sync size warning reaches the person who needs it. Above 180,000
+  characters of PUT body (the Worker rejects 200,000 with a 413) the page
+  only wrote "同步数据接近上限" into `#sync-status`, which exists solely
+  inside the settings modal — so in practice the first visible symptom was
+  "同步失败: HTTP 413". The same message now also goes out as a toast, at
+  most once an hour, and the PUT is still sent: nothing about what the
+  Worker sees has changed. (M-053)
+
+- The import dialog's "N 个书签" count no longer includes metadata-only
+  entries. It already excluded built-in hide-tombstones; it now excludes
+  the sub-collection rows too, so the number matches the pins the user is
+  about to get. The import itself still carries every entry across —
+  including the metadata, which `doImport`'s M-133 coordinate check was
+  otherwise rejecting as junk, so exported lists survive the round trip.
+  (M-031, on top of M-133)
+
 - The layer FABs and the basemap attribution ride above the restaurant
   detail card. Measured reachability of the five buttons with a card open was
   0/5 on 416x657, 616x816, 657x416 and 393x852, and the OSM / CARTO credit —
@@ -649,6 +908,22 @@ carry the mechanism, the evidence and the red lines for each change.
   `crossorigin`. Without it the preload is a no-cors/include request while
   `boot()`'s `fetch()` is cors/same-origin — different keys, so the preloaded
   response sat unclaimed. (M-139)
+
+- Release QA (2.0.0 gate): on the phone layouts the first-visit value bar
+  sat at the same z-index as the FAB stack, and an open bottom sheet lifts
+  that stack (M-071) straight into the bar's band — on a 416x657 outer
+  screen every tap on 定位 / 图层 landed on the bar instead. The bar now
+  yields while a bottom sheet is open and returns when it closes; it is
+  only marked "seen" by the user's own × or CTA. (M-109 × M-071)
+- Release QA: a sub-collection or pin named by the user was run through
+  the translation table in the 收藏 tab — a list called 京都美食 showed as
+  "Kyoto eats" on the EN page while the card chip kept the real name. Both
+  the group header and the pin row now carry the `lang="ja"` "user text"
+  sentinel like every other user-named node. (M-098)
+- Release QA: the un-saved card button read "☆ Saved" in English (and
+  "☆ お気に入り" in Japanese) because it reused the noun run 收藏. It now
+  uses the verb entry 加入收藏 → "☆ Save" / "☆ お気に入りに追加" /
+  "☆ 加入收藏"; the saved state is unchanged. (M-106)
 
 ### Security
 

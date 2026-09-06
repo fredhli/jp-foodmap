@@ -13,7 +13,7 @@ were all defended by nothing but a careful reader.
 | `tests/compat/` | pre-2.0 `localStorage` still loads correctly | a build in `docs/`, Playwright Chromium |
 | `tests/worker/` | the Cloudflare Worker: routing, auth, KV, CORS, versioning | `node` |
 | `tests/sync/` | the browser-side sync state machine against a fake Worker | Playwright Chromium |
-| `tests/smoke_playwright.py` | the built page on 4 viewports, console clean | a build in `docs/`, Playwright Chromium |
+| `tests/smoke_playwright.py` | the built page on 5 viewports, console clean | a build in `docs/`, Playwright Chromium |
 
 And one checker that is not a test suite but belongs to the same gate:
 
@@ -102,9 +102,9 @@ uv run python tests/smoke_playwright.py --viewport fold-outer
 uv run python tests/smoke_playwright.py --screenshots /tmp/shots
 ```
 
-Four viewports (Fold 8 outer 416×657, Fold 8 inner portrait 616×816,
-iPhone 393×852, desktop 1440×900) × six things: boot, local search, detail
-card, save/star, filter, account menu. A console error that is not on the
+Five viewports (Fold 8 outer 416×657, Fold 8 inner portrait 616×816, Fold 8 inner landscape 816×616,
+iPhone 393×852, desktop 1440×900) × seven things: boot, local search, detail
+card, save/star, filter, account menu, F1 phone drawer. A console error that is not on the
 offline allowlist fails that viewport.
 
 ## `tests/worker/` and `tests/sync/`

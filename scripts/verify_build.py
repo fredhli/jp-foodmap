@@ -28,6 +28,11 @@ Why each check exists (all from the 2026-09-05 audit):
   sw.js           ALL five popup variants must stay in CURRENT_VERSIONED_URLS
                   (activate's GC allowlist) or a visitor who switched language
                   loses the copy they are still using (M-062).
+  manifest        id / start_url / scope are the install identity (M-145).
+                  Changing `id` orphans every home-screen icon already out
+                  there and makes a re-install a second, separate app.
+  about           the 关于本站 sheet must carry the real APP_VERSION and
+                  DATA_SCRAPED_AT, not an unsubstituted placeholder (M-119).
   i18n            missing EN/JA translation counts must not grow past the
                   2026-09-05 baseline — every new Chinese UI string has to be
                   added to data/i18n/{en,ja}.json in the same change.
@@ -514,6 +519,81 @@ def check_localstorage_keys() -> None:
         ok("storage-keys", f"all {len(REQUIRED_LOCALSTORAGE_KEYS)} key names present")
 
 
+# M-031 / E2. Sub-collections ride inside the existing `bookmarks` array as
+# coordinate-less {category:'meta'} entries rather than as a new localStorage
+# key or a new top-level KV field. Four load-bearing properties of that
+# decision, each of which is a silent data-loss bug if it ever goes away:
+#
+#   1. renderBookmark bails on anything without numeric lat/lon, so metadata
+#      entries paint no marker. Drop the guard and every list row becomes a
+#      pin at (undefined, undefined).
+#   2. rebuildHiddenIds still matches ONLY category 'hidden' + an 'fb-' id.
+#      Widen it to 'meta' and list rows start tombstoning built-in landmarks.
+#   3. buildBody still sends favorites as Array.from(state.fav) — a plain
+#      string array. The Worker replaces the blob wholesale, so a richer
+#      shape here would be written back by new clients and misread by old.
+#   4. 'meta' is actually spelled somewhere, i.e. the feature is still built
+#      in and this check is testing the live page rather than passing by
+#      accident.
+#
+# Regex existence assertions on purpose — line numbers in a 15k-line
+# generator are worthless, and the whole JS lands on two enormous lines.
+SUBCOLLECTION_CONTRACTS: list[tuple[str, str, str]] = [
+    (
+        "renderBookmark coordinate guard",
+        r"typeof\s+bm\.lat\s*!==\s*'number'\s*\|\|\s*typeof\s+bm\.lon\s*!==\s*'number'",
+        "metadata entries would be rendered as markers at undefined coords",
+    ),
+    (
+        "rebuildHiddenIds is 'hidden'-only",
+        r"bm\.category\s*===\s*'hidden'\s*&&\s*typeof\s+bm\.id\s*===\s*'string'",
+        "widening the tombstone test past 'hidden' makes sub-collection rows "
+        "hide built-in landmarks",
+    ),
+    (
+        "buildBody favorites stay a plain string array",
+        r"favorites:\s*Array\.from\(state\.fav\)",
+        "the KV blob's favorites field must stay a flat string array — see "
+        "CLAUDE.md 'Never change the KV blob schema breakingly'",
+    ),
+    (
+        "sub-collection entries are category 'meta'",
+        r"category:\s*'meta'",
+        "sub-collections are gone, or moved off the 'meta' category they "
+        "share with nothing else",
+    ),
+]
+
+
+def check_subcollections() -> None:
+    if not MAP_HTML.exists():
+        fail("subcollections", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    broken = [
+        f"{name} ({why})"
+        for name, pattern, why in SUBCOLLECTION_CONTRACTS
+        if not re.search(pattern, html)
+    ]
+    if broken:
+        fail(
+            "subcollections",
+            f"{len(broken)} sub-collection invariant(s) no longer hold in "
+            f"docs/index.html: {broken}",
+        )
+        return
+    # And the two categories must stay distinct: 'meta' must never be spelled
+    # as a hidden-tombstone category anywhere.
+    if re.search(r"category\s*:\s*'hidden'\s*,\s*kind\s*:", html):
+        fail(
+            "subcollections",
+            "a sub-collection entry is being written with category 'hidden' — "
+            "that is the built-in landmark tombstone category, not this one",
+        )
+        return
+    ok("subcollections", f"all {len(SUBCOLLECTION_CONTRACTS)} E2 invariants hold")
+
+
 def check_service_worker() -> None:
     if not SW_JS.exists():
         fail("sw", f"{SW_JS} does not exist — run map.py first")
@@ -543,6 +623,75 @@ def check_service_worker() -> None:
         fail("sw", f"expected 4 popups variants in the allowlist, found {n_popups}")
         return
     ok("sw", f"{len(bare)} versioned URLs incl. all 4 popups variants")
+
+
+def check_manifest_identity() -> None:
+    """M-145: the install identity is frozen.
+
+    `id` is what the browser keys an installed app by. Change it and every
+    existing home-screen / desktop icon points at an app that no longer
+    exists, while a re-install lands as a SECOND app — the install-side
+    equivalent of renaming a localStorage key. `start_url` / `scope` are the
+    same story for what the installed window is allowed to navigate to.
+    Shortcuts (M-145) may be added freely; they must stay inside the scope.
+    """
+    path = DOCS_DIR / "manifest.webmanifest"
+    if not path.exists():
+        fail("manifest", f"{path} does not exist")
+        return
+    try:
+        man = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        fail("manifest", f"manifest.webmanifest is not valid JSON: {e}")
+        return
+    for key in ("id", "start_url", "scope"):
+        if man.get(key) != "/":
+            fail(
+                "manifest",
+                f'{key} is {man.get(key)!r}, expected "/". Changing it orphans '
+                f"every already-installed copy of the app.",
+            )
+            return
+    shortcuts = man.get("shortcuts") or []
+    if not isinstance(shortcuts, list):
+        fail("manifest", "shortcuts must be a list")
+        return
+    for s in shortcuts:
+        if not isinstance(s, dict) or not s.get("name") or not s.get("url"):
+            fail("manifest", f"shortcut entry missing name/url: {s!r}")
+            return
+        if not str(s["url"]).startswith("/"):
+            fail("manifest", f"shortcut url {s['url']!r} is outside the scope")
+            return
+    ok("manifest", f'id/start_url/scope = "/", {len(shortcuts)} shortcut(s)')
+
+
+def check_about_stamps() -> None:
+    """M-119: the 关于本站 sheet has to actually carry the two build facts.
+
+    APP_VERSION and DATA_SCRAPED_AT are substituted into ONBOARD_HTML at
+    import time in map.py. If either placeholder ever stops being replaced
+    the page ships a literal `v__APP_VERSION__`, which no test elsewhere
+    would notice.
+    """
+    if not MAP_HTML.exists():
+        fail("about", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    missing = [s for s in ("v2.0.0", "2026-05-19") if s not in html]
+    if missing:
+        fail(
+            "about",
+            f"docs/index.html does not mention {missing} — the 关于本站 sheet "
+            f"lost its version / scrape-date stamp (map.py APP_VERSION / "
+            f"DATA_SCRAPED_AT).",
+        )
+        return
+    if "__APP_VERSION__" in html or "__DATA_SCRAPED_AT__" in html:
+        fail("about", "an unsubstituted __APP_VERSION__/__DATA_SCRAPED_AT__ "
+                      "placeholder reached docs/index.html")
+        return
+    ok("about", "version v2.0.0 + scrape date 2026-05-19 present")
 
 
 def check_i18n(build_log: Path | None, baseline: dict, update_baseline: bool) -> None:
@@ -709,7 +858,10 @@ def main(argv: list[str] | None = None) -> int:
         check_restaurants(baseline, args.update_baseline)
         check_restaurant_fields()    # M-023 / B1
         check_localstorage_keys()
+        check_subcollections()       # M-031 / E2
         check_service_worker()
+        check_manifest_identity()    # M-145
+        check_about_stamps()         # M-119
         check_i18n(args.build_log, baseline, args.update_baseline)
         check_csv_consistency()
     except Failure as e:

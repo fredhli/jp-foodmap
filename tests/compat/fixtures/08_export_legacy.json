@@ -1,0 +1,26 @@
+{
+  "__note__": "A favorites.json exported by a PRE-2.0 build: `favorites` / `blacklist` are plain arrays of tabelog.com URL strings, `schema` is 1, `bookmarks` is a real pin. M-032 changed the EXPORT side to write [{url,name,rating,city}] objects instead — the import side (pickUrl / normalizeImport) already accepted both, and it must keep accepting this file forever. localStorage starts empty so the counts after the import are exactly what came out of this file. exportFile is not localStorage: the test writes it to a temp path and feeds it to #ssm-import-file the way a user would.",
+  "localStorage": {},
+  "exportFile": {
+    "schema": 1,
+    "app": "jpfoodmap",
+    "favorites": [
+      "https://tabelog.com/tottori/A3101/A310101/31000300/",
+      "https://tabelog.com/tottori/A3101/A310101/31004889/",
+      "https://tabelog.com/tottori/A3101/A310101/31000868/"
+    ],
+    "blacklist": [
+      "https://tabelog.com/tottori/A3101/A310101/31001933/"
+    ],
+    "bookmarks": [
+      {
+        "id": "bm-legacy-1",
+        "name": "旧书签",
+        "emoji": "📍",
+        "lat": 35.6586,
+        "lon": 139.7454,
+        "category": "bookmark"
+      }
+    ]
+  }
+}

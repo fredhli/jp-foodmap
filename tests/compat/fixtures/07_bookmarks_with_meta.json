@@ -1,0 +1,9 @@
+{
+  "__note__": "tabelog.bookmarks carrying all five entry shapes at once: a real personal pin, a built-in hide-tombstone, an E2 sub-collection body (category:'meta', kind:'list'), a live member row, and an orphaned member row whose restaurant is no longer starred. Metadata entries must paint no marker, must not be mistaken for tombstones, must survive an unrelated save byte-for-byte, and the orphan must be hidden on read and swept on the next write. This is the shape a 2.0.0 client writes into the SAME bookmarks array a pre-2.0 client reads, so an old client has to round-trip it untouched.",
+  "localStorage": {
+    "tabelog.showAttractions": "1",
+    "tabelog.showBookmarks": "1",
+    "tabelog.bookmarks": "[{\"id\": \"bm-legacy-9\", \"name\": \"老书签\", \"emoji\": \"📍\", \"lat\": 35.6812, \"lon\": 139.7671, \"category\": \"bookmark\"}, {\"id\": \"fb-tokyo-tower\", \"category\": \"hidden\"}, {\"id\": \"list:k7f2x\", \"category\": \"meta\", \"kind\": \"list\", \"name\": \"京都\", \"emoji\": \"⛩️\", \"created\": 1757000000000}, {\"id\": \"lm:k7f2x:https://tabelog.com/kyoto/A2601/A260302/26000305/\", \"category\": \"meta\", \"kind\": \"member\", \"list\": \"list:k7f2x\", \"ref\": \"https://tabelog.com/kyoto/A2601/A260302/26000305/\"}, {\"id\": \"lm:k7f2x:https://tabelog.com/tokyo/A1301/A130101/13000000/\", \"category\": \"meta\", \"kind\": \"member\", \"list\": \"list:k7f2x\", \"ref\": \"https://tabelog.com/tokyo/A1301/A130101/13000000/\"}]",
+    "omakase_state_cache_v2": "{\"fav\": [\"https://tabelog.com/kyoto/A2601/A260302/26000305/\"], \"black\": [], \"dirty\": false}"
+  }
+}

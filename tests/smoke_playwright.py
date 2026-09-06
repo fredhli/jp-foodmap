@@ -5,7 +5,7 @@
     uv run python tests/smoke_playwright.py --viewport fold-outer
     uv run python tests/smoke_playwright.py --screenshots <dir>
 
-Six things, on each of the four viewports the site is actually used at:
+Seven things, on each of the five viewports the site is actually used at:
 
   boot      the payload lands and the counter shows the corpus size
   search    typing a restaurant name hits the local index
@@ -13,6 +13,7 @@ Six things, on each of the four viewports the site is actually used at:
   save      the star toggles, the counter moves, and it lands in localStorage
   filter    changing one filter changes the visible count
   account   the avatar menu opens and scrolls
+  fav-drawer  (F1) below 520px the ⭐ pill opens the results / 收藏 drawer
 
 A console error that is not on the offline allowlist (Google Identity's 403,
 the third-party hosts this run blocks) fails the viewport. Serves docs/ over
@@ -260,6 +261,102 @@ def check_account(page, name):
     return f"menu {box['h']:.0f}px tall on a {vh}px viewport"
 
 
+def check_fav_drawer(page, name):
+    """F1: below 520px the ⭐ pill opens #wb-left as a bottom drawer; at 520px
+    and up the same element is the column / split panel and the pill is gone.
+    Covers the reachable half of the F1 acceptance list on every viewport the
+    suite already runs."""
+    # Earlier checks (save, filter) leave a .sync-toast on screen for a few
+    # seconds and it sits in the same bottom-left corner as the pill. Let it
+    # expire before hit-testing rather than racing it.
+    try:
+        page.wait_for_function(
+            "() => !document.querySelector('.sync-toast')", timeout=8000)
+    except Exception:
+        pass
+    st = page.evaluate("""() => {
+      const f = document.getElementById('wb-fav-fab');
+      if (!f) return {missing: true};
+      const cs = getComputedStyle(f);
+      const r = f.getBoundingClientRect();
+      const t = cs.display === 'none' ? null
+        : document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return {shown: cs.display !== 'none',
+              inView: r.left >= 0 && r.top >= 0
+                      && r.right <= innerWidth && r.bottom <= innerHeight,
+              hit: !!(t && (t === f || f.contains(t))),
+              by: t ? (t.id || t.className || t.tagName) : null,
+              phone: !/wb-(split|mid|wide)/.test(document.body.className)};
+    }""")
+    if st.get("missing"):
+        raise AssertionError("#wb-fav-fab is not in the page")
+    if not st["phone"]:
+        # >=520px: the pill must stay out of the way entirely.
+        if st["shown"]:
+            raise AssertionError("the phone drawer pill is visible on a workbench mode")
+        return "pill correctly hidden (workbench mode)"
+    if not (st["shown"] and st["inView"] and st["hit"]):
+        raise AssertionError(f"⭐ pill is not reachable: {st}")
+
+    page.eval_on_selector("#wb-fav-fab", "el => el.click()")
+    page.wait_for_function(
+        "() => document.body.classList.contains('wb-fav-open')", timeout=15000)
+    page.wait_for_timeout(350)
+    d = page.evaluate("""() => {
+      const l = document.getElementById('wb-left');
+      const r = l.getBoundingClientRect();
+      const s = document.getElementById('wb-sort');
+      const dist = s ? s.querySelector('option[value="distance"]') : null;
+      return {frac: r.height / innerHeight, bottom: Math.round(r.bottom),
+              vh: innerHeight,
+              tabs: document.querySelectorAll('#wb-left .wb-tab').length,
+              on: (document.querySelector('.wb-tab.on') || {}).id,
+              distHidden: dist ? dist.hidden : null,
+              // M3 red line: the phone hosts must not have moved.
+              ff: document.getElementById('ff-sheet-content').parentElement.id,
+              bs: document.getElementById('bs-content').parentElement.id,
+              ss: document.getElementById('ss-box').parentElement === document.body};
+    }""")
+    if d["frac"] > 0.67 or abs(d["bottom"] - d["vh"]) > 2:
+        raise AssertionError(f"drawer geometry wrong: {d}")
+    if d["tabs"] != 2 or d["on"] not in ("wb-tab-results", "wb-tab-fav"):
+        raise AssertionError(f"drawer tabs wrong: {d}")
+    if d["distHidden"] is False:
+        raise AssertionError("distance sort offered without the user ever locating")
+    if d["ff"] != "ff-sheet" or d["bs"] != "bs-sheet" or not d["ss"]:
+        raise AssertionError(f"M3 phone hosts moved: {d}")
+
+    # Mutual exclusion with the filter panel, then Esc back out.
+    page.evaluate("() => { const b = Array.from("
+                  "document.querySelectorAll('#wb-left .wb-filter-btn'))"
+                  "  .find(e => e.offsetParent !== null); if (b) b.click(); }")
+    page.wait_for_timeout(400)
+    ex = page.evaluate(
+        "() => ({drawer: document.body.classList.contains('wb-fav-open'),"
+        "        filter: document.getElementById('ff-sheet')"
+        "                  .classList.contains('ff-open')})")
+    if ex["drawer"] or not ex["filter"]:
+        raise AssertionError(f"filter/drawer are not mutually exclusive: {ex}")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    page.eval_on_selector("#wb-fav-fab", "el => el.click()")
+    page.wait_for_function(
+        "() => document.body.classList.contains('wb-fav-open')", timeout=15000)
+    page.wait_for_timeout(300)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(350)
+    end = page.evaluate(
+        "() => ({open: document.body.classList.contains('wb-fav-open'),"
+        "        af: document.activeElement ? document.activeElement.id : null,"
+        "        scrim: getComputedStyle("
+        "          document.getElementById('wb-fav-backdrop')).pointerEvents})")
+    if end["open"] or end["scrim"] != "none":
+        raise AssertionError(f"drawer did not close cleanly: {end}")
+    if end["af"] != "wb-fav-fab":
+        raise AssertionError(f"focus was not handed back to the pill: {end}")
+    return f"drawer {d['frac']:.0%} of the viewport, tab {d['on']}, focus restored"
+
+
 CHECKS = [
     ("boot", check_boot),
     ("search", check_search),
@@ -267,6 +364,7 @@ CHECKS = [
     ("save", check_save),
     ("filter", check_filter),
     ("account", check_account),
+    ("fav-drawer", check_fav_drawer),   # F1
 ]
 
 

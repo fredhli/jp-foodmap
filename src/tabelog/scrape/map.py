@@ -593,18 +593,18 @@ def load_google_places() -> dict[str, dict]:
 HELP_COPY: dict[str, dict[str, str]] = {
     "blacklist": {
         "zh-CN": "弃用名单 = 你研究后决定不会去的餐厅，会从地图上自动隐藏；和收藏一起通过你的 Google 账号跨设备同步。",
-        "en": "The Discard list holds restaurants you've researched and decided not to visit. They auto-hide from the map and sync across devices alongside your Saved list, via your Google account.",
-        "ja": "非表示リストは、調べた結果「行かない」と決めたレストランの置き場です。地図から自動的に非表示になり、お気に入りと一緒に Google アカウントで端末間同期されます。",
+        "en": "The Hidden list holds restaurants you've researched and decided not to visit. They auto-hide from the map and sync across devices alongside your Saved list, via your Google account.",
+        "ja": "除外リストは、調べた結果「行かない」と決めたレストランの置き場です。地図から自動的に非表示になり、お気に入りと一緒に Google アカウントで端末間同期されます。",
     },
     "kind-bookmark": {
-        "zh-CN": "收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。",
-        "en": "Saved is for places or buildings you want to mark yourself — hotels, shops, points of interest. Synced across devices alongside Sights, via your Google account.",
-        "ja": "お気に入りは、自分で印を付けたい場所や建物（ホテル、お店、気になるスポット）のためのカテゴリです。観光スポットと一緒に Google アカウントで端末間同期されます。",
+        "zh-CN": "书签 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。",  # M-106
+        "en": "Pins are places or buildings you want to mark yourself — hotels, shops, points of interest. Synced across devices alongside Landmarks, via your Google account.",
+        "ja": "ピンは、自分で印を付けたい場所や建物（ホテル、お店、気になる場所）のためのカテゴリです。名所と一緒に Google アカウントで端末間同期されます。",
     },
     "kind-attraction": {
-        "zh-CN": "景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。",
-        "en": "Sights is for destinations you add on top of the built-in tourist anchors. Custom Sights show on the map next to the built-ins and can be removed anytime. Synced across devices alongside Saved, via your Google account.",
-        "ja": "観光スポットは、デフォルトの観光スポットに加えて自分で追加した行き先のためのカテゴリです。デフォルトと並んで地図に表示され、いつでも削除できます。お気に入りと一緒に Google アカウントで端末間同期されます。",
+        "zh-CN": "景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和书签一起通过你的 Google 账号跨设备同步。",  # M-106
+        "en": "Landmarks are destinations you add on top of the built-in tourist anchors. They show on the map next to the built-in Landmarks and can be removed anytime. Synced across devices alongside Pins, via your Google account.",
+        "ja": "名所は、内蔵の名所に加えて自分で追加した行き先のためのカテゴリです。内蔵の名所と並んで地図に表示され、いつでも削除できます。ピンと一緒に Google アカウントで端末間同期されます。",
     },
     # M-114: the slider's left end is 3.4, which reads like "no rating
     # filter is possible below this" — it is, because 3.4 is the corpus
@@ -2300,7 +2300,18 @@ def build_filter_panel_html(
 # M-150: the manifest's cache-buster string used to be typed out twice (the
 # page <link> and the SW app-shell list) and had to be kept in sync by hand.
 # It lives here now; both references substitute __MANIFEST_V__.
-MANIFEST_VERSION = "no-theme-color-1"
+MANIFEST_VERSION = "shortcuts-2"
+
+# M-119: the two build-time facts the "关于本站" sheet states out loud.
+# APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
+# tag are kept in step by hand at release time.
+APP_VERSION = "2.0.0"
+# DATA_SCRAPED_AT is when the Tabelog corpus was last pulled. It is a
+# hand-written constant on purpose: data/tabelog/tabelog.csv has no
+# scraped_at column yet (the build log says "no scraped_at timestamps yet"),
+# so there is nothing to compute it from. Bump this after the next re-scrape,
+# or replace it with a quantile over scraped_at once that column exists.
+DATA_SCRAPED_AT = "2026-05-19"
 
 # Page title, install metadata, and launcher icons. The browser tab keeps the
 # original inline 🗾 emoji favicon; the raster launcher icons use the same
@@ -2642,8 +2653,157 @@ MAP_FAB_HTML = """
     /* Slower, not stopped — a frozen spinner reads as "hung". */
     .map-fab.loading .map-fab-ic::after { animation-duration: 2.4s; }
   }
+
+  /* ===== A11: the 图层 popover — the four layer toggles move inside it ===
+     Five to seven pills in the corner was the single biggest thing in the
+     way of the map (M-071's whole rework exists because a 252px column did
+     not fit next to a detail card). The stack now carries three controls
+     (zoom pair >=700px, locate, 图层) and the four toggles are re-hosted
+     inside #layers-pop.
+     Only the HOST changes: #fab-transit-long / #fab-transit-city /
+     #fab-attractions / #fab-bookmarks are the very same <button> elements
+     with the same ids, the same click handlers, the same aria-pressed and
+     the same localStorage keys — wireTransitFab / wireFab / applyToggle /
+     applyTransitBucket / transitFabsLoading / wireAttractionsFab and
+     bookmarkPopupHtml's `fabId` lookup are untouched. Their pill look is
+     overridden to a full-width row purely by the #layers-pop rules below,
+     which outrank every .map-fab / media-query rule above on ID
+     specificity regardless of source order. */
+  #fab-layers { position: relative; }   /* badge anchor */
+  .map-fab-badge {
+    position: absolute; top: -5px; right: -5px;
+    min-width: 18px; height: 18px; padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: #2563eb; color: #fff;
+    border: 2px solid #fff;
+    font-size: 10px; font-weight: 700; line-height: 14px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+  /* Anchored to the STACK, not to #fab-layers: opening it off the pill
+     itself put the panel straight over #fab-locate (and over the zoom pair
+     at >=700px), so a tap meant for "locate me" landed on the checkbox row.
+     .map-fab-stack is position:fixed, so it is already the containing
+     block — no wrapper needed, and the panel rides --sheet-h / --wb-bottom
+     with the stack for free (M-071). */
+  #layers-pop {
+    position: absolute;
+    right: 0; bottom: calc(100% + 8px);
+    width: 300px; max-width: calc(100vw - 28px);
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    padding: 6px;
+    pointer-events: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    transform-origin: bottom right;
+    animation: lp-in 0.14s ease-out;
+  }
+  #layers-pop[hidden] { display: none; }
+  /* The stack is position:fixed WITH a z-index, so it is its own stacking
+     context — a z-index on #layers-pop alone can never lift the panel over
+     the detail card (10002) or the search capsule (9996). Raise the whole
+     stack for as long as the panel is up instead. It only ever applies
+     after the user reached #fab-layers and opened the menu, so M-071's
+     "buttons behind a near-fullscreen card beat buttons jammed under the
+     search box" trade-off is untouched in every other state. */
+  .map-fab-stack.lp-open { z-index: 10003; }
+  #layers-pop.lp-down {
+    bottom: auto; top: calc(100% + 8px);
+    transform-origin: top right;
+  }
+  @keyframes lp-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #layers-pop { animation: none; }
+  }
+  /* The re-hosted toggles. ID specificity (1,1,0) beats .map-fab (0,1,0),
+     .map-fab.map-fab-circle (0,2,0) and every media-query override above,
+     so none of those have to be touched or narrowed. */
+  #layers-pop .map-fab {
+    width: 100%; height: auto; min-height: 44px;   /* F2 / M-078 */
+    margin: 0; padding: 7px 10px;
+    border: 0; border-radius: 10px;
+    background: transparent; color: #374151;
+    box-shadow: none;
+    display: flex; align-items: center; justify-content: flex-start;
+    gap: 10px;
+    align-self: auto;
+    text-align: left;
+    font-size: 14px;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #layers-pop .map-fab:hover { background: #f3f4f6; box-shadow: none; }
+  }
+  #layers-pop .map-fab .map-fab-label { display: block; font-size: 14px; }
+  #layers-pop .map-fab-ic {
+    flex: 0 0 auto; width: 22px; font-size: 18px; text-align: center;
+  }
+  /* M-193 / BUG-16: the loading ring is drawn on a white row here, so the
+     white-on-blue variant for .active would be invisible. */
+  #layers-pop .map-fab.active.loading .map-fab-ic::after {
+    border-color: rgba(0,0,0,0.14); border-top-color: #2563eb;
+  }
+  #layers-pop .lp-txt {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  #layers-pop .lp-sub {
+    font-size: 11px; font-weight: 500; color: #6b7280; line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* On/off is a switch instead of a filled pill — a 300px panel of solid
+     blue rows is unreadable, and the amber third state needs to stay
+     distinguishable from plain "on". */
+  #layers-pop .lp-sw {
+    flex: 0 0 auto; position: relative;
+    width: 36px; height: 20px; border-radius: 999px;
+    background: #d1d5db;
+    transition: background 0.15s ease-out;
+  }
+  #layers-pop .lp-sw::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    transition: transform 0.15s ease-out;
+  }
+  #layers-pop .map-fab.active .lp-sw   { background: #2563eb; }
+  #layers-pop .map-fab.show-all .lp-sw { background: #f59e0b; }
+  #layers-pop .map-fab.active .lp-sw::after,
+  #layers-pop .map-fab.show-all .lp-sw::after { transform: translateX(16px); }
+  @media (prefers-reduced-motion: reduce) {
+    #layers-pop .lp-sw, #layers-pop .lp-sw::after { transition: none; }
+  }
+  /* Explicit control for the third state. The FAB row still cycles
+     0 -> 1 -> 2 -> 0; this only ever moves between '1' and '2', so the
+     tri-state is discoverable without being the only way in. */
+  #layers-pop .lp-check {
+    display: flex; align-items: center; gap: 10px;
+    min-height: 44px; padding: 7px 10px;   /* F2 / M-078 */
+    margin-top: 4px;
+    border-top: 1px solid #f3f4f6;
+    font-size: 12.5px; color: #4b5563; font-weight: 500;
+    cursor: pointer; user-select: none;
+    pointer-events: auto;
+  }
+  #layers-pop .lp-check input {
+    flex: 0 0 auto; width: 18px; height: 18px; margin: 0;
+    accent-color: #f59e0b; cursor: pointer;
+  }
+  #layers-pop .map-fab:focus-visible,
+  #layers-pop .lp-check:focus-within { outline: 2px solid #2563eb;
+                                       outline-offset: -2px; }
 </style>
-<div class="map-fab-stack" role="group" aria-label="图层切换">
+<div class="map-fab-stack" role="group" aria-label="地图控件">
   <!-- M-159: explicit zoom, >=700px only (see .map-fab-zoom). -->
   <button id="fab-zoom-in" class="map-fab map-fab-circle map-fab-zoom"
           type="button" title="放大" aria-label="放大">+</button>
@@ -2662,22 +2822,50 @@ MAP_FAB_HTML = """
       <line x1="20" y1="12" x2="22.5" y2="12"></line>
     </svg>
   </button>
-  <button id="fab-transit-long" class="map-fab" type="button"
-          aria-pressed="false" title="新干线 / JR 长途线路">
-    <span class="map-fab-ic">🚄</span><span class="map-fab-label">长途</span>
+  <!-- A11: one 图层 pill replaces the four toggle pills. The toggles keep
+       their ids / handlers / storage keys — they just live in #layers-pop
+       now (see the CSS block above and wireLayersPop in FILTER_JS). -->
+  <button id="fab-layers" class="map-fab" type="button"
+          aria-expanded="false" aria-controls="layers-pop"
+          title="图层" aria-label="图层">
+    <span class="map-fab-ic">🗂️</span><span class="map-fab-label">图层</span>
+    <span class="map-fab-badge" id="fab-layers-badge" hidden
+          aria-hidden="true"></span>
   </button>
-  <button id="fab-transit-city" class="map-fab" type="button"
-          aria-pressed="false" title="地铁 / 私铁 / 城市轨道">
-    <span class="map-fab-ic">🚇</span><span class="map-fab-label">市内</span>
-  </button>
-  <button id="fab-attractions" class="map-fab active" type="button"
-          aria-pressed="true" title="景点锚点">
-    <span class="map-fab-ic">🗾</span><span class="map-fab-label">景点</span>
-  </button>
-  <button id="fab-bookmarks" class="map-fab active" type="button"
-          aria-pressed="true" title="我的收藏">
-    <span class="map-fab-ic">⭐</span><span class="map-fab-label">收藏</span>
-  </button>
+  <div id="layers-pop" role="group" aria-label="图层设置" hidden>
+      <button id="fab-transit-long" class="map-fab" type="button"
+              aria-pressed="false" title="新干线 / JR 长途线路">
+        <span class="map-fab-ic">🚄</span>
+        <span class="lp-txt"><span class="map-fab-label">长途</span>
+          <span class="lp-sub">新干线 / JR 特急</span></span>
+        <span class="lp-sw" aria-hidden="true"></span>
+      </button>
+      <button id="fab-transit-city" class="map-fab" type="button"
+              aria-pressed="false" title="地铁 / 私铁 / 城市轨道">
+        <span class="map-fab-ic">🚇</span>
+        <span class="lp-txt"><span class="map-fab-label">市内</span>
+          <span class="lp-sub">地铁 / 私铁 / 城市轨道</span></span>
+        <span class="lp-sw" aria-hidden="true"></span>
+      </button>
+      <button id="fab-attractions" class="map-fab active" type="button"
+              aria-pressed="true" title="景点锚点">
+        <span class="map-fab-ic">🗾</span>
+        <span class="lp-txt"><span class="map-fab-label">景点</span>
+          <span class="lp-sub"><span id="lp-n-builtin"></span> 个内置地标</span></span>
+        <span class="lp-sw" aria-hidden="true"></span>
+      </button>
+      <button id="fab-bookmarks" class="map-fab active" type="button"
+              aria-pressed="true" title="我的收藏">
+        <span class="map-fab-ic">⭐</span>
+        <span class="lp-txt"><span class="map-fab-label">收藏</span>
+          <span class="lp-sub">我的收藏与书签</span></span>
+        <span class="lp-sw" aria-hidden="true"></span>
+      </button>
+      <label class="lp-check">
+        <input type="checkbox" id="lp-attr-all">
+        <span>也显示已隐藏的景点</span>
+      </label>
+  </div>
 </div>
 """
 
@@ -2847,6 +3035,17 @@ SEARCH_BOX_HTML = """
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     margin-top: 1px;
   }
+  /* G3 / M-031: which sub-collections a hit belongs to, tacked onto the end
+     of the sub-line. Decorative only — the whole row is the click target,
+     so these are <span>s and never steal the tap. */
+  #ss-list .ss-list-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 0 6px; border-radius: 999px;
+    background: #fef3c7; color: #92400e;
+    font-size: 11px; font-weight: 600; line-height: 16px;
+    vertical-align: -3px;
+  }
+  #ss-list .ss-list-chip img { height: 11px; width: 11px; }
   #ss-list .ss-fav {
     flex-shrink: 0;
     background: #f9fafb; border: 1px solid #d1d5db;
@@ -3028,7 +3227,8 @@ SEARCH_BOX_HTML = """
     min-height: 14px; padding: 4px 0;
   }
   .ssm-signin-help {
-    font-size: 11px; color: #6b7280; line-height: 1.5;
+    font-size: 12px;   /* M-118: 11px was below the page's own floor */
+    color: #6b7280; line-height: 1.5;
     margin: 4px 8px 6px; padding: 0;
     text-align: center;
   }
@@ -3096,12 +3296,23 @@ SEARCH_BOX_HTML = """
         </button>
       </div>
       <!-- Signed-out pane: Google's official sign-in button is rendered into
-           #ssm-signin-btn by GIS, then a one-line status slot, then a help
-           paragraph explaining what signing in actually does. -->
+           #ssm-signin-btn by GIS, then a one-line status slot, then what
+           signing in actually buys you.
+           M-118: this used to be one 11px sentence that answered none of the
+           three questions people actually have (what syncs, what Google
+           tells us, where the data lives). Three bullets plus the reassurance
+           that none of it is required. Each line is a single CJK run so the
+           runtime localizer translates it whole instead of word-by-word —
+           that is why there is no comma inside any of them. -->
       <div id="ssm-signed-out" hidden>
         <div id="ssm-signin-btn"></div>
         <div id="ssm-cfg-msg"></div>
-        <p class="ssm-signin-help" id="ssm-signin-help">登录后，收藏 / 弃用 / 景点 会跨设备同步。未登录则只存在当前浏览器。</p>
+        <ul class="ssm-why">
+          <li>收藏 / 弃用 / 书签 / 子收藏夹 跨设备同步</li>
+          <li>只读取你的邮箱和头像</li>
+          <li>数据托管于 Cloudflare 可导出可退出可删除</li>
+        </ul>
+        <p class="ssm-signin-help" id="ssm-signin-help">不想登录也完全可用</p>
       </div>
       <div class="ssm-divider"></div>
       <button class="ssm-row" id="ssm-reset" type="button">
@@ -3215,8 +3426,8 @@ HELP_POPOVER_HTML = """
 </style>
 <div id="ff-help-pop" role="tooltip" aria-live="polite" hidden>
   <div class="ff-help-section" data-help-for="blacklist" hidden>弃用名单 = 你研究后决定不会去的餐厅，会从地图上自动隐藏；和收藏一起通过你的 Google 账号跨设备同步。</div>
-  <div class="ff-help-section" id="help-kind-bookmark" data-help-for="kind-bookmark" hidden>收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
-  <div class="ff-help-section" id="help-kind-attraction" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。</div>
+  <div class="ff-help-section" id="help-kind-bookmark" data-help-for="kind-bookmark" hidden>书签 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
+  <div class="ff-help-section" id="help-kind-attraction" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和书签一起通过你的 Google 账号跨设备同步。</div>
   <div class="ff-help-section" data-help-for="price-curation" hidden>本站只收录每个区域评分前 1% 的餐厅；其中高价位 fine-dining 进一步压到 0.1%；和果子、咖啡厅、面包店等非正餐也按比例控量。这样，在地图上显示出来的 20000 日元以下的高分正餐餐厅，多数可以在一个合理的天数内提前预订，甚至 walk-in。</div>
   <!-- C2 / M-114: the slider floor is a property of the corpus, not of the
        control — say it where the control is. -->
@@ -3279,6 +3490,496 @@ HELP_POPOVER_HTML = """
     <dt lang="en"><kbd>?</kbd></dt><dd>快捷键</dd>
   </dl>
 </div>
+"""
+
+
+# M-066 / M-109 / M-110 / M-119: first-visit value bar, on-demand legend,
+# 关于本站 sheet, install-to-home-screen helper + snackbar, and the neutral
+# cluster bubbles. One constant so the whole onboarding surface has one
+# owner. Injected into <body>, i.e. after the vendor MarkerCluster stylesheet
+# in <head> — that is what lets the cluster override win the cascade with a
+# two-class selector instead of !important.
+ONBOARD_HTML = """
+<style>
+  /* ---- M-110: neutral cluster bubbles ---------------------------------
+     MarkerCluster.Default.css paints small / medium / large green, yellow
+     and orange — a third colour scale on top of the price halos (green→red)
+     and the filter chips, saying "many restaurants" in exactly the hue that
+     everywhere else on this page means "expensive". One neutral blue-grey
+     for all three sizes; the number inside already says how many. The
+     selectors carry an extra class (0,2,0) so they outrank the vendor
+     sheet's (0,1,0) — no !important needed, and none is used. */
+  .leaflet-pane .marker-cluster-small,
+  .leaflet-pane .marker-cluster-medium,
+  .leaflet-pane .marker-cluster-large {
+    background-color: rgba(37, 99, 235, 0.18);
+  }
+  .leaflet-pane .marker-cluster-small div,
+  .leaflet-pane .marker-cluster-medium div,
+  .leaflet-pane .marker-cluster-large div {
+    background-color: rgba(37, 99, 235, 0.45);
+    color: #1f2937;
+    font-weight: 600;
+  }
+
+  /* ---- M-109: first-visit value bar -----------------------------------
+     One dismissible row under the search box, never a full-screen scrim:
+     the map stays visible and operable behind it. Below #ss-box (9996) so
+     an open search dropdown always covers it. */
+  #intro-bar {
+    position: fixed;
+    top: calc(max(12px, env(safe-area-inset-top)) + 52px);
+    left: 12px; right: 12px;
+    z-index: 9995;
+    box-sizing: border-box;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
+    /* Room on the right for the absolutely-positioned × — as a flex item it
+       wrapped onto a third row of its own on a 416px outer screen. */
+    padding: 8px 42px 8px 10px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px; color: #1f2937; line-height: 1.4;
+  }
+  #intro-bar[hidden] { display: none; }
+  /* On mid / wide the search box has been re-parented into #wb-top, so the
+     bar hangs off the top bar and spans only the map column. */
+  body.wb-mid #intro-bar, body.wb-wide #intro-bar {
+    top: calc(var(--wb-top) + 8px);
+    left: calc(var(--wb-left) + 12px);
+    right: calc(var(--wb-right) + 12px);
+  }
+  #intro-bar .ib-txt { flex: 1 1 160px; min-width: 0; }
+  #intro-bar .ib-act {
+    flex: 0 0 auto;
+    min-height: 34px; padding: 5px 11px;
+    border: 1px solid #d1d5db; border-radius: 999px;
+    background: #f9fafb; color: #1d4ed8; cursor: pointer;
+    font: inherit; font-size: 12px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @media (hover: none) and (pointer: coarse) {   /* F2: touch target */
+    #intro-bar .ib-act { min-height: 40px; }
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #intro-bar .ib-act:hover { background: #eef2ff; }
+  }
+  #intro-bar .ib-x {
+    position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+    width: 36px; height: 36px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: none; border-radius: 999px;
+    color: #9ca3af; font-size: 20px; line-height: 1; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #intro-bar .ib-act:focus-visible, #intro-bar .ib-x:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }
+
+  /* ---- shared shell for #legend-pop / #about-modal / #install-help ----
+     Same geometry and behaviour contract as #kb-help: centered card, no
+     scrim, closed by Esc / the back gesture / its own ×. */
+  .ob-modal {
+    position: fixed; z-index: 10035;
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 32px));
+    max-height: min(82vh, 620px); max-height: min(82dvh, 620px);
+    overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    background: #fff; color: #1f2937;
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.28);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px; line-height: 1.55;
+    padding: 14px 16px 16px;
+  }
+  .ob-modal[hidden] { display: none; }
+  .ob-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 700; font-size: 15px; margin-bottom: 10px;
+  }
+  .ob-close {
+    width: 44px; height: 44px; margin: -10px -12px -10px 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; border-radius: 999px;
+    color: #9ca3af; font-size: 22px; line-height: 1; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ob-modal button:focus-visible, .ob-modal a:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }
+  .ob-sec { margin-top: 14px; }
+  .ob-sec:first-of-type { margin-top: 0; }
+  .ob-sec h4 {
+    margin: 0 0 4px; font-size: 13px; font-weight: 700; color: #111827;
+  }
+  .ob-sec p { margin: 0 0 6px; color: #4b5563; }
+  .ob-sec p:last-child { margin-bottom: 0; }
+  .ob-rows {
+    display: grid; grid-template-columns: auto 1fr; gap: 5px 10px;
+    align-items: center;
+  }
+  .ob-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+  .ob-badge {
+    font-size: 15px; line-height: 1; text-align: center; min-width: 18px;
+  }
+  .ob-cluster {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(37, 99, 235, 0.18);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ob-cluster b {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(37, 99, 235, 0.45); color: #1f2937;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+  }
+  .ob-kv {
+    display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0;
+  }
+  .ob-kv dt { color: #6b7280; white-space: nowrap; }
+  .ob-kv dd { margin: 0; }
+  .ob-link { color: #2563eb; text-decoration: none; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .ob-link:hover { text-decoration: underline; }
+  }
+  .ob-danger {
+    color: #b91c1c; background: none; border: none;
+    padding: 8px 0; min-height: 40px;                /* F2 */
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .ob-steps { margin: 0; padding-left: 20px; color: #4b5563; }
+  .ob-steps li { margin: 0 0 4px; }
+  .ob-note { color: #6b7280; font-size: 12px; margin: 8px 0 0; }
+  .ob-sub { display: block; color: #6b7280; font-size: 12px; }
+
+  /* ---- M-066: the one-shot install snackbar --------------------------- */
+  #install-snack {
+    position: fixed; z-index: 10036;
+    left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom) + 16px);
+    width: min(420px, calc(100vw - 24px));
+    box-sizing: border-box;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
+    padding: 10px 12px;
+    background: #1f2937; color: #f9fafb;
+    border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,0.32);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px; line-height: 1.45;
+  }
+  #install-snack[hidden] { display: none; }
+  #install-snack .is-txt { flex: 1 1 150px; min-width: 0; }
+  #install-snack .is-sub { display: block; color: #9ca3af; font-size: 12px; }
+  #install-snack .is-btn {
+    flex: 0 0 auto; min-height: 34px; padding: 5px 12px;
+    border: 1px solid #4b5563; border-radius: 999px;
+    background: #374151; color: #f9fafb;
+    font: inherit; font-size: 12px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #install-snack .is-btn.is-primary { background: #2563eb; border-color: #2563eb; }
+  #install-snack .is-never {
+    flex: 0 0 auto; min-height: 34px; padding: 5px 4px;
+    background: none; border: none; color: #9ca3af;
+    font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer;
+  }
+  #install-snack button:focus-visible {
+    outline: 2px solid #93c5fd; outline-offset: 2px;
+  }
+  @media (hover: none) and (pointer: coarse) {   /* F2 */
+    #install-snack .is-btn, #install-snack .is-never { min-height: 40px; }
+  }
+
+  /* .ssm-row is display:flex, and an author `display` always beats the
+     UA sheet's [hidden] { display: none } — so the install row needs its
+     own rule or hiding it in standalone mode does nothing (M-066). */
+  #ssm-install[hidden] { display: none; }
+
+  /* ---- M-118: what signing in actually buys you ----------------------- */
+  .ssm-why { margin: 6px 8px 4px; padding: 0 0 0 16px; list-style: disc; }
+  .ssm-why li {
+    font-size: 12px;   /* M-118: was one 11px line for all of it */
+    line-height: 1.5; color: #4b5563; margin: 0 0 3px;
+  }
+</style>
+
+<!-- M-109: one dismissible row, not a tour and not a scrim. Stays hidden
+     until the payload has actually rendered (see mountIntroBar) so it never
+     competes with the boot spinner or with #boot-fail-banner. -->
+<div id="intro-bar" role="note" hidden>
+  <span class="ib-txt">这是一张日本美食与景点地图</span>
+  <button type="button" class="ib-act" id="ib-region">选一个地区开始</button>
+  <button type="button" class="ib-act" id="ib-legend">地图怎么看</button>
+  <button type="button" class="ib-x" id="ib-close" aria-label="关闭">×</button>
+</div>
+
+<!-- M-109 / M-110: the legend. On demand only — nothing on the map is
+     annotated by default, and this is where the annotation lives. -->
+<div id="legend-pop" class="ob-modal" role="dialog" aria-modal="true"
+     aria-labelledby="legend-title" hidden>
+  <div class="ob-head">
+    <span id="legend-title">地图图例</span>
+    <button type="button" class="ob-close" aria-label="关闭">×</button>
+  </div>
+  <div class="ob-sec">
+    <h4>价格区间上限</h4>
+    <p>标记颜色按这家店的价格区间上限着色</p>
+    <!-- Filled from PRICE_BUCKETS + BUCKET_COLOR at runtime so the legend
+         can never drift from the colours the markers actually use. -->
+    <div class="ob-rows" id="legend-prices"></div>
+  </div>
+  <div class="ob-sec">
+    <h4>菜系图标</h4>
+    <p>标记中间的图标代表菜系</p>
+    <div class="ob-rows" id="legend-genres"></div>
+  </div>
+  <div class="ob-sec">
+    <h4>聚合圆圈</h4>
+    <div class="ob-rows">
+      <span class="ob-cluster" aria-hidden="true"><b lang="en">24</b></span>
+      <span>圆里的数字是这一片有多少家店</span>
+    </div>
+    <p style="margin-top:6px;">放大地图就会散开</p>
+  </div>
+  <div class="ob-sec">
+    <h4>收藏与弃用</h4>
+    <div class="ob-rows">
+      <span class="ob-badge" aria-hidden="true">⭐</span>
+      <span>你收藏的店</span>
+      <span class="ob-badge" aria-hidden="true" style="color:#dc2626;">✕</span>
+      <!-- Two lines, no comma between them: each CJK run is translated on
+           its own, and a full-width ，would survive into the EN page. -->
+      <span>你弃用的店<br><span class="ob-sub">默认不在地图上显示</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- M-119: provenance, the curation rule, the disclaimer, the version and
+     the two data-rights entry points. The delete button does NOT reimplement
+     deletion — it hands off to #ssm-delete-cloud, the one place in this
+     codebase allowed to clear localStorage. -->
+<div id="about-modal" class="ob-modal" role="dialog" aria-modal="true"
+     aria-labelledby="about-title" hidden>
+  <div class="ob-head">
+    <span id="about-title">关于本站</span>
+    <button type="button" class="ob-close" aria-label="关闭">×</button>
+  </div>
+  <div class="ob-sec">
+    <dl class="ob-kv">
+      <dt>数据来源</dt>
+      <dd lang="en">Tabelog</dd>
+      <dt>抓取于</dt>
+      <dd lang="en">__DATA_SCRAPED_AT__</dd>
+      <dt>坐标</dt>
+      <dd lang="en">GSI + Google Maps</dd>
+      <dt>地图底图</dt>
+      <dd lang="en">OpenStreetMap / CARTO</dd>
+      <dt>版本</dt>
+      <dd lang="en">v__APP_VERSION__</dd>
+    </dl>
+  </div>
+  <div class="ob-sec">
+    <h4>收录规则</h4>
+    <!-- Text copied at open time from the existing price-curation help
+         popover: one canonical wording, already language-swapped. -->
+    <p id="about-curation"></p>
+  </div>
+  <div class="ob-sec">
+    <p class="ob-note">营业状态与价格请以原站为准</p>
+  </div>
+  <div class="ob-sec">
+    <h4>你的数据</h4>
+    <p><a class="ob-link" id="about-privacy" href="privacy.html"
+          target="_blank" rel="noopener">隐私政策</a></p>
+    <button type="button" class="ob-danger" id="about-delete">删除我的云端数据</button>
+  </div>
+</div>
+
+<!-- M-066 / M-145 / M-197: the text fallback for every browser that does not
+     hand us a beforeinstallprompt event. Three variants, one shown at a
+     time. No Samsung Internet branch on purpose — it is Chromium, so if it
+     fires beforeinstallprompt it takes the native path, and we do not ship
+     menu directions nobody has confirmed on a real device. -->
+<div id="install-help" class="ob-modal" role="dialog" aria-modal="true"
+     aria-labelledby="install-title" hidden>
+  <div class="ob-head">
+    <span id="install-title">安装到主屏幕</span>
+    <button type="button" class="ob-close" aria-label="关闭">×</button>
+  </div>
+  <div class="ob-sec" id="ih-ios" hidden>
+    <ol class="ob-steps">
+      <li>点底部的分享按钮</li>
+      <li>选择添加到主屏幕</li>
+      <li>再点添加</li>
+    </ol>
+  </div>
+  <div class="ob-sec" id="ih-desktop" hidden>
+    <ol class="ob-steps">
+      <li>点地址栏右侧的安装图标</li>
+      <li>或打开浏览器菜单选择安装</li>
+    </ol>
+  </div>
+  <div class="ob-sec" id="ih-generic" hidden>
+    <p>在浏览器菜单里找添加到主屏幕或安装</p>
+  </div>
+  <p class="ob-note">装好之后离线也能看地图</p>
+</div>
+
+<!-- M-066: shown at most once per session, after the first favourite, and
+     never while a modal / import / navigation is in progress. role=status,
+     not alert: it is an offer, not a problem. -->
+<div id="install-snack" role="status" hidden>
+  <span class="is-txt">把地图装到主屏幕<span class="is-sub">下次一点就开</span></span>
+  <button type="button" class="is-btn is-primary" id="is-go">安装</button>
+  <button type="button" class="is-btn" id="is-later">稍后</button>
+  <button type="button" class="is-never" id="is-never">不再提示</button>
+</div>
+"""
+# M-119: same pattern as HEAD_BRANDING's __MANIFEST_V__ substitution — the
+# constant is complete the moment it is defined, so nothing in main() has to
+# remember to stamp it.
+ONBOARD_HTML = ONBOARD_HTML.replace("__APP_VERSION__", APP_VERSION).replace(
+    "__DATA_SCRAPED_AT__", DATA_SCRAPED_AT
+)
+
+
+# M-031 / F1: the phone (<520px) entry into the results / collections list.
+# M-027 built #wb-left for split/mid/wide only — below 520px no wb-* class is
+# ever set, so the outer Fold screen had no list at all. This block adds an
+# ⭐ pill stacked directly above #ff-fab and a bottom drawer that reuses the
+# SAME #wb-left element: nothing is cloned, nothing is moved, and every
+# listener / observer the result list and the collections tab already own
+# keeps working. Injected AFTER WORKBENCH_HTML in main() so the
+# `body.wb-fav-open` rules win the tie against the `body.wb-split` ones they
+# have to override.
+#
+# The drawer is an OVERLAY: it never writes --wb-bottom, so the map box is
+# unchanged and the FAB stack needs no new offset arithmetic — it is simply
+# hidden for as long as the drawer is up, the same thing openFilterUI() does
+# to #ff-fab.
+PHONE_DRAWER_HTML = """
+<style>
+  /* ---------- F1: the ⭐ entry pill (phone only) ---------- */
+  /* Same visual language as #ff-fab, parked one 52px step above it. The
+     52px is #ff-fab's own box (41px) plus an 11px gap. */
+  #wb-fav-fab {
+    position: fixed;
+    left: 14px;
+    bottom: calc(18px + env(safe-area-inset-bottom) + 52px);
+    z-index: 9995;
+    background: #fff; color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 10px 16px;
+    font-size: 15px; font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    display: inline-flex; align-items: center; gap: 8px;
+    user-select: none;
+    line-height: 1;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
+  }
+  /* M-160: decorative hover only where there is a real pointer. */
+  @media (hover: hover) and (pointer: fine) {
+    #wb-fav-fab:hover { background: #f9fafb;
+                        box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
+  }
+  #wb-fav-fab:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+  /* emojify() rewrites the ⭐ into an Apple PNG at load. */
+  #wb-fav-fab .wbf-ic img.emoji-img,
+  #wb-fav-fab .wbf-ic { width: 18px; height: 18px; display: block; }
+  #wb-fav-fab .wbf-n { font-variant-numeric: tabular-nums; color: #2563eb; }
+  #wb-fav-fab .wbf-n:empty { display: none; }
+  #wb-fav-fab .wbf-t { font-size: 13px; color: #6b7280; font-weight: 600; }
+  /* Mirrors #ff-fab's own ≤420px rule: glyph + number only. */
+  @media (max-width: 420px) {
+    #wb-fav-fab { padding: 10px 14px; gap: 6px; }
+    #wb-fav-fab .wbf-t { display: none; }
+  }
+  #wb-fav-fab[hidden] { display: none !important; }
+  /* Phone only — the >=520px modes have the tabs in #wb-left itself. */
+  body.wb-split #wb-fav-fab, body.wb-mid #wb-fav-fab,
+  body.wb-wide  #wb-fav-fab { display: none !important; }
+
+  /* ---------- F1: the drawer ---------- */
+  /* Its own scrim, deliberately NOT #ff-backdrop: that one is the filter
+     sheet's and carries .ff-open, which closeFilterUI() clears. */
+  #wb-fav-backdrop {
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(0,0,0,0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.22s ease-out;
+  }
+  #wb-fav-backdrop.on { opacity: 1; pointer-events: auto; }
+  body.wb-fav-open #wb-left {
+    display: flex;
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+    width: auto;
+    height: min(66vh, calc(100vh - 96px));
+    height: min(66dvh, calc(100dvh - 96px));
+    z-index: 10002;
+    transform: none;
+    pointer-events: auto;
+    border-top: 1px solid #e5e7eb;
+    border-right: none;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -6px 18px rgba(0,0,0,0.12);
+    animation: wb-fav-slide 0.22s ease-out;
+  }
+  @keyframes wb-fav-slide {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.wb-fav-open #wb-left { animation: none; }
+    #wb-fav-backdrop { transition: none; }
+  }
+  /* The drawer covers the bottom 66% — the FAB stack and both pills would
+     sit behind it, so they step aside for as long as it is up. Same move
+     openFilterUI() makes with #ff-fab. */
+  body.wb-fav-open .map-fab-stack,
+  body.wb-fav-open #ff-fab,
+  body.wb-fav-open #wb-fav-fab { display: none !important; }
+
+  /* Grip + × header. #wb-fav-grip is created by the JS and prepended into
+     #wb-left, so it exists in every mode and is shown only in the drawer. */
+  #wb-fav-grip { display: none; }
+  /* 44px tall so the × below can be a full 44px target without reaching
+     down into #wb-left-head and landing on top of the 筛选 button. */
+  body.wb-fav-open #wb-fav-grip {
+    display: flex; align-items: center; justify-content: center;
+    position: relative; flex-shrink: 0;
+    height: 44px;
+    touch-action: none;
+  }
+  #wb-fav-grip .wbf-bar {
+    width: 44px; height: 4px; border-radius: 999px; background: #d1d5db;
+  }
+  #wb-fav-close {
+    position: absolute; right: 6px; top: 0;
+    width: 44px; height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: none; cursor: pointer;
+    color: #6b7280; font-size: 22px; line-height: 1;
+    border-radius: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wb-fav-close:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  /* The × overlaps the tab row, so give the head some room for it. */
+  body.wb-fav-open #wb-left-head { padding-top: 4px; }
+</style>
+<button id="wb-fav-fab" type="button" aria-haspopup="dialog"
+        aria-expanded="false" aria-controls="wb-left"
+        aria-label="收藏与结果" title="收藏与结果">
+  <span class="wbf-ic" aria-hidden="true">⭐</span>
+  <span class="wbf-n"></span>
+  <span class="wbf-t">收藏</span>
+</button>
+<div id="wb-fav-backdrop"></div>
 """
 
 
@@ -3484,6 +4185,52 @@ BOOKMARKS_MODAL_HTML = """
     --num-columns: 8;
   }
   #bm-modal #bm-emoji-picker.bm-show { display: block; }
+  /* E11 / M-031: pick the sub-collections the new pin joins. Same tinted
+     panel as .bm-quick so the two "extras" rows read as one block; the
+     picks are held in memory and only written once 保存 succeeds. */
+  #bm-modal .bm-lists {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    padding: 7px 10px; margin-bottom: 8px;
+    background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 6px;
+  }
+  #bm-modal .bm-lists:empty { display: none; }
+  #bm-modal .bm-lists-k {
+    font-size: 11px; color: #6b7280; font-weight: 600; flex-shrink: 0;
+  }
+  #bm-modal .bm-list-chip {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 4px;
+    min-height: 32px; padding: 0 10px; max-width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #d1d5db; border-radius: 999px;
+    background: #fff; color: #374151;
+    font-family: inherit; font-size: 12px; font-weight: 600;
+    line-height: 1; cursor: pointer;
+    overflow: hidden; white-space: nowrap;
+  }
+  #bm-modal .bm-list-chip > span { overflow: hidden; text-overflow: ellipsis; }
+  #bm-modal .bm-list-chip img { height: 14px; width: 14px; flex-shrink: 0; }
+  #bm-modal .bm-list-chip.bm-list-on {
+    background: #fef3c7; border-color: #facc15; color: #92400e;
+  }
+  #bm-modal .bm-list-chip.bm-list-new {
+    background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8;
+  }
+  #bm-modal .bm-list-chip:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal .bm-list-chip:hover { background: #f3f4f6; }
+    #bm-modal .bm-list-chip.bm-list-on:hover { background: #fde68a; }
+    #bm-modal .bm-list-chip.bm-list-new:hover { background: #dbeafe; }
+  }
+  @media (pointer: coarse) {   /* G6 / M-078: 44px hit area */
+    #bm-modal .bm-list-chip::after {
+      content: ''; position: absolute;
+      left: 50%; top: 50%; width: 100%; height: 44px; min-width: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
   #bm-modal .bm-error {
     color: #b91c1c; font-size: 12px;
     min-height: 16px; margin-top: 8px;
@@ -3544,7 +4291,7 @@ BOOKMARKS_MODAL_HTML = """
 <div id="bm-modal" role="dialog" aria-modal="true" aria-hidden="true"
      aria-labelledby="bm-modal-title">
   <div class="bm-head">
-    <span class="bm-title" id="bm-modal-title">加入收藏</span>
+    <span class="bm-title" id="bm-modal-title">新建书签</span>
     <button class="bm-close" aria-label="关闭">×</button>
   </div>
   <div class="bm-body">
@@ -3563,7 +4310,7 @@ BOOKMARKS_MODAL_HTML = """
       <div class="bm-kind-seg" role="radiogroup" aria-label="类型">
         <button type="button" data-kind="bookmark" class="active"
                 role="radio" aria-checked="true"
-                aria-describedby="help-kind-bookmark">⭐ 收藏<span class="ff-help-trigger"
+                aria-describedby="help-kind-bookmark">⭐ 书签<span class="ff-help-trigger"
                 data-help-for="kind-bookmark" aria-hidden="true">?</span></button>
         <button type="button" data-kind="attraction"
                 role="radio" aria-checked="false"
@@ -3613,6 +4360,11 @@ BOOKMARKS_MODAL_HTML = """
          database each deploy. -->
     <emoji-picker id="bm-emoji-picker"
       data-source="vendor/emoji-picker-element-data-1.8.0/en/emojibase/data.json"></emoji-picker>
+
+    <!-- E11 / M-031: sub-collection chips, filled in by openBookmarkModal()
+         from window.__flLists(). Left empty in the markup so a build with
+         no lists yet renders nothing at all (:empty hides the panel). -->
+    <div class="bm-lists" id="bm-lists"></div>
 
     <div class="bm-error" id="bm-error" aria-live="polite"></div>
   </div>
@@ -3715,6 +4467,181 @@ BOOKMARKS_MODAL_HTML = """
   <div class="imp-foot">
     <button type="button" class="imp-cancel">取消</button>
     <button type="button" class="imp-confirm">导入</button>
+  </div>
+</div>
+"""
+
+
+# M-031 / E2: the one shared UI primitive for sub-collections — name + icon,
+# used both for "new list" and "rename list". Every list-shaped surface
+# (the workbench list rail, the "add to list" menu on a card) opens THIS
+# dialog through window.__flEditModal, so there is exactly one place where a
+# list name is typed and exactly one set of icon presets. Deliberately
+# smaller than #bm-modal: no free-form emoji entry and no emoji-picker-element
+# (a list icon is a label, not an expression), which also keeps the ~430 KB
+# emojibase fetch off this path.
+FAV_LIST_MODAL_HTML = """
+<style>
+  #fl-backdrop {
+    position: fixed; inset: 0; z-index: 10020;
+    background: rgba(0,0,0,0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s ease-out;
+  }
+  #fl-backdrop.fl-open { opacity: 1; pointer-events: auto; }
+  #fl-modal {
+    position: fixed; left: 50%; top: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    z-index: 10021;
+    /* 360 not 340: eight 34px presets + gaps fit on one row at this width,
+       and the row only wraps below ~330px of viewport (split-view). */
+    width: min(92vw, 360px);
+    max-height: 90vh; max-height: 90dvh;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #1f2937;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+    display: flex; flex-direction: column;
+  }
+  #fl-modal.fl-open {
+    opacity: 1; pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  /* Same keyboard-avoidance anchor as #bm-modal (M-080/M-081): fixed
+     centering is relative to the layout viewport, so with a soft keyboard up
+     the 保存 / 取消 row sits behind it on anything touch. */
+  @media (max-width: 480px), (pointer: coarse) {
+    #fl-modal { top: 7dvh; transform: translate(-50%, 0) scale(0.96); }
+    #fl-modal.fl-open { transform: translate(-50%, 0) scale(1); }
+  }
+  #fl-modal .fl-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+  #fl-modal .fl-title { font-weight: 700; font-size: 14px; }
+  /* G6 / M-078: 44px hit area, 20px glyph. */
+  #fl-modal .fl-close {
+    background: none; border: none; cursor: pointer;
+    font-size: 20px; line-height: 1; color: #9ca3af;
+    width: 44px; height: 44px; padding: 0; margin: -10px -10px -10px 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #fl-modal .fl-close:hover { color: #374151; }
+  }
+  #fl-modal .fl-body {
+    padding: 12px 14px; font-size: 13px;
+    overflow-y: auto; flex: 1 1 auto; min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  #fl-modal .fl-label {
+    display: block; margin-bottom: 5px;
+    font-size: 12px; color: #6b7280; font-weight: 600;
+  }
+  #fl-modal #fl-name {
+    display: block; width: 100%; box-sizing: border-box;
+    min-height: 44px; padding: 10px;
+    margin-bottom: 12px;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 13px; font-family: inherit;
+  }
+  #fl-modal #fl-name:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 1px;
+  }
+  /* M-081: 16px suppresses iOS focus-zoom on every touch device. */
+  @media (max-width: 480px), (hover: none) and (pointer: coarse) {
+    #fl-modal #fl-name { font-size: 16px; }
+  }
+  #fl-modal .fl-emoji-list {
+    display: flex; gap: 5px; flex-wrap: wrap;
+    justify-content: space-between;
+    padding: 7px 10px;
+    background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 6px;
+  }
+  /* G6 / M-078: 34px chip, 44px hit area via the ::after overlay. */
+  #fl-modal .fl-emoji-list button {
+    position: relative;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
+    cursor: pointer; font-size: 16px; line-height: 1;
+    width: 34px; height: 34px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: inherit;
+  }
+  @media (pointer: coarse) {
+    #fl-modal .fl-emoji-list button::after {
+      content: ''; position: absolute;
+      left: 50%; top: 50%; width: 44px; height: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
+  #fl-modal .fl-emoji-list button[aria-pressed="true"] {
+    background: #eff6ff; border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset;
+  }
+  #fl-modal .fl-emoji-list button:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #fl-modal .fl-emoji-list button:hover {
+      background: #eff6ff; border-color: #93c5fd;
+    }
+  }
+  #fl-modal .fl-error {
+    color: #b91c1c; font-size: 12px; min-height: 14px; margin-top: 8px;
+  }
+  #fl-modal .fl-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 10px 14px 14px;
+    border-top: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+  /* G6 / M-078: both footer buttons are 44px tall. */
+  #fl-modal .fl-foot button {
+    min-height: 44px; padding: 0 18px;
+    border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    border: 1px solid #d1d5db; background: #f9fafb; color: #1f2937;
+  }
+  #fl-modal .fl-foot button.fl-save {
+    background: #2563eb; border-color: #2563eb; color: #fff;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #fl-modal .fl-foot button.fl-save:hover { background: #1d4ed8; }
+    #fl-modal .fl-foot button.fl-cancel:hover { background: #f3f4f6; }
+  }
+</style>
+<div id="fl-backdrop"></div>
+<div id="fl-modal" role="dialog" aria-modal="true" aria-hidden="true"
+     aria-labelledby="fl-title">
+  <div class="fl-head">
+    <span class="fl-title" id="fl-title">新建子收藏夹</span>
+    <button class="fl-close" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="fl-body">
+    <label class="fl-label" for="fl-name">名称</label>
+    <input type="text" id="fl-name" maxlength="24" autocomplete="off"
+           placeholder="京都美食">
+    <span class="fl-label">图标</span>
+    <div class="fl-emoji-list">
+      <button type="button" data-emoji="📁" aria-pressed="true">📁</button>
+      <button type="button" data-emoji="⛩️" aria-pressed="false">⛩️</button>
+      <button type="button" data-emoji="🍜" aria-pressed="false">🍜</button>
+      <button type="button" data-emoji="🏨" aria-pressed="false">🏨</button>
+      <button type="button" data-emoji="🚉" aria-pressed="false">🚉</button>
+      <button type="button" data-emoji="☕" aria-pressed="false">☕</button>
+      <button type="button" data-emoji="🌸" aria-pressed="false">🌸</button>
+      <button type="button" data-emoji="⭐" aria-pressed="false">⭐</button>
+    </div>
+    <div class="fl-error" id="fl-error" aria-live="polite"></div>
+  </div>
+  <div class="fl-foot">
+    <button type="button" class="fl-cancel">取消</button>
+    <button type="button" class="fl-save">保存</button>
   </div>
 </div>
 """
@@ -3925,6 +4852,10 @@ MOBILE_UX_ASSETS = """
   #bs-sheet.bs-peek .rst-gcal,
   #bs-sheet.bs-peek .rst-approx,
   #bs-sheet.bs-peek .rst-tabelog,
+  /* E11: the list chips are a "file this away" action, not a decision
+     input — peek is the 40%-of-viewport surface, so they wait for the
+     expanded card. */
+  #bs-sheet.bs-peek .rst-lists,
   #bs-sheet.bs-peek .rst-footer { display: none; }
   /* The peek action bar is the ⭐ / 🚫 pair only — no border, no reserved
      height, so the card stays inside the 40% budget. */
@@ -4097,6 +5028,51 @@ MOBILE_UX_ASSETS = """
   .rst-holiday { font-size: 12.5px; color: #374151; line-height: 1.5;
                  margin: 0 0 10px; }
   .rst-holiday .rst-holiday-k { color: #6b7280; margin-right: 8px; }
+  /* E11 / M-031: the "which of my lists is this in" row, immediately above
+     the action bar. Chips are 32px tall visually with a 44px hit area from
+     the ::after overlay (the row wraps with 6px gaps, so the halo has
+     nothing to steal a tap from — same trick as #bm-modal .bm-quick-list). */
+  .rst-lists { display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+               margin-top: 12px; padding-top: 10px;
+               border-top: 1px solid #e5e7eb; }
+  .rst-lists:empty { display: none; margin: 0; padding: 0; border-top: 0; }
+  .rst-lists-k { font-size: 11px; color: #6b7280; font-weight: 600;
+                 flex-shrink: 0; }
+  .rst-list-chip { position: relative;
+                   display: inline-flex; align-items: center; gap: 4px;
+                   min-height: 32px; padding: 0 10px; max-width: 100%;
+                   box-sizing: border-box;
+                   border: 1px solid #d1d5db; border-radius: 999px;
+                   background: #f9fafb; color: #374151;
+                   font-family: inherit; font-size: 12px; font-weight: 600;
+                   line-height: 1; cursor: pointer;
+                   overflow: hidden; white-space: nowrap; }
+  .rst-list-chip > span { overflow: hidden; text-overflow: ellipsis; }
+  .rst-list-chip img { height: 14px; width: 14px; flex-shrink: 0; }
+  .rst-list-chip.rst-list-on { background: #fef3c7; border-color: #facc15;
+                               color: #92400e; }
+  .rst-list-chip.rst-list-new { background: #eff6ff; border-color: #bfdbfe;
+                                color: #1d4ed8; }
+  .rst-list-chip:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .rst-list-chip:hover { background: #f3f4f6; }
+    .rst-list-chip.rst-list-on:hover { background: #fde68a; }
+    .rst-list-chip.rst-list-new:hover { background: #dbeafe; }
+  }
+  @media (pointer: coarse) {   /* G6 / M-078: 44px hit area */
+    .rst-list-chip::after {
+      content: ''; position: absolute;
+      left: 50%; top: 50%; width: 100%; height: 44px; min-width: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
+  /* The chip row already draws the separator, so the action bar right
+     under it must not draw a second one. */
+  .rst-lists + .rst-actions-bar { margin-top: 8px; padding-top: 0;
+                                  border-top: 0; }
+  /* M-032: share sits in the action bar beside the Google Maps square and
+     matches it exactly — 28px visual, 44px inside the bar. */
+  .rst-share { padding: 0; font-family: inherit; }
   /* D5 / H3: the bottom action bar. 44px is unconditional here — this is
      the row every visit ends on, and it is the last thing in the card, so
      nothing is displaced by giving it thumb-sized targets on every device. */
@@ -4973,10 +5949,12 @@ WORKBENCH_HTML = """
     <div class="wb-tabs" role="tablist">
       <button id="wb-tab-results" class="wb-tab on" type="button"
               role="tab" aria-selected="true" aria-controls="wb-list">结果</button>
-      <!-- Third-phase "collections" tab. Present but hidden so the tablist
-           markup (and its ids) are already the shape phase 3 expects. -->
+      <!-- E1 / M-031: the collections tab, live from 2.0.0 on. The label is
+           a static text node so the one-shot localizeTree() pass owns it;
+           the family count in .wb-tab-n is a number written at runtime by
+           favSyncTab() and therefore needs no translation. -->
       <button id="wb-tab-fav" class="wb-tab" type="button"
-              role="tab" aria-selected="false" hidden>收藏</button>
+              role="tab" aria-selected="false" aria-controls="wb-fav">收藏<b class="wb-tab-n"></b></button>
       <button class="wb-top-btn wb-filter-btn" type="button">
         <span>筛选</span><b class="wb-filter-n"></b>
       </button>
@@ -4988,6 +5966,12 @@ WORKBENCH_HTML = """
   <div id="wb-list-tools"></div>
   <div id="wb-list"></div>
   <div id="wb-list-foot"></div>
+  <!-- E1 / E2 / M-031: the collections tab's panel. Empty here — every child
+       is generated by favRender(), with emoji pre-swapped through emojiImg()
+       and text pre-run through localizeText(). It sits inside #wb-left, so
+       the observeDynamic('#wb-left') pass in startDynamicObservers() already
+       covers it (subtree: true) and no second observer is registered. -->
+  <div id="wb-fav" role="tabpanel" aria-labelledby="wb-tab-fav"></div>
 </aside>
 <div id="wb-split-handle" role="separator" aria-orientation="horizontal"
      tabindex="0" aria-label="调整面板高度"></div>
@@ -5217,6 +6201,199 @@ RESULT_LIST_HTML = """
   }
   #ss-list .ss-net { color: #15803d; font-weight: 700; }
 </style>
+"""
+
+
+# M-031 / E1 / E2 / E8 / E9 / B9: the workbench left column's second tab.
+# Styling plus two new body-level nodes (the "…" menu and the E9 return bar).
+# The panel itself (#wb-fav) is a slot in WORKBENCH_HTML; everything inside
+# it is written at runtime by favRender() in FILTER_JS_TEMPLATE, which
+# pre-swaps emoji through emojiImg() and pre-translates through localizeText()
+# exactly the way the result list does. Injected after RESULT_LIST_HTML so
+# the .wb-row rules it reuses are already in the cascade.
+FAV_TAB_HTML = """
+<style>
+  /* The two panels are mutually exclusive; wbSetTab() flips both classes.
+     Attribute-hidden rather than class-hidden on the result-list slots so
+     nothing here has to know how their own display values are computed. */
+  #wb-list-tools[hidden], #wb-list[hidden], #wb-list-foot[hidden] {
+    display: none !important;
+  }
+  #wb-fav { display: none; }
+  #wb-fav.on {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+  }
+  .wb-tab-n {
+    margin-left: 4px; color: #2563eb; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .wb-tab-n:empty { display: none; }
+
+  /* ---------- tools header ---------- */
+  #fv-head {
+    flex-shrink: 0; padding: 6px 12px 8px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .fv-sum { margin-bottom: 6px; font-size: 12px; color: #6b7280; }
+  .fv-sum b { color: #2563eb; font-variant-numeric: tabular-nums; }
+  .fv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  #fv-group {
+    flex: 0 1 auto; min-width: 0; max-width: 60%;
+    min-height: 32px; padding: 0 6px; box-sizing: border-box;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    background: #fff; color: #374151;
+    font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer;
+  }
+  #fv-group:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+  @media (pointer: coarse) { #fv-group { min-height: 44px; } }
+  #fv-bulk { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  #fv-bulk[hidden] { display: none; }
+
+  /* ---------- the scroller ---------- */
+  #fv-body {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  }
+  .fv-zero {
+    padding: 30px 20px; text-align: center;
+    font-size: 13px; line-height: 1.75; color: #9ca3af;
+  }
+  .fv-zero img.emoji-img { width: 22px; height: 22px; }
+  .fv-zero-t { display: block; margin-top: 8px; color: #6b7280; font-weight: 600; }
+
+  /* ---------- one group ---------- */
+  .fv-grp-h {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; box-sizing: border-box;
+    min-height: 34px; margin: 0; padding: 5px 6px 5px 8px;
+    border: 0; border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb; color: #374151;
+    font: 700 12px/1.35 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  @media (pointer: coarse) { .fv-grp-h { min-height: 44px; } }
+  @media (hover: hover) and (pointer: fine) {
+    .fv-grp-h:hover { background: #f3f4f6; }
+  }
+  .fv-grp-h:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  .fv-grp-h.is-focus { background: #eff6ff; color: #1d4ed8; }
+  .fv-caret {
+    flex: 0 0 auto; width: 10px; color: #9ca3af; font-size: 9px;
+    transition: transform 0.12s ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) { .fv-caret { transition: none; } }
+  .fv-grp.collapsed .fv-caret { transform: rotate(-90deg); }
+  .fv-grp.collapsed .fv-rows { display: none; }
+  .fv-grp-ic { flex: 0 0 auto; display: inline-flex; }
+  .fv-grp-ic img.emoji-img { width: 15px; height: 15px; }
+  .fv-grp-nm {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fv-grp-n {
+    flex: 0 0 auto; color: #6b7280; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Visual 26, hit area 44 via ::after — same trick as .wb-row-fav. */
+  .fv-more {
+    position: relative; flex: 0 0 auto;
+    width: 26px; height: 26px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #6b7280; font-size: 15px; font-weight: 700; line-height: 1;
+    cursor: pointer;
+  }
+  .fv-more::after { content: ''; position: absolute; inset: -9px -6px; }
+  @media (hover: hover) and (pointer: fine) {
+    .fv-more:hover { background: #e5e7eb; color: #111827; }
+  }
+
+  /* ---------- rows ---------- */
+  /* Favourites are counted in the tens, not the thousands, so this list is
+     not windowed the way #wb-list is. content-visibility keeps even a
+     four-figure collection off the layout critical path. */
+  #wb-fav .wb-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto var(--wb-row-h);
+  }
+  #wb-fav .wb-row-nm { font-weight: 600; }
+  .fv-kind { flex: 0 0 auto; color: #9ca3af; }
+  .fv-empty {
+    padding: 12px 14px 16px; font-size: 12px; line-height: 1.7;
+    color: #9ca3af; border-bottom: 1px solid #f3f4f6;
+  }
+
+  /* ---------- the "…" menu ---------- */
+  #fv-menu {
+    position: fixed; z-index: 10006; display: none;
+    min-width: 168px; max-width: 260px; max-height: 62dvh; overflow-y: auto;
+    padding: 5px; box-sizing: border-box;
+    border: 1px solid #e5e7eb; border-radius: 10px;
+    background: #fff; box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #fv-menu.on { display: block; }
+  .fv-mi {
+    display: flex; align-items: center; gap: 7px;
+    width: 100%; box-sizing: border-box;
+    min-height: 38px; padding: 0 10px; margin: 0;
+    border: 0; border-radius: 6px; background: none;
+    color: #374151; font: 600 13px/1.3 inherit;
+    text-align: left; cursor: pointer;
+  }
+  @media (pointer: coarse) { .fv-mi { min-height: 44px; } }
+  @media (hover: hover) and (pointer: fine) { .fv-mi:hover { background: #f3f4f6; } }
+  .fv-mi:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  .fv-mi.danger { color: #b91c1c; }
+  .fv-mi img.emoji-img { width: 15px; height: 15px; }
+  .fv-mi-t {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fv-mi-sep { height: 1px; margin: 4px 6px; background: #f3f4f6; }
+  .fv-mi-none { padding: 8px 10px; font-size: 12px; color: #9ca3af; }
+
+  /* ---------- E9 return bar ---------- */
+  /* Floats over the map, never over the left column: the insets are the same
+     --wb-* variables the .folium-map rule uses, so it tracks every mode. */
+  #fav-focus-bar {
+    position: fixed; z-index: 9995; display: none;
+    top: 66px;
+    left: calc(var(--wb-left) + 8px); right: calc(var(--wb-right) + 8px);
+    justify-content: center; pointer-events: none;
+  }
+  body.wb-mid #fav-focus-bar, body.wb-wide #fav-focus-bar {
+    top: calc(var(--wb-top) + 8px);
+  }
+  #fav-focus-bar.on { display: flex; }
+  .fv-focus {
+    pointer-events: auto;
+    display: inline-flex; align-items: center; gap: 8px;
+    max-width: 100%; box-sizing: border-box;
+    min-height: 36px; padding: 4px 5px 4px 12px;
+    border: 1px solid #93c5fd; border-radius: 999px;
+    background: #eff6ff; color: #1d4ed8;
+    font: 600 12.5px/1.3 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.14);
+  }
+  .fv-focus-t {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fv-focus img.emoji-img { width: 15px; height: 15px; }
+  .fv-focus-btn {
+    flex: 0 0 auto; min-height: 28px; padding: 0 10px; box-sizing: border-box;
+    border: 1px solid #2563eb; border-radius: 999px;
+    background: #2563eb; color: #fff;
+    font: 700 12px/1 inherit; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @media (pointer: coarse) { .fv-focus-btn { min-height: 36px; } }
+  .fv-focus-btn:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+</style>
+<div id="fv-menu" role="menu" aria-hidden="true"></div>
+<div id="fav-focus-bar" aria-live="polite"></div>
 """
 
 
@@ -5657,6 +6834,43 @@ FILTER_JS_TEMPLATE = r"""
     if (d._nm == null) d._nm = normalizeForSearch(d.name || '');
     return d._nm;
   }
+  // ===== M-066 / M-145: install-to-home-screen plumbing ==================
+  // beforeinstallprompt fires as soon as Chromium decides the page is
+  // installable — routinely BEFORE the 3 MB payload lands and initMap runs —
+  // so the capture has to sit at module scope, not inside initMap.
+  // preventDefault() parks Chromium's own mini-infobar; the UI built in
+  // initMap decides when (and whether) to spend the event. Nothing here is
+  // persisted beyond the frequency record: a BeforeInstallPromptEvent cannot
+  // be revived across loads, and the browser re-fires it when it wants to.
+  var obDeferredPrompt = null;
+  var obInstalled = false;
+  var obOnInstallState = null;      // set by initMap once the UI exists
+  function obIsStandalone() {
+    try {
+      if (window.matchMedia
+          && window.matchMedia('(display-mode: standalone)').matches) return true;
+    } catch (_) {}
+    return navigator.standalone === true;   // iOS Home Screen
+  }
+  window.addEventListener('beforeinstallprompt', function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    obDeferredPrompt = e;
+    if (obOnInstallState) { try { obOnInstallState(); } catch (_) {} }
+  });
+  window.addEventListener('appinstalled', function() {
+    obDeferredPrompt = null;
+    obInstalled = true;
+    // Permanent LOCAL suppression — tabelog.installHint never leaves this
+    // browser: it is not in the sync blob, not in buildBody(), not in KV.
+    try {
+      var rec = JSON.parse(localStorage.getItem('tabelog.installHint') || '{}');
+      if (!rec || typeof rec !== 'object') rec = {};
+      rec.never = true;
+      localStorage.setItem('tabelog.installHint', JSON.stringify(rec));
+    } catch (_) {}
+    if (obOnInstallState) { try { obOnInstallState(); } catch (_) {} }
+  });
+
   // ===== M-012: service-worker update prompt =============================
   // The waiting worker never activates by itself (install no longer calls
   // skipWaiting), so a deploy can't swap the running code out from under an
@@ -6099,7 +7313,12 @@ FILTER_JS_TEMPLATE = r"""
   var ATTR_L10N = [
     ['#ff-fab',                        'title',      '筛选'],
     ['.ff-help-trigger[aria-label]',   'aria-label', '说明'],
-    ['.map-fab-stack',                 'aria-label', '图层切换'],
+    // A11: the stack is zoom + locate + 图层 now; the four layer toggles
+    // moved into #layers-pop, which carries its own label.
+    ['.map-fab-stack',                 'aria-label', '地图控件'],
+    ['#fab-layers',                    'title',      '图层'],
+    ['#fab-layers',                    'aria-label', '图层'],
+    ['#layers-pop',                    'aria-label', '图层设置'],
     ['#fab-locate',                    'title',      '定位到我的位置'],
     ['#fab-locate',                    'aria-label', '定位到我的位置'],
     ['#fab-transit-long',              'title',      '新干线 / JR 长途线路'],
@@ -6123,6 +7342,11 @@ FILTER_JS_TEMPLATE = r"""
     ['#wb-split-handle',               'aria-label', '调整面板高度'],
     ['#wb-detail',                     'aria-label', '详情'],
     ['#wb-left',                       'aria-label', '结果'],
+    // F1: the phone drawer's entry pill. openFavDrawer() re-labels #wb-left
+    // to 收藏与结果 while the drawer is up and puts 结果 back on close.
+    ['#wb-fav-fab',                    'aria-label', '收藏与结果'],
+    ['#wb-fav-fab',                    'title',      '收藏与结果'],
+    ['#wb-fav-close',                  'aria-label', '关闭'],
     ['.bm-close',                      'aria-label', '关闭'],
     ['.bm-kind-seg',                   'aria-label', '类型'],
     ['#bm-emoji-more',                 'title',      '打开完整 emoji 选择器'],
@@ -6136,6 +7360,12 @@ FILTER_JS_TEMPLATE = r"""
     // #bs-content, so observeDynamic re-runs this pass over it.
     ['.rst-prev',                      'aria-label', '上一家'],
     ['.rst-next',                      'aria-label', '下一家'],
+    // M-032 / E11: card share button + the "＋" chip on both list rows.
+    // All three are runtime-built inside an observed container.
+    ['.rst-share',                     'aria-label', '分享这家店'],
+    ['.rst-share',                     'title',      '分享这家店'],
+    ['.rst-list-new',                  'aria-label', '新建子收藏夹'],
+    ['.bm-list-new',                   'aria-label', '新建子收藏夹'],
     // H2 / C1 / G6 (filter panel, region select, bookmark modal).
     ['.ff-close',                      'aria-label', '关闭'],
     ['#kb-help .kb-close',             'aria-label', '关闭'],
@@ -6755,7 +7985,8 @@ FILTER_JS_TEMPLATE = r"""
     // modal is up. `inert` is supported everywhere this page runs; the
     // aria-hidden fallback keeps older engines announcing the right thing.
     var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack',
-                     '#wb-left', '#wb-top', '#wb-rail', '#wb-detail'];
+                     '#wb-left', '#wb-top', '#wb-rail', '#wb-detail',
+                     '#wb-fav-fab'];   // F1: the phone drawer's entry pill
     function setBackgroundInert(on, exclude) {
       for (var i = 0; i < INERT_SEL.length; i++) {
         var nodes = document.querySelectorAll(INERT_SEL[i]);
@@ -6884,6 +8115,8 @@ FILTER_JS_TEMPLATE = r"""
       if (bmEl && bmEl.classList.contains('bm-open')) return;
       var impEl = document.getElementById('imp-modal');
       if (impEl && impEl.classList.contains('imp-open')) return;
+      var flEl = document.getElementById('fl-modal');           // M-031 / E2
+      if (flEl && flEl.classList.contains('fl-open')) return;
 
       var k = e.key;
       var handled = false;
@@ -7400,12 +8633,371 @@ FILTER_JS_TEMPLATE = r"""
     }
     function saveBookmarks() {
       mergeDiskBookmarksIntoMemory();
+      flPrune();   // M-031 / E2: drop dead sub-collection members on write only
       try {
         var out = JSON.stringify(bookmarks);
         localStorage.setItem(BM_KEY, out);
         lastWrittenBookmarks = out;
       } catch (e) { storageBlocked(e); }   // M-046
     }
+
+    // ===== Sub-collections (E2 / M-031) ==================================
+    // "Saved, then what?" — one flat level of named lists over the places
+    // the user already saved. Two entry shapes, BOTH stored in the existing
+    // `bookmarks` array (localStorage tabelog.bookmarks, `bookmarks` on the
+    // KV blob) as coordinate-less metadata:
+    //
+    //   { id:'list:<k>',        category:'meta', kind:'list',
+    //     name, emoji, created }
+    //   { id:'lm:<k>:<ref>',    category:'meta', kind:'member',
+    //     list:'list:<k>', ref:'<tabelog url>' | 'bm-…' | 'fb-…' }
+    //
+    // Why this and not a new field:
+    //   * No new localStorage key and no new top-level KV field — the Worker
+    //     replaces the blob wholesale, so a top-level `favMeta` would need
+    //     M-044 first and would be silently dropped by every deployed page
+    //     in the meantime.
+    //   * category is 'meta', never 'hidden'. rebuildHiddenIds() keys the
+    //     built-in landmark tombstones off 'hidden' + an 'fb-' id and must
+    //     keep meaning exactly that.
+    //   * One entry PER MEMBER, never a members[] array on the list body:
+    //     mergeBookmarks() merges by id, so two devices adding different
+    //     restaurants to the same list both survive. An array inside one
+    //     object would be replaced wholesale by whichever side won.
+    //   * renderBookmark() already returns early for anything without
+    //     numeric lat/lon, so none of this paints a marker; an old client
+    //     round-trips the entries untouched.
+    // Rule: a Tabelog restaurant added to a list is ALSO starred (below),
+    // so a client that knows nothing about lists still shows it as saved.
+    var FL_LIST_PREFIX   = 'list:';
+    var FL_MEMBER_PREFIX = 'lm:';
+    var FL_DEFAULT_EMOJI = '📁';
+    var FL_NAME_MAX      = 24;
+    function flIsMeta(bm)   { return !!bm && bm.category === 'meta'; }
+    function flIsList(bm)   {
+      return flIsMeta(bm) && bm.kind === 'list' && typeof bm.id === 'string';
+    }
+    function flIsMember(bm) {
+      return flIsMeta(bm) && bm.kind === 'member'
+          && typeof bm.id === 'string' && typeof bm.list === 'string'
+          && typeof bm.ref === 'string' && bm.ref !== '';
+    }
+    function flShortId() {
+      return (Date.now().toString(36) +
+              Math.random().toString(36).slice(2) + 'zzzz').slice(0, 8);
+    }
+    function flCleanName(s) {
+      var t = (typeof s === 'string') ? s.replace(/^\s+|\s+$/g, '') : '';
+      if (t.length > FL_NAME_MAX) t = t.slice(0, FL_NAME_MAX);
+      return t || localizeText('未命名');
+    }
+    function flCleanEmoji(e) {
+      if (typeof e !== 'string' || !e) return FL_DEFAULT_EMOJI;
+      try { if (!isPureEmoji(e)) return FL_DEFAULT_EMOJI; } catch (_) { return FL_DEFAULT_EMOJI; }
+      return e;
+    }
+    // A membership is live while its target still exists as something the
+    // user saved: a starred Tabelog URL, a personal pin, or a built-in
+    // landmark. The on-disk favorites cache counts too — another tab may
+    // have starred the URL a moment ago and this tab has not reconciled
+    // omakase_state_cache_v2 yet; pruning a live membership on that race
+    // would delete it from every device on the next push. Cached for a
+    // second so a full-list read costs at most one localStorage parse.
+    var flDiskFav = null, flDiskFavAt = 0;
+    function flDiskFavList() {
+      var now = Date.now();
+      if (flDiskFav && now - flDiskFavAt < 1000) return flDiskFav;
+      var c = null;
+      try { c = loadCache(); } catch (_) { c = null; }
+      flDiskFav = (c && Array.isArray(c.fav)) ? c.fav : [];
+      flDiskFavAt = now;
+      return flDiskFav;
+    }
+    function flRefAlive(ref) {
+      if (typeof ref !== 'string' || !ref) return false;
+      if (ref.indexOf('http') === 0) {
+        if (typeof state !== 'undefined' && state && state.fav && state.fav.has(ref)) return true;
+        return flDiskFavList().indexOf(ref) >= 0;
+      }
+      for (var i = 0; i < bookmarks.length; i++) {
+        var b = bookmarks[i];
+        if (b && !flIsMeta(b) && b.category !== 'hidden' && b.id === ref) return true;
+      }
+      for (var j = 0; j < EMBEDDED_FAVORITES_BUILTIN.length; j++) {
+        if (EMBEDDED_FAVORITES_BUILTIN[j] && EMBEDDED_FAVORITES_BUILTIN[j].id === ref) return true;
+      }
+      return false;
+    }
+    // Orphans (list deleted elsewhere, restaurant un-starred elsewhere) are
+    // hidden on read and swept on the NEXT write — never on a read path, so
+    // a transient state can't silently eat data. Mutates `bookmarks` in
+    // place and never calls saveBookmarks (it runs from inside it).
+    var flPruning = false;
+    function flPrune() {
+      if (flPruning) return false;
+      flPruning = true;
+      var changed = false;
+      try {
+        var live = {};
+        for (var i = 0; i < bookmarks.length; i++) {
+          if (flIsList(bookmarks[i])) live[bookmarks[i].id] = 1;
+        }
+        for (var j = bookmarks.length - 1; j >= 0; j--) {
+          var b = bookmarks[j];
+          if (!flIsMember(b)) continue;
+          if (live[b.list] === 1 && flRefAlive(b.ref)) continue;
+          bookmarks.splice(j, 1);
+          changed = true;
+        }
+      } catch (_) { /* never break a save over housekeeping */ }
+      flPruning = false;
+      return changed;
+    }
+    function flChanged() {
+      try { document.dispatchEvent(new CustomEvent('fl:change')); } catch (_) {}
+    }
+    function flFindList(listId) {
+      if (typeof listId !== 'string' || !listId) return null;
+      for (var i = 0; i < bookmarks.length; i++) {
+        if (flIsList(bookmarks[i]) && bookmarks[i].id === listId) return bookmarks[i];
+      }
+      return null;
+    }
+    // Oldest first — the rail order stays stable as lists are added.
+    function flLists() {
+      var out = [];
+      bookmarks.forEach(function(b) {
+        if (!flIsList(b)) return;
+        out.push({
+          id: b.id,
+          name: (typeof b.name === 'string' && b.name) ? b.name : localizeText('未命名'),
+          emoji: flCleanEmoji(b.emoji),
+          created: (typeof b.created === 'number' && isFinite(b.created)) ? b.created : 0
+        });
+      });
+      out.sort(function(x, y) {
+        if (x.created !== y.created) return x.created - y.created;
+        return x.id < y.id ? -1 : (x.id > y.id ? 1 : 0);
+      });
+      return out;
+    }
+    function flMembers(listId) {
+      var out = [], seen = {};
+      if (typeof listId !== 'string' || !listId) return out;
+      bookmarks.forEach(function(b) {
+        if (!flIsMember(b) || b.list !== listId) return;
+        if (seen['r' + b.ref]) return;
+        if (!flRefAlive(b.ref)) return;   // orphan: hidden here, swept on write
+        seen['r' + b.ref] = 1;
+        out.push(b.ref);
+      });
+      return out;
+    }
+    function flListsOf(ref) {
+      var out = [], seen = {}, live = {};
+      if (typeof ref !== 'string' || !ref) return out;
+      bookmarks.forEach(function(b) { if (flIsList(b)) live[b.id] = 1; });
+      bookmarks.forEach(function(b) {
+        if (!flIsMember(b) || b.ref !== ref) return;
+        if (!live[b.list] || seen[b.list]) return;
+        seen[b.list] = 1;
+        out.push(b.list);
+      });
+      return out;
+    }
+    function flCreate(name, emoji) {
+      var id = FL_LIST_PREFIX + flShortId();
+      while (flFindList(id)) id = FL_LIST_PREFIX + flShortId();
+      bookmarks.push({
+        id: id, category: 'meta', kind: 'list',
+        name: flCleanName(name), emoji: flCleanEmoji(emoji),
+        created: Date.now()
+      });
+      saveBookmarks();
+      schedulePush();
+      flChanged();
+      return id;
+    }
+    function flRename(listId, name, emoji) {
+      var hit = flFindList(listId);
+      if (!hit) return false;
+      hit.name = flCleanName(name);
+      hit.emoji = flCleanEmoji(emoji);
+      saveBookmarks();
+      schedulePush();
+      flChanged();
+      return true;
+    }
+    // Deleting a list takes its membership rows with it. The places
+    // themselves are untouched — they stay starred / stay pinned.
+    function flDelete(listId) {
+      if (typeof listId !== 'string' || !listId) return false;
+      var changed = false;
+      for (var i = bookmarks.length - 1; i >= 0; i--) {
+        var b = bookmarks[i];
+        if (!b) continue;
+        if ((flIsList(b) && b.id === listId) ||
+            (flIsMember(b) && b.list === listId)) {
+          bookmarks.splice(i, 1);
+          changed = true;
+        }
+      }
+      if (!changed) return false;
+      saveBookmarks();
+      schedulePush();
+      flChanged();
+      return true;
+    }
+    function flMemberId(listId, ref) {
+      return FL_MEMBER_PREFIX + listId.slice(FL_LIST_PREFIX.length) + ':' + ref;
+    }
+    // One place can sit in several lists at once (there is no "move").
+    function flAdd(listId, ref) {
+      if (typeof ref !== 'string' || !ref) return false;
+      if (!flFindList(listId)) return false;
+      var exists = false;
+      for (var i = 0; i < bookmarks.length; i++) {
+        var b = bookmarks[i];
+        if (flIsMember(b) && b.list === listId && b.ref === ref) { exists = true; break; }
+      }
+      // A restaurant in a list is a favourite, full stop — via the existing
+      // toggleFav so the cache write / push scheduling stay in one place.
+      if (ref.indexOf('http') === 0
+          && typeof state !== 'undefined' && state && state.fav && !state.fav.has(ref)) {
+        toggleFav(ref);
+      }
+      if (!exists) {
+        bookmarks.push({
+          id: flMemberId(listId, ref), category: 'meta', kind: 'member',
+          list: listId, ref: ref
+        });
+      }
+      saveBookmarks();
+      schedulePush();
+      flChanged();
+      return true;
+    }
+    // Removing from a list never un-stars the place.
+    function flRemove(listId, ref) {
+      var changed = false;
+      for (var i = bookmarks.length - 1; i >= 0; i--) {
+        var b = bookmarks[i];
+        if (flIsMember(b) && b.list === listId && b.ref === ref) {
+          bookmarks.splice(i, 1);
+          changed = true;
+        }
+      }
+      if (!changed) return false;
+      saveBookmarks();
+      schedulePush();
+      flChanged();
+      return true;
+    }
+
+    // The shared name+icon dialog (#fl-modal). Every surface that creates or
+    // renames a list opens THIS one — flEditModal(null, cb) for new,
+    // flEditModal(id, cb) for rename. cb receives the list id on save and is
+    // not called on cancel.
+    var flModal     = document.getElementById('fl-modal');
+    var flBackdrop  = document.getElementById('fl-backdrop');
+    var flNameInput = document.getElementById('fl-name');
+    var flTitleEl   = document.getElementById('fl-title');
+    var flErrorEl   = document.getElementById('fl-error');
+    var flRelease = null, flCb = null, flEditingId = null;
+    var flEmoji = FL_DEFAULT_EMOJI;
+    function flSetEmoji(e) {
+      flEmoji = flCleanEmoji(e);
+      if (!flModal) return;
+      var btns = flModal.querySelectorAll('.fl-emoji-list button');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].setAttribute('aria-pressed',
+          btns[i].getAttribute('data-emoji') === flEmoji ? 'true' : 'false');
+      }
+    }
+    function flModalOpen() {
+      return !!flModal && flModal.classList.contains('fl-open');
+    }
+    function flCloseModal() {
+      if (!flModalOpen()) return;
+      flModal.classList.remove('fl-open');
+      if (flBackdrop) flBackdrop.classList.remove('fl-open');
+      flModal.setAttribute('aria-hidden', 'true');
+      flCb = null; flEditingId = null;
+      if (flRelease) { var r = flRelease; flRelease = null; try { r(); } catch (_) {} }
+      uiDrop('flmodal');           // M-015: gives the Android back button back
+    }
+    uiRegister('flmodal', flCloseModal);
+    function flEditModal(listId, cb) {
+      if (!flModal) return;
+      flEditingId = (typeof listId === 'string' && listId) ? listId : null;
+      flCb = (typeof cb === 'function') ? cb : null;
+      var cur = null;
+      if (flEditingId) {
+        flLists().forEach(function(l) { if (l.id === flEditingId) cur = l; });
+        if (!cur) flEditingId = null;
+      }
+      if (flTitleEl) {
+        flTitleEl.textContent =
+          localizeText(flEditingId ? '重命名子收藏夹' : '新建子收藏夹');
+      }
+      if (flNameInput) flNameInput.value = cur ? cur.name : '';
+      flSetEmoji(cur ? cur.emoji : FL_DEFAULT_EMOJI);
+      if (flErrorEl) flErrorEl.textContent = '';
+      if (flBackdrop) flBackdrop.classList.add('fl-open');
+      flModal.classList.add('fl-open');
+      flModal.setAttribute('aria-hidden', 'false');
+      uiPush('flmodal');
+      // H2 / M-074: aria-modal="true" without containment is a lie. trapFocus
+      // also remembers the trigger and hands focus back on close.
+      if (flRelease) { try { flRelease(); } catch (_) {} }
+      flRelease = trapFocus(flModal, '#fl-name');
+    }
+    function flSaveModal() {
+      var id = flEditingId;
+      var name = flNameInput ? flNameInput.value : '';
+      var cb = flCb;
+      if (id) flRename(id, name, flEmoji);
+      else    id = flCreate(name, flEmoji);
+      flCloseModal();
+      if (cb) { try { cb(id); } catch (_) {} }
+    }
+    if (flModal) {
+      var flClose = flModal.querySelector('.fl-close');
+      if (flClose) flClose.addEventListener('click', flCloseModal);
+      var flCancel = flModal.querySelector('.fl-cancel');
+      if (flCancel) flCancel.addEventListener('click', flCloseModal);
+      var flSaveBtn = flModal.querySelector('.fl-save');
+      if (flSaveBtn) flSaveBtn.addEventListener('click', flSaveModal);
+      var flChips = flModal.querySelectorAll('.fl-emoji-list button');
+      for (var flI = 0; flI < flChips.length; flI++) {
+        flChips[flI].addEventListener('click', function() {
+          flSetEmoji(this.getAttribute('data-emoji'));
+        });
+      }
+      if (flNameInput) {
+        flNameInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); flSaveModal(); }
+        });
+        // Same job as PLACEHOLDER_L10N further down (placeholders are
+        // attributes, so localizeTree's text-node walk never sees them);
+        // kept local to this section so the table stays where its element is.
+        var flPh = {'zh-CN': '京都美食', 'zh-TW': '京都美食',
+                    'en': 'Kyoto eats', 'ja': '京都グルメ'};
+        flNameInput.placeholder = flPh[activeLang] || flPh['zh-CN'];
+      }
+    }
+    if (flBackdrop) flBackdrop.addEventListener('click', flCloseModal);
+
+    window.__flLists     = flLists;
+    window.__flListsOf   = flListsOf;
+    window.__flMembers   = flMembers;
+    window.__flCreate    = flCreate;
+    window.__flRename    = flRename;
+    window.__flDelete    = flDelete;
+    window.__flAdd       = flAdd;
+    window.__flRemove    = flRemove;
+    window.__flEditModal = flEditModal;
+
     // Pick the right name field for the active UI language.
     //   full schema: { name_src, name_sc, name_tc, name_jp, name_en, ... }
     //   legacy:      { name, ... }                          — pre-i18n entries
@@ -7716,6 +9308,17 @@ FILTER_JS_TEMPLATE = r"""
                    + 'title="Open in Google Maps">'
                    + '<img src="img/google-maps-v2.png" alt="Google Maps" '
                    + 'width="18" height="18" loading="lazy"></a>';
+      // M-032: share this one restaurant (?r=<id> deep link). The helper
+      // ships in the same build; the typeof guard is for the case where a
+      // stale service-worker HTML meets a newer/older script — a dead button
+      // is worse than no button. aria-label / title get localized by the
+      // ATTR_L10N pass observeDynamic runs over #bs-content.
+      var shareBtn = (typeof window.__shareRestaurant === 'function')
+        ? '<button type="button" class="rst-gmaps rst-share" '
+          + 'aria-label="分享这家店" title="分享这家店">'
+          + emojiImg('🔗', 'height:18px;width:18px;vertical-align:0;')
+          + '</button>'
+        : '';
       // TEMP-ish: "location calibrated by Google" note, shown under the
       // address when this row was Google-calibrated (d.gcal). Hand-tuned per
       // language like chipText, so the runtime CJK localizer doesn't fragment
@@ -7825,6 +9428,11 @@ FILTER_JS_TEMPLATE = r"""
         + gcalNote
         + approxNote
         + photoHtml
+        // E11 / M-031: the sub-collection chips. Left empty here and filled
+        // by bindCardExtras → flPaintCardLists, so a chip tap (or a change
+        // made from another surface) repaints this one row instead of the
+        // whole card, and the card keeps its scroll position.
+        + '<div class="rst-lists"></div>'
         // D5: one 44px action row at the end of the card, Tabelog on the
         // right where an "exit to the source" link belongs.
         + '<div class="rst-actions-bar">'
@@ -7833,6 +9441,7 @@ FILTER_JS_TEMPLATE = r"""
           + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
             + '<span class="ff-black-label">🚫 弃用</span></button>'
           + gmapsBtn
+          + shareBtn
           + '<a class="rst-tabelog" href="' + url + '" target="_blank" rel="noopener">Tabelog ↗</a>'
         + '</div>'
       + '</div>';
@@ -7921,6 +9530,104 @@ FILTER_JS_TEMPLATE = r"""
       }).observe(bsSheet, {attributes: true, attributeFilter: ['class']});
     }
     // Called from openSheet's paint() on every repaint of the card.
+    // ---- E11 / M-031: sub-collection chips on the detail card ------------
+    // Everything below talks to the list model through window.__fl* only —
+    // it never touches the `bookmarks` array itself. The row is painted
+    // into the .rst-lists div renderPopup leaves empty, and repainted on
+    // 'fl:change' so a chip tap costs one row, not a whole card.
+    // flLists() is O(bookmarks) and the search dropdown asks for it once per
+    // row, so the id → {name, emoji} lookup is memoised and dropped whenever
+    // the model changes.
+    var flChipIndex = null;
+    function flChipLists() {
+      if (flChipIndex) return flChipIndex;
+      var arr = (typeof window.__flLists === 'function') ? window.__flLists() : [];
+      var byId = {};
+      for (var i = 0; i < arr.length; i++) byId[arr[i].id] = arr[i];
+      flChipIndex = {arr: arr, byId: byId};
+      return flChipIndex;
+    }
+    function flChipsOf(ref) {
+      if (typeof window.__flListsOf !== 'function' || !ref) return [];
+      try { return window.__flListsOf(ref) || []; } catch (_) { return []; }
+    }
+    // One chip. `cls` prefixes let the card and #bm-modal share the markup
+    // without sharing a stylesheet. List names are user text: escaped, and
+    // wrapped in the lang="ja" sentinel so the CJK localizer leaves a name
+    // like 京都美食 alone instead of translating it into the UI language.
+    function flChipHtml(cls, L, on) {
+      return '<button type="button" class="' + cls + '-chip'
+        + (on ? ' ' + cls + '-on' : '') + '" data-list="' + escapeHtml(L.id)
+        + '" aria-pressed="' + (on ? 'true' : 'false') + '">'
+        + emojiImg(L.emoji)
+        + '<span lang="ja">' + escapeHtml(L.name) + '</span></button>';
+    }
+    // The whole row. No lists yet → a single "＋ 新建子收藏夹" chip, which is
+    // both the empty state and the only affordance that needs to exist.
+    function flChipRowHtml(cls, picked) {
+      var lists = flChipLists().arr;
+      if (!lists.length) {
+        return '<button type="button" class="' + cls + '-chip ' + cls + '-new"'
+          + ' data-list="" aria-label="新建子收藏夹">＋ 新建子收藏夹</button>';
+      }
+      var h = '<span class="' + cls + 's-k">加入子收藏夹</span>';
+      for (var i = 0; i < lists.length; i++) {
+        h += flChipHtml(cls, lists[i], picked.indexOf(lists[i].id) >= 0);
+      }
+      h += '<button type="button" class="' + cls + '-chip ' + cls + '-new"'
+        + ' data-list="" aria-label="新建子收藏夹">＋</button>';
+      return h;
+    }
+    function flPaintCardLists(d) {
+      var box = bsContent && bsContent.querySelector('.rst-lists');
+      if (!box) return;
+      box.innerHTML = d ? flChipRowHtml('rst-list', flChipsOf(d.detail_url)) : '';
+    }
+    // Delegated so the row can be replaced wholesale without re-binding.
+    document.addEventListener('click', function(e) {
+      var chip = e.target.closest && e.target.closest('.rst-list-chip');
+      if (!chip || !bsContent || !bsContent.contains(chip)) return;
+      var d = bsActive;
+      if (!d) return;
+      var ref = d.detail_url;
+      var lid = chip.getAttribute('data-list');
+      if (!lid) {
+        if (typeof window.__flEditModal === 'function') {
+          window.__flEditModal(null, function(newId) {
+            if (newId && typeof window.__flAdd === 'function') {
+              flAfterMembershipChange(d, function() { window.__flAdd(newId, ref); });
+            }
+          });
+        }
+        return;
+      }
+      var on = chip.getAttribute('aria-pressed') === 'true';
+      flAfterMembershipChange(d, function() {
+        if (on) {
+          // Leaving a list never un-stars the place (see __flRemove).
+          if (typeof window.__flRemove === 'function') window.__flRemove(lid, ref);
+        } else if (typeof window.__flAdd === 'function') {
+          window.__flAdd(lid, ref);
+        }
+      });
+    });
+    // __flAdd stars the restaurant as a side effect, so the ⭐ button, the
+    // counter, the marker icon and the filter all have to catch up — the
+    // same four steps the delegated ⭐ handler runs. Only when the star
+    // actually flipped, so a plain "leave this list" costs nothing.
+    function flAfterMembershipChange(d, fn) {
+      var was = isFav(d);
+      fn();
+      if (isFav(d) === was) return;
+      updateFavCount();
+      syncToggleButtons(d);
+      if (d._m) d._m.setIcon(makeIcon(d));
+      apply();
+    }
+    document.addEventListener('fl:change', function() {
+      flChipIndex = null;
+      if (bsActive) flPaintCardLists(bsActive);
+    });
     function bindCardExtras(d) {
       wireCardA11y();
       if (!d) return;
@@ -7934,6 +9641,16 @@ FILTER_JS_TEMPLATE = r"""
         bsFocusIn = false;
       }
       if (bsSheet) bsSheet.setAttribute('aria-label', d.name || '');
+      flPaintCardLists(d);          // E11 / M-031: sub-collection chip row
+      // M-032: navigator.share must be reached synchronously from the
+      // gesture, so this handler calls the helper with nothing awaited in
+      // between — no localization lookup, no fetch, no promise.
+      var shareEl = bsContent.querySelector('.rst-share');
+      if (shareEl && typeof window.__shareRestaurant === 'function') {
+        shareEl.addEventListener('click', function(ev) {
+          window.__shareRestaurant(d, ev);
+        });
+      }
       var nav = bsContent.querySelector('.rst-nav');
       if (!nav) return;
       // The stepper is only shown when there is a visible ordered list to
@@ -8063,7 +9780,7 @@ FILTER_JS_TEMPLATE = r"""
               '隐藏</button>';
         }
       } else {
-        var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除收藏';
+        var delLabel = (bm.category === 'attraction') ? '删除景点' : '删除书签';  // M-106
         actionBtn = '<button id="bm-del" ' +
             'style="padding:4px 12px;font-size:12px;cursor:pointer;' +
                    'border:1px solid #fecaca;border-radius:4px;' +
@@ -8174,6 +9891,11 @@ FILTER_JS_TEMPLATE = r"""
     // so they can be un-hidden via the popup. CSS does the heavy lifting
     // — we just toggle a body class for show-all and an .active vs
     // .show-all class on the FAB itself.
+    // A11: the popover's "也显示已隐藏的景点" checkbox needs to reach the
+    // third state directly instead of clicking its way around the cycle
+    // (2 -> 1 would otherwise have to pass through '0' and write it). The
+    // key, the three values and the aria-pressed semantics are unchanged.
+    var attrSetState = null;
     (function wireAttractionsFab() {
       var btn = document.getElementById('fab-attractions');
       if (!btn) return;
@@ -8206,9 +9928,140 @@ FILTER_JS_TEMPLATE = r"""
         apply(state);
         try { localStorage.setItem(KEY, state); } catch (_) {}
       });
+      attrSetState = function(s) {                     // A11
+        if (s !== '0' && s !== '1' && s !== '2') return;
+        if (s === state) return;
+        state = s;
+        apply(state);
+        try { localStorage.setItem(KEY, state); } catch (_) {}
+      };
     })();
     wireFab('fab-bookmarks',   bookmarksLayer,
             'tabelog.showBookmarks',   true);
+
+    // ===== A11: the 图层 popover shell ===================================
+    // The shell only. The four toggles inside #layers-pop are the same
+    // buttons wired above — nothing here touches their handlers, ids or
+    // storage keys, so applyToggle / applyTransitBucket / transitFabsLoading
+    // and bookmarkPopupHtml's fabId lookup keep working unchanged. The badge
+    // is derived by observing the aria-pressed those handlers already write,
+    // which is why none of them needed a call added to their tail.
+    (function wireLayersPop() {
+      var lpBtn = document.getElementById('fab-layers');
+      var lpPop = document.getElementById('layers-pop');
+      if (!lpBtn || !lpPop) return;
+      var lpBadge = document.getElementById('fab-layers-badge');
+      var lpAttrCb = document.getElementById('lp-attr-all');
+      var lpRelease = null;
+
+      // "219 个内置地标" — the count comes from the baked-in landmark table
+      // so it can never drift from what the 景点 layer actually draws.
+      var lpN = document.getElementById('lp-n-builtin');
+      if (lpN) {
+        try { lpN.textContent = String(EMBEDDED_FAVORITES_BUILTIN.length); }
+        catch (_) {}
+      }
+
+      // Badge = how many layers are lit. The attractions FAB reports
+      // aria-pressed="true" in BOTH '1' and '2', which is what we want —
+      // show-all is still an on layer.
+      function updateLayerBadge() {
+        var n = lpPop.querySelectorAll('.map-fab[aria-pressed="true"]').length;
+        if (lpBadge) {
+          lpBadge.textContent = n ? String(n) : '';
+          lpBadge.hidden = !n;
+        }
+        var ab = document.getElementById('fab-attractions');
+        if (lpAttrCb && ab) lpAttrCb.checked = ab.classList.contains('show-all');
+      }
+      try {
+        new MutationObserver(updateLayerBadge).observe(lpPop, {
+          subtree: true, attributes: true,
+          attributeFilter: ['aria-pressed', 'class']
+        });
+      } catch (_) {}
+      updateLayerBadge();
+
+      if (lpAttrCb) {
+        lpAttrCb.addEventListener('change', function() {
+          // Checked -> '2', cleared -> '1'. '0' stays the FAB row's job.
+          if (attrSetState) attrSetState(lpAttrCb.checked ? '2' : '1');
+        });
+      }
+
+      // The panel is absolutely positioned inside .map-fab-stack, so it
+      // rides --sheet-h / --wb-bottom with the stack for free (M-071). All
+      // that is left is picking a side: prefer up, flip down when the card
+      // has eaten the space above, and cap the height when neither fits.
+      function placePop() {
+        lpPop.classList.remove('lp-down');
+        lpPop.style.maxHeight = '';
+        // The stack, not the pill — that is what the panel is anchored to.
+        var host = lpPop.offsetParent || lpBtn;
+        var r = host.getBoundingClientRect();
+        // The floating search capsule owns the top of the map; sliding the
+        // panel under it would hide its first row. Only counts when the two
+        // actually share a column (on mid / wide the capsule is off to the
+        // left inside #wb-top).
+        var guard = 16;
+        var ssb = document.getElementById('ss-box');
+        if (ssb && ssb.getClientRects().length) {
+          var sb = ssb.getBoundingClientRect();
+          if (sb.right > r.right - lpPop.offsetWidth && sb.left < r.right) {
+            guard = Math.max(guard, sb.bottom + 8);
+          }
+        }
+        var above = r.top - guard;
+        var below = window.innerHeight - r.bottom - 16;
+        var want = lpPop.scrollHeight;
+        var room = above;
+        if (want > above && below > above) {
+          lpPop.classList.add('lp-down');
+          room = below;
+        }
+        if (want > room) lpPop.style.maxHeight = Math.max(120, room) + 'px';
+      }
+
+      function openLayersPop() {
+        if (lpPop.classList.contains('open')) return;
+        lpPop.hidden = false;
+        lpPop.classList.add('open');
+        if (lpPop.parentNode) lpPop.parentNode.classList.add('lp-open');
+        lpBtn.setAttribute('aria-expanded', 'true');
+        placePop();
+        uiPush('layers');                  // M-015
+        // Non-modal: focusInto, not trapFocus — no backdrop, no inert, and
+        // the map stays usable behind it (H2 / M-074).
+        lpRelease = focusInto(lpPop, null, lpBtn);
+      }
+      function closeLayersPop() {
+        if (!lpPop.classList.contains('open')) return;
+        lpPop.classList.remove('open');
+        lpPop.hidden = true;
+        if (lpPop.parentNode) lpPop.parentNode.classList.remove('lp-open');
+        lpBtn.setAttribute('aria-expanded', 'false');
+        if (lpRelease) { try { lpRelease(); } catch (_) {} lpRelease = null; }
+        uiDrop('layers');                  // M-015
+      }
+      uiRegister('layers', closeLayersPop);   // M-015
+
+      lpBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (lpPop.classList.contains('open')) closeLayersPop();
+        else openLayersPop();
+      });
+      document.addEventListener('click', function(e) {
+        if (!lpPop.classList.contains('open')) return;
+        if (lpPop.contains(e.target) || lpBtn.contains(e.target)) return;
+        closeLayersPop();
+      });
+      // No Escape listener of its own: the shared keydown dispatcher closes
+      // whatever is on top of uiStack through uiClosers, which is exactly
+      // the "only the topmost overlay reacts" behaviour we want here.
+      window.addEventListener('resize', function() {
+        if (lpPop.classList.contains('open')) placePop();
+      });
+    })();
 
     // ----- 加入收藏 modal -----
     var bmModal      = document.getElementById('bm-modal');
@@ -8231,7 +10084,7 @@ FILTER_JS_TEMPLATE = r"""
         b.classList.toggle('active', on);
         b.setAttribute('aria-checked', on ? 'true' : 'false');
       });
-      bmTitleEl.textContent = (bmKind === 'attraction') ? '加入景点' : '加入收藏';
+      bmTitleEl.textContent = (bmKind === 'attraction') ? '加入景点' : '新建书签';  // M-106
     }
     bmKindBtns.forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -8270,6 +10123,53 @@ FILTER_JS_TEMPLATE = r"""
     var bmTrapRelease = null;    // H2 / M-074
     var bmUsePlaceBtn = document.getElementById('bm-use-place');
     var bmCopyBtn     = document.getElementById('bm-copy');
+    // ---- E11 / M-031: sub-collection chips inside the pin dialog ---------
+    // Picks are held here until 保存 succeeds — a cancelled dialog must not
+    // leave a membership row pointing at a pin that was never created.
+    var bmListsBox   = document.getElementById('bm-lists');
+    var bmPickedLists = [];
+    function bmPaintLists() {
+      if (!bmListsBox) return;
+      bmListsBox.innerHTML = flChipRowHtml('bm-list', bmPickedLists);
+    }
+    if (bmListsBox) {
+      bmListsBox.addEventListener('click', function(e) {
+        var chip = e.target.closest && e.target.closest('.bm-list-chip');
+        if (!chip) return;
+        var lid = chip.getAttribute('data-list');
+        if (!lid) { bmOpenListModal(); return; }
+        var at = bmPickedLists.indexOf(lid);
+        if (at >= 0) bmPickedLists.splice(at, 1);
+        else bmPickedLists.push(lid);
+        bmPaintLists();
+      });
+    }
+    // The list dialog stacks on top of this one. Two document-level Tab
+    // traps fight over focus, so stand ours down while #fl-modal is up and
+    // re-arm it when the dialog closes (cancel included — flEditModal's
+    // callback only fires on save, so the class attribute is the signal).
+    function bmOpenListModal() {
+      var flm = document.getElementById('fl-modal');
+      if (!flm || typeof window.__flEditModal !== 'function') return;
+      var hadTrap = !!bmTrapRelease;
+      if (bmTrapRelease) {
+        var rel = bmTrapRelease; bmTrapRelease = null;
+        try { rel(); } catch (_) {}
+      }
+      var obs = new MutationObserver(function() {
+        if (flm.classList.contains('fl-open')) return;
+        obs.disconnect();
+        if (hadTrap && bmModal.classList.contains('bm-open')) {
+          bmTrapRelease = trapFocus(bmModal, '#bm-name',
+                                    document.getElementById('ss-input'));
+        }
+      });
+      obs.observe(flm, {attributes: true, attributeFilter: ['class']});
+      window.__flEditModal(null, function(newId) {
+        if (newId && bmPickedLists.indexOf(newId) < 0) bmPickedLists.push(newId);
+        bmPaintLists();
+      });
+    }
     function openBookmarkModal(latlng, prefillName) {
       bmPending = {lat: latlng.lat, lng: latlng.lng};
       bmCoordEl.textContent = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
@@ -8284,6 +10184,8 @@ FILTER_JS_TEMPLATE = r"""
       }
       bmEmojiInput.value = '📍';
       bmSetKind('bookmark');           // reset default each open
+      bmPickedLists = [];              // E11: picks are per-dialog-open
+      bmPaintLists();
       bmShowError('');
       bmCollapsePicker();
       bmBackdrop.classList.add('bm-open');
@@ -8415,6 +10317,16 @@ FILTER_JS_TEMPLATE = r"""
       renderBookmark(bm);
       saveBookmarks();
       schedulePush();
+      // E11 / M-031: file the pin into whatever lists were ticked. Done
+      // after the pin is in `bookmarks` so flRefAlive() can see it — a
+      // membership row written first would look like an orphan and be
+      // swept by the very next flPrune().
+      if (bmPickedLists.length && typeof window.__flAdd === 'function') {
+        for (var pl = 0; pl < bmPickedLists.length; pl++) {
+          window.__flAdd(bmPickedLists[pl], bm.id);
+        }
+        bmPickedLists = [];
+      }
       // If a search-temp 📍 sits at this exact spot it's the one being
       // bookmarked — drop it so the bookmark emoji doesn't stack on top.
       // Coord match instead of a "source" flag keeps the right-click path
@@ -8612,8 +10524,8 @@ FILTER_JS_TEMPLATE = r"""
       'ss-input': {
         'zh-CN': '搜索餐厅 / 景点 / 地址 ...',
         'zh-TW': '搜尋餐廳 / 景點 / 地址 ...',
-        'en':    'Search restaurants / sights / address ...',
-        'ja':    'レストラン / スポット / 住所を検索 ...'
+        'en':    'Search restaurants / landmarks / address ...',   // M-106
+        'ja':    'レストラン / 名所 / 住所を検索 ...'
       },
       'bm-name': {
         'zh-CN': '例如：东京塔',
@@ -9034,6 +10946,45 @@ FILTER_JS_TEMPLATE = r"""
         a.appendChild(document.createTextNode(' '));
         a.appendChild(ssNet);
       }
+      // G3 / M-031: the sub-collections this hit is filed under. Two names,
+      // then "+N" — a third chip would push the station out of view.
+      // Prepended, not appended: .ss-addr is one nowrap ellipsised line that
+      // city · station | cuisine · price already fills on a 344px column, so
+      // a trailing chip is never on screen. Emoji are pre-swapped rather
+      // than left to the #ss-list observer (one less mutation pass per row),
+      // and the name rides the lang="ja" sentinel so the CJK localizer does
+      // not translate what the user typed.
+      var ssLids = flChipsOf(d.detail_url);
+      if (ssLids.length) {
+        var ssIdx = flChipLists().byId, ssShown = 0, ssHave = 0;
+        var ssFrag = document.createDocumentFragment();
+        for (var sl = 0; sl < ssLids.length; sl++) if (ssIdx[ssLids[sl]]) ssHave++;
+        for (var sc = 0; sc < ssLids.length && ssShown < 2; sc++) {
+          var ssL = ssIdx[ssLids[sc]];
+          if (!ssL) continue;
+          var ssChip = document.createElement('span');
+          ssChip.className = 'ss-list-chip';
+          ssChip.innerHTML = emojiImg(ssL.emoji);
+          var ssNm = document.createElement('span');
+          ssNm.setAttribute('lang', 'ja');
+          ssNm.textContent = ssL.name;
+          ssChip.appendChild(ssNm);
+          if (ssShown) ssFrag.appendChild(document.createTextNode(' '));
+          ssFrag.appendChild(ssChip);
+          ssShown++;
+        }
+        if (ssHave > ssShown) {
+          var ssMore = document.createElement('span');
+          ssMore.className = 'ss-list-chip';
+          ssMore.textContent = '+' + (ssHave - ssShown);
+          ssFrag.appendChild(document.createTextNode(' '));
+          ssFrag.appendChild(ssMore);
+        }
+        if (ssShown || ssHave) {
+          ssFrag.appendChild(document.createTextNode(' '));
+          a.insertBefore(ssFrag, a.firstChild);
+        }
+      }
       text.appendChild(n); text.appendChild(a);
       var rating = document.createElement('span');
       rating.className = 'ss-rating';
@@ -9163,8 +11114,43 @@ FILTER_JS_TEMPLATE = r"""
       var items = (localMatch && localMatch.items) || [];
       var total = (localMatch && localMatch.total) || 0;
       if (items.length > 0) {
-        ssAppendSectionHead('餐厅库');
-        ssAppendRestaurantSection(items, localMatch.inViewportCount, localMatch);
+        // G3: hits the user already starred come first, in their own
+        // section, and are then left out of 餐厅库 so nothing appears twice.
+        // Zero starred hits ⇒ the original single-section render, byte for
+        // byte — the split below is skipped entirely.
+        var favItems = [], restItems = [];
+        for (var fi = 0; fi < items.length; fi++) {
+          (isFav(items[fi]) ? favItems : restItems).push(items[fi]);
+        }
+        if (favItems.length) {
+          ssAppendSectionHead('已收藏');
+          favItems.forEach(ssAppendRestaurantRow);
+        }
+        if (!favItems.length) {
+          ssAppendSectionHead('餐厅库');
+          ssAppendRestaurantSection(items, localMatch.inViewportCount, localMatch);
+        } else if (restItems.length) {
+          // Both of ssAppendRestaurantSection's split indices count from the
+          // head of the array it is given (locHit = "in the named place",
+          // inViewportCount = "on screen"), so pulling rows out of the
+          // middle means recounting them against what is left. The clone
+          // keeps localMatch itself untouched for the next render.
+          var restIvc = null, restM = localMatch;
+          if (localMatch && localMatch.inViewportCount != null) {
+            var ivN = 0, ivCut = Math.min(localMatch.inViewportCount, items.length);
+            for (var iv = 0; iv < ivCut; iv++) if (!isFav(items[iv])) ivN++;
+            restIvc = ivN;
+          }
+          if (localMatch && localMatch.locToken) {
+            var lhN = 0, lhCut = Math.min(localMatch.locHit, items.length);
+            for (var lh = 0; lh < lhCut; lh++) if (!isFav(items[lh])) lhN++;
+            restM = {};
+            for (var mk in localMatch) restM[mk] = localMatch[mk];
+            restM.locHit = lhN;
+          }
+          ssAppendSectionHead('餐厅库');
+          ssAppendRestaurantSection(restItems, restIvc, restM);
+        }
         if (total > items.length) {
           var more = document.createElement('div');
           more.className = 'ss-row ss-empty';
@@ -10624,6 +12610,7 @@ FILTER_JS_TEMPLATE = r"""
       });
     }
     var BODY_WARN_CHARS = 180000;   // the Worker rejects > 200,000 (M-053)
+    var flBodyWarnAt = 0;           // last time the size toast was shown
     function push(conflictDepth) {
       conflictDepth = conflictDepth || 0;
       // Local mode (not signed in): nothing to push, but keep dirty=true so
@@ -10675,6 +12662,16 @@ FILTER_JS_TEMPLATE = r"""
       var baseBeforePush = syncBase;
       if (body.length > BODY_WARN_CHARS) {
         setStatus('同步数据接近上限，请删减收藏或书签', 'err');
+        // M-053 / M-031: the PUT still goes out — behaviour towards the
+        // Worker is unchanged — but #sync-status only exists while the
+        // settings modal is open, so the one person who needs to read this
+        // never saw it and got a bare "同步失败: HTTP 413" instead. Once an
+        // hour is plenty; this fires on every push while the blob is big.
+        if (Date.now() - flBodyWarnAt > 3600000) {
+          flBodyWarnAt = Date.now();
+          showToast(l10nSentence(['同步数据接近上限', '请删减收藏或书签']),
+                    {ms: 8000});
+        }
       }
       fetchAuthed(API, {
         method: 'PUT',
@@ -11127,7 +13124,10 @@ FILTER_JS_TEMPLATE = r"""
       btn.classList.toggle('rst-on-fav', on);
       btn.style.background = '';
       btn.style.borderColor = '';
-      label.textContent = on ? '⭐ 已收藏' : '☆ 收藏';
+      // 加入收藏, not 收藏: the bare run is the noun (EN "Saved") everywhere
+      // else on the page, so the un-saved button used to read "☆ Saved" in
+      // English. 加入收藏 is the verb entry (Save / お気に入りに追加).
+      label.textContent = on ? '⭐ 已收藏' : '☆ 加入收藏';
     }
     function syncBlackButton(btn, d) {
       var label = btn.querySelector('.ff-black-label');
@@ -12056,6 +14056,12 @@ FILTER_JS_TEMPLATE = r"""
       filterState.gcalOnly = gcEl ? gcEl.checked : false;
     }
     function passesFilter(d) {
+      // E9 / M-031: "只看这个" on a sub-collection. favFocusRefs is null
+      // unless the collections tab is focusing one, so this is a single
+      // null test on the normal path. It deliberately sits ahead of every
+      // filter test — focusing a list means the map, the 命中 count and the
+      // result list all agree, and the return bar says so out loud.
+      if (favFocusRefs && !favFocusRefs.has(d.detail_url)) return false;
       var fs = filterState;
       // Blacklist short-circuits when "隐藏" is on, regardless of other
       // filters. Hide-blacklist defeats only-fav so a starred-then-blacklisted
@@ -12459,6 +14465,12 @@ FILTER_JS_TEMPLATE = r"""
     }
     function wbListOn() {
       var m = (typeof wbMode === 'function') ? wbMode() : 'phone';
+      // F1: below 520px the same #wb-left is the bottom drawer. It is live
+      // only while the drawer is up, so a phone that never taps the ⭐ pill
+      // still builds nothing and renders not one .wb-row.
+      if (m === 'phone') {
+        return document.body.classList.contains('wb-fav-open');
+      }
       return m === 'split' || m === 'mid' || m === 'wide';
     }
     function wbReadRowH() {
@@ -12477,12 +14489,17 @@ FILTER_JS_TEMPLATE = r"""
         if (!o || typeof o !== 'object') return;
         if (WB_SORTS.indexOf(o.sort) >= 0) wbList.sort = o.sort;
         wbList.select = (o.select === true);
+        // E1 / M-031: additive field, no new localStorage key. Anything that
+        // is not exactly 'fav' (missing, unknown, a future value) leaves the
+        // default 'results' in place — see the guard next to wbSetTab().
+        if (o.tab === 'fav' || o.tab === 'results') wbTabPref = o.tab;
       } catch (_) {}      // unreadable / unknown shape -> defaults, never throw
     }
     function wbSaveListView() {
       try {
         localStorage.setItem(WB_LIST_KEY,
-          JSON.stringify({sort: wbList.sort, select: wbList.select}));
+          JSON.stringify({sort: wbList.sort, select: wbList.select,
+                          tab: (wbTabPref === 'fav') ? 'fav' : 'results'}));
       } catch (_) {}
     }
     wbLoadListView();
@@ -12517,7 +14534,11 @@ FILTER_JS_TEMPLATE = r"""
           return (wbAwardRank(a) - wbAwardRank(b)) || (wbRating(b) - wbRating(a));
         });
       } else if (s === 'distance') {
-        var c = map.getCenter();
+        // F1: the user's own fix once they have tapped #fab-locate, the map
+        // centre until then. Nothing here ever CALLS locate() — wbUserLoc is
+        // written only by the plugin's locationfound event (owner's Q5: the
+        // outer screen must never geolocate on its own).
+        var c = wbUserLoc || map.getCenter();
         for (i = 0; i < arr.length; i++) {
           arr[i]._wbD = bmHaversineM(arr[i].lat, arr[i].lon, c.lat, c.lng);
         }
@@ -12850,8 +14871,14 @@ FILTER_JS_TEMPLATE = r"""
 
       var opts = '';
       for (var i = 0; i < WB_SORTS.length; i++) {
-        opts += '<option value="' + WB_SORTS[i] + '">' +
-                escAttr(wbT(WB_SORT_LABEL[WB_SORTS[i]])) + '</option>';
+        // F1: sorting by distance is only an honest answer once we know
+        // where the user is, and we never ask — so the option stays out of the
+        // menu until #fab-locate has produced a fix. A user who picked it in
+        // an earlier session keeps it (wbDistOptShown), or their persisted
+        // sort would be a selected-but-invisible option.
+        var hid = (WB_SORTS[i] === 'distance' && !wbDistOptShown()) ? ' hidden' : '';
+        opts += '<option value="' + WB_SORTS[i] + '"' + hid + '>' +
+                escAttr(wbSortLabel(WB_SORTS[i])) + '</option>';
       }
       toolsEl.innerHTML =
         '<div class="wb-tools">' +
@@ -13019,6 +15046,810 @@ FILTER_JS_TEMPLATE = r"""
       if (wbNeedsSort()) wbScheduleSort();
       else wbListRender(true);
     });
+
+    // ===== M-031 / E1 · E2(UI) · E8 · E9 · B9: the collections tab =========
+    // The left column's second panel. Its ONLY data sources are state.fav
+    // and the sub-collection rows behind window.__fl* — it never reads
+    // filterState and never calls passesFilter (B9). A favourite the filter
+    // hides on the map has to still be listed here, or the user concludes
+    // their data is gone.
+    //
+    // Deliberately separate from the result list: rows carry data-fav-ref
+    // (never data-i) and live under #wb-fav, so the delegated handlers bound
+    // to #wb-list cannot see them and wbList.activeIdx stays the result
+    // list's private business. wbRowHtml / wbListRender are read-only here.
+    var favEls = null;
+    var favGroupBy = 'city';      // 'city' | 'list' — session only
+    var favCollapsed = {};        // group key -> 1, session only
+    var favSelect = false;
+    var favChecked = {};          // ref -> 1
+    var favCheckedN = 0;
+    var favFocus = null;          // E9: the list id the map is cropped to
+    var favFocusRefs = null;      // its Tabelog URLs, or null — read by passesFilter
+    var favSig = '';
+    var favMenuEl = document.getElementById('fv-menu');
+    var favMenuActions = [];
+    // Declared WITHOUT an initialiser on purpose: wbLoadListView() already
+    // ran in this same scope and may have set it from tabelog.listView.
+    // A `= 'results'` here would clobber that; the guard below normalises
+    // anything that is not exactly 'fav' (missing key, unknown value).
+    var wbTabPref;
+    if (wbTabPref !== 'fav') wbTabPref = 'results';
+
+    function favT(s) { return localizeText(s); }
+    function favCount() { return (state && state.fav) ? state.fav.size : 0; }
+    function favLists() {
+      return (typeof window.__flLists === 'function') ? window.__flLists() : [];
+    }
+    function favMembersOf(id) {
+      return (typeof window.__flMembers === 'function') ? window.__flMembers(id) : [];
+    }
+    function favFindList(id) {
+      var ls = favLists();
+      for (var i = 0; i < ls.length; i++) if (ls[i].id === id) return ls[i];
+      return null;
+    }
+    // A member ref is one of four things. 'gone' is a favourite whose URL is
+    // not in this build's corpus (a delisted restaurant, or a row dropped by
+    // a re-scrape) — it still gets a row so the star can be taken back off.
+    function favRefInfo(ref) {
+      if (typeof ref !== 'string' || !ref) return null;
+      var i;
+      if (ref.indexOf('http') === 0) {
+        var d = rowByUrl[ref];
+        return d ? {kind: 'rst', ref: ref, d: d} : {kind: 'gone', ref: ref};
+      }
+      for (i = 0; i < bookmarks.length; i++) {
+        var b = bookmarks[i];
+        if (b && b.id === ref && b.category !== 'hidden' && b.category !== 'meta') {
+          return {kind: 'pin', ref: ref, bm: b};
+        }
+      }
+      for (i = 0; i < EMBEDDED_FAVORITES_BUILTIN.length; i++) {
+        var fb = EMBEDDED_FAVORITES_BUILTIN[i];
+        if (fb && fb.id === ref) return {kind: 'sight', ref: ref, bm: fb};
+      }
+      return null;
+    }
+    function favIsRst(info) { return info.kind === 'rst' || info.kind === 'gone'; }
+    function favByRating(a, b) {
+      var ra = (a.d && a.d.rating != null) ? a.d.rating : -1;
+      var rb = (b.d && b.d.rating != null) ? b.d.rating : -1;
+      return rb - ra;
+    }
+    function favPinEmoji(bm) {
+      return (bm && typeof bm.emoji === 'string' && bm.emoji) ? bm.emoji : '📍';
+    }
+    function favLabelOf(info) {
+      if (info.kind === 'rst') return info.d.name || info.ref;
+      if (info.kind === 'gone') return info.ref;
+      return bmDisplayName(info.bm);
+    }
+
+    // ---- grouping (E1) ---------------------------------------------------
+    // The two sentinel keys start with a control character so they can never
+    // collide with a real Japanese city name.
+    var FAV_K_GONE = 'gone';
+    var FAV_K_OTHER = 'other';
+    function favGroupCity(infos, prefix) {
+      // Bucket keys carry a 'k' prefix so a city name can never resolve to
+      // something off Object.prototype.
+      var buckets = {}, keys = [], out = [], i;
+      for (i = 0; i < infos.length; i++) {
+        var info = infos[i];
+        var k = (info.kind === 'gone') ? FAV_K_GONE
+              : ((info.kind === 'rst' && info.d.city) ? info.d.city : FAV_K_OTHER);
+        if (!buckets['k' + k]) { buckets['k' + k] = []; keys.push(k); }
+        buckets['k' + k].push(info);
+      }
+      keys.sort(function(a, b) {
+        return (buckets['k' + b].length - buckets['k' + a].length) ||
+               (a < b ? -1 : (a > b ? 1 : 0));
+      });
+      for (i = 0; i < keys.length; i++) {
+        var key = keys[i], items = buckets['k' + key];
+        items.sort(favByRating);
+        out.push({
+          key: prefix + key,
+          label: (key === FAV_K_GONE) ? favT('不在当前数据里')
+               : (key === FAV_K_OTHER) ? favT('其他') : key,
+          ja: (key !== FAV_K_GONE && key !== FAV_K_OTHER),
+          listId: null, emoji: '', items: items
+        });
+      }
+      return out;
+    }
+    function favBuildGroups() {
+      var all = [], i, j;
+      state.fav.forEach(function(u) {
+        var info = favRefInfo(u);
+        if (info) all.push(info);
+      });
+      if (favGroupBy !== 'list') return favGroupCity(all, 'c:');
+      var lists = favLists(), groups = [], filed = {};
+      for (i = 0; i < lists.length; i++) {
+        var L = lists[i], refs = favMembersOf(L.id), items = [];
+        for (j = 0; j < refs.length; j++) {
+          var mi = favRefInfo(refs[j]);
+          if (!mi) continue;
+          items.push(mi);
+          filed[refs[j]] = 1;
+        }
+        // Restaurants first (rating desc), then landmarks and pins by name.
+        items.sort(function(a, b) {
+          var ka = favIsRst(a) ? 0 : 1, kb = favIsRst(b) ? 0 : 1;
+          if (ka !== kb) return ka - kb;
+          if (!ka) return favByRating(a, b);
+          var na = favLabelOf(a), nb = favLabelOf(b);
+          return na < nb ? -1 : (na > nb ? 1 : 0);
+        });
+        // ja: true — the name is the user's own text. #wb-left's i18n
+        // observer would otherwise run it through localizeText(), and a list
+        // called 京都美食 came back as "Kyoto eats" on the EN page (release QA).
+        groups.push({key: 'l:' + L.id, label: L.name, ja: true,
+                     listId: L.id, emoji: L.emoji || '', items: items});
+      }
+      // Q1: a place can sit in several lists, so "未分组" is everything that
+      // is in none of them — by city, the way the other tab groups.
+      var rest = [];
+      for (i = 0; i < all.length; i++) if (!filed[all[i].ref]) rest.push(all[i]);
+      rest.sort(function(a, b) {
+        var ca = (a.kind === 'rst' && a.d.city) ? a.d.city : '';
+        var cb = (b.kind === 'rst' && b.d.city) ? b.d.city : '';
+        if (!ca !== !cb) return ca ? -1 : 1;       // city-less rows last
+        if (ca !== cb) return ca < cb ? -1 : 1;
+        return favByRating(a, b);
+      });
+      groups.push({key: 'u:none', label: favT('未分组'), ja: false,
+                   listId: null, emoji: '', items: rest, unfiled: true});
+      return groups;
+    }
+
+    // ---- row markup ------------------------------------------------------
+    function favStarHtml(on) {
+      return '<span class="wb-row-fav' + (on ? ' on' : '') + '" role="button"' +
+        ' tabindex="-1" aria-label="' + escAttr(favT('收藏')) +
+        '" aria-pressed="' + (on ? 'true' : 'false') + '"></span>';
+    }
+    function favMoreHtml() {
+      // U+22EF, not an emoji — nothing in emojify() will try to swap it.
+      return '<span class="fv-more" role="button" tabindex="-1" aria-haspopup="menu"' +
+        ' aria-label="' + escAttr(favT('更多')) + '">⋯</span>';
+    }
+    function favRowHtml(info) {
+      var checked = favSelect && !!favChecked[info.ref];
+      var black = (info.kind === 'rst') && state.black.has(info.ref);
+      var cls = 'wb-row fv-row' + (black ? ' is-black' : '') +
+                (checked ? ' is-checked' : '');
+      var chk = favSelect
+        ? '<span class="wb-row-chk" aria-hidden="true">' + (checked ? '✓' : '') + '</span>'
+        : '';
+      var ic, l1, l2, acts;
+      if (info.kind === 'rst') {
+        var d = info.d;
+        var cat = d.categories && d.categories[0];
+        var color = BUCKET_COLOR[d.bucket] || '#9ca3af';
+        if (!WB_HEX_RE.test(color)) color = '#9ca3af';
+        ic = '<span class="wb-row-ic">' +
+             emojiImg((cat && GENRE_EMOJI[cat]) || '🍽️', 'width:18px;height:18px;') +
+             '<i class="wb-row-dot" style="background:' + color + '"></i></span>';
+        l1 = (black ? '<span class="wb-row-x" aria-hidden="true">✕</span>' : '') +
+             '<span class="wb-row-nm" lang="ja">' + escAttr(d.name || '') + '</span>' +
+             '<span class="wb-row-rt">★' +
+             (d.rating == null ? '–' : d.rating) + '</span>';
+        var lbl = WB_BUCKET_LABEL[d.bucket] || '';
+        var price = lbl ? ((d.bucket === 'na') ? favT(lbl) : (lbl + ' ' + favT('上限'))) : '';
+        l2 = price ? '<span class="wb-row-pr">' + escAttr(price) + '</span>' : '';
+        if (d.city) {
+          if (l2) l2 += '<span class="wb-row-sep" aria-hidden="true">·</span>';
+          l2 += '<span lang="ja">' + escAttr(d.city) + '</span>';
+        }
+        acts = favStarHtml(true) + favMoreHtml();
+      } else if (info.kind === 'gone') {
+        ic = '<span class="wb-row-ic">' +
+             emojiImg('🍽️', 'width:18px;height:18px;') + '</span>';
+        l1 = '<span class="wb-row-nm">' + escAttr(info.ref) + '</span>';
+        l2 = '<span class="fv-kind">' + escAttr(favT('不在当前数据里')) + '</span>';
+        acts = favStarHtml(true) + favMoreHtml();
+      } else {
+        ic = '<span class="wb-row-ic">' +
+             emojiImg(favPinEmoji(info.bm), 'width:18px;height:18px;') + '</span>';
+        // lang="ja": a pin's name is user text, not UI copy (M-098 sentinel).
+        l1 = '<span class="wb-row-nm" lang="ja">' + escAttr(favLabelOf(info)) + '</span>';
+        l2 = '<span class="fv-kind">' +
+             escAttr(favT(info.kind === 'sight' ? '景点' : '书签')) + '</span>';  // M-106
+        acts = favMoreHtml();
+      }
+      return '<button type="button" class="' + cls + '" data-fav-ref="' +
+        escAttr(info.ref) + '" data-fav-kind="' + info.kind + '">' +
+        chk + ic +
+        '<span class="wb-row-b">' +
+          '<span class="wb-row-l1">' + l1 + '</span>' +
+          '<span class="wb-row-l2">' + l2 + '</span>' +
+        '</span>' +
+        '<span class="wb-row-acts">' + acts + '</span></button>';
+    }
+    function favGroupHtml(g) {
+      var collapsed = !!favCollapsed[g.key];
+      var focused = !!(g.listId && g.listId === favFocus);
+      var h = '<div class="fv-grp' + (collapsed ? ' collapsed' : '') +
+              '" data-grp="' + escAttr(g.key) +
+              '" data-list="' + escAttr(g.listId || '') + '">' +
+        '<button type="button" class="fv-grp-h' + (focused ? ' is-focus' : '') +
+        '" aria-expanded="' + (collapsed ? 'false' : 'true') + '">' +
+        '<span class="fv-caret" aria-hidden="true">▼</span>' +
+        (g.emoji ? '<span class="fv-grp-ic">' + emojiImg(g.emoji) + '</span>' : '') +
+        '<span class="fv-grp-nm"' + (g.ja ? ' lang="ja"' : '') + '>' +
+        escAttr(g.label) + '</span>' +
+        '<span class="fv-grp-n">' + g.items.length + '</span>' +
+        (g.listId ? favMoreHtml() : '') +
+        '</button><div class="fv-rows">';
+      if (!g.items.length) {
+        h += '<div class="fv-empty">' +
+             escAttr(l10nSentence(['这个子收藏夹还是空的', '从结果或详情里加入子收藏夹'])) +
+             '</div>';
+      } else {
+        for (var i = 0; i < g.items.length; i++) h += favRowHtml(g.items[i]);
+      }
+      return h + '</div></div>';
+    }
+
+    // ---- render ----------------------------------------------------------
+    function favIsOpen() {
+      return wbTabPref === 'fav' && wbListOn();
+    }
+    function favSigNow() {
+      return favCount() + ':' + ((state && state.black) ? state.black.size : 0);
+    }
+    function favSyncTab() {
+      var tF = document.getElementById('wb-tab-fav');
+      if (!tF) return;
+      var n = tF.querySelector('.wb-tab-n');
+      if (n) n.textContent = favCount() ? String(favCount()) : '';
+    }
+    function favSyncBulk() {
+      if (!favEls) return;
+      var n = favCheckedN, sfx = n ? (' (' + n + ')') : '';
+      favEls.bulkMove.textContent = favT('移到') + '…' + sfx;
+      favEls.bulkOut.textContent = favT('从子收藏夹移除') + sfx;
+      favEls.bulkBlack.textContent = favT('弃用') + sfx;
+      favEls.bulkMove.disabled = !n;
+      favEls.bulkOut.disabled = !n;
+      favEls.bulkBlack.disabled = !n;
+    }
+    function favRender() {
+      favSyncTab();
+      favSig = favSigNow();
+      // Nothing is built on a phone: wbListOn() is false there, so not one
+      // node of this panel is ever created and the outer screen is untouched.
+      if (!favIsOpen()) return;
+      if (!favBuild()) return;
+      var n = favCount();
+      favEls.sum.innerHTML =
+        escAttr(favT('共')) + ' <b>' + n + '</b> ' + escAttr(favT('家')) +
+        ' <span aria-hidden="true">·</span> ' + escAttr(favT('不受筛选影响'));
+      favEls.group.value = favGroupBy;
+      favEls.selectBtn.classList.toggle('on', favSelect);
+      favEls.selectBtn.setAttribute('aria-pressed', favSelect ? 'true' : 'false');
+      favEls.bulk.hidden = !favSelect;
+      favSyncBulk();
+
+      var lists = favLists();
+      if (!n && !lists.length) {
+        favEls.body.innerHTML = '<div class="fv-zero">' + emojiImg('⭐') +
+          '<b class="fv-zero-t">' + escAttr(favT('收藏还是空的')) + '</b>' +
+          escAttr(favT('在结果里点星标就会出现在这里')) + '</div>';
+        return;
+      }
+      var keep = favEls.body.scrollTop;
+      var groups = favBuildGroups(), html = '';
+      for (var i = 0; i < groups.length; i++) html += favGroupHtml(groups[i]);
+      favEls.body.innerHTML = html;
+      favEls.body.scrollTop = keep;
+    }
+
+    // ---- E9: crop the map to one sub-collection --------------------------
+    function favPaintFocusBar() {
+      var bar = document.getElementById('fav-focus-bar');
+      if (!bar) return;
+      var L = favFocus ? favFindList(favFocus) : null;
+      if (!L) { bar.className = ''; bar.innerHTML = ''; return; }
+      // Body-level node: no observer covers it, so emoji are pre-swapped and
+      // text pre-translated right here (CLAUDE.md).
+      bar.innerHTML = '<div class="fv-focus">' +
+        (L.emoji ? emojiImg(L.emoji) : '') +
+        '<span class="fv-focus-t">' + escAttr(favT('正在看')) + ' ' +
+        escAttr(L.name) + '</span>' +
+        '<button type="button" class="fv-focus-btn" id="fv-focus-clear">' +
+        escAttr(favT('显示全部')) + '</button></div>';
+      bar.className = 'on';
+    }
+    function favSetFocus(listId) {
+      var L = listId ? favFindList(listId) : null;
+      favFocus = L ? L.id : null;
+      if (favFocus) {
+        var refs = favMembersOf(favFocus), s = new Set();
+        for (var i = 0; i < refs.length; i++) {
+          if (refs[i].indexOf('http') === 0) s.add(refs[i]);
+        }
+        favFocusRefs = s;
+        favGroupBy = 'list';
+        favCollapsed = {};      // the list being focused has to be readable
+      } else {
+        favFocusRefs = null;
+      }
+      favPaintFocusBar();
+      scheduleRecompute();      // map + 命中 count + result list, all at once
+      favRender();
+    }
+    window.__favFocus = favSetFocus;
+    window.__favCount = favCount;
+
+    // ---- E8: copy the list as plain text ---------------------------------
+    function favExecCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0;';
+      document.body.appendChild(ta);
+      var done = false;
+      try { ta.select(); done = document.execCommand('copy'); } catch (_) { done = false; }
+      if (ta.parentNode) ta.parentNode.removeChild(ta);
+      return done;
+    }
+    function favWriteClipboard(text) {
+      function ok() { showToast(favT('已复制清单'), {ms: 2000}); }
+      function bad() { showToast(favT('复制失败'), {ms: 3000}); }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(ok, function() {
+            if (favExecCopy(text)) ok(); else bad();
+          });
+          return;
+        }
+      } catch (_) {}
+      if (favExecCopy(text)) ok(); else bad();
+    }
+    function favCopyList(listId) {
+      var title, items = [], i;
+      if (listId) {
+        var L = favFindList(listId);
+        if (!L) return;
+        title = L.name;
+        var refs = favMembersOf(listId);
+        for (i = 0; i < refs.length; i++) {
+          var mi = favRefInfo(refs[i]);
+          if (mi) items.push(mi);
+        }
+      } else {
+        title = favT('收藏');
+        state.fav.forEach(function(u) {
+          var info = favRefInfo(u);
+          if (info) items.push(info);
+        });
+        items.sort(favByRating);
+      }
+      var lines = [title + ' · ' + items.length + ' ' + favT('家')];
+      for (i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (it.kind === 'rst') {
+          lines.push(it.d.name + ' · ★' +
+                     (it.d.rating == null ? '' : it.d.rating) + ' · ' + it.ref);
+        } else if (it.kind === 'gone') {
+          lines.push(it.ref);
+        } else {
+          lines.push(favPinEmoji(it.bm) + ' ' + favLabelOf(it));
+        }
+      }
+      favWriteClipboard(lines.join('\n'));
+    }
+
+    // ---- the "…" menu ----------------------------------------------------
+    function favCloseMenu() {
+      if (!favMenuEl) return;
+      favMenuEl.classList.remove('on');
+      favMenuEl.setAttribute('aria-hidden', 'true');
+      favMenuEl.innerHTML = '';
+      favMenuActions = [];
+    }
+    function favOpenMenu(anchor, items) {
+      if (!favMenuEl || !anchor) return;
+      favMenuActions = [];
+      var html = '', i;
+      for (i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (it.sep) { html += '<div class="fv-mi-sep"></div>'; continue; }
+        favMenuActions.push(it.run || null);
+        html += '<button type="button" role="menuitem" class="fv-mi' +
+          (it.danger ? ' danger' : '') + '" data-mi="' +
+          (favMenuActions.length - 1) + '">' +
+          (it.emoji ? emojiImg(it.emoji) : '') +
+          '<span class="fv-mi-t">' + escAttr(it.label) + '</span>' +
+          (it.check ? '<span aria-hidden="true">✓</span>' : '') + '</button>';
+      }
+      if (!favMenuActions.length) return;
+      favMenuEl.innerHTML = html;
+      favMenuEl.classList.add('on');
+      favMenuEl.setAttribute('aria-hidden', 'false');
+      var r = anchor.getBoundingClientRect();
+      var mw = favMenuEl.offsetWidth, mh = favMenuEl.offsetHeight;
+      var left = Math.min(r.right - mw, window.innerWidth - mw - 8);
+      if (left < 8) left = 8;
+      var top = r.bottom + 4;
+      if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+      favMenuEl.style.left = left + 'px';
+      favMenuEl.style.top = top + 'px';
+      var first = favMenuEl.querySelector('.fv-mi');
+      if (first) { try { first.focus(); } catch (_) {} }
+    }
+    // Menu for one collection's group header.
+    function favListMenu(anchor, listId) {
+      var focused = (favFocus === listId);
+      favOpenMenu(anchor, [
+        {label: favT('重命名'), run: function() {
+          if (typeof window.__flEditModal === 'function') {
+            window.__flEditModal(listId, function() { favRender(); });
+          }
+        }},
+        {label: favT('复制清单文本'), run: function() { favCopyList(listId); }},
+        {label: focused ? favT('显示全部') : favT('只看这个'),
+         run: function() { favSetFocus(focused ? null : listId); }},
+        {sep: true},
+        {label: favT('删除'), danger: true,
+         run: function() { favDeleteList(listId); }}
+      ]);
+    }
+    // Menu for one row: toggle membership in every collection, plus a way to
+    // make a new one on the spot.
+    function favRefMenu(anchor, ref) {
+      var lists = favLists(), items = [], i;
+      for (i = 0; i < lists.length; i++) {
+        (function(L) {
+          var inIt = favMembersOf(L.id).indexOf(ref) >= 0;
+          items.push({label: L.name, emoji: L.emoji || '', check: inIt,
+            run: function() {
+              if (inIt) window.__flRemove(L.id, ref);
+              else window.__flAdd(L.id, ref);
+              showToast(favT(inIt ? '已移除' : '已加入') + ' ' + L.name, {ms: 2200});
+            }});
+        })(lists[i]);
+      }
+      if (items.length) items.push({sep: true});
+      items.push({label: favT('新建子收藏夹'), run: function() {
+        if (typeof window.__flEditModal !== 'function') return;
+        window.__flEditModal(null, function(id) {
+          if (id) window.__flAdd(id, ref);
+        });
+      }});
+      favOpenMenu(anchor, items);
+    }
+    function favDeleteList(listId) {
+      var L = favFindList(listId);
+      if (!L) return;
+      var name = L.name, emoji = L.emoji, refs = favMembersOf(listId);
+      if (favFocus === listId) favSetFocus(null);
+      if (typeof window.__flDelete !== 'function' || !window.__flDelete(listId)) return;
+      // M-035's pattern: the row goes immediately, the undo rebuilds it.
+      // The rebuilt collection gets a fresh id (the old one is gone from
+      // every device by now) but keeps its name, icon and every member —
+      // and no member's star was ever touched by the delete.
+      showToast(favT('已删除') + ' ' + name, {
+        actionLabel: favT('撤销'), ms: 9000,
+        onAction: function() {
+          if (typeof window.__flCreate !== 'function') return;
+          var nid = window.__flCreate(name, emoji);
+          for (var i = 0; i < refs.length; i++) window.__flAdd(nid, refs[i]);
+          announce(favT('已恢复') + ' ' + name);
+        }
+      });
+    }
+
+    // ---- select mode + batch --------------------------------------------
+    function favSetSelect(on) {
+      favSelect = !!on;
+      if (!favSelect) { favChecked = {}; favCheckedN = 0; }
+      favRender();
+    }
+    // Ticking a box repaints ONE row: a full favRender() would detach the
+    // element the click landed on (and any focus with it) mid-gesture.
+    function favToggleCheck(ref, rowEl) {
+      if (favChecked[ref]) { delete favChecked[ref]; favCheckedN--; }
+      else { favChecked[ref] = 1; favCheckedN++; }
+      if (rowEl) {
+        var on = !!favChecked[ref];
+        rowEl.classList.toggle('is-checked', on);
+        var c = rowEl.querySelector('.wb-row-chk');
+        if (c) c.textContent = on ? '✓' : '';
+        favSyncBulk();
+      } else {
+        favRender();
+      }
+    }
+    function favCheckedRefs() {
+      var out = [];
+      for (var k in favChecked) if (favChecked.hasOwnProperty(k)) out.push(k);
+      return out;
+    }
+    // B4 + H2: N toggles, ONE saveCache write, ONE debounced PUT.
+    function favBulkBlack() {
+      var refs = favCheckedRefs(), changed = 0;
+      for (var i = 0; i < refs.length; i++) {
+        var u = refs[i];
+        if (u.indexOf('http') !== 0 || state.black.has(u)) continue;
+        toggleBlack(u, {defer: true});
+        changed++;
+      }
+      if (!changed) { favSetSelect(false); return; }
+      schedulePush();
+      refreshAllMarkers();
+      showToast(favT('已弃用') + ' ' + changed + ' ' + favT('家'));
+      favSetSelect(false);
+    }
+    function favBulkList(anchor, add) {
+      var lists = favLists(), items = [], i;
+      for (i = 0; i < lists.length; i++) {
+        (function(L) {
+          items.push({label: L.name, emoji: L.emoji || '', run: function() {
+            var refs = favCheckedRefs(), n = 0;
+            for (var j = 0; j < refs.length; j++) {
+              var okd = add ? window.__flAdd(L.id, refs[j])
+                            : window.__flRemove(L.id, refs[j]);
+              if (okd) n++;
+            }
+            showToast(favT(add ? '已加入' : '已移除') + ' ' + L.name +
+                      ' ' + n + ' ' + favT('家'), {ms: 2500});
+            favSetSelect(false);
+          }});
+        })(lists[i]);
+      }
+      if (add) {
+        if (items.length) items.push({sep: true});
+        items.push({label: favT('新建子收藏夹'), run: function() {
+          if (typeof window.__flEditModal !== 'function') return;
+          var refs = favCheckedRefs();
+          window.__flEditModal(null, function(id) {
+            if (!id) return;
+            for (var j = 0; j < refs.length; j++) window.__flAdd(id, refs[j]);
+            favSetSelect(false);
+          });
+        }});
+      }
+      favOpenMenu(anchor, items);
+    }
+
+    // ---- tab switching ---------------------------------------------------
+    function favApplyTab() {
+      var onFav = (wbTabPref === 'fav');
+      var tR = document.getElementById('wb-tab-results');
+      var tF = document.getElementById('wb-tab-fav');
+      if (tR) {
+        tR.classList.toggle('on', !onFav);
+        tR.setAttribute('aria-selected', onFav ? 'false' : 'true');
+      }
+      if (tF) {
+        tF.classList.toggle('on', onFav);
+        tF.setAttribute('aria-selected', onFav ? 'true' : 'false');
+      }
+      var ids = ['wb-list-tools', 'wb-list', 'wb-list-foot'];
+      for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) el.hidden = onFav;
+      }
+      var panel = document.getElementById('wb-fav');
+      if (panel) panel.classList.toggle('on', onFav);
+      favCloseMenu();
+      if (onFav) favRender();
+      else wbListRender(true);       // the window was measured while hidden
+      favSyncTab();
+    }
+    function wbSetTab(tab) {
+      wbTabPref = (tab === 'fav') ? 'fav' : 'results';
+      wbSaveListView();              // rides in tabelog.listView, no new key
+      favApplyTab();
+    }
+    window.__wbSetTab = wbSetTab;
+    (function() {
+      var tR = document.getElementById('wb-tab-results');
+      var tF = document.getElementById('wb-tab-fav');
+      if (tR) tR.addEventListener('click', function() { wbSetTab('results'); });
+      if (tF) tF.addEventListener('click', function() { wbSetTab('fav'); });
+      // Roving arrow keys inside the tablist — the two buttons are their own
+      // tab stops, so this is a convenience, not the only way through.
+      function onTabKey(ev) {
+        if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
+        ev.preventDefault();
+        var next = (ev.key === 'ArrowRight') ? tF : tR;
+        if (!next) return;
+        wbSetTab(next === tF ? 'fav' : 'results');
+        try { next.focus(); } catch (_) {}
+      }
+      if (tR) tR.addEventListener('keydown', onTabKey);
+      if (tF) tF.addEventListener('keydown', onTabKey);
+    })();
+
+    // ---- scaffolding + wiring --------------------------------------------
+    function favBuild() {
+      if (favEls) return favEls;
+      var panel = document.getElementById('wb-fav');
+      if (!panel) return null;
+      panel.innerHTML =
+        '<div id="fv-head">' +
+          '<div class="fv-sum" id="fv-sum"></div>' +
+          '<div class="fv-tools">' +
+            '<select id="fv-group" aria-label="' + escAttr(favT('分组')) + '">' +
+              '<option value="city">' + escAttr(favT('按城市')) + '</option>' +
+              '<option value="list">' + escAttr(favT('按子收藏夹')) + '</option>' +
+            '</select>' +
+            '<button id="fv-new" class="wb-tool-btn" type="button">＋ ' +
+              escAttr(favT('新建子收藏夹')) + '</button>' +
+            '<button id="fv-copy" class="wb-tool-btn" type="button">' +
+              escAttr(favT('复制清单文本')) + '</button>' +
+            '<button id="fv-select" class="wb-tool-btn" type="button"' +
+              ' aria-pressed="false">' + escAttr(favT('选择')) + '</button>' +
+          '</div>' +
+          '<div id="fv-bulk" hidden>' +
+            '<button id="fv-bulk-move" class="wb-tool-btn" type="button" disabled></button>' +
+            '<button id="fv-bulk-out" class="wb-tool-btn" type="button" disabled></button>' +
+            '<button id="fv-bulk-black" class="wb-tool-btn" type="button" disabled></button>' +
+            '<button id="fv-bulk-cancel" class="wb-tool-btn" type="button">' +
+              escAttr(favT('取消')) + '</button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="fv-body"></div>';
+      // Same trick as #wb-list: the two row-end glyphs are painted from a
+      // CSS variable so a hundred rows cost zero extra <img> elements.
+      panel.style.setProperty('--wb-star', 'url("' + wbEmojiUrl('⭐') + '")');
+      panel.style.setProperty('--wb-ban', 'url("' + wbEmojiUrl('🚫') + '")');
+      favEls = {
+        panel: panel,
+        sum: document.getElementById('fv-sum'),
+        group: document.getElementById('fv-group'),
+        body: document.getElementById('fv-body'),
+        selectBtn: document.getElementById('fv-select'),
+        bulk: document.getElementById('fv-bulk'),
+        bulkMove: document.getElementById('fv-bulk-move'),
+        bulkOut: document.getElementById('fv-bulk-out'),
+        bulkBlack: document.getElementById('fv-bulk-black')
+      };
+      favEls.group.addEventListener('change', function() {
+        favGroupBy = (favEls.group.value === 'list') ? 'list' : 'city';
+        favEls.body.scrollTop = 0;
+        favRender();
+      });
+      document.getElementById('fv-new').addEventListener('click', function() {
+        favCloseMenu();
+        if (typeof window.__flEditModal !== 'function') return;
+        window.__flEditModal(null, function() {
+          favGroupBy = 'list';
+          favRender();
+        });
+      });
+      document.getElementById('fv-copy').addEventListener('click', function() {
+        favCloseMenu();
+        favCopyList(null);
+      });
+      favEls.selectBtn.addEventListener('click', function() {
+        favSetSelect(!favSelect);
+      });
+      favEls.bulk.addEventListener('click', function(ev) {
+        var b = ev.target.closest ? ev.target.closest('button') : null;
+        if (!b) return;
+        if (b.id === 'fv-bulk-move') favBulkList(b, true);
+        else if (b.id === 'fv-bulk-out') favBulkList(b, false);
+        else if (b.id === 'fv-bulk-black') favBulkBlack();
+        else if (b.id === 'fv-bulk-cancel') favSetSelect(false);
+      });
+      favEls.body.addEventListener('click', function(ev) {
+        var t = ev.target;
+        var more = t.closest ? t.closest('.fv-more') : null;
+        var head = t.closest ? t.closest('.fv-grp-h') : null;
+        var grp = t.closest ? t.closest('.fv-grp') : null;
+        if (more) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          var row = t.closest('.wb-row');
+          if (row) favRefMenu(more, row.getAttribute('data-fav-ref'));
+          else if (grp && grp.getAttribute('data-list')) {
+            favListMenu(more, grp.getAttribute('data-list'));
+          }
+          return;
+        }
+        if (head) {
+          if (!grp) return;
+          var key = grp.getAttribute('data-grp');
+          if (favCollapsed[key]) delete favCollapsed[key];
+          else favCollapsed[key] = 1;
+          grp.classList.toggle('collapsed', !!favCollapsed[key]);
+          head.setAttribute('aria-expanded', favCollapsed[key] ? 'false' : 'true');
+          return;
+        }
+        var rowEl = t.closest ? t.closest('.wb-row') : null;
+        if (!rowEl) return;
+        var ref = rowEl.getAttribute('data-fav-ref');
+        var kind = rowEl.getAttribute('data-fav-kind');
+        var star = t.closest('.wb-row-fav');
+        if (star) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          toggleFav(ref);            // un-star; the row leaves on re-render
+          refreshAllMarkers();
+          favRender();
+          return;
+        }
+        if (favSelect) { favToggleCheck(ref, rowEl); return; }
+        if (kind === 'rst') {
+          var d = rowByUrl[ref];
+          if (d) openSheet(d);
+          return;
+        }
+        // Landmarks and pins are not in the cluster, so there is no card to
+        // open — fly to them instead.
+        var info = favRefInfo(ref);
+        if (info && info.bm && typeof info.bm.lat === 'number') {
+          map.flyTo([info.bm.lat, info.bm.lon], Math.max(map.getZoom(), 15));
+        }
+      });
+      favEls.body.addEventListener('scroll', favCloseMenu, {passive: true});
+      return favEls;
+    }
+
+    if (favMenuEl) {
+      favMenuEl.addEventListener('click', function(ev) {
+        var b = ev.target.closest ? ev.target.closest('.fv-mi') : null;
+        if (!b) return;
+        var idx = parseInt(b.getAttribute('data-mi'), 10);
+        var fn = favMenuActions[idx];
+        favCloseMenu();
+        if (typeof fn === 'function') { try { fn(); } catch (_) {} }
+      });
+    }
+    document.addEventListener('pointerdown', function(ev) {
+      if (!favMenuEl || !favMenuEl.classList.contains('on')) return;
+      if (favMenuEl.contains(ev.target)) return;
+      favCloseMenu();
+    }, true);
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape' && favMenuEl && favMenuEl.classList.contains('on')) {
+        favCloseMenu();
+      }
+    });
+    var favBarEl = document.getElementById('fav-focus-bar');
+    if (favBarEl) favBarEl.addEventListener('click', function(ev) {
+      if (ev.target.closest && ev.target.closest('#fv-focus-clear')) favSetFocus(null);
+    });
+
+    // ---- the three events that drive it ----------------------------------
+    document.addEventListener('fl:change', function() {
+      // A collection may have been renamed, emptied or deleted elsewhere
+      // (another tab, a sync merge) — drop a focus that no longer resolves.
+      if (favFocus && !favFindList(favFocus)) {
+        favFocus = null;
+        favFocusRefs = null;
+        favPaintFocusBar();
+        scheduleRecompute();
+      } else if (favFocus) {
+        var refs = favMembersOf(favFocus), s = new Set();
+        for (var i = 0; i < refs.length; i++) {
+          if (refs[i].indexOf('http') === 0) s.add(refs[i]);
+        }
+        favFocusRefs = s;
+        favPaintFocusBar();
+        scheduleRecompute();
+      }
+      favRender();
+    });
+    document.addEventListener('wb:results', function() {
+      favSyncTab();
+      // Re-render only when the favourite / blacklist sets actually moved —
+      // wb:results also fires on every pan, and a full repaint per pan would
+      // throw the scroll position away.
+      if (favIsOpen() && favSigNow() !== favSig) favRender();
+    });
+    document.addEventListener('wb:mode', function() {
+      if (!wbListOn()) { favCloseMenu(); return; }
+      favApplyTab();
+    });
+    favApplyTab();
 
     function apply() {
       readFilterInputs();
@@ -13256,6 +16087,9 @@ FILTER_JS_TEMPLATE = r"""
     var ffTrapRelease = null;
     function openFilterUI(opts) {
       opts = opts || {};
+      // F1: the phone drawer holds the same bottom slot — one line, and only
+      // this line, of mutual exclusion.
+      if (typeof favDrawerOpen === 'function' && favDrawerOpen()) closeFavDrawer();
       if (wbIsPhoneLike()) {
         if (bsActive) closeSheet();      // restaurant detail yields to filter
         ffSheet.classList.add('ff-open');
@@ -13652,6 +16486,209 @@ FILTER_JS_TEMPLATE = r"""
     window.__wbOpenFilter = openFilterUI;
     window.__wbCloseFilter = closeFilterUI;
 
+    // ===== M-031 / F1: the phone (<520px) results / collections drawer ====
+    // The ⭐ pill above #ff-fab opens #wb-left as a bottom drawer. Same
+    // element, same listeners, same observers as the >=520px column — the
+    // only new state is `body.wb-fav-open`, which wbListOn() reads.
+    //
+    // Deliberately NOT part of the layout: the drawer overlays the map and
+    // never touches --wb-bottom, so wbApplyMode() / wbRelocate() are
+    // untouched and #ff-sheet-content / #bs-content / #ss-box stay in their
+    // phone hosts (the M-027 structural invariant).
+    var wbFavFab      = document.getElementById('wb-fav-fab');
+    var wbFavBackdrop = document.getElementById('wb-fav-backdrop');
+    var wbFavGrip     = null;
+    var wbFavTrapRelease = null;
+    var wbUserLoc = null;       // {lat, lng} once #fab-locate produced a fix
+
+    // ---- distance sort (F1): map centre until the user locates -----------
+    function wbDistOptShown() {
+      return !!wbUserLoc || wbList.sort === 'distance';
+    }
+    function wbSortLabel(k) {
+      if (k === 'distance') return wbT(wbUserLoc ? '距我的位置' : '距地图中心');
+      return wbT(WB_SORT_LABEL[k]);
+    }
+    function wbSyncDistanceOpt() {
+      if (!wbEls || !wbEls.sort) return;
+      var opt = wbEls.sort.querySelector('option[value="distance"]');
+      if (!opt) return;
+      opt.hidden = !wbDistOptShown();
+      opt.textContent = wbSortLabel('distance');
+    }
+    // The locate plugin fires this on the map; it only ever runs because the
+    // user tapped #fab-locate (nothing on this page calls locate() itself).
+    try {
+      map.on('locationfound', function(e) {
+        if (!e || !e.latlng) return;
+        wbUserLoc = {lat: e.latlng.lat, lng: e.latlng.lng};
+        wbSyncDistanceOpt();
+        if (wbList.sort === 'distance') wbScheduleSort();
+      });
+    } catch (_) {}
+
+    // ---- open / close ----------------------------------------------------
+    function favDrawerOpen() {
+      return document.body.classList.contains('wb-fav-open');
+    }
+    // The tab the drawer should land on. The user's own last choice wins;
+    // the "start on 收藏 when there are favourites" default applies only
+    // while tabelog.listView has no tab field at all.
+    function wbFavStoredTab() {
+      try {
+        var raw = localStorage.getItem(WB_LIST_KEY);
+        if (!raw) return null;
+        var o = JSON.parse(raw);
+        if (o && (o.tab === 'fav' || o.tab === 'results')) return o.tab;
+      } catch (_) {}
+      return null;
+    }
+    function wbFavCount() {
+      return (typeof window.__favCount === 'function') ? window.__favCount() : 0;
+    }
+    function wbFavEnsureGrip() {
+      if (wbFavGrip || !wbLeftEl) return;
+      wbFavGrip = document.createElement('div');
+      wbFavGrip.id = 'wb-fav-grip';
+      wbFavGrip.innerHTML =
+        '<div class="wbf-bar" aria-hidden="true"></div>' +
+        '<button id="wb-fav-close" type="button" aria-label="' +
+        escAttr(localizeText('关闭')) + '">×</button>';
+      wbLeftEl.insertBefore(wbFavGrip, wbLeftEl.firstChild);
+      var x = document.getElementById('wb-fav-close');
+      if (x) x.addEventListener('click', function() { closeFavDrawer(); });
+    }
+    function openFavDrawer() {
+      if (!wbLeftEl || wbMode() !== 'phone' || favDrawerOpen()) return;
+      // Both dock to the bottom of a phone: whatever is there now yields.
+      if (ffIsOpen()) closeFilterUI();
+      if (bsActive) closeSheet();
+      wbFavEnsureGrip();
+      document.body.classList.add('wb-fav-open');
+      if (wbFavBackdrop) wbFavBackdrop.classList.add('on');
+      if (wbFavFab) wbFavFab.setAttribute('aria-expanded', 'true');
+      wbLeftEl.setAttribute('role', 'dialog');
+      wbLeftEl.setAttribute('aria-modal', 'true');
+      wbLeftEl.setAttribute('aria-label', localizeText('收藏与结果'));
+      // wbListOn() is true from here on, so the two wb:mode listeners build
+      // the list scaffolding and repaint the collections panel for us.
+      wbFavNotifyMode();
+      var want = wbFavStoredTab() || (wbFavCount() > 0 ? 'fav' : 'results');
+      if (typeof window.__wbSetTab === 'function') window.__wbSetTab(want);
+      wbSyncDistanceOpt();
+      uiPush('favdrawer');                        // M-015: Android back
+      if (wbFavTrapRelease) { try { wbFavTrapRelease(); } catch (_) {} }
+      // H2: the overlay we just displaced can still hold focus — closing the
+      // filter sheet leaves activeElement on its × (the sheet slides out but
+      // is never display:none), and trapFocus would then take THAT as the
+      // element to hand focus back to on close. Park focus first so the
+      // return target is the pill, which is what the user actually pressed.
+      try {
+        var a0 = document.activeElement;
+        if (a0 && a0 !== document.body && a0 !== wbFavFab
+            && !wbLeftEl.contains(a0) && typeof a0.blur === 'function') {
+          a0.blur();
+        }
+      } catch (_) {}
+      wbFavTrapRelease = trapFocus(wbLeftEl, null, wbFavFab);
+    }
+    // `silent` is set only when the caller is already inside a wb:mode
+    // dispatch — re-entering the same event would loop.
+    function closeFavDrawer(silent) {
+      if (!favDrawerOpen()) return;
+      // Class off first: the trap hands focus back to #wb-fav-fab, which is
+      // display:none while `wb-fav-open` is on <body>.
+      document.body.classList.remove('wb-fav-open');
+      if (wbFavBackdrop) wbFavBackdrop.classList.remove('on');
+      if (wbFavFab) wbFavFab.setAttribute('aria-expanded', 'false');
+      if (wbLeftEl) {
+        wbLeftEl.removeAttribute('role');
+        wbLeftEl.removeAttribute('aria-modal');
+        wbLeftEl.setAttribute('aria-label', localizeText('结果'));
+      }
+      var r = wbFavTrapRelease;
+      wbFavTrapRelease = null;
+      if (r) { try { r(); } catch (_) {} }
+      if (!silent) wbFavNotifyMode();
+      uiDrop('favdrawer');                        // M-015
+      // H2: trapFocus() hands focus back to whatever was active when the
+      // drawer opened, and that is not always the pill — open the drawer
+      // straight out of the filter sheet and activeElement is still a node
+      // inside the (now display:none) sheet, so its focus() is a silent
+      // no-op and the keyboard is left on <body>. Catch every version of
+      // "focus went nowhere", not just the literal body case.
+      if (wbFavFab && !wbFavFab.hidden) {
+        var a = document.activeElement;
+        var lost = !a || a === document.body || a === document.documentElement
+                   || !a.isConnected
+                   || (!a.offsetParent
+                       && !(a.getClientRects && a.getClientRects().length));
+        if (lost) { try { wbFavFab.focus(); } catch (_) {} }
+      }
+    }
+    // Re-uses the existing wb:mode contract instead of inventing a second
+    // one: the result list and the collections tab already rebuild / release
+    // themselves from it, and wbListOn() now answers for the drawer too.
+    function wbFavNotifyMode() {
+      try {
+        document.dispatchEvent(new CustomEvent('wb:mode', {detail: {mode: wbMode()}}));
+      } catch (_) {}
+    }
+    uiRegister('favdrawer', closeFavDrawer);      // M-015
+    window.__wbFavDrawer = {open: openFavDrawer, close: closeFavDrawer,
+                            isOpen: favDrawerOpen};
+
+    if (wbFavFab) wbFavFab.addEventListener('click', openFavDrawer);
+    if (wbFavBackdrop) {
+      wbFavBackdrop.addEventListener('click', function() { closeFavDrawer(); });
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && favDrawerOpen()) {
+        e.preventDefault();
+        closeFavDrawer();
+      }
+    });
+    // A restaurant card is the same bottom slot; let it win, exactly as the
+    // filter sheet already does. Watching the class rather than patching
+    // openSheet keeps this task out of the detail-card owner's file region.
+    if (typeof bsSheet !== 'undefined' && bsSheet && window.MutationObserver) {
+      try {
+        new MutationObserver(function() {
+          if (favDrawerOpen() && bsSheet.classList.contains('bs-open')) {
+            closeFavDrawer();
+          }
+        }).observe(bsSheet, {attributes: true, attributeFilter: ['class']});
+      } catch (_) {}
+    }
+    // Crossing 520px turns #wb-left back into a panel / column — drop the
+    // drawer state so no orphan scrim survives the rotation. Registered last,
+    // so the list and collections listeners have already reacted.
+    document.addEventListener('wb:mode', function(ev) {
+      var m = (ev && ev.detail && ev.detail.mode) || wbMode();
+      if (m !== 'phone' && favDrawerOpen()) closeFavDrawer(true);
+    });
+
+    // ---- the ⭐ entry pill ------------------------------------------------
+    // Visibility is #ff-fab's, verbatim: openSheet / closeSheet /
+    // openFilterUI / closeFilterUI all drive it through the `hidden`
+    // property, so mirroring the attribute is the whole rule.
+    function wbFavFabSync() {
+      if (!wbFavFab) return;
+      wbFavFab.hidden = !!(ffFab && ffFab.hidden);
+      var n = wbFavCount();
+      var b = wbFavFab.querySelector('.wbf-n');
+      if (b) b.textContent = n ? String(n) : '';
+    }
+    if (wbFavFab && ffFab && window.MutationObserver) {
+      try {
+        new MutationObserver(wbFavFabSync)
+          .observe(ffFab, {attributes: true, attributeFilter: ['hidden']});
+      } catch (_) {}
+    }
+    document.addEventListener('wb:results', wbFavFabSync);
+    document.addEventListener('fl:change', wbFavFabSync);
+    wbFavFabSync();
+
     // Filter reset. Extracted from an inline #ff-reset handler so the avatar
     // dropdown's reset row can call it too — see the menu wiring below.
     function resetFilters() {
@@ -13928,22 +16965,14 @@ FILTER_JS_TEMPLATE = r"""
     var ssmAcctPic = document.getElementById('ssm-acct-pic');
     var ssmAcctName = document.getElementById('ssm-acct-name');
     var ssmAcctEmail = document.getElementById('ssm-acct-email');
-    var ssmSigninHelp = document.getElementById('ssm-signin-help');
 
-    // Hand-tune the help paragraph per language so the runtime CJK localizer
-    // doesn't fragment "登录后…会跨设备同步" into Saved/Discard/Sights-shaped
-    // word salad. zh-CN keeps the HTML source; zh-TW would auto-convert via
-    // OpenCC but the hand version reads cleaner.
-    (function tuneHelp() {
-      if (!ssmSigninHelp) return;
-      if (activeLang === 'en') {
-        ssmSigninHelp.textContent = 'Once signed in, your Saved / Discard / Sights sync across devices. Otherwise they stay in this browser only.';
-      } else if (activeLang === 'ja') {
-        ssmSigninHelp.textContent = 'サインインすると、お気に入り / 非表示リスト / 観光スポット が端末間で同期されます。それ以外はこのブラウザ内のみに保存されます。';
-      } else if (activeLang === 'zh-TW') {
-        ssmSigninHelp.textContent = '登入後，收藏 / 棄用 / 觀光景點 會跨裝置同步。未登入則僅存於目前的瀏覽器。';
-      }
-    })();
+    // M-118: the signed-out pane used to carry ONE long sentence, which the
+    // runtime CJK localizer fragmented into "Saved / Discard / Sights"-shaped
+    // word salad — so it also carried a hand-written override per language
+    // right here. The copy is now four short lines in SEARCH_BOX_HTML, each
+    // one a single CJK run with its own entry in data/i18n/{en,ja}.json, so
+    // the ordinary run substitution translates every one of them whole and
+    // the per-language override has nothing left to fix.
 
     // Single auth-state refresh — keeps the avatar + the menu pane in sync,
     // and lazily renders Google's sign-in button into ssm-signin-btn the
@@ -14031,12 +17060,36 @@ FILTER_JS_TEMPLATE = r"""
     // import can only ever add, never clobber existing state. After a merge
     // we schedulePush() — same path a normal star/blacklist toggle takes —
     // which saves locally and (when signed in) flushes to the Worker/KV.
+    // M-032: an exported favorites.json used to be a list of opaque
+    // tabelog.com URLs — unreadable by the person it was sent to and
+    // useless in a spreadsheet. Each entry now carries the name, the rating
+    // and the city alongside the url. Two hard constraints:
+    //   * `schema` stays 1. Nothing gates on it, and bumping it could make
+    //     an older build decide it can't read a file it reads perfectly.
+    //   * this shape must NEVER reach buildBody(). The Worker blob's
+    //     favorites/blacklist are plain URL-string arrays and the Worker
+    //     replaces the blob wholesale — an object array there would rewrite
+    //     every other device's state into a shape the readers don't expect.
+    // Import already tolerated both (pickUrl takes a string or an object),
+    // so old files and new files both round-trip.
+    function exportEntry(u) {
+      var d = rowByUrl[u];
+      // `!d.detail_url` also rejects the Object.prototype members a URL like
+      // "constructor" would otherwise resolve to.
+      if (!d || !d.detail_url) return {url: u};
+      return {
+        url: u,
+        name: d.name || '',
+        rating: (d.rating == null ? null : d.rating),
+        city: d.city || ''
+      };
+    }
     function backupBlob() {
       return {
         schema: 1,
         app: 'jpfoodmap',
-        favorites: Array.from(state.fav),
-        blacklist: Array.from(state.black),
+        favorites: Array.from(state.fav).map(exportEntry),     // M-032
+        blacklist: Array.from(state.black).map(exportEntry),   // M-032
         bookmarks: bookmarks
       };
     }
@@ -14100,9 +17153,15 @@ FILTER_JS_TEMPLATE = r"""
       cb.checked  = available;
     }
     function openImportModal(norm) {
-      // Bookmark array carries real pins + metadata-only "hidden" tombstones;
-      // only count the real pins, split into 景点 (attraction) vs 书签.
-      var realBm = norm.bookmarks.filter(function(b) { return b.category !== 'hidden'; });
+      // Bookmark array carries real pins + metadata-only entries: "hidden"
+      // tombstones for built-ins and (M-031 / E2) the sub-collection list /
+      // member rows. Only count the real pins, split into 景点 (attraction)
+      // vs 书签 — "3 个书签" for a file whose bookmarks array is mostly list
+      // metadata is a lie about what the user is about to import. doImport
+      // still carries every entry across, metadata included.
+      var realBm = norm.bookmarks.filter(function(b) {
+        return b.category !== 'hidden' && b.category !== 'meta';
+      });
       var attrN  = realBm.filter(function(b) { return b.category === 'attraction'; }).length;
       var pinN   = realBm.length - attrN;
       setImpRow(impFavCb,   document.getElementById('imp-fav-n'),
@@ -14223,8 +17282,12 @@ FILTER_JS_TEMPLATE = r"""
           if (!bm.id || existing.has(bm.id)) return;   // dedup; skip id-less junk
           // M-133: coordinates from a hand-edited or foreign export were
           // never checked, so junk pins rode straight up to the cloud.
-          // "hidden" tombstones legitimately carry no coordinates at all.
-          if (bm.category !== 'hidden') {
+          // "hidden" tombstones legitimately carry no coordinates at all —
+          // and so do the M-031 / E2 sub-collection rows (category 'meta'),
+          // which would otherwise be silently counted as rejected junk and
+          // a user's exported lists would not survive an export/import trip.
+          // Everything else still has to prove it is a real place.
+          if (bm.category !== 'hidden' && bm.category !== 'meta') {
             if (!(Number.isFinite(bm.lat) && Math.abs(bm.lat) <= 90 &&
                   Number.isFinite(bm.lon) && Math.abs(bm.lon) <= 180)) {
               rejected++;
@@ -14497,6 +17560,549 @@ FILTER_JS_TEMPLATE = r"""
       } else if (lsw && lsw.q && ssInput) {
         ssInput.value = lsw.q;
         ssWrap.classList.add('has-text');
+      }
+    } catch (_) {}
+
+    // ===== M-066 · M-109 · M-110 · M-119: onboarding / legend / about =====
+    // Everything a first-time visitor needs before the map means anything,
+    // plus the install path for the 30% of sessions that happen on a phone
+    // in Japan. Two new localStorage keys, BOTH LOCAL ONLY — neither is in
+    // the sync blob, neither is ever sent to the Worker, neither goes near
+    // buildBody():
+    //   tabelog.seenIntro    '1' once the value bar has been dismissed
+    //   tabelog.installHint  {snoozedUntil, shownCount, firstShownAt, never}
+    var SEEN_INTRO_KEY   = 'tabelog.seenIntro';     // M-109
+    var INSTALL_HINT_KEY = 'tabelog.installHint';   // M-066
+    var OB_SNOOZE_MS = 30 * 24 * 3600 * 1000;   // "稍后" / prompt dismissed
+    var OB_WINDOW_MS = 90 * 24 * 3600 * 1000;   // at most 3 offers per window
+
+    // ---- one shell for the three dialogs ---------------------------------
+    // Same contract as kbHelpOpen/Close: uiPush/uiDrop so Android's back
+    // gesture and the global Escape both close them, trapFocus so Tab can't
+    // walk out into the map, focus handed back to whatever opened it.
+    function obDialog(id, kind) {
+      var el = document.getElementById(id);
+      var release = null;
+      var api = {
+        el: el,
+        isOpen: function() { return !!el && !el.hidden; },
+        open: function(returnTo) {
+          if (!el || !el.hidden) return;
+          el.hidden = false;
+          uiPush(kind);
+          release = trapFocus(el, null, returnTo || null);
+        },
+        close: function() {
+          if (!el || el.hidden) return;
+          el.hidden = true;
+          if (release) { var r = release; release = null; try { r(); } catch (_) {} }
+          uiDrop(kind);
+        }
+      };
+      uiRegister(kind, api.close);
+      var x = el && el.querySelector('.ob-close');
+      if (x) x.addEventListener('click', api.close);
+      return api;
+    }
+    var obLegend  = obDialog('legend-pop',   'legend');
+    var obAbout   = obDialog('about-modal',  'about');
+    var obInstall = obDialog('install-help', 'installhelp');
+
+    // ---- M-109 / M-110: the legend's two generated blocks -----------------
+    // Both are built from the same tables the markers read, so the legend
+    // can never drift from what is actually painted.
+    (function buildLegend() {
+      var pricesEl = document.getElementById('legend-prices');
+      if (pricesEl && typeof PRICE_BUCKETS !== 'undefined' && PRICE_BUCKETS) {
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < PRICE_BUCKETS.length; i++) {
+          var key = PRICE_BUCKETS[i][0];
+          var dot = document.createElement('span');
+          dot.className = 'ob-dot';
+          dot.style.background = BUCKET_COLOR[key] || '#9ca3af';
+          var lab = document.createElement('span');
+          lab.textContent = localizeText(PRICE_BUCKETS[i][1]);
+          frag.appendChild(dot);
+          frag.appendChild(lab);
+        }
+        pricesEl.appendChild(frag);
+      }
+      var genresEl = document.getElementById('legend-genres');
+      if (genresEl) {
+        var ex = ['寿司·海鲜', '拉面·沾面', '咖啡·三明治'];
+        var gfrag = document.createDocumentFragment();
+        for (var g = 0; g < ex.length; g++) {
+          var ic = document.createElement('span');
+          ic.className = 'ob-badge';
+          // emojiImg, not a bare glyph: #legend-genres is not one of the
+          // observed containers, so nothing would swap it afterwards.
+          ic.innerHTML = emojiImg((GENRE_EMOJI && GENRE_EMOJI[ex[g]]) || '🍽️');
+          var nm = document.createElement('span');
+          nm.textContent = localizeText(ex[g]);
+          gfrag.appendChild(ic);
+          gfrag.appendChild(nm);
+        }
+        genresEl.appendChild(gfrag);
+      }
+    })();
+
+    // ---- M-119: 关于本站 --------------------------------------------------
+    function obOpenAbout(returnTo) {
+      // The curation rule has exactly one authored wording, in the
+      // price-curation help popover — and wireHelpTriggers() has already
+      // swapped that node into the active language. Copy it rather than
+      // fork it.
+      var cur = document.getElementById('about-curation');
+      var src = document.querySelector('.ff-help-section[data-help-for="price-curation"]');
+      if (cur && src && !cur.textContent) cur.textContent = src.textContent;
+      obAbout.open(returnTo);
+    }
+    var obDelBtn = document.getElementById('about-delete');
+    if (obDelBtn) obDelBtn.addEventListener('click', function(e) {
+      // The account menu closes itself on any outside click; without this the
+      // click that opened it would bubble on and shut it in the same tick.
+      e.stopPropagation();
+      // Deliberately NOT a second implementation of "delete my data":
+      // #ssm-delete-cloud is the only place in this codebase allowed to
+      // clear localStorage (M-008), and it arms/confirms before it fires.
+      obAbout.close();
+      try { openAvatarMenu(); } catch (_) {}
+      var d = document.getElementById('ssm-delete-cloud');
+      if (d) {
+        try { d.scrollIntoView({block: 'nearest'}); } catch (_) {}
+        try { d.focus(); } catch (_) {}
+      }
+    });
+
+    // ---- M-066 / M-145 / M-197: install ----------------------------------
+    function obHintRead() {
+      try {
+        var r = JSON.parse(localStorage.getItem(INSTALL_HINT_KEY) || '{}');
+        return (r && typeof r === 'object') ? r : {};
+      } catch (_) { return {}; }
+    }
+    function obHintWrite(r) {
+      try { localStorage.setItem(INSTALL_HINT_KEY, JSON.stringify(r)); } catch (_) {}
+    }
+    function obSnooze(days) {
+      var r = obHintRead();
+      r.snoozedUntil = Date.now() + days * 24 * 3600 * 1000;
+      obHintWrite(r);
+    }
+    // iPad on iPadOS 13+ reports platform MacIntel; maxTouchPoints is what
+    // separates it from a desktop Mac. iOS Chrome / Edge / Firefox are all
+    // WebKit and all install through the same share sheet — the integrated
+    // report corrected the earlier "send them to Safari" advice, so there
+    // is no browser branch inside iOS here.
+    function obIsIOS() {
+      var ua = navigator.userAgent || '';
+      if (/iPad|iPhone|iPod/.test(ua)) return true;
+      return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+    }
+    function obIsDesktopChromium() {
+      var ua = navigator.userAgent || '';
+      return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Android|Mobile/.test(ua);
+    }
+    function obShowInstallHelp(returnTo) {
+      var ios = document.getElementById('ih-ios');
+      var dsk = document.getElementById('ih-desktop');
+      var gen = document.getElementById('ih-generic');
+      var useIos = obIsIOS();
+      var useDsk = !useIos && obIsDesktopChromium();
+      if (ios) ios.hidden = !useIos;
+      if (dsk) dsk.hidden = !useDsk;
+      // Neutral fallback: claims neither support nor the lack of it.
+      if (gen) gen.hidden = useIos || useDsk;
+      obInstall.open(returnTo);
+    }
+    function obTriggerInstall(returnTo) {
+      if (obDeferredPrompt) {
+        var p = obDeferredPrompt;
+        obDeferredPrompt = null;      // the event is single-use
+        try { p.prompt(); } catch (_) { return; }
+        try {
+          if (p.userChoice && p.userChoice.then) {
+            p.userChoice.then(function(c) {
+              if (c && c.outcome === 'dismissed') obSnooze(30);
+            }, function() {});
+          }
+        } catch (_) {}
+        return;
+      }
+      obShowInstallHelp(returnTo);
+    }
+
+    // ---- the three new avatar-menu rows ---------------------------------
+    // Built here rather than in SEARCH_BOX_HTML so the menu markup keeps one
+    // owner; localizeText() at construction because the one-shot
+    // localizeTree(document.body) has already run by now.
+    var obInstallRow = null;
+    (function mountMenuRows() {
+      var menu = document.getElementById('ss-menu');
+      if (!menu) return;
+      function row(id, icon, label) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ssm-row';
+        b.id = id;
+        var i = document.createElement('span');
+        i.setAttribute('aria-hidden', 'true');
+        i.textContent = icon;
+        var t = document.createElement('span');
+        t.textContent = localizeText(label);
+        b.appendChild(i);
+        b.appendChild(t);
+        try { emojify(b); } catch (_) {}
+        return b;
+      }
+      var sep = document.createElement('div');
+      sep.className = 'ssm-divider';
+      var legendRow  = row('ssm-legend',  '🎨',  '地图图例');
+      var aboutRow   = row('ssm-about',   'ⓘ',  '关于本站');
+      var installRow = row('ssm-install', '⬇️', '安装为应用');
+      obInstallRow = installRow;
+      legendRow.addEventListener('click', function() {
+        closeAvatarMenu();
+        obLegend.open(document.getElementById('ss-avatar'));
+      });
+      aboutRow.addEventListener('click', function() {
+        closeAvatarMenu();
+        obOpenAbout(document.getElementById('ss-avatar'));
+      });
+      installRow.addEventListener('click', function() {
+        closeAvatarMenu();
+        obTriggerInstall(document.getElementById('ss-avatar'));
+      });
+      // Land above the privacy/data block: help before legal.
+      var anchor = document.getElementById('ssm-privacy-link');
+      anchor = anchor ? anchor.previousElementSibling : null;   // section label
+      if (anchor && anchor.previousElementSibling
+          && anchor.previousElementSibling.classList
+          && anchor.previousElementSibling.classList.contains('ssm-divider')) {
+        anchor = anchor.previousElementSibling;
+      }
+      var nodes = [sep, legendRow, aboutRow, installRow];
+      for (var i = 0; i < nodes.length; i++) {
+        if (anchor) menu.insertBefore(nodes[i], anchor);
+        else menu.appendChild(nodes[i]);
+      }
+      obRefreshInstallUi();
+    })();
+
+    // ---- M-066: the one-shot snackbar after the first favourite ----------
+    var obSnackEl    = document.getElementById('install-snack');
+    var obSnackTimer = 0;
+    var obSnackShown = false;      // once per page load, no exceptions
+    function obHideSnack() {
+      if (obSnackTimer) { clearTimeout(obSnackTimer); obSnackTimer = 0; }
+      if (obSnackEl) obSnackEl.hidden = true;
+    }
+    // Never interrupt something the user is in the middle of.
+    function obBusy() {
+      if (document.getElementById('boot-fail-banner')) return true;
+      var m;
+      m = document.getElementById('bm-modal');
+      if (m && m.classList.contains('bm-open')) return true;
+      m = document.getElementById('imp-modal');
+      if (m && m.classList.contains('imp-open')) return true;
+      m = document.getElementById('fl-modal');
+      if (m && m.classList.contains('fl-open')) return true;
+      m = document.getElementById('ss-menu');
+      if (m && m.classList.contains('open')) return true;
+      m = document.getElementById('kb-help');
+      if (m && !m.hidden) return true;
+      if (obLegend.isOpen() || obAbout.isOpen() || obInstall.isOpen()) return true;
+      return false;
+    }
+    function obSnackEligible() {
+      if (obSnackShown || !obSnackEl) return false;
+      if (obIsStandalone() || obInstalled) return false;
+      var r = obHintRead();
+      if (r.never) return false;
+      if (r.snoozedUntil && Date.now() < r.snoozedUntil) return false;
+      if (r.firstShownAt && (Date.now() - r.firstShownAt) < OB_WINDOW_MS
+          && (r.shownCount || 0) >= 3) return false;
+      // A browser we can neither prompt nor walk through gets nothing but
+      // the (always-present) menu row — no snackbar that leads nowhere.
+      if (!obDeferredPrompt && !obIsIOS()) return false;
+      return true;
+    }
+    // Sit above the detail card rather than over its buttons.
+    function obPlaceSnack() {
+      if (!obSnackEl) return;
+      var base = 16;
+      var sheet = document.getElementById('bs-sheet');
+      if (sheet) {
+        var r = sheet.getBoundingClientRect();
+        if (r.height > 0 && r.top > 0 && r.top < window.innerHeight - 8) {
+          base = Math.max(base, window.innerHeight - r.top + 12);
+        }
+      }
+      base = Math.min(base, Math.max(16, window.innerHeight - 110));
+      obSnackEl.style.bottom = 'calc(env(safe-area-inset-bottom) + ' + base + 'px)';
+    }
+    function obMaybeSnack() {
+      if (!obSnackEligible()) return;
+      obSnackShown = true;   // claimed for this load even if we bail below
+      // The same tap also fires the "已加入收藏" toast and, for an anonymous
+      // visitor, the "已保存在此浏览器" one. Three stacked notices at once is
+      // noise, so wait for #sync-stack to drain (bounded — if it never does,
+      // give up rather than surfacing minutes after the action).
+      var obWaited = 0;
+      setTimeout(function show() {
+        if (obBusy() || obIsStandalone() || obInstalled) return;
+        var stack = document.getElementById('sync-stack');
+        if (stack && stack.children.length && obWaited < 9000) {
+          obWaited += 700;
+          setTimeout(show, 700);
+          return;
+        }
+        var r = obHintRead();
+        var now = Date.now();
+        if (!r.firstShownAt || (now - r.firstShownAt) >= OB_WINDOW_MS) {
+          r.firstShownAt = now;
+          r.shownCount = 0;
+        }
+        r.shownCount = (r.shownCount || 0) + 1;
+        obHintWrite(r);
+        obPlaceSnack();
+        obSnackEl.hidden = false;
+        obSnackTimer = setTimeout(obHideSnack, 12000);
+      }, 900);
+    }
+    (function wireSnack() {
+      if (!obSnackEl) return;
+      var go = document.getElementById('is-go');
+      if (go) go.addEventListener('click', function() {
+        obHideSnack();
+        obTriggerInstall(null);
+      });
+      var later = document.getElementById('is-later');
+      if (later) later.addEventListener('click', function() {
+        obHideSnack();
+        obSnooze(30);
+      });
+      var never = document.getElementById('is-never');
+      if (never) never.addEventListener('click', function() {
+        obHideSnack();
+        var r = obHintRead();
+        r.never = true;                 // local only; the menu row stays
+        obHintWrite(r);
+      });
+    })();
+    // The trigger: the first time this page load turns a restaurant INTO a
+    // favourite. Wrapping toggleFav keeps the hook in one place instead of
+    // sprinkling call-site checks through the card, the list and the bulk
+    // actions — every one of them goes through here.
+    if (typeof toggleFav === 'function') {
+      var obOrigToggleFav = toggleFav;
+      toggleFav = function(url) {
+        var was = state.fav.has(url);
+        var out = obOrigToggleFav.apply(this, arguments);
+        if (!was && state.fav.has(url)) obMaybeSnack();
+        return out;
+      };
+    }
+
+    // M-066: everything above hides itself once the app is installed —
+    // matchMedia standalone, iOS navigator.standalone, or a live
+    // appinstalled event this session.
+    function obRefreshInstallUi() {
+      var hide = obIsStandalone() || obInstalled;
+      if (obInstallRow) obInstallRow.hidden = hide;
+      if (hide) {
+        obHideSnack();
+        if (obInstall.isOpen()) obInstall.close();
+      }
+    }
+    obOnInstallState = obRefreshInstallUi;   // let the module-scope listeners in
+    obRefreshInstallUi();
+
+    // ---- M-109: the first-visit value bar --------------------------------
+    (function mountIntroBar() {
+      var bar = document.getElementById('intro-bar');
+      if (!bar) return;
+      var seen = '1';
+      try { seen = localStorage.getItem(SEEN_INTRO_KEY); } catch (_) { seen = '1'; }
+      if (seen === '1') return;              // dismissed once, gone forever
+      function markSeen() {
+        try { localStorage.setItem(SEEN_INTRO_KEY, '1'); } catch (_) {}
+      }
+      // Release QA (2.0.0): on the phone layouts an open bottom sheet lifts
+      // the FAB stack (M-071) straight into the band this bar occupies
+      // (416x657: stack y=102, bar y=64-168) and the bar, injected later at
+      // the same z-index, swallowed every tap on locate / layers. So the bar
+      // yields while a sheet is up and comes back when it closes — never
+      // marked seen by that, only by the user's own × / CTA. In mid / wide
+      // the card lives in its own column and the bar stays.
+      var shown = false, dismissed = false;
+      var bsEl = document.getElementById('bs-sheet');
+      function sheetUp() {
+        return !!(bsEl && bsEl.classList.contains('bs-open')) &&
+               !/\bwb-(mid|wide)\b/.test(document.body.className);
+      }
+      function paint() { bar.hidden = dismissed || !shown || sheetUp(); }
+      function dismiss() { markSeen(); dismissed = true; paint(); }
+      if (bsEl && window.MutationObserver) {
+        new MutationObserver(paint).observe(bsEl, {attributes: true, attributeFilter: ['class']});
+      }
+      document.addEventListener('wb:mode', paint);
+      var x = document.getElementById('ib-close');
+      if (x) x.addEventListener('click', dismiss);
+      var reg = document.getElementById('ib-region');
+      if (reg) reg.addEventListener('click', function(e) {
+        // The filter popover installs a document-level outside-click closer
+        // (see wbFilterPop below); without this the click that opened it
+        // would bubble on and shut it again in the same tick.
+        e.stopPropagation();
+        dismiss();
+        try {
+          if (typeof window.__wbOpenFilter === 'function') {
+            window.__wbOpenFilter({focus: '#ff-region'});
+          } else {
+            openFilterUI({focus: '#ff-region'});
+          }
+        } catch (_) {}
+      });
+      var leg = document.getElementById('ib-legend');
+      if (leg) leg.addEventListener('click', function(e) {
+        e.stopPropagation();
+        markSeen();       // the bar stays put under the dialog
+        obLegend.open(e.currentTarget);
+      });
+      // Show only once the payload has actually painted: .ff-count still
+      // reading its placeholder means boot is in flight, and a boot failure
+      // banner outranks an introduction. Deliberately NO locate() here —
+      // 70% of sessions are trip planning from outside Japan, and an
+      // automatic pan would also throw away the restored tabelog.mapView.
+      var tries = 0;
+      function ready() {
+        if (document.getElementById('boot-fail-banner')) return false;
+        var c = document.querySelector('.ff-count');
+        if (!c) return false;
+        var t = (c.textContent || '').trim();
+        return !!t && t !== '–' && t !== '-' && t !== '—';
+      }
+      function tick() {
+        if (++tries > 10) return;
+        if (!ready()) { setTimeout(tick, 400); return; }
+        shown = true;
+        paint();
+      }
+      setTimeout(tick, 600);
+    })();
+
+    // ===== M-032: ?r=<id> single-restaurant deep link ======================
+    // The one shareable URL this site has. `id` is the trailing numeric
+    // segment of the Tabelog detail_url in base36 — all 9,807 rows have one,
+    // all of them distinct, at most 5 characters. Nothing is baked into
+    // restaurants.json for this: the reverse table is built lazily, once,
+    // the first time a link is actually consumed or produced twice.
+    // Deliberately NOT shareable: user pins (private), the map view, the
+    // filter state and the user's location. Only a public restaurant page.
+    var shareIdx = null;                       // Map(base36 -> row)
+    function shareIdOf(d) {
+      var m = d && d.detail_url && /\/(\d+)\/?$/.exec(d.detail_url);
+      return m ? Number(m[1]).toString(36) : '';
+    }
+    function shareRowById(id) {
+      if (!shareIdx) {
+        shareIdx = new Map();
+        for (var sIdx = 0; sIdx < data.length; sIdx++) {
+          var sid = shareIdOf(data[sIdx]);
+          if (sid) shareIdx.set(sid, data[sIdx]);
+        }
+      }
+      return shareIdx.get(id) || null;
+    }
+    // Built from origin + pathname, never from location.href: ?lang would
+    // ride along and readLangParam() persists whatever it finds into the
+    // recipient's tabelog.lang — one shared link would permanently switch
+    // somebody else's UI language.
+    function shareUrlFor(d) {
+      var id = shareIdOf(d);
+      if (!id) return '';
+      return window.location.origin + window.location.pathname + '?r=' + id;
+    }
+    // MUST be called synchronously from the click handler: navigator.share
+    // needs a live user activation, and an await before it turns the call
+    // into a NotAllowedError. Three tiers, same shape as #bm-copy's
+    // coordinate copy: share sheet -> async clipboard -> execCommand.
+    function shareRestaurant(d, ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      var url = shareUrlFor(d);
+      if (!url) return;
+      function copied() { showToast(localizeText('已复制链接'), {ms: 2000}); }
+      function legacy() {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = url;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          copied();
+        } catch (_) {}
+      }
+      function copy() {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(copied, legacy);
+        } else {
+          legacy();
+        }
+      }
+      if (navigator.share) {
+        try {
+          var p = navigator.share({title: d.name || '', url: url});
+          if (p && p.catch) {
+            // AbortError is the user closing the share sheet — that is a
+            // completed interaction, not a failure to fall back from.
+            p.catch(function(err) {
+              if (err && err.name === 'AbortError') return;
+              copy();
+            });
+          }
+          return;
+        } catch (_) { /* synchronous throw: no share target — copy instead */ }
+      }
+      copy();
+    }
+    window.__shareUrlFor    = shareUrlFor;      // M-032: used by the card
+    window.__shareRestaurant = shareRestaurant; // M-032
+    // Consume ?r= exactly once, in this order:
+    //   1. a language-switch reload wins — it already reopened the card
+    //      above (bsActive), and the ?r= that started the session is still
+    //      in the URL, so acting on it again would open the same card twice;
+    //   2. strip the parameter with replaceState *before* opening anything,
+    //      so it is gone even if the lookup misses and the entry the card's
+    //      uiPush() lands on top of is already clean (one back press then
+    //      returns to a bare URL, still on this site);
+    //   3. openSheet() — which pushes the single new history entry.
+    // An unknown or malformed id is ignored in silence: a stale link should
+    // still land the recipient on a working map, not on an error.
+    try {
+      var shareParam = new URLSearchParams(window.location.search).get('r');
+      if (shareParam) {
+        var shareRow = bsActive ? null : shareRowById(shareParam);
+        var shareLoc = new URL(window.location.href);
+        shareLoc.searchParams.delete('r');       // ?lang and the hash survive
+        history.replaceState(history.state, '',
+                             shareLoc.pathname + shareLoc.search + shareLoc.hash);
+        if (shareRow) {
+          // openSheet only pans; the recipient's saved map view is usually
+          // in another prefecture entirely, so put the map there first.
+          // animate:false — this is boot, not a navigation.
+          if (typeof shareRow.lat === 'number' && typeof shareRow.lon === 'number') {
+            try {
+              map.setView([shareRow.lat, shareRow.lon],
+                          Math.max(map.getZoom(), 16), {animate: false});
+            } catch (_) {}
+          }
+          openSheet(shareRow);
+        }
       }
     } catch (_) {}
   }
@@ -15389,7 +18995,13 @@ def main(argv: list[str] | None = None) -> None:
     m.get_root().html.add_child(folium.Element(MAP_FAB_HTML))
     m.get_root().html.add_child(folium.Element(SEARCH_BOX_HTML))
     m.get_root().html.add_child(folium.Element(BOOKMARKS_MODAL_HTML))
+    m.get_root().html.add_child(folium.Element(FAV_LIST_MODAL_HTML))  # M-031 / E2
     m.get_root().html.add_child(folium.Element(HELP_POPOVER_HTML))
+    # M-066 / M-109 / M-110 / M-119: intro bar, legend, about, install helper.
+    # Anywhere in <body> works for the markup; the position matters only for
+    # the cluster-colour override inside it, which has to land after folium's
+    # <head> <link> to MarkerCluster.Default.css.
+    m.get_root().html.add_child(folium.Element(ONBOARD_HTML))
     # M-033/M-034/M-028/M-089: sync banners, toasts, empty-state cards.
     # Added after the search box so its CSS (avatar badge, #ff-count.is-zero)
     # wins the tie against the earlier blocks it decorates.
@@ -15400,6 +19012,12 @@ def main(argv: list[str] | None = None) -> None:
     m.get_root().html.add_child(folium.Element(WORKBENCH_HTML))
     # M-027 / B1: result-list styling, right after the shell it fills.
     m.get_root().html.add_child(folium.Element(RESULT_LIST_HTML))
+    # M-031 / E1-E2-E8-E9: the collections tab, after the .wb-row rules it reuses.
+    m.get_root().html.add_child(folium.Element(FAV_TAB_HTML))
+    # M-031 / F1: the phone drawer. Last of the shell blocks on purpose — its
+    # `body.wb-fav-open` rules have to outrank the `body.wb-split` ones in
+    # WORKBENCH_HTML, which have identical specificity.
+    m.get_root().html.add_child(folium.Element(PHONE_DRAWER_HTML))
     m.get_root().html.add_child(folium.Element(filter_js))
 
     # M-020: folium writes with a plain open('w'), and the old code then
