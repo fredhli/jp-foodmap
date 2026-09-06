@@ -30,6 +30,7 @@ import io
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -49,6 +50,28 @@ def _tmp_path(path: Path) -> Path:
     """Sibling temp file — must live on the same filesystem as `path`,
     otherwise `replace` degrades to a non-atomic copy."""
     return path.with_name(path.name + TMP_SUFFIX)
+
+
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    """`tmp.replace(path)`, retried on Windows sharing violations.
+
+    On Windows `os.replace` fails with PermissionError (WinError 5 / 32) when
+    another process has the target open — Dropbox indexing a file that was
+    written a second ago, or Defender scanning it. Seen 2026-09-06 on the
+    google_places.csv ledger: the last write of a two-hour run failed after
+    every API call had already been paid for. The window is short, so a few
+    retries with backoff (about 10 s in total) cover it; after that the
+    original error is re-raised and the .tmp is left in place, complete, for
+    a hand copy."""
+    delays = (0.1, 0.3, 0.7, 1.5, 3.0, 5.0)
+    for delay in delays + (None,):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if delay is None:
+                raise
+            time.sleep(delay)
 
 
 def _fsync_dir(directory: Path) -> None:
@@ -94,7 +117,7 @@ def atomic_write_bytes(
         os.fsync(f.fileno())
     if keep_prev:
         backup_file(path)
-    tmp.replace(path)
+    _replace_with_retry(tmp, path)
     _fsync_dir(path.parent)
 
 
@@ -117,7 +140,7 @@ def atomic_write_text(
         os.fsync(f.fileno())
     if keep_prev:
         backup_file(path)
-    tmp.replace(path)
+    _replace_with_retry(tmp, path)
     _fsync_dir(path.parent)
 
 
