@@ -54,16 +54,30 @@ def eq(actual, expected, what: str) -> None:
 
 
 def open_filter_panel(page) -> None:
-    """The filter panel is a bottom sheet: its inputs are in the DOM from boot
-    but only clickable once #ff-fab has slid the sheet up (.ff-open)."""
-    if not page.eval_on_selector("#ff-sheet", "el => el.classList.contains('ff-open')"):
-        page.click("#ff-fab")
-        page.wait_for_function(
-            "() => document.getElementById('ff-sheet')"
-            "  .classList.contains('ff-open')",
-            timeout=15000,
-        )
-        page.wait_for_timeout(350)  # let the 0.25s slide-up settle
+    """The filter panel's inputs are in the DOM from boot but only laid out
+    once a host is open. M-027 gave it two hosts: the bottom sheet behind
+    #ff-fab (<700px) and the non-modal popover behind the top bar's 筛选
+    button (>=700px). Wait on #ff-sheet-content being laid out, which is
+    true in either."""
+    if page.eval_on_selector(
+            "#ff-sheet-content", "el => el.offsetParent !== null"):
+        return
+    opened = page.evaluate(
+        "() => { const b = Array.from(document.querySelectorAll('.wb-filter-btn'))"
+        "         .find(e => e.offsetParent !== null);"
+        "  if (b) { b.click(); return true; }"
+        "  const f = document.getElementById('ff-fab');"
+        "  if (f) { f.click(); return true; }"
+        "  return false; }"
+    )
+    if not opened:
+        raise AssertionError("no way to open the filter panel on this viewport")
+    page.wait_for_function(
+        "() => { const c = document.getElementById('ff-sheet-content');"
+        "  return c && c.offsetParent !== null; }",
+        timeout=15000,
+    )
+    page.wait_for_timeout(350)  # let the 0.25s slide-up settle
 
 
 def load_fixture(name: str) -> dict[str, str]:
@@ -181,6 +195,57 @@ def t04_syncbase_preserved(page, base):
     if not raw2:
         raise AssertionError("tabelog.syncBase was cleared on the second load")
     eq(json.loads(raw2).get("v"), 7, "syncBase still v7 after a refresh")
+
+
+@case("05_filterstate_pre_region.json")
+def t05_filterstate_pre_region(page, base):
+    """filterState written before the region selector (C1 / M-023) existed:
+    no `region` key, plus an unknown key from a hypothetical future build."""
+    eq(total_count(page), 9807, "corpus total unaffected by the region filter")
+    open_filter_panel(page)
+    sel = page.eval_on_selector("#ff-region", "el => el.value")
+    eq(sel, "", "a state without `region` selects 全部地区")
+    n_opts = page.eval_on_selector("#ff-region", "el => el.options.length")
+    eq(n_opts, 48, "47 prefectures plus the 全部地区 row")
+    if shown_count(page) <= 0:
+        raise AssertionError("no restaurants shown after restoring pre-region state")
+    # The rest of the old state still applies, so this is a real restore and
+    # not a silent reset-to-defaults.
+    eq(page.eval_on_selector("#ff-rating", "el => el.value"), "3.6",
+       "the rating from the old state survived")
+    # And an apply() rewrites the state WITH the new field, additively.
+    page.eval_on_selector("#ff-price-all", "el => el.click()")
+    page.wait_for_timeout(300)
+    saved = json.loads(page.evaluate(
+        "() => localStorage.getItem('tabelog.filterState')"))
+    if "region" not in saved:
+        raise AssertionError("apply() should persist the new `region` field")
+    eq(saved["region"], None, "no region picked => null, not 0")
+    eq(saved.get("someFutureKey"), None,
+       "unknown keys are not required to survive, but must not throw")
+
+
+@case("06_filterstate_bad_region.json")
+def t06_filterstate_bad_region(page, base):
+    """A `region` of the wrong TYPE (a prefecture name) degrades to 全部地区
+    rather than throwing or emptying the map."""
+    eq(total_count(page), 9807, "corpus total unaffected")
+    open_filter_panel(page)
+    eq(page.eval_on_selector("#ff-region", "el => el.value"), "",
+       "a non-integer region falls back to 全部地区")
+    if shown_count(page) <= 0:
+        raise AssertionError("a bad region value emptied the map")
+    # Out-of-range integers take the same path.
+    page.evaluate(
+        "() => { const s = JSON.parse(localStorage.getItem('tabelog.filterState'));"
+        "  s.region = 99; localStorage.setItem('tabelog.filterState', JSON.stringify(s)); }"
+    )
+    reload_and_wait(page)
+    open_filter_panel(page)
+    eq(page.eval_on_selector("#ff-region", "el => el.value"), "",
+       "region 99 (out of 0..46) falls back to 全部地区")
+    if shown_count(page) <= 0:
+        raise AssertionError("an out-of-range region emptied the map")
 
 
 # ---------------------------------------------------------------------------

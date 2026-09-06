@@ -1,0 +1,6 @@
+{
+  "__note__": "Pre-C1 tabelog.filterState — written by a build from before the region selector existed, so it carries no `region` key at all. It also carries the forward-compatible uncheckedPrices/uncheckedGenres complement (M-016) plus one unknown key a future build might add. Loading it must select 全部地区, leave the corpus total at 9807, and throw nothing.",
+  "localStorage": {
+    "tabelog.filterState": "{\"rating\":3.6,\"prices\":[\"lt1k\",\"1to3k\",\"3to5k\",\"5to10k\",\"10to20k\",\"ge20k\",\"na\"],\"genres\":[],\"uncheckedPrices\":[],\"uncheckedGenres\":[],\"awards\":[],\"bookableOnly\":false,\"onlyFav\":false,\"hideBlack\":true,\"hideForeign\":true,\"someFutureKey\":{\"nested\":1}}"
+  }
+}

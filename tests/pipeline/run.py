@@ -371,6 +371,166 @@ def t_scraped_at_column():
     mapmod.print_corpus_age([{"scraped_at": "garbage"}])
 
 
+# --------------------------------------------------------------------------
+# (h) M-029: policy_struct never invents a field
+# --------------------------------------------------------------------------
+@test
+def t_policy_struct():
+    from tabelog.scrape import map as mapmod
+
+    ps, pb = mapmod.policy_struct, mapmod.policy_b
+
+    # b comes from the Japanese head word only, and 完全予約制 wins over the
+    # 予約可 prefix test.
+    eq(pb("完全予約制 …"), 2, "完全予約制 -> 2")
+    eq(pb("予約不可"), 0, "予約不可 -> 0")
+    eq(pb("予約可 …"), 1, "予約可 -> 1")
+    eq(pb("★インターネット予約"), None, "unknown head -> no verdict")
+    eq(pb(""), None, "empty -> no verdict")
+
+    # --- JA ---------------------------------------------------------------
+    eq(ps("予約可", "ja", 1), {"b": 1}, "head word alone leaves nothing to say")
+    d = ps("予約可 ご予約のキャンセルは1週間前までにお願いします。", "ja", 1)
+    eq(set(d), {"b", "cancel"}, "JA cancellation sentence -> cancel only")
+    eq("キャンセル" in d["cancel"], True, "JA cancel keeps the original wording")
+    d = ps("予約可 ご予約は3日前までにお願いします。", "ja", 1)
+    eq(set(d), {"b", "lead"}, "JA lead-time sentence -> lead only")
+
+    # --- ZH ---------------------------------------------------------------
+    eq(ps("可预订", "zh-CN", 1), {"b": 1}, "SC head word alone")
+    d = ps("接受预订。请提前3天预订。取消需在前一天告知。", "zh-CN", 1)
+    eq(set(d), {"b", "lead", "cancel"}, "SC splits lead and cancel")
+    eq(d["lead"], "请提前3天预订", "SC lead is verbatim")
+    # The Traditional variant uses the same keyword table (it carries both
+    # spellings), so the s2twp text classifies identically.
+    d = ps("接受預訂。請提前3天預訂。取消需在前一天告知。", "zh-TW", 1)
+    eq(set(d), {"b", "lead", "cancel"}, "TC splits lead and cancel too")
+
+    # --- EN ---------------------------------------------------------------
+    eq(ps("Reservations accepted", "en", 1), {"b": 1}, "EN head word alone")
+    d = ps(
+        "Reservations accepted. Please book 3 days in advance. "
+        "Cancellations must be made the day before.",
+        "en",
+        1,
+    )
+    eq(set(d), {"b", "lead", "cancel"}, "EN splits lead and cancel")
+    # An ASCII full stop only ends a sentence when whitespace follows, and
+    # a handful of abbreviations keep theirs — otherwise "2.5 hours" and
+    # "etc. by the day before" each split into fragments.
+    d = ps(
+        "Reservations accepted. The course is 2.5 hours. Please change the "
+        "date, time, etc. by the day before.",
+        "en",
+        1,
+    )
+    eq(d["note"], "The course is 2.5 hours", "a decimal point is not a sentence end")
+    eq(
+        d["lead"],
+        "Please change the date, time, etc. by the day before",
+        "'etc.' keeps its full stop",
+    )
+
+    # --- nothing to say ---------------------------------------------------
+    eq(ps("", "ja", None), None, "no text and no verdict -> no slot at all")
+    eq(ps("   ", "en", None), None, "blank text -> no slot")
+    eq(ps("", "ja", 0), {"b": 0}, "verdict with no prose is still a slot")
+
+    # Bullet lists have no terminal punctuation; the marker is a boundary,
+    # and a compound word's middle dot is not.
+    d = ps(
+        "完全予約制 ・キャンセルは前日までにご連絡ください ・コースは一斉スタートです",
+        "ja",
+        2,
+    )
+    eq(d["cancel"], "キャンセルは前日までにご連絡ください", "bullet ends the sentence")
+    eq(d["note"], "コースは一斉スタートです", "and the next bullet is its own sentence")
+    eq(
+        ps("予約可 ソフト・ドリンクは無料です。", "ja", 1)["note"],
+        "ソフト・ドリンクは無料です",
+        "a compound word's middle dot is not a boundary",
+    )
+
+    # A sentence matching BOTH keyword families is a cancellation rule.
+    d = ps("予約可 当日キャンセルはコース代金を頂戴します。", "ja", 1)
+    eq(set(d), {"b", "cancel"}, "cancel wins over lead when both match")
+
+    # note is capped, and the cap is visible.
+    long_note = "予約可 " + ("あ" * 400) + "。"
+    d = ps(long_note, "ja", 1)
+    eq(len(d["note"]), 201, "note truncated to 200 chars + ellipsis")
+    eq(d["note"].endswith("…"), True, "truncated note ends with an ellipsis")
+
+    # Every emitted string is a substring of the input (nothing invented).
+    src = "予約可 ご予約は3日前までに。キャンセルは前日まで無料です。当店は禁煙です。"
+    d = ps(src, "ja", 1)
+    for key in ("lead", "cancel", "note"):
+        if key in d:
+            for part in d[key].split("。"):
+                if part and part not in src:
+                    raise AssertionError(f"{key} fragment {part!r} is not in the source text")
+
+
+# --------------------------------------------------------------------------
+# (i) M-030: holiday / station-distance slots reject Tabelog's placeholders
+# --------------------------------------------------------------------------
+@test
+def t_holiday_slot():
+    from tabelog.scrape import map as mapmod
+
+    hs, sm = mapmod.holiday_slot, mapmod.station_m_slot
+
+    # 2,578 corpus rows carry the literal '-'; rendering them would put
+    # "休 -" on a quarter of the cards.
+    eq(hs("-"), None, "'-' is not a closing day")
+    eq(hs(""), None, "empty is not a closing day")
+    eq(hs(None), None, "None is not a closing day")
+    eq(hs("年中無休です"), "年中無休です", "無休 kept verbatim")
+    eq(hs("月曜日"), "月曜日", "曜 token kept verbatim")
+    eq(hs("不定休"), "不定休", "不定休 kept verbatim")
+    eq(hs("祝日の翌日"), "祝日の翌日", "祝 token kept verbatim")
+    eq(hs("お問い合わせください"), None, "prose with no day token is dropped")
+
+    eq(sm("-"), None, "'-' is not a distance")
+    eq(sm(""), None, "empty is not a distance")
+    eq(sm("abc"), None, "junk is not a distance")
+    eq(sm("520"), 520, "plain metres")
+    eq(sm("520.0"), 520, "float-ish metres are floored to int")
+    eq(sm(-5), None, "negative metres are rejected")
+
+
+# --------------------------------------------------------------------------
+# (j) M-023: prefecture_index is an integer key, never a substring match
+# --------------------------------------------------------------------------
+@test
+def t_prefecture_index():
+    from tabelog.scrape import map as mapmod
+
+    pi = mapmod.prefecture_index
+    eq(len(mapmod._PREF_EN), 47, "_PREF_EN has one name per prefecture")
+    eq(pi("東京都渋谷区神南1-1-1"), 13, "東京都 is index 13")
+    eq(pi("〒150-0001 東京都渋谷区神南1-1-1"), 13, "postcode prefix is stripped")
+    eq(pi("〒6008216京都府京都市下京区"), 25, "postcode without a hyphen too")
+    # The reason this is an integer and not a substring test: 京都 occurs
+    # inside 東京都.
+    eq(pi("京都府京都市下京区"), 25, "京都府 is index 25, not 東京都")
+    eq(pi("北海道札幌市中央区"), 0, "北海道 is index 0")
+    eq(pi("沖縄県那覇市"), 46, "沖縄県 is index 46")
+    eq(pi("Somewhere else"), None, "no prefecture -> no index")
+    eq(pi(""), None, "empty -> no index")
+    eq(pi(None), None, "None -> no index")
+
+    table = mapmod.pref_l10n_table({13: 936})
+    eq(len(table), 47, "PREFS table has 47 entries")
+    eq(table[13]["ja"], "東京都", "PREFS is index-aligned with _PREFECTURES")
+    eq(table[13]["en"], "Tokyo", "PREFS carries the romanization")
+    eq(table[13]["n"], 936, "PREFS carries this build's row count")
+    eq(table[2]["tc"], "岩手縣", "岩手 is not over-converted to 巖手")
+    for i, entry in enumerate(table):
+        if set(entry) != {"ja", "sc", "tc", "en", "n"}:
+            raise AssertionError(f"PREFS[{i}] keys are {sorted(entry)}")
+
+
 def main(argv: list[str]) -> int:
     wanted = argv[1:] or None
     n_pass = n_fail = n_skip = 0

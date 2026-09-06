@@ -1,0 +1,6 @@
+{
+  "__note__": "Hostile tabelog.filterState: `region` is a prefecture NAME (the shape a naive implementation would have stored) instead of the integer index this build writes, and there is a second out-of-range numeric variant in the same file's spirit. Both must degrade to 全部地区 silently — never a throw, never an empty map.",
+  "localStorage": {
+    "tabelog.filterState": "{\"rating\":3.4,\"uncheckedPrices\":[],\"uncheckedGenres\":[],\"awards\":[],\"bookableOnly\":false,\"onlyFav\":false,\"hideBlack\":true,\"hideForeign\":true,\"region\":\"京都\"}"
+  }
+}

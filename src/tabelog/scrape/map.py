@@ -141,6 +141,16 @@ _CJK_RUN_RE = re.compile(r"[㐀-鿿豈-﫿]+")
 # doesn't fill up with entries we'll never use.
 _HAN_VARIANTS_LITERAL_RE = re.compile(r"var HAN_VARIANTS\s*=\s*[^;]+;")
 _KNOWN_LOCS_LITERAL_RE = re.compile(r"var KNOWN_LOCS\s*=\s*[^;]+;")
+# M-023: same treatment for the PREFS table. Its 47 × 3 CJK place names are
+# data the region filter reads by index and renders per activeLang — they
+# are never a text node the runtime localizer has to translate, so leaving
+# them in would add 100+ phantom "missing EN/JA" entries.
+_PREFS_LITERAL_RE = re.compile(r"var PREFS\s*=\s*[^;]+;")
+# M-023 (C1): the region <optgroup> labels are hand-written in all four
+# languages inside FILTER_JS_TEMPLATE (中国·四国 must not be translated as
+# "China · Shikoku", which is exactly what a run-by-run lookup would do), so
+# they are data too — strip them for the same reason as PREFS above.
+_PREF_GROUPS_LITERAL_RE = re.compile(r"var PREF_GROUPS\s*=\s*[^;]+;")
 # The runtime tokenizer regex `/[㐀-鿿豈-﫿]+/g` literally contains the four
 # CJK boundary characters that define its character class — U+3400, U+9FFF,
 # U+F900, U+FAFF. Spelled with explicit \u escapes so the source character
@@ -153,6 +163,8 @@ _CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 def _scan_cjk_runs(html: str) -> set[str]:
     scanned = _HAN_VARIANTS_LITERAL_RE.sub("", html)
     scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
+    scanned = _PREFS_LITERAL_RE.sub("", scanned)  # M-023
+    scanned = _PREF_GROUPS_LITERAL_RE.sub("", scanned)  # M-023 (C1)
     scanned = _CJK_RUN_RE_LITERAL_RE.sub("", scanned)
     return set(_CJK_RUN_RE.findall(scanned))
 
@@ -211,6 +223,15 @@ def trad_popup_array(arr: list) -> list:
         a[6] = to_trad(a[6])
     if len(a) > 8 and isinstance(a[8], str) and a[8]:
         a[8] = to_trad(a[8])
+    # M-029: slot 9 (the policy struct main() appends) holds three
+    # Simplified strings. Converted here so this helper stays correct on its
+    # own; main() re-derives the slot from the already-converted slot 6 text
+    # right afterwards, which is the value that actually ships.
+    if len(a) > 9 and isinstance(a[9], dict):
+        a[9] = {
+            k: (to_trad(v) if isinstance(v, str) and v else v)
+            for k, v in a[9].items()
+        }
     return a
 
 
@@ -238,6 +259,290 @@ def ja_popup_array(arr: list, policy_ja: str | None) -> list:
     if policy_ja and len(a) > 6:
         a[6] = policy_ja
     return a
+
+
+# --------------------------------------------------------------------------
+# M-029 — structured reservation policy (popups slot 9)
+#
+# The card used to print the whole `reservation_policy` blob under a
+# "预约政策" heading, which is where a traveller's actual questions go to
+# die: can I book at all, how far ahead, what happens if I cancel. The
+# build now splits that same text — per language variant, using that
+# language's own wording — into at most four fields:
+#
+#   b       0 = 予約不可 / 1 = 予約可 / 2 = 完全予約制, read off the JAPANESE
+#           head word only, so all four variants agree on the verdict.
+#   lead    the sentence(s) that mention how far ahead to book.
+#   cancel  the sentence(s) that mention cancellation.
+#   note    everything else, verbatim, truncated at 200 chars.
+#
+# Nothing is ever invented: every value is a substring of the text the card
+# would otherwise have shown. A field we cannot find is simply absent, and
+# a row with no head word and no text yields `None` for the whole slot.
+# --------------------------------------------------------------------------
+
+# Sentence boundaries. 【…】 headings are also boundaries, so a policy
+# written as "【ご予約について】前日までに…" splits into the heading and the
+# rule instead of one run-on line. An ASCII full stop only ends a sentence
+# when whitespace or the end of the string follows it — otherwise "¥2.50"
+# and "18:00-21:00" would each become two "sentences".
+_POLICY_SEG_RE = re.compile(r"(?:[。．!?！？\n]|\.(?=\s|$))+")
+# …and these abbreviations keep their full stop even when a space follows.
+# 45 rows say "etc. ", 61 say "a.m." / "p.m."; splitting there strands the
+# rest of the sentence ("…by the day before") in a bucket on its own.
+_POLICY_ABBREV_RE = re.compile(
+    r"\b(?:etc|e\.g|i\.e|vs|approx|a\.m|p\.m|Mr|Mrs|Ms|Dr)\.", re.IGNORECASE
+)
+_ABBREV_DOT = "\x00"
+# Bullet lists are written with no terminal punctuation at all
+# ("…ご了承ください ・コースは一斉スタートです ・30分以上の遅刻は…"), which
+# would otherwise arrive as one enormous sentence and be filed under whichever
+# keyword happened to appear first. A leading-whitespace requirement keeps
+# compound words (ソフト・ドリンク) intact; the marker itself is preserved.
+_POLICY_BULLET_RE = re.compile(r"[ 　]+(?=[・▶※])")
+# …and once a bullet has done its job as a boundary, drop it off the front of
+# the sentence it introduced. ・ is only ever a list marker in this position
+# (mid-word it is a compound separator, which the rule above leaves alone).
+_POLICY_BULLET_LEAD_RE = re.compile(r"^[・･]+\s*")
+# Script sniff for the ~60 rows whose EN variant falls back to the Chinese
+# text. Per-character (not per-run) so the comparison against ASCII letters
+# is a fair one.
+_CJK_CHAR_RE = re.compile(r"[㐀-鿿豈-﫿]")
+_ASCII_ALPHA_RE = re.compile(r"[A-Za-z]")
+
+# Enumeration head words. Stripped off the FIRST sentence only — they are
+# what `b` already encodes, so repeating them in `note` is noise. An
+# unrecognised head is left alone (it stays verbatim in `note`).
+_POLICY_HEADS_JA = (
+    "完全予約制",
+    "予約不可",
+    "予約可能",
+    "予約可",
+    "要予約",
+    "予約制",
+)
+_POLICY_HEADS_ZH = (
+    "完全预约制",
+    "不接受预订",
+    "不接受预约",
+    "不能预订",
+    "不能预约",
+    "不可预订",
+    "不可预约",
+    "无法预订",
+    "无法预约",
+    "需要预订",
+    "需要预约",
+    "需预订",
+    "需预约",
+    "必须预订",
+    "必须预定",
+    "必须预约",
+    "可以预订",
+    "可以预约",
+    "可预订",
+    "可预约",
+    "接受预订",
+    "接受预定",
+    "接受预约",
+    "受理预订",
+    "受理预约",
+)
+_POLICY_HEADS_EN = (
+    "reservations are not accepted",
+    "reservations not accepted",
+    "reservations are not possible",
+    "reservations are accepted",
+    "reservations are required",
+    "reservations accepted",
+    "reservations required",
+    "reservations possible",
+    "reservations available",
+    "reservation is required",
+    "reservation required",
+    "available for reservation",
+    "unable to make a reservation",
+    "unable to book",
+    "appointments required",
+    "appointments accepted",
+    "appointment required",
+    "bookings accepted",
+    "booking required",
+    "no reservations",
+    "complete reservation system",
+    "reservation only",
+)
+# Punctuation left dangling after the head word is peeled off.
+_POLICY_HEAD_TAIL_RE = re.compile(r"^[\s、,，。：:；;\-–—・]+")
+
+# (cancellation, lead-time) matchers per language family. Cancellation wins
+# when a sentence matches both ("当日キャンセルは…" is a cancellation rule,
+# not a booking window).
+_POLICY_KEYWORDS = {
+    "ja": (
+        re.compile("キャンセル"),
+        re.compile("前日|日前|当日|週間前|ヶ月前|か月前|カ月前|ヵ月前|までに"),
+    ),
+    # One set for both Chinese variants: it carries the Simplified and the
+    # Traditional spelling of every token that differs (当天/當天, 周前/週前,
+    # 个月前/個月前), so the s2twp text matches with no second table.
+    "zh": (
+        re.compile("取消"),
+        re.compile(
+            "提前|天前|前一天|前一日|当天|当日|當天|當日|周前|週前|"
+            "个月前|個月前|之前"
+        ),
+    ),
+    "en": (
+        re.compile("cancel", re.IGNORECASE),
+        re.compile(
+            r"in advance|days? (?:before|prior)|day-of|same day|"
+            r"weeks? before|months? before|prior to",
+            re.IGNORECASE,
+        ),
+    ),
+}
+_POLICY_JOIN = {"ja": "。", "zh-CN": "。", "zh-TW": "。", "en": ". "}
+_POLICY_NOTE_MAX = 200
+_policy_heads_tc: tuple[str, ...] | None = None
+
+
+def _policy_heads(lang: str) -> tuple[str, ...]:
+    """Head words to peel, for `lang`. zh-TW's list is the Simplified one
+    run through to_trad (plus the Simplified forms, since a handful of rows
+    contain characters s2twp leaves alone)."""
+    global _policy_heads_tc
+    if lang == "ja":
+        return _POLICY_HEADS_JA
+    if lang == "en":
+        return _POLICY_HEADS_EN
+    if lang == "zh-TW":
+        if _policy_heads_tc is None:
+            _policy_heads_tc = tuple(
+                dict.fromkeys(
+                    [to_trad(h) for h in _POLICY_HEADS_ZH] + list(_POLICY_HEADS_ZH)
+                )
+            )
+        return _policy_heads_tc
+    return _POLICY_HEADS_ZH
+
+
+def policy_b(ja_text: str | None) -> int | None:
+    """Bookability verdict from the Japanese policy's head word, the one
+    field all four variants must agree on. 完全予約制 is tested first because
+    the other two are not prefixes of it but reading order should match the
+    documented rule; 予約可 is tested last because it prefixes 予約可能.
+    Anything else (43 rows: blank, or prose that starts mid-sentence)
+    returns None and the slot simply has no `b`."""
+    t = (ja_text or "").strip()
+    if not t:
+        return None
+    if t.startswith("完全予約制"):
+        return 2
+    if t.startswith("予約不可"):
+        return 0
+    if t.startswith("予約可"):
+        return 1
+    return None
+
+
+def _join_segments(parts: list[str], join: str) -> str:
+    """Re-join sentences with the separator their language writes. The one
+    subtlety is English: a segment that already ends in a full stop (the
+    protected abbreviations do) must not collect a second one from the
+    ". " separator."""
+    if join != ". ":
+        return join.join(parts)
+    out = ""
+    for part in parts:
+        if out:
+            out += " " if out.endswith(".") else ". "
+        out += part
+    return out
+
+
+def policy_struct(text: str | None, lang: str, b: int | None) -> dict | None:
+    """Split one language variant's policy text into {b, lead, cancel, note}.
+
+    `lang` is one of 'ja' / 'zh-CN' / 'zh-TW' / 'en' and selects the keyword
+    set; `b` comes from policy_b() on the Japanese original. Only keys with
+    a value are present. Returns None when there is nothing at all to say."""
+    text = (text or "").strip()
+    out: dict = {}
+    if b is not None:
+        out["b"] = b
+    if not text:
+        return out or None
+    # ~60 rows have no English translation, so the EN variant falls back to
+    # the Chinese text (exactly as slot 6 does). Read those with the Chinese
+    # rules. The test is "mostly CJK", not "contains CJK": plenty of the
+    # machine-translated English leaves a stray kanji or two in place
+    # (…if you are 遅れる場合…), and those are still English sentences.
+    if lang == "en" and len(_CJK_CHAR_RE.findall(text)) > len(_ASCII_ALPHA_RE.findall(text)):
+        lang = "zh-CN"
+    marked = text.replace("【", "\n【").replace("】", "】\n")
+    marked = _POLICY_BULLET_RE.sub("\n", marked)
+    marked = _POLICY_ABBREV_RE.sub(
+        lambda m: m.group(0).replace(".", _ABBREV_DOT), marked
+    )
+    segs = [
+        _POLICY_BULLET_LEAD_RE.sub("", s.strip()).replace(_ABBREV_DOT, ".")
+        for s in _POLICY_SEG_RE.split(marked)
+    ]
+    for i, seg in enumerate(segs):
+        if not seg:
+            continue
+        probe = seg.lower() if lang == "en" else seg
+        for head in _policy_heads(lang):
+            if probe.startswith(head):
+                segs[i] = _POLICY_HEAD_TAIL_RE.sub("", seg[len(head):])
+                break
+        break
+    cancel_re, lead_re = _POLICY_KEYWORDS["zh" if lang.startswith("zh") else lang]
+    buckets: dict[str, list[str]] = {"lead": [], "cancel": [], "note": []}
+    for seg in segs:
+        if not seg:
+            continue
+        if cancel_re.search(seg):
+            buckets["cancel"].append(seg)
+        elif lead_re.search(seg):
+            buckets["lead"].append(seg)
+        else:
+            buckets["note"].append(seg)
+    join = _POLICY_JOIN.get(lang, "。")
+    for key in ("lead", "cancel", "note"):
+        value = _join_segments(buckets[key], join).strip()
+        if key == "note" and len(value) > _POLICY_NOTE_MAX:
+            value = value[:_POLICY_NOTE_MAX].rstrip() + "…"
+        if value:
+            out[key] = value
+    return out or None
+
+
+# M-030 — closing days (popups slot 10). 7,926 rows have a non-empty
+# `holiday`, but 2,578 of those are the literal '-' Tabelog prints when it
+# has nothing; rendering "休 -" on 2,578 cards would be worse than saying
+# nothing. Only a string that actually names a day / 無休 / 不定休 / 祝 is
+# kept, verbatim in Japanese — the card localizes the tokens at render time.
+_HOLIDAY_TOKEN_RE = re.compile(r"[月火水木金土日]曜|無休|不定休|祝")
+
+
+def holiday_slot(v) -> str | None:
+    s = str(v or "").strip()
+    return s if s and _HOLIDAY_TOKEN_RE.search(s) else None
+
+
+def station_m_slot(v) -> int | None:
+    """M-030 — metres to the nearest station (popups slot 11), for the
+    card's "walk N min" line. '-' / '' / junk all yield None."""
+    s = str(v or "").strip()
+    if not s or s == "-":
+        return None
+    try:
+        n = int(float(s))
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
 
 
 def load_google_places() -> dict[str, dict]:
@@ -300,6 +605,14 @@ HELP_COPY: dict[str, dict[str, str]] = {
         "zh-CN": "景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。",
         "en": "Sights is for destinations you add on top of the built-in tourist anchors. Custom Sights show on the map next to the built-ins and can be removed anytime. Synced across devices alongside Saved, via your Google account.",
         "ja": "観光スポットは、デフォルトの観光スポットに加えて自分で追加した行き先のためのカテゴリです。デフォルトと並んで地図に表示され、いつでも削除できます。お気に入りと一緒に Google アカウントで端末間同期されます。",
+    },
+    # M-114: the slider's left end is 3.4, which reads like "no rating
+    # filter is possible below this" — it is, because 3.4 is the corpus
+    # floor, not a UI limit. Say so once instead of leaving people to guess.
+    "rating-floor": {
+        "zh-CN": "3.4 是本站收录的最低分：比它更低的餐厅根本不在数据里。",
+        "en": "3.4 is the lowest rating this site carries — anything below it was never collected, so the far-left end of the slider means no rating filter at all.",
+        "ja": "3.4 がこのサイトのスコア下限です。それを下回るレストランはデータにありません。",
     },
     "price-curation": {
         "zh-CN": "本站只收录每个区域评分前 1% 的餐厅；其中高价位 fine-dining 进一步压到 0.1%；和果子、咖啡厅、面包店等非正餐也按比例控量。这样，在地图上显示出来的 20000 日元以下的高分正餐餐厅，多数可以在一个合理的天数内提前预订，甚至 walk-in。",
@@ -412,6 +725,68 @@ _PREFECTURES = (
     "鹿児島県",
     "沖縄県",
 )
+
+# --------------------------------------------------------------------------
+# M-023 — prefecture as an INTEGER index into _PREFECTURES (payload key
+# `pref`). The map had no regional layer at all; the filter needs one, and
+# the only safe key is the tuple position. Substring-matching `loc_norm`
+# would be a correctness bug in both directions — "京都" is a substring of
+# "東京都", and the canonicalized forms differ per script.
+# --------------------------------------------------------------------------
+# Google-calibrated 日本語 addresses arrive as "〒150-0001 東京都渋谷区…".
+# Tabelog's own never do, but the strip costs nothing and keeps the helper
+# usable for both.
+_POSTCODE_PREFIX_RE = re.compile(r"^〒?\d{3}-?\d{4}\s*")
+
+# Romanized prefecture names, same order as _PREFECTURES. Hand-written:
+# there is no transliteration table in this repo and these are the forms
+# every English map uses.
+_PREF_EN = (
+    "Hokkaido", "Aomori", "Iwate", "Miyagi", "Akita", "Yamagata",
+    "Fukushima", "Ibaraki", "Tochigi", "Gunma", "Saitama", "Chiba",
+    "Kanagawa", "Tokyo", "Niigata", "Toyama", "Ishikawa", "Fukui",
+    "Yamanashi", "Nagano", "Gifu", "Shizuoka", "Aichi", "Mie", "Shiga",
+    "Kyoto", "Osaka", "Hyogo", "Nara", "Wakayama", "Tottori", "Shimane",
+    "Okayama", "Hiroshima", "Yamaguchi", "Tokushima", "Kagawa", "Ehime",
+    "Kochi", "Fukuoka", "Saga", "Nagasaki", "Kumamoto", "Oita", "Miyazaki",
+    "Kagoshima", "Okinawa",
+)
+# s2twp over-converts 岩 → 巖 inside this one place name (the same class of
+# proper-noun bug _TRAD_FIXUPS exists for, but scoped here so the global
+# table keeps only runs that appear on the page).
+_PREF_TC_FIXUPS = {"巖手縣": "岩手縣"}
+
+
+def prefecture_index(addr: str | None) -> int | None:
+    """Address → 0-46 index into _PREFECTURES, or None when the address does
+    not start with a prefecture name. 9,810/9,810 corpus rows resolve."""
+    a = _POSTCODE_PREFIX_RE.sub("", (addr or "").strip())
+    if not a:
+        return None
+    for i, p in enumerate(_PREFECTURES):
+        if a.startswith(p):
+            return i
+    return None
+
+
+def pref_l10n_table(counts: dict[int, int] | None = None) -> list[dict]:
+    """The `PREFS` table inlined into the page: one entry per prefecture,
+    index == _PREFECTURES position. `ja` is the Japanese name, `sc` its
+    canonical Simplified form (the same canon_str() spelling the search box
+    normalizes to), `tc` the s2twp conversion of `sc`, `en` the romanization,
+    and `n` how many restaurants the current build put in it."""
+    counts = counts or {}
+    out: list[dict] = []
+    for i, ja in enumerate(_PREFECTURES):
+        sc = canon_str(ja)
+        tc = to_trad(sc)
+        tc = _PREF_TC_FIXUPS.get(tc, tc)
+        out.append(
+            {"ja": ja, "sc": sc, "tc": tc, "en": _PREF_EN[i], "n": counts.get(i, 0)}
+        )
+    return out
+
+
 # After the prefecture is stripped, repeated tokens of the form "<name><suffix>"
 # where suffix ∈ {市,郡,区,町,村}. The negation excludes digits so we stop
 # cleanly at the 番地 portion of the address.
@@ -1184,20 +1559,28 @@ def build_filter_panel_html(
     award_counts: dict[str, int],
     gcal_count: int = 0,
     foreign_count: int | None = None,  # M-095
+    # M-023: per-prefecture row counts, index → n. The region <select> is
+    # built in JS from the injected PREFS table (which already carries the
+    # same numbers), so nothing in this function reads it yet; the parameter
+    # exists so the panel can render the counts server-side later without
+    # another signature change at the call site.
+    pref_counts: dict[int, int] | None = None,
 ) -> str:
+    # H3 / M-078: the inline `display:block` used to be unbeatable by any
+    # stylesheet rule, which is why every option row was ~19px tall on a
+    # touch screen. Layout now comes from .ff-opt in the stylesheet below.
     price_rows = "\n".join(
-        f'      <label style="display:block;margin:1px 0;">'
-        f'<input type="checkbox" name="ff-price" value="{key}" checked> '
-        f'<span style="display:inline-block;width:11px;height:11px;background:{color};'
-        f'border-radius:50%;margin:0 4px;vertical-align:middle;"></span>{label}</label>'
+        f'      <label class="ff-opt">'
+        f'<input type="checkbox" name="ff-price" value="{key}" checked>'
+        f'<span class="ff-dot" style="background:{color};"></span>'
+        f"<span>{label}</span></label>"
         for key, label, color, _, _ in PRICE_BUCKETS
     )
     award_rows = "\n".join(
-        f'    <label style="display:inline-flex;align-items:center;gap:4px;'
-        f'margin:0 8px 4px 0;font-size:12px;white-space:nowrap;">'
-        f'<input type="checkbox" name="ff-award" value="{slug}"> '
-        f"{emoji} {label} "
-        f'<span style="color:#6b7280;font-size:11px;">({award_counts.get(slug, 0)})</span></label>'
+        f'    <label class="ff-opt ff-award">'
+        f'<input type="checkbox" name="ff-award" value="{slug}">'
+        f"<span>{emoji} {label} "
+        f'<span class="ff-n">({award_counts.get(slug, 0)})</span></span></label>'
         for slug, label, emoji in AWARD_TAGS
     )
 
@@ -1210,26 +1593,31 @@ def build_filter_panel_html(
         if not visible:
             return ""
         rows = "\n".join(
-            f'        <label style="display:block;margin:1px 0;line-height:1.4;">'
-            f'<input type="checkbox" name="ff-genre" value="{cat}" checked> '
-            f'{cat} <span style="color:#6b7280;">({cat_counts.get(cat, 0)})</span></label>'
+            f'          <label class="ff-opt">'
+            f'<input type="checkbox" name="ff-genre" value="{cat}" checked>'
+            f'<span>{cat} <span class="ff-n">({cat_counts.get(cat, 0)})</span></span></label>'
             for cat in visible
         )
         # Per-group 全选/全清 chips: same wiring as the section-wide ones,
         # scoped to checkboxes inside this wrapper via the data attribute.
+        # C7 / M-088: <button>, not <a href="#"> — a link that goes nowhere
+        # is announced as a link, is draggable, and dirties the URL on any
+        # path where preventDefault doesn't run.
         header = (
-            f'        <div style="display:flex;justify-content:space-between;'
-            f'align-items:baseline;margin:6px 0 2px;">'
-            f'<span style="font-weight:600;color:#374151;font-size:11px;'
-            f'letter-spacing:0.5px;">{group}</span>'
-            f'<span style="font-size:10px;">'
-            f'<a href="#" class="ff-group-all" style="color:#2563eb;text-decoration:none;">全选</a>'
-            f'<span style="color:#d1d5db;"> | </span>'
-            f'<a href="#" class="ff-group-none" style="color:#2563eb;text-decoration:none;">全清</a>'
+            f'        <div class="ff-sec-head ff-group-head">'
+            f'<span class="ff-sec-title ff-group-title">{group}</span>'
+            f'<span class="ff-sec-links">'
+            f'<button type="button" class="ff-link ff-group-all">全选</button>'
+            f'<span class="ff-link-sep">|</span>'
+            f'<button type="button" class="ff-link ff-group-none">全清</button>'
             f"</span>"
             f"</div>"
         )
-        return f'      <div data-genre-group="{group}">\n{header}\n{rows}\n      </div>'
+        return (
+            f'      <div data-genre-group="{group}">\n{header}\n'
+            f'        <div class="ff-genre-rows">\n{rows}\n        </div>\n'
+            f"      </div>"
+        )
 
     genre_rows = "\n".join(
         _genre_section(group, buckets) for group, buckets in MEAL_GROUPS.items()
@@ -1263,7 +1651,7 @@ def build_filter_panel_html(
     max-height: min(75vh, calc(100vh - 132px));
     max-height: min(75dvh, calc(100dvh - 132px));
     background: #fff;
-    border-radius: 14px 14px 0 0;
+    border-radius: 12px 12px 0 0;   /* G8: overlay radius */
     box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
     transform: translateY(100%);
     transition: transform 0.25s ease-out;
@@ -1276,7 +1664,7 @@ def build_filter_panel_html(
     #ff-sheet {{ width: min(560px, calc(100vw - 32px));
                  max-height: min(80vh, calc(100vh - 132px));
                  max-height: min(80dvh, calc(100dvh - 132px));
-                 border-radius: 14px 14px 0 0; }}
+                 border-radius: 12px 12px 0 0; }}   /* G8 */
   }}
   @media (min-width: 1100px) {{
     #ff-sheet {{ width: min(640px, calc(100vw - 32px));
@@ -1449,13 +1837,16 @@ def build_filter_panel_html(
   .ff-help-trigger {{
     display: inline-flex;
     align-items: center; justify-content: center;
-    width: 15px; height: 15px;
+    /* H3 / M-079: 18px glyph (was 15) at 12px type (was 10) — this is a
+       real control, not decoration. The 44px hit area is added below,
+       scoped to the filter panel where there is room for it. */
+    width: 18px; height: 18px;
     padding: 0;
     border: none;
     border-radius: 50%;
     background: #e5e7eb;
     color: #6b7280;
-    font: 700 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font: 700 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     cursor: help;
     user-select: none;
     margin-left: 5px;
@@ -1470,6 +1861,235 @@ def build_filter_panel_html(
   @media (hover: hover) and (pointer: fine) {{
     .ff-help-trigger:hover {{ background: #d1d5db; color: #111827; }}
   }}
+
+  /* ===================================================================
+     H3 / M-078 · C1 / M-023 · C2 / M-114 · C5 · C7 / M-088 · B8 · G8
+     Everything below is the 2.0 filter panel: real touch targets, a
+     region selector, rating shortcuts, per-section summaries and the
+     active-conditions chip row. Kept in one block so the panel's layout
+     rules are readable in one place instead of scattered inline.
+     =================================================================== */
+
+  /* --- option rows (price / cuisine / award / the standalone toggles) --- */
+  #ff-sheet-content label {{
+    display: flex; align-items: center; gap: 7px;
+    min-height: 40px; margin: 0; line-height: 1.35;
+    cursor: pointer;
+  }}
+  @media (pointer: coarse) {{
+    #ff-sheet-content label {{ min-height: 44px; }}
+  }}
+  #ff-sheet-content label input[type=checkbox] {{
+    width: 18px; height: 18px; flex-shrink: 0; margin: 0;
+  }}
+  #ff-sheet-content .ff-dot {{
+    display: inline-block; width: 11px; height: 11px;
+    border-radius: 50%; flex-shrink: 0;
+  }}
+  #ff-sheet-content .ff-n {{ color: #6b7280; font-size: 11px; }}
+  /* Awards stay chips on one wrapping row, so they opt out of the block
+     layout — higher specificity than the rule above, on purpose. */
+  #ff-sheet-content label.ff-award {{
+    display: inline-flex; width: auto;
+    margin: 0 8px 4px 0; font-size: 12px; white-space: nowrap;
+  }}
+  #ff-sheet-content label.ff-sec-title {{
+    display: inline-flex; min-height: 0; font-weight: 600; cursor: default;
+  }}
+
+  /* --- section headers: title · live summary · 全选/全清 --- */
+  #ff-sheet-content .ff-sec-head {{
+    display: flex; align-items: center; gap: 8px;
+    min-height: 40px; margin: 6px 0 2px;
+  }}
+  @media (pointer: coarse) {{
+    #ff-sheet-content .ff-sec-head {{ min-height: 44px; }}
+  }}
+  #ff-sheet-content .ff-sec-title {{
+    font-weight: 600; display: inline-flex; align-items: center;
+    flex-shrink: 0;
+  }}
+  /* C5: the always-on summary — what this section is currently doing,
+     readable with the section collapsed or scrolled past. */
+  #ff-sheet-content .ff-sec-sum {{
+    font-size: 12px; color: #6b7280;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }}
+  #ff-sheet-content .ff-sec-sum:empty {{ display: none; }}
+  #ff-sheet-content .ff-sec-links {{
+    margin-left: auto; flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 2px;
+    font-size: 12px; white-space: nowrap; color: #6b7280;
+  }}
+  #ff-sheet-content .ff-sec-links b {{ color: #374151; }}
+  #ff-sheet-content .ff-link-sep {{ color: #d1d5db; }}
+  #ff-sheet-content .ff-group-head {{ min-height: 34px; margin: 6px 0 2px; }}
+  @media (pointer: coarse) {{
+    #ff-sheet-content .ff-group-head {{ min-height: 40px; }}
+  }}
+  #ff-sheet-content .ff-group-title {{
+    font-weight: 600; color: #374151; font-size: 11px; letter-spacing: 0.5px;
+  }}
+  /* C7 / M-088: was <a href="#">. Same look, real button semantics. */
+  #ff-sheet-content .ff-link {{
+    display: inline-flex; align-items: center;
+    min-height: 32px; padding: 0 6px;
+    background: none; border: none; border-radius: 6px;
+    color: #2563eb; font: inherit; font-size: 12px;
+    cursor: pointer;
+  }}
+  @media (pointer: coarse) {{
+    #ff-sheet-content .ff-link {{ min-height: 44px; }}
+    #ff-sheet-content .ff-group-head .ff-link {{ min-height: 40px; }}
+  }}
+  #ff-sheet-content .ff-link:focus-visible {{
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }}
+  /* H3: the "?" is its own control — 18px glyph, 44px hit area that stays
+     inside the (>=40px) header row so it can never eat a click meant for
+     the checkbox on the line below. */
+  #ff-sheet-content .ff-help-trigger {{ position: relative; }}
+  #ff-sheet-content .ff-help-trigger::after {{
+    content: ''; position: absolute;
+    left: 50%; top: 50%; width: 44px; height: 44px;
+    transform: translate(-50%, -50%);
+  }}
+
+  /* --- H2 / M-074: explicit close affordance in the panel header --- */
+  #ff-sheet-content .ff-sheet-head {{ gap: 6px; }}
+  #ff-sheet-content .ff-close {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; margin: 0 -8px 0 4px;
+    flex-shrink: 0;
+    background: none; border: none; border-radius: 999px;
+    color: #9ca3af; font-size: 22px; line-height: 1;
+    cursor: pointer;
+  }}
+  #ff-sheet-content .ff-close:focus-visible {{
+    outline: 2px solid #2563eb; outline-offset: -2px;
+  }}
+  @media (hover: hover) and (pointer: fine) {{
+    #ff-sheet-content .ff-close:hover {{ background: #f3f4f6; color: #374151; }}
+  }}
+
+  /* --- C1 / M-023: region selector --- */
+  #ff-region {{
+    width: 100%; box-sizing: border-box;
+    min-height: 40px; padding: 8px 10px; margin-bottom: 4px;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    background: #fff; color: #111827;
+    font-family: inherit; font-size: 13px;
+  }}
+  @media (pointer: coarse) {{
+    /* 16px is the iOS focus-zoom threshold, same reason as #ss-input. */
+    #ff-region {{ min-height: 44px; font-size: 16px; }}
+  }}
+  #ff-region:focus-visible {{ outline: 2px solid #2563eb; outline-offset: 2px; }}
+
+  /* --- C2 / M-114: rating scale, ticks and shortcut chips --- */
+  #ff-rating {{
+    -webkit-appearance: none; appearance: none;
+    width: 100%; margin: 2px 0 0; background: transparent;
+  }}
+  #ff-rating::-webkit-slider-runnable-track {{
+    height: 4px; border-radius: 999px; background: #e5e7eb;
+  }}
+  #ff-rating::-webkit-slider-thumb {{
+    -webkit-appearance: none; appearance: none;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #2563eb; border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    margin-top: -10px; cursor: pointer;
+  }}
+  #ff-rating::-moz-range-track {{
+    height: 4px; border-radius: 999px; background: #e5e7eb;
+  }}
+  #ff-rating::-moz-range-thumb {{
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #2563eb; border: 2px solid #fff; cursor: pointer;
+  }}
+  #ff-rating:focus-visible {{ outline: 2px solid #2563eb; outline-offset: 4px; }}
+  #ff-sheet-content .ff-rating-scale {{
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: #9ca3af;
+    font-variant-numeric: tabular-nums;
+    margin: 0 0 4px;
+  }}
+  #ff-sheet-content .ff-rating-chips {{
+    display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px;
+  }}
+  #ff-sheet-content .ff-rchip {{
+    display: inline-flex; align-items: center;
+    min-height: 32px; padding: 0 12px;
+    border: 1px solid #d1d5db; border-radius: 999px;
+    background: #fff; color: #374151;
+    font-family: inherit; font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }}
+  @media (pointer: coarse) {{
+    #ff-sheet-content .ff-rchip {{ min-height: 44px; }}
+  }}
+  #ff-sheet-content .ff-rchip.on {{
+    border-color: #2563eb; background: #eff6ff; color: #1d4ed8;
+    font-weight: 600;
+  }}
+  #ff-sheet-content .ff-rchip:focus-visible {{
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }}
+
+  /* --- H3: the cuisine box no longer scrolls inside a scroller --- */
+  #ff-genre-box > summary {{ border-radius: 6px; }}   /* G8 */
+  #ff-sheet-content .ff-genre-list {{
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    padding: 4px 8px; background: #fff;
+  }}
+  @media (min-width: 360px) {{
+    #ff-sheet-content .ff-genre-rows {{
+      display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px;
+    }}
+  }}
+
+  /* --- C5: active-conditions chip row (M-022 grew one chip into seven) --- */
+  #ff-active-chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }}
+  .ff-chip .ff-chip-x {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; margin: -3px -6px -3px 0;
+    padding: 0; border: none; border-radius: 999px;
+    background: none; color: #1d4ed8;
+    font-family: inherit; font-size: 14px; line-height: 1;
+    cursor: pointer;
+  }}
+  @media (pointer: coarse) {{
+    .ff-chip .ff-chip-x {{ width: 28px; height: 28px; }}
+  }}
+  .ff-chip .ff-chip-x:focus-visible {{ outline: 2px solid #2563eb; outline-offset: 1px; }}
+  @media (hover: hover) and (pointer: fine) {{
+    .ff-chip .ff-chip-x:hover {{ background: #dbeafe; }}
+  }}
+
+  /* --- B8: "this filter is also hiding N places you could book" --- */
+  #ff-foreign-hint {{
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin: 2px 0 8px; padding: 8px 10px;
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px;
+    font-size: 12px; line-height: 1.5; color: #92400e;
+  }}
+  #ff-foreign-hint[hidden] {{ display: none; }}
+  #ff-foreign-hint .ff-hint-txt {{ flex: 1 1 auto; min-width: 0; }}
+  #ff-foreign-show {{
+    display: inline-flex; align-items: center;
+    min-height: 32px; padding: 0 12px; flex-shrink: 0;
+    border: 1px solid #f59e0b; border-radius: 999px;
+    background: #fff; color: #92400e;
+    font-family: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }}
+  @media (pointer: coarse) {{
+    #ff-foreign-show {{ min-height: 44px; }}
+  }}
+  #ff-foreign-show:focus-visible {{ outline: 2px solid #2563eb; outline-offset: 2px; }}
 </style>
 <!-- M-089: no static aria-label — it wins over the element's own content,
      so the visible "1234 / 9807" count was invisible to screen readers.
@@ -1486,15 +2106,19 @@ def build_filter_panel_html(
   <div id="ff-sheet-content">
   <div class="ff-sheet-head"
        style="display:flex;justify-content:space-between;align-items:center;
-              border-bottom:1px solid #e5e7eb;padding:2px 0 8px;margin-bottom:10px;">
+              border-bottom:1px solid #e5e7eb;padding:2px 0 4px;margin-bottom:8px;">
     <span id="ff-sheet-title" style="font-weight:700;font-size:15px;">筛选</span>
     <!-- M-022: same two-segment reading as the FAB. .ff-total (the corpus
          size) stays in the DOM — setCountText('ff-total') still writes it and
-         it is the only place the denominator is still meaningful. -->
+         it is the only place the denominator is still meaningful. C1 makes
+         it the *region* total once a prefecture is picked. -->
     <span style="font-size:12px;color:#6b7280;">
       命中 <b class="ff-count">–</b> · 视野内 <span class="ff-inview">–</span>
       / <span class="ff-total">–</span>
     </span>
+    <!-- H2 / M-074: the panel used to be closable only by the grip swipe,
+         the backdrop, Esc, or the FAB it hid. -->
+    <button type="button" class="ff-close" aria-label="关闭">×</button>
   </div>
 
   <!-- M-022: default-on filters that silently remove rows get a visible chip
@@ -1515,20 +2139,50 @@ def build_filter_panel_html(
     <button id="ff-empty-panel-reset" class="ffe-reset" type="button">重置筛选</button>
   </div>
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;">
-    <span style="font-weight:600;">评分</span>
-    <span style="font-size:11px;color:#374151;">≥ <b id="ff-rating-val">3.4</b></span>
+  <!-- C1 / M-023: prefecture picker. The <option>s are built in JS from the
+       injected PREFS table so the names follow activeLang and carry this
+       build's per-prefecture counts. lang="ja" is the sentinel that keeps
+       the runtime CJK localizer out of the option text — it tokenizes CJK
+       run by run and would happily rewrite a prefecture name. -->
+  <div class="ff-sec-head">
+    <label class="ff-sec-title" for="ff-region">地区</label>
+    <span class="ff-sec-sum" id="ff-region-sum"></span>
   </div>
-  <input type="range" id="ff-rating" min="3.4" max="4.5" step="0.05" value="3.4"
-         style="width:100%;margin-bottom:6px;">
+  <select id="ff-region" lang="ja" aria-label="地区"></select>
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;">
-    <span style="font-weight:600;">晚餐价格<button type="button" class="ff-help-trigger"
+  <div class="ff-sec-head">
+    <label class="ff-sec-title" for="ff-rating">评分</label>
+    <span class="ff-sec-sum" id="ff-rating-sum"></span>
+    <span class="ff-sec-links">≥ <b id="ff-rating-val">3.4</b><button
+            type="button" class="ff-help-trigger" data-help-for="rating-floor"
+            aria-label="说明" aria-haspopup="dialog">?</button></span>
+  </div>
+  <!-- C2 / M-114: a bare 3.4–4.5 slider gave no sense of where the useful
+       stops are. Ticks + end labels + one-tap thresholds. -->
+  <input type="range" id="ff-rating" min="3.4" max="4.5" step="0.05" value="3.4"
+         list="ff-rating-ticks" aria-valuetext="3.40">
+  <datalist id="ff-rating-ticks">
+    <option value="3.4"></option><option value="3.6"></option>
+    <option value="3.8"></option><option value="4.0"></option>
+    <option value="4.2"></option><option value="4.5"></option>
+  </datalist>
+  <div class="ff-rating-scale" lang="en"><span>3.4</span><span>4.5</span></div>
+  <div class="ff-rating-chips" id="ff-rating-chips">
+    <button type="button" class="ff-rchip" data-rating="3.4">全部</button>
+    <button type="button" class="ff-rchip" data-rating="3.6" lang="en">≥3.6</button>
+    <button type="button" class="ff-rchip" data-rating="3.8" lang="en">≥3.8</button>
+    <button type="button" class="ff-rchip" data-rating="4.0" lang="en">≥4.0</button>
+    <button type="button" class="ff-rchip" data-rating="4.2" lang="en">≥4.2</button>
+  </div>
+
+  <div class="ff-sec-head">
+    <span class="ff-sec-title">晚餐价格<button type="button" class="ff-help-trigger"
             data-help-for="price-curation" aria-label="说明" aria-haspopup="dialog">?</button></span>
-    <span style="font-size:11px;">
-      <a href="#" id="ff-price-all" style="color:#2563eb;text-decoration:none;">全选</a>
-      <span style="color:#d1d5db;">|</span>
-      <a href="#" id="ff-price-none" style="color:#2563eb;text-decoration:none;">全清</a>
+    <span class="ff-sec-sum" id="ff-price-sum"></span>
+    <span class="ff-sec-links">
+      <button type="button" class="ff-link" id="ff-price-all">全选</button>
+      <span class="ff-link-sep">|</span>
+      <button type="button" class="ff-link" id="ff-price-none">全清</button>
     </span>
   </div>
 {price_rows}
@@ -1545,70 +2199,83 @@ def build_filter_panel_html(
       <span style="color:#6b7280;font-size:10px;">▾</span>
     </summary>
     <div style="margin-top:4px;font-size:11px;">
-      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:3px;">
-        <a href="#" id="ff-genre-all" style="color:#2563eb;text-decoration:none;">全选</a>
-        <span style="color:#d1d5db;">|</span>
-        <a href="#" id="ff-genre-none" style="color:#2563eb;text-decoration:none;">全清</a>
+      <div class="ff-sec-head ff-group-head" style="margin-top:0;">
+        <span class="ff-sec-links">
+          <button type="button" class="ff-link" id="ff-genre-all">全选</button>
+          <span class="ff-link-sep">|</span>
+          <button type="button" class="ff-link" id="ff-genre-none">全清</button>
+        </span>
       </div>
-      <div style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;
-                  border-radius:4px;padding:4px 6px;background:#fff;">
+      <!-- H3: the 180px inner scroller put a second scrollbar inside a
+           scrolling sheet — the cuisine list is the one place people scrub
+           through with a thumb. <details> still collapses the whole box. -->
+      <div class="ff-genre-list">
 {genre_rows}
       </div>
     </div>
   </details>
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">获奖</span>
-    <span style="font-size:11px;">
-      <a href="#" id="ff-award-none" style="color:#2563eb;text-decoration:none;">全清</a>
+  <div class="ff-sec-head">
+    <span class="ff-sec-title">获奖</span>
+    <span class="ff-sec-sum" id="ff-award-sum"></span>
+    <span class="ff-sec-links">
+      <button type="button" class="ff-link" id="ff-award-none">全清</button>
     </span>
   </div>
-  <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">
+  <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">
     勾选后只看对应获奖店；多选取并集，不勾则不限制
   </div>
   <div style="display:flex;flex-wrap:wrap;margin-bottom:6px;">
 {award_rows}
   </div>
 
-  <div style="font-weight:600;margin-top:6px;margin-bottom:2px;">Tabelog 预约</div>
-  <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-bookable-only"> 只显示可以通过 Tabelog 预约
+  <div class="ff-sec-head"><span class="ff-sec-title">Tabelog 预约</span></div>
+  <label>
+    <input type="checkbox" id="ff-bookable-only"><span>只显示可以通过 Tabelog 预约</span>
   </label>
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">收藏</span>
-    <span style="font-size:11px;color:#6b7280;">⭐ <b id="ff-fav-count">0</b></span>
+  <div class="ff-sec-head">
+    <span class="ff-sec-title">收藏</span>
+    <span class="ff-sec-links">⭐ <b id="ff-fav-count">0</b></span>
   </div>
-  <label style="display:block;margin-bottom:4px;">
-    <input type="checkbox" id="ff-only-fav"> 只显示已收藏
+  <label>
+    <input type="checkbox" id="ff-only-fav"><span>只显示已收藏</span>
   </label>
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">弃用名单<button type="button" class="ff-help-trigger"
+  <div class="ff-sec-head">
+    <span class="ff-sec-title">弃用名单<button type="button" class="ff-help-trigger"
             data-help-for="blacklist" aria-label="说明" aria-haspopup="dialog">?</button></span>
-    <span style="font-size:11px;color:#6b7280;">🚫 <b id="ff-black-count">0</b></span>
+    <span class="ff-sec-links">🚫 <b id="ff-black-count">0</b></span>
   </div>
-  <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-hide-black" checked> 隐藏弃用名单
+  <label>
+    <input type="checkbox" id="ff-hide-black" checked><span>隐藏弃用名单</span>
   </label>
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">非日本料理</span>
-    <span style="font-size:11px;color:#6b7280;">🌏 <b>{foreign_count}</b></span>
+  <div class="ff-sec-head">
+    <span class="ff-sec-title">非日本料理</span>
+    <span class="ff-sec-links">🌏 <b>{foreign_count}</b></span>
   </div>
-  <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-hide-foreign" checked> 隐藏非日本料理（中餐、韩餐、西餐、南亚、中东菜等）
+  <label>
+    <input type="checkbox" id="ff-hide-foreign" checked><span>隐藏非日本料理（中餐、韩餐、西餐、南亚、中东菜等）</span>
   </label>
+  <!-- B8: this toggle is on by default and is the single biggest silent
+       subtraction on the page. Once the rest of the filter narrows things
+       down, say how many of the hidden rows would actually have been
+       bookable — that is the number that changes a trip plan. -->
+  <div id="ff-foreign-hint" hidden>
+    <span class="ff-hint-txt" id="ff-foreign-hint-txt"></span>
+    <button type="button" id="ff-foreign-show">一起显示</button>
+  </div>
 
   <!-- TEMP: Google-calibration filter. Delete this whole section (plus the
        ff-gcal-only wiring in FILTER_JS_TEMPLATE) once every restaurant is
        calibrated — see scrape/google_enrich.py. -->
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;margin-bottom:2px;">
-    <span style="font-weight:600;">定位校准</span>
-    <span style="font-size:11px;color:#6b7280;">🛰️ <b>{gcal_count}</b></span>
+  <div class="ff-sec-head">
+    <span class="ff-sec-title">定位校准</span>
+    <span class="ff-sec-links">🛰️ <b>{gcal_count}</b></span>
   </div>
-  <label style="display:block;margin-bottom:6px;">
-    <input type="checkbox" id="ff-gcal-only"> 只看谷歌地图校准过坐标的餐厅
+  <label>
+    <input type="checkbox" id="ff-gcal-only"><span>只看谷歌地图校准过坐标的餐厅</span>
   </label>
 
   <!-- M-028: a copy of the avatar menu's 重置筛选, at the bottom of the panel
@@ -1750,7 +2417,11 @@ MAP_FAB_HTML = """
   .map-fab-stack {
     position: fixed;
     bottom: calc(18px + env(safe-area-inset-bottom) + var(--sheet-h, 0px));
-    right: 14px;
+    /* H8 / M-090: the right inset was a bare 14px, so on a landscape notched
+       phone the column sat under the rounded corner. M-027 adds --wb-right
+       (0 outside the workbench modes) so the stack tracks the map's own edge
+       instead of the window's. */
+    right: calc(14px + env(safe-area-inset-right) + var(--wb-right, 0px));
     z-index: 9995;
     display: flex; flex-direction: column; gap: 8px;
     pointer-events: none;
@@ -1780,6 +2451,7 @@ MAP_FAB_HTML = """
     background: #fff; color: #374151;
     border: 1px solid #d1d5db;
     border-radius: 999px;
+    min-height: 44px;            /* F2 / M-078 */
     padding: 8px 14px;
     font-size: 13px; font-weight: 600;
     cursor: pointer;
@@ -1839,11 +2511,18 @@ MAP_FAB_HTML = """
   /* Locate button is icon-only on every viewport — round, no label. The
      SVG keeps it visually distinct from the pill-shaped layer toggles. */
   .map-fab.map-fab-circle {
-    width: 40px; height: 40px; padding: 0;
+    width: 44px; height: 44px; padding: 0;   /* F2 / M-078 */
     border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
     align-self: flex-end;       /* line up flush with the pill stack edge */
   }
+  /* M-159: Leaflet's own zoom control is off (folium builds the map with
+     zoomControl disabled), so pinch was the only way to zoom on a laptop
+     trackpad without a scroll wheel. Desktop / tablet only — a phone has
+     pinch and the column is already five buttons tall. */
+  .map-fab.map-fab-zoom { font-size: 22px; font-weight: 400; line-height: 1; }
+  @media (max-width: 699px) { .map-fab.map-fab-zoom { display: none; } }
+  .map-fab:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   .map-fab .map-fab-svg {
     width: 20px; height: 20px; display: block;
     stroke: currentColor;
@@ -1854,9 +2533,90 @@ MAP_FAB_HTML = """
                                      border-color: #2563eb; }
   /* Tighten on narrow screens — drop the label, keep just the icon. */
   @media (max-width: 480px) {
-    .map-fab { padding: 9px 10px; }
+    /* F2 / M-078: square 44px targets instead of a 37x35 icon pill. */
+    .map-fab { width: 44px; height: 44px; padding: 0;
+               justify-content: center; align-self: flex-end; }
     .map-fab-label { display: none; }
     .map-fab-ic { font-size: 17px; }
+  }
+  /* M-071 rework (gate E3, 657x416 Fold outer landscape): five 44px pills in
+     a column are 252px tall — more than half of a 416px-high viewport. In
+     split mode the stack rides on top of the result panel (45% of the
+     height), so 18 + 187 + 252 = 457 > 416 and #fab-locate left the screen
+     entirely; with a card open instead of the panel the arithmetic is just
+     as bad. No amount of tuning the offsets fixes that — a 252px column
+     simply does not fit next to anything on a 416px screen. So under 560px
+     of height the column lays itself out as a ROW: 44px tall, "panel +
+     stack" and "card + stack" both fit with room to spare, and the buttons
+     keep their 44px targets. wrap-reverse keeps the row inside the map box
+     when the workbench columns make that box narrow — the overflow line
+     grows upward, never off the bottom. */
+  @media (max-height: 560px) {
+    .map-fab-stack {
+      flex-direction: row;
+      flex-wrap: wrap-reverse;
+      align-items: center;
+      justify-content: flex-end;
+      max-width: calc(100vw - var(--wb-left, 0px) - var(--wb-right, 0px) - 28px);
+    }
+    /* Both the ≤480 rule and .map-fab-circle pin align-self to flex-end,
+       which means "bottom" once the main axis is horizontal. */
+    .map-fab, .map-fab.map-fab-circle { align-self: center; }
+    /* AUTO-12's right inset assumed a narrow column; under a wide, short row
+       it would squeeze the credit down to a few characters for nothing. The
+       row clears the credit vertically instead (it sits 18px + safe-area
+       above the map's bottom edge; the credit is one ~14px line). */
+    .leaflet-control-attribution {
+      margin-right: 20px !important;
+      max-width: calc(100vw - 44px);
+    }
+  }
+  /* M-071 rework (gate E3, 416x657 Fold outer PORTRAIT): the same collision
+     one axis over, and it misses the 560px rule above by 97px. M3's fuller
+     card (decision tiles + policy table + closures) opens 469px tall on a
+     657px screen, and F2/M-078 grew the column to 252px: 252 + 469 + 56
+     (search capsule) = 777 > 657. syncSheetOffset()'s maxLift then stops
+     lifting part-way, which parks the column's bottom two buttons *behind*
+     the card (#bs-sheet is z-index 10002, the stack 9995) and its top one
+     under the search capsule — measured 3/5 reachable, against 5/5 on HEAD.
+     Tuning the clamp cannot win (the three boxes do not fit on one axis),
+     so the same row treatment applies: a 252x44 row leaves the whole band
+     above the card free at every card height the max-height cap allows.
+     Cut-offs: portrait only (landscape is the rule above), <700px wide
+     because that is where the bottom sheet exists at all (mid / wide put
+     the card in a column and never lift the stack), and <796px tall
+     because a fully lifted column starts at vh - 18 - 469 - 252, i.e.
+     vh - 739, and the search capsule wants the first 57px: below 796 the
+     column is under the capsule, at or above it clears (measured: 370x800
+     -> top 61, 393x852 -> 113, 616x816 -> 76), so the taller portrait
+     phones keep the familiar right-hand column. Note this is innerHeight,
+     not the device: an iPhone showing Safari's URL bar reports ~745 and
+     gets the row, which is exactly right — the column would not fit there
+     either. The map never scrolls, so the toolbar cannot collapse and
+     flip the layout back mid-session. */
+  @media (orientation: portrait) and (max-width: 699px)
+     and (max-height: 795px) {
+    .map-fab-stack {
+      flex-direction: row;
+      flex-wrap: wrap-reverse;
+      align-items: center;
+      justify-content: flex-end;
+      max-width: calc(100vw - var(--wb-left, 0px) - var(--wb-right, 0px) - 28px);
+      /* Unlike the landscape rule above (split mode hides #ff-fab), the
+         phone layout keeps the 筛选 pill in the opposite bottom corner —
+         151x46 at 416px wide, which leaves 229px for a 252px row. The 56px
+         floor parks the row one 8px gap above it. It only bites while the
+         sheet is closed, which is exactly when #ff-fab is on screen:
+         openSheet() hides the pill and publishes --sheet-h in the same
+         breath, so max() hands the lift straight back to the card. */
+      bottom: calc(18px + env(safe-area-inset-bottom)
+                   + max(56px, var(--sheet-h, 0px)));
+    }
+    .map-fab, .map-fab.map-fab-circle { align-self: center; }
+    .leaflet-control-attribution {
+      margin-right: 20px !important;
+      max-width: calc(100vw - 44px);
+    }
   }
   /* M-193 / BUG-16: a transit LOD file is 1-4 MB. The FAB used to turn blue
      the moment it was clicked and stay blue whether the download was still
@@ -1884,6 +2644,11 @@ MAP_FAB_HTML = """
   }
 </style>
 <div class="map-fab-stack" role="group" aria-label="图层切换">
+  <!-- M-159: explicit zoom, >=700px only (see .map-fab-zoom). -->
+  <button id="fab-zoom-in" class="map-fab map-fab-circle map-fab-zoom"
+          type="button" title="放大" aria-label="放大">+</button>
+  <button id="fab-zoom-out" class="map-fab map-fab-circle map-fab-zoom"
+          type="button" title="缩小" aria-label="缩小">&#8722;</button>
   <button id="fab-locate" class="map-fab map-fab-circle" type="button"
           title="定位到我的位置" aria-label="定位到我的位置">
     <svg class="map-fab-svg" viewBox="0 0 24 24" fill="none"
@@ -1927,7 +2692,9 @@ SEARCH_BOX_HTML = """
     top: max(12px, env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%);
     z-index: 9996;
-    width: min(calc(100vw - 32px), 380px);
+    /* H5 / M-086: 380px was set for a phone and never grew — on a desktop
+       the box used a fifth of the width while its own rows ellipsized. */
+    width: min(calc(100vw - 32px), clamp(380px, 64vw, 560px));
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
   /* M-073: the search box sits *below* the two bottom sheets (10002), so an
@@ -1948,22 +2715,32 @@ SEARCH_BOX_HTML = """
   }
   #ss-input-wrap {
     position: relative; display: flex; align-items: center;
-    background: #fff; border: 1px solid #d1d5db; border-radius: 22px;
+    /* F2 / M-078: the primary control on every viewport, so it gets the
+       44px minimum outright rather than a padded-out hit area. */
+    min-height: 44px;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 999px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     transition: box-shadow 0.15s ease-out;
   }
+  /* H6 / M-084: the focus ring moved off the <input> and onto the wrapper,
+     so the whole pill lights up instead of a rectangle inside a rounded
+     box — and the ring no longer depends on the input keeping outline:none
+     with nothing to replace it. */
   #ss-input-wrap:focus-within {
     box-shadow: 0 4px 14px rgba(0,0,0,0.22);
     border-color: #93c5fd;
+    outline: 2px solid #2563eb; outline-offset: 2px;
   }
+  /* Suppressed only inside a wrapper that is guaranteed to be drawing one. */
+  #ss-input-wrap:focus-within #ss-input { outline: none; }
   #ss-icon {
     padding-left: 14px; color: #6b7280; font-size: 14px;
     line-height: 1; user-select: none;
   }
   #ss-input {
     flex: 1; min-width: 0;
-    padding: 9px 6px 9px 8px;
-    border: none; outline: none; background: transparent;
+    padding: 12px 6px 12px 8px;   /* F2 / M-078: 44px pill */
+    border: none; background: transparent;
     font-size: 14px; color: #1f2937;
     font-family: inherit;
   }
@@ -2055,13 +2832,18 @@ SEARCH_BOX_HTML = """
     #ss-list .ss-row.ss-empty:hover { background: transparent; }
   }
   #ss-list .ss-row.ss-error { color: #b91c1c; }
-  #ss-list .ss-text { flex: 1; min-width: 0; }
+  #ss-list .ss-text { flex: 1; min-width: 0; }   /* H5: lets the clamp work */
+  /* H5 / M-086: Japanese restaurant names are routinely 20+ characters and
+     a single ellipsized line cut most of them at the branch marker, so two
+     rows that read the same way looked identical. Two lines for the name,
+     one for the address. */
   #ss-list .ss-name {
     font-size: 13px; font-weight: 600; color: #1f2937;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    white-space: normal; overflow: hidden;
   }
   #ss-list .ss-addr {
-    font-size: 11px; color: #6b7280;
+    font-size: 12px; color: #6b7280;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     margin-top: 1px;
   }
@@ -2082,7 +2864,7 @@ SEARCH_BOX_HTML = """
   #ss-list .ss-icon img { width: 16px; height: 16px; vertical-align: -3px; }
   #ss-list .ss-section-head {
     padding: 4px 12px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em;   /* M-079 */
     color: #6b7280; background: #f3f4f6;
     text-transform: uppercase;
   }
@@ -2090,12 +2872,12 @@ SEARCH_BOX_HTML = """
      splitting "屏幕内 / 其他区域" inside the 餐厅库 section is useful. */
   #ss-list .ss-subsection-head {
     padding: 2px 18px;
-    font-size: 10px; font-weight: 600;
+    font-size: 11px; font-weight: 600;   /* M-079 */
     color: #6b7280; background: #fafafa;
     border-bottom: 1px solid #f3f4f6;
   }
   #ss-list .ss-rating {
-    flex-shrink: 0; font-size: 11px; font-weight: 600;
+    flex-shrink: 0; font-size: 12px; font-weight: 600;   /* M-079 */
     color: #b45309; padding: 0 6px;
   }
   /* M-025 / BUG-07: the "name location" constraint used to be invisible and
@@ -2132,7 +2914,7 @@ SEARCH_BOX_HTML = """
     #ss-list .ss-row.ss-genre-row:hover { background: #fef3c7; }
   }
   #ss-list .ss-genre-hint {
-    flex-shrink: 0; font-size: 10px; color: #92400e;
+    flex-shrink: 0; font-size: 11px; color: #92400e;   /* M-079 */
     border: 1px solid #fde68a; border-radius: 999px; padding: 2px 7px;
   }
   /* M-081 (hard prerequisite for M-018): iOS Safari zooms the page in on
@@ -2147,7 +2929,10 @@ SEARCH_BOX_HTML = """
     #ss-input { font-size: 16px; }       /* iOS no-zoom */
   }
   @media (max-width: 480px) {
-    #ss-box { top: 8px; width: calc(100vw - 16px); }
+    /* H8 / M-090: 8px was measured from the viewport edge, which on a
+       notched phone is under the status bar. env() is 0 elsewhere. */
+    #ss-box { top: calc(env(safe-area-inset-top) + 8px);
+              width: calc(100vw - 16px); }
   }
   /* Top row: search input + avatar side by side. Restructured from a single
      input-wrap so the avatar can anchor a Google-style account dropdown on
@@ -2155,19 +2940,28 @@ SEARCH_BOX_HTML = """
   #ss-top { display: flex; align-items: center; gap: 8px; position: relative; }
   #ss-input-wrap { flex: 1; min-width: 0; }
   #ss-avatar {
+    position: relative;             /* F2: anchor for the ::after hit area */
     flex-shrink: 0;
     width: 36px; height: 36px;
     padding: 0; border: 1px solid #d1d5db; border-radius: 50%;
     background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    cursor: pointer; overflow: hidden;
+    cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
     transition: box-shadow 0.15s ease-out;
   }
+  /* F2 / M-078: 36px visual, 44px touch target. The round crop moved from
+     the button to the <img> so the button is no longer overflow:hidden and
+     can grow a hit area past its own edge. */
+  #ss-avatar::after {
+    content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  }
+  #ss-avatar:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     #ss-avatar:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.22); }
   }
-  #ss-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #ss-avatar img { width: 100%; height: 100%; object-fit: cover; display: block;
+                   border-radius: 50%; }
   /* Account / settings dropdown opened from #ss-avatar. Anchored to the
      search box's right edge so it lines up under the avatar on both desktop
      and mobile (the box is centered, so 'right:0' tracks correctly). */
@@ -2198,12 +2992,13 @@ SEARCH_BOX_HTML = """
      own row, so no pointer / hover. */
   .ssm-acct {
     display: flex; align-items: center; gap: 10px;
-    padding: 8px; border-radius: 8px;
+    padding: 8px; border-radius: 6px;   /* G8: control radius */
     color: #1f2937; font: inherit;
   }
   .ssm-row {
     display: flex; align-items: center; gap: 10px;
-    padding: 8px; border-radius: 8px; cursor: pointer;
+    min-height: 40px;                   /* F2: menu rows */
+    padding: 8px; border-radius: 6px; cursor: pointer;   /* G8 */
     border: none; background: none; color: #1f2937;
     font: inherit; text-align: left; width: 100%;
     -webkit-tap-highlight-color: transparent;
@@ -2258,7 +3053,7 @@ SEARCH_BOX_HTML = """
      ("本地模式" / "已同步" / etc.) doesn't have to be rewired — only its
      parent moved from the filter sheet up here into the avatar menu. */
   #ss-menu #ff-sync-status {
-    font-size: 10px; color: #6b7280; text-align: center;
+    font-size: 12px;   /* M-079: it carries the sync state */ color: #6b7280; text-align: center;
     padding: 6px 0 2px; min-height: 13px;
   }
 </style>
@@ -2268,12 +3063,16 @@ SEARCH_BOX_HTML = """
       <span id="ss-icon">🔍</span>
       <input id="ss-input" type="text" autocomplete="off"
              role="combobox" aria-expanded="false" aria-controls="ss-list"
-             aria-autocomplete="list"
+             aria-autocomplete="list" aria-haspopup="listbox"
+             aria-label="搜索餐厅 / 景点 / 地址"
              placeholder="搜索餐厅 / 景点 / 地址 ...">
       <div id="ss-spinner"></div>
       <button id="ss-clear" type="button" aria-label="清空">×</button>
     </div>
-    <button id="ss-avatar" type="button" aria-label="账户">
+    <!-- H7 / M-088: a disclosure button, not a menubutton — the panel below
+         is a settings pane with a form-ish mix of rows, not a menu. -->
+    <button id="ss-avatar" type="button" aria-label="账户"
+            aria-expanded="false" aria-controls="ss-menu">
       <img id="ss-avatar-pic" src="img/default-avatar-v2.png" alt=""
            referrerpolicy="no-referrer">
     </button>
@@ -2282,7 +3081,7 @@ SEARCH_BOX_HTML = """
          #ss-avatar is overflow:hidden (round crop). Styled in SYNC_UI_HTML;
          purely decorative — the words are in #sync-sr / #sync-banner. -->
     <span id="ss-avatar-dot" hidden aria-hidden="true"></span>
-    <div id="ss-menu" role="menu" hidden>
+    <div id="ss-menu" hidden>
       <!-- Signed-in pane: account info (info-only) + sign-out. -->
       <div id="ssm-signed-in" hidden>
         <div class="ssm-acct">
@@ -2419,6 +3218,66 @@ HELP_POPOVER_HTML = """
   <div class="ff-help-section" id="help-kind-bookmark" data-help-for="kind-bookmark" hidden>收藏 = 你自己想标注的地点或建筑物；和景点一起通过你的 Google 账号跨设备同步。</div>
   <div class="ff-help-section" id="help-kind-attraction" data-help-for="kind-attraction" hidden>景点 = 系统默认旅游锚点之外你自己加的去处，与默认景点一起在地图上显示，可随时删除；和收藏一起通过你的 Google 账号跨设备同步。</div>
   <div class="ff-help-section" data-help-for="price-curation" hidden>本站只收录每个区域评分前 1% 的餐厅；其中高价位 fine-dining 进一步压到 0.1%；和果子、咖啡厅、面包店等非正餐也按比例控量。这样，在地图上显示出来的 20000 日元以下的高分正餐餐厅，多数可以在一个合理的天数内提前预订，甚至 walk-in。</div>
+  <!-- C2 / M-114: the slider floor is a property of the corpus, not of the
+       control — say it where the control is. -->
+  <div class="ff-help-section" data-help-for="rating-floor" hidden>3.4 是本站收录的最低分：比它更低的餐厅根本不在数据里。</div>
+</div>
+
+<!-- M-017 (G7): keyboard shortcut sheet, opened with "?" and closed with
+     Esc. Static markup so the one-shot localizeTree(document.body) pass
+     translates it; the key glyphs are lang="en" so the CJK tokenizer never
+     walks into them. -->
+<style>
+  #kb-help {
+    position: fixed; z-index: 10035;
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(340px, calc(100vw - 32px));
+    max-height: min(80vh, 520px); max-height: min(80dvh, 520px);
+    overflow-y: auto;
+    background: #fff; color: #1f2937;
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.28);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    padding: 14px 16px 16px;
+  }
+  #kb-help[hidden] { display: none; }
+  #kb-help .kb-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 700; font-size: 14px; margin-bottom: 8px;
+  }
+  #kb-help .kb-close {
+    width: 44px; height: 44px; margin: -10px -12px -10px 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; border-radius: 999px;
+    color: #9ca3af; font-size: 22px; line-height: 1; cursor: pointer;
+  }
+  #kb-help dl { margin: 0; display: grid; grid-template-columns: auto 1fr;
+                gap: 6px 12px; align-items: center; }
+  #kb-help dt { margin: 0; }
+  #kb-help dd { margin: 0; color: #374151; }
+  #kb-help kbd {
+    display: inline-block; min-width: 22px; text-align: center;
+    padding: 2px 6px; border: 1px solid #d1d5db; border-bottom-width: 2px;
+    border-radius: 6px; background: #f9fafb;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: #111827;
+  }
+</style>
+<div id="kb-help" role="dialog" aria-modal="true" aria-labelledby="kb-help-title" hidden>
+  <div class="kb-head">
+    <span id="kb-help-title">快捷键</span>
+    <button type="button" class="kb-close" aria-label="关闭">×</button>
+  </div>
+  <dl>
+    <dt lang="en"><kbd>/</kbd></dt><dd>聚焦搜索</dd>
+    <dt lang="en"><kbd>J</kbd></dt><dd>下一家</dd>
+    <dt lang="en"><kbd>K</kbd></dt><dd>上一家</dd>
+    <dt lang="en"><kbd>F</kbd></dt><dd>收藏当前</dd>
+    <dt lang="en"><kbd>X</kbd></dt><dd>弃用当前</dd>
+    <dt lang="en"><kbd>Esc</kbd></dt><dd>关闭当前层</dd>
+    <dt lang="en"><kbd>?</kbd></dt><dd>快捷键</dd>
+  </dl>
 </div>
 """
 
@@ -2461,10 +3320,13 @@ BOOKMARKS_MODAL_HTML = """
     flex-shrink: 0;
   }
   #bm-modal .bm-title { font-weight: 700; font-size: 14px; }
+  /* G6 / M-078: 44px hit area (the glyph stays 20px). */
   #bm-modal .bm-close {
     background: none; border: none; cursor: pointer;
     font-size: 20px; line-height: 1; color: #9ca3af;
-    padding: 2px 6px;
+    width: 44px; height: 44px; padding: 0; margin: -10px -10px -10px 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px;
   }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     #bm-modal .bm-close:hover { color: #374151; }
@@ -2475,9 +3337,28 @@ BOOKMARKS_MODAL_HTML = """
     -webkit-overflow-scrolling: touch;
   }
   #bm-modal .bm-coord {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: #6b7280; font-size: 12px;
     margin-bottom: 10px; text-align: center;
+  }
+  /* G6: the coordinates were selectable text and nothing else — copying
+     them off a phone meant a long-press drag inside a modal that closes on
+     an outside tap. */
+  #bm-modal #bm-copy {
+    flex-shrink: 0;
+    width: 32px; height: 32px; margin: -6px 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    background: #fff; color: #6b7280;
+    font-family: inherit; font-size: 13px; line-height: 1;
+    cursor: pointer;
+  }
+  @media (pointer: coarse) {
+    #bm-modal #bm-copy { width: 44px; height: 44px; }
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    #bm-modal #bm-copy:hover { background: #f9fafb; color: #374151; }
   }
   #bm-modal .bm-row {
     display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
@@ -2485,12 +3366,31 @@ BOOKMARKS_MODAL_HTML = """
   #bm-modal .bm-row > label {
     width: 42px; flex-shrink: 0; color: #6b7280; font-size: 12px;
   }
+  /* G6 / M-078: 44px form controls. */
   #bm-modal .bm-row > input {
     flex: 1; min-width: 0;
-    padding: 6px 8px;
-    border: 1px solid #d1d5db; border-radius: 5px;
+    min-height: 44px; padding: 10px 10px;
+    border: 1px solid #d1d5db; border-radius: 6px;
     font-size: 13px; font-family: inherit;
     box-sizing: border-box;
+  }
+  #bm-modal .bm-row > input:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 1px;
+  }
+  /* G5: "use the place name" — the search-result flow already knows the
+     name; this is the one-tap way to accept it after an edit. */
+  #bm-modal #bm-use-place {
+    flex-shrink: 0; display: none;
+    min-height: 36px; padding: 0 10px;
+    border: 1px solid #bfdbfe; border-radius: 999px;
+    background: #eff6ff; color: #1d4ed8;
+    font-family: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer; max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #bm-modal #bm-use-place.bm-show { display: inline-flex; align-items: center; }
+  @media (pointer: coarse) {
+    #bm-modal #bm-use-place { min-height: 44px; }
   }
   #bm-modal #bm-emoji {
     flex: 1; min-width: 0;
@@ -2507,7 +3407,12 @@ BOOKMARKS_MODAL_HTML = """
     #bm-modal .bm-row > input { font-size: 16px; }
     #bm-modal #bm-emoji { font-size: 18px; }
   }
-  @media (max-width: 480px) {
+  /* M-080: the keyboard-avoidance anchor was ≤480px only, so a Fold inner
+     screen (616 / 816 CSS px, very much a touch device with a soft
+     keyboard) kept the centered modal and put 保存 / 取消 behind the
+     keyboard. One comma. The visualViewport listener in FILTER_JS refines
+     this further when the API is available. */
+  @media (max-width: 480px), (pointer: coarse) {
     #bm-modal { top: 7dvh; transform: translate(-50%, 0) scale(0.96); }
     #bm-modal.bm-open { transform: translate(-50%, 0) scale(1); }
   }
@@ -2525,11 +3430,26 @@ BOOKMARKS_MODAL_HTML = """
   #bm-modal .bm-quick-list {
     display: flex; gap: 6px; flex-wrap: wrap;
   }
+  /* G6 / M-078: 34px visual chip, 44px hit area via the ::after overlay —
+     the chips sit in their own tinted panel with 6px gaps, so the halo has
+     nothing to steal a tap from. */
   #bm-modal .bm-quick-list button {
-    background: #fff; border: 1px solid #d1d5db; border-radius: 5px;
+    position: relative;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
     cursor: pointer; font-size: 16px; line-height: 1;
-    padding: 4px 7px;
+    width: 34px; height: 34px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
     font-family: inherit;
+  }
+  @media (pointer: coarse) {
+    #bm-modal .bm-quick-list button::after {
+      content: ''; position: absolute;
+      left: 50%; top: 50%; width: 44px; height: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
+  #bm-modal .bm-quick-list button:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
   }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     #bm-modal .bm-quick-list button:hover {
@@ -2574,10 +3494,14 @@ BOOKMARKS_MODAL_HTML = """
     flex-shrink: 0;
     border-top: 1px solid #f3f4f6;
   }
+  /* G6 / M-078: 44px commit / dismiss row. */
   #bm-modal .bm-foot button {
-    padding: 6px 14px; border-radius: 5px; cursor: pointer;
+    min-height: 44px; padding: 0 18px; border-radius: 6px; cursor: pointer;
     font-size: 13px; font-weight: 600; border: 1px solid #d1d5db;
-    background: #f9fafb; color: #1f2937;
+    background: #f9fafb; color: #1f2937; font-family: inherit;
+  }
+  #bm-modal .bm-foot button:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
   }
   #bm-modal .bm-foot button.bm-save {
     background: #2563eb; border-color: #2563eb; color: #fff;
@@ -2624,7 +3548,10 @@ BOOKMARKS_MODAL_HTML = """
     <button class="bm-close" aria-label="关闭">×</button>
   </div>
   <div class="bm-body">
-    <div class="bm-coord" id="bm-coord" lang="en"></div>
+    <div class="bm-coord">
+      <span id="bm-coord" lang="en"></span>
+      <button type="button" id="bm-copy" aria-label="复制坐标" title="复制坐标">⧉</button>
+    </div>
     <div class="bm-row">
       <label>类型</label>
       <!-- The "?" spans are decorative for AT (a focusable role=button
@@ -2648,6 +3575,8 @@ BOOKMARKS_MODAL_HTML = """
       <label for="bm-name">名称</label>
       <input type="text" id="bm-name" maxlength="40"
              placeholder="例如：东京塔" autocomplete="off">
+      <!-- G5: only shown when the modal was opened from a search result. -->
+      <button type="button" id="bm-use-place">用地点名填入</button>
     </div>
     <div class="bm-row">
       <label for="bm-emoji">Emoji</label>
@@ -2664,6 +3593,9 @@ BOOKMARKS_MODAL_HTML = """
         <button type="button" data-emoji="⭐">⭐</button>
         <button type="button" data-emoji="❤️">❤️</button>
         <button type="button" data-emoji="🛍️">🛍️</button>
+        <!-- G5: two more presets, both already in docs/emoji/_manifest.json. -->
+        <button type="button" data-emoji="⛩️">⛩️</button>
+        <button type="button" data-emoji="♨️">♨️</button>
         <button type="button" id="bm-emoji-more"
                 aria-expanded="false" aria-controls="bm-emoji-picker"
                 title="打开完整 emoji 选择器">🔽</button>
@@ -2915,7 +3847,7 @@ MOBILE_UX_ASSETS = """
     max-height: min(75vh, calc(100vh - 132px));
     max-height: min(75dvh, calc(100dvh - 132px));
     background: #fff;
-    border-radius: 14px 14px 0 0;
+    border-radius: 12px 12px 0 0;   /* G8: overlay radius */
     box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
     transform: translateY(100%);
     transition: transform 0.25s ease-out;
@@ -2934,7 +3866,7 @@ MOBILE_UX_ASSETS = """
     #bs-sheet { width: min(680px, calc(100vw - 32px));
                 max-height: min(80vh, calc(100vh - 132px));
                 max-height: min(80dvh, calc(100dvh - 132px));
-                border-radius: 14px 14px 0 0; }
+                border-radius: 12px 12px 0 0; }   /* G8 */
   }
   /* Desktop: roomier sheet so the 2-column popup layout has space. */
   @media (min-width: 1100px) {
@@ -2976,14 +3908,29 @@ MOBILE_UX_ASSETS = """
     -webkit-overflow-scrolling: touch;
   }
   /* Peek mode — entered when the sheet is opened from a search-result tap.
-     The sheet only shows the ribbons + title + rating + ⭐/🚫 actions, so
-     the highlighted marker on the map below stays visible. User swipes up
-     on the grip (or taps it) to reveal the rest. */
+     D6 / M-112: peek is the outer-screen decision surface, so it keeps the
+     ribbons + title + subtitle + the three decision tiles + the action bar,
+     and drops everything that needs a second look (policy table, hours,
+     seats/address, photos). M-112 specifically: the "calibrated by Google"
+     note is reassurance about the pin, not a decision input — it has no
+     business in a 40%-of-viewport card. */
   #bs-sheet.bs-peek .rst-photos,
   #bs-sheet.bs-peek .rst-genre,
   #bs-sheet.bs-peek .rst-info,
+  #bs-sheet.bs-peek .rst-sec,
   #bs-sheet.bs-peek .rst-policy,
+  #bs-sheet.bs-peek .rst-policy-tbl,
+  #bs-sheet.bs-peek .rst-policy-raw,
+  #bs-sheet.bs-peek .rst-holiday,
+  #bs-sheet.bs-peek .rst-gcal,
+  #bs-sheet.bs-peek .rst-approx,
+  #bs-sheet.bs-peek .rst-tabelog,
   #bs-sheet.bs-peek .rst-footer { display: none; }
+  /* The peek action bar is the ⭐ / 🚫 pair only — no border, no reserved
+     height, so the card stays inside the 40% budget. */
+  #bs-sheet.bs-peek .rst-actions-bar {
+    margin-top: 6px; padding-top: 0; border-top: 0;
+  }
   /* M-188: 44px in peek — this is the state whose whole job is to say
      "there is more, act on me", so it gets a real touch target. The full
      state keeps its original 19px so the card layout is unchanged. */
@@ -3002,7 +3949,7 @@ MOBILE_UX_ASSETS = """
   #bs-grip-hint { display: none; }
   #bs-sheet.bs-peek #bs-grip-hint {
     display: block; text-align: center;
-    font-size: 10px; color: #6b7280;
+    font-size: 11px; color: #6b7280;   /* M-079: 10px was below the floor */
     margin-top: 3px; letter-spacing: 0.5px;
   }
   #bs-grip-hint .bs-hint-tap { display: none; }
@@ -3015,8 +3962,13 @@ MOBILE_UX_ASSETS = """
      via the default UA stylesheet, links inherit their own. */
   #bs-sheet.bs-peek #bs-content { cursor: pointer; }
   /* ===== Restaurant detail card (lives inside #bs-content) ===== */
+  /* M-111 / D1: the card is a query container. Its host moves between the
+     bottom sheet (up to 880px wide) and the workbench's 340/384px right
+     column, so a `@media (min-width: 1100px)` two-column rule was reading
+     the wrong number entirely — the viewport is wide, the card is not. */
   .rst-card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-              font-size: 13px; color: #1f2937; }
+              font-size: 13px; color: #1f2937;
+              container-type: inline-size; container-name: rstcard; }
   /* Award ribbons sit above the title — flat dark badges matching the
      Tabelog site style. Order in the JSX matches visual order:
        medals (gold→silver→bronze) → 百名店 (newest year first) → hot.
@@ -3050,14 +4002,124 @@ MOBILE_UX_ASSETS = """
                 align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   .rst-title { font-weight: 700; font-size: 16px; flex: 1; min-width: 0;
                line-height: 1.3; }
-  .rst-title .rst-rating { color: #c33; margin-left: 4px; font-weight: 700; }
+  .rst-title .rst-rating { color: #c33; margin-left: 4px; font-weight: 700;
+                           font-variant-numeric: tabular-nums; }
+  /* D4: "第 n / N 家" plus ↑ / ↓. Sits in the header next to ×, because the
+     header is the one row that never scrolls out of reach. Hidden (not
+     removed) when there is no ordered result set to walk. */
+  .rst-nav { display: inline-flex; align-items: center; gap: 2px;
+             margin-right: 2px; }
+  .rst-nav[hidden] { display: none; }
+  .rst-nav-pos { font-size: 12px; color: #6b7280; white-space: nowrap;
+                 font-variant-numeric: tabular-nums; padding: 0 2px; }
+  .rst-prev, .rst-next {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-sizing: border-box; width: 28px; height: 28px;
+    padding: 0; border: 1px solid #d1d5db; border-radius: 6px;   /* G8 */
+    background: #f9fafb; color: #4b5563;
+    font: 700 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  /* H3: 28px is the visual size a fine pointer needs; the pseudo-element
+     grows the hit box to 44 for thumbs without moving anything. */
+  .rst-prev::after, .rst-next::after {
+    content: ''; position: absolute; inset: -8px; }
+  .rst-prev:disabled, .rst-next:disabled { opacity: 0.4; cursor: default; }
+  .rst-prev:active, .rst-next:active { background: #f3f4f6; }
+  @media (hover: hover) and (pointer: fine) {
+    .rst-prev:not(:disabled):hover,
+    .rst-next:not(:disabled):hover { background: #f3f4f6; }
+  }
+  /* D1: subtitle line — cuisine bucket · nearest station · walking minutes.
+     Everything a "is this even the right kind of place" glance needs, on
+     one row directly under the name. */
+  .rst-sub { color: #4b5563; font-size: 12.5px; line-height: 1.5;
+             margin: 0 0 10px; display: flex; flex-wrap: wrap;
+             gap: 2px 10px; align-items: baseline; }
+  .rst-sub .rst-sub-sep { color: #9ca3af; }
+  .rst-sub-i { display: inline-flex; align-items: baseline; flex-wrap: wrap;
+               min-width: 0; }
+  .rst-walk { color: #6b7280; font-variant-numeric: tabular-nums; }
+  /* §5.3 decision tiles — the three numbers the trip actually turns on.
+     Equal thirds; the tile grows past 44px rather than clipping a long
+     bucket label. */
+  .rst-decision { display: grid; grid-template-columns: repeat(3, 1fr);
+                  gap: 6px; margin: 0 0 12px; }
+  .rst-tile { box-sizing: border-box; min-height: 44px; min-width: 0;
+              display: flex; flex-direction: column; justify-content: center;
+              gap: 2px; padding: 5px 8px;
+              border: 1px solid #e5e7eb; border-radius: 10px;   /* G8 card */
+              background: #f9fafb; }
+  .rst-tile-k { font-size: 11.5px; color: #6b7280; line-height: 1.25; }
+  .rst-tile-v { font-size: 15px; font-weight: 700; color: #1f2937;
+                line-height: 1.25; overflow-wrap: anywhere;
+                font-variant-numeric: tabular-nums; }
+  /* D2: "上限" is the qualifier, not the number — it rides along at label
+     weight so the bucket stays the thing you read. */
+  .rst-tile-u { font-size: 11.5px; font-weight: 500; color: #6b7280;
+                white-space: nowrap; }
+  /* Three tiles across a 384px (wide) or 340px (mid) detail column leaves
+     ~85px of text per tile, so the headline steps down rather than breaking
+     "仅电话 / 到店" across two lines. */
+  @container rstcard (max-width: 430px) {
+    .rst-tile-v { font-size: 13.5px; }
+  }
+  @container rstcard (max-width: 340px) {
+    .rst-tile { padding: 5px 6px; }
+    .rst-tile-v { font-size: 12.5px; }
+    .rst-tile-k { font-size: 11px; }
+  }
+  /* D3 §5.4: the policy table. Two columns, label gutter sized to content
+     so EN / JA labels don't force a fixed width that clips. */
+  .rst-sec { font-size: 11.5px; font-weight: 700; color: #6b7280;
+             letter-spacing: 0.3px; margin: 0 0 5px; }
+  .rst-policy-tbl { display: grid; grid-template-columns: max-content 1fr;
+                    gap: 4px 10px; margin: 0 0 8px;
+                    font-size: 12.5px; line-height: 1.5; }
+  .rst-policy-k { color: #6b7280; }
+  .rst-policy-v { color: #374151; min-width: 0; overflow-wrap: anywhere; }
+  /* P3: the machine-translated original was 12px #6b7280 — decorative grey
+     for the one piece of text that is the actual source of truth. */
+  .rst-policy-raw { font-size: 12.5px; color: #374151; line-height: 1.5;
+                    margin: 0 0 10px; }
+  .rst-policy-raw > summary {
+    display: flex; align-items: center; min-height: 32px;
+    color: #2563eb; cursor: pointer; list-style: none;
+    -webkit-tap-highlight-color: transparent; }
+  .rst-policy-raw > summary::-webkit-details-marker { display: none; }
+  .rst-policy-raw > summary::before { content: '▸'; margin-right: 5px; }
+  .rst-policy-raw[open] > summary::before { content: '▾'; }
+  .rst-policy-raw > div { margin-top: 4px; }
+  @media (pointer: coarse) {
+    .rst-policy-raw > summary { min-height: 44px; }
+  }
+  /* M-030: regular closing days, tokenised out of the Japanese source. */
+  .rst-holiday { font-size: 12.5px; color: #374151; line-height: 1.5;
+                 margin: 0 0 10px; }
+  .rst-holiday .rst-holiday-k { color: #6b7280; margin-right: 8px; }
+  /* D5 / H3: the bottom action bar. 44px is unconditional here — this is
+     the row every visit ends on, and it is the last thing in the card, so
+     nothing is displaced by giving it thumb-sized targets on every device. */
+  .rst-actions-bar { display: flex; align-items: center; gap: 8px;
+                     flex-wrap: wrap; min-height: 44px;
+                     margin-top: 12px; padding-top: 10px;
+                     border-top: 1px solid #e5e7eb; }
+  .rst-actions-bar .rst-btn { min-height: 44px; padding: 0 12px;
+                              display: inline-flex; align-items: center; }
+  .rst-actions-bar .rst-gmaps { width: 44px; height: 44px; }
+  .rst-tabelog { margin-left: auto; display: inline-flex; align-items: center;
+                 min-height: 44px; color: #2563eb; text-decoration: none;
+                 font-size: 13px; white-space: nowrap; }
+  @media (hover: hover) and (pointer: fine) {
+    .rst-tabelog:hover { text-decoration: underline; }
+  }
   /* Match .rst-btn exactly so the trio (gmaps / 收藏 / 弃用) renders at one
      consistent height; gmaps is the square sibling. */
   .rst-gmaps { display: inline-flex; align-items: center; justify-content: center;
                box-sizing: border-box;
                width: 28px; height: 28px;
                text-decoration: none;
-               border: 1px solid #d1d5db; border-radius: 5px;
+               border: 1px solid #d1d5db; border-radius: 6px;   /* G8 */
                background: #f9fafb;
                transition: background 0.15s; }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
@@ -3067,13 +4129,16 @@ MOBILE_UX_ASSETS = """
   /* Square × that mirrors the search box's clear control, sitting after
      收藏/弃用 in the card header so the sheet can be dismissed without
      reaching for the grip. Same 28px footprint as .rst-gmaps. */
-  .rst-close { display: inline-flex; align-items: center; justify-content: center;
+  .rst-close { position: relative;
+               display: inline-flex; align-items: center; justify-content: center;
                box-sizing: border-box;
                width: 28px; height: 28px;
-               padding: 0; border: 1px solid #d1d5db; border-radius: 5px;
+               padding: 0; border: 1px solid #d1d5db; border-radius: 6px;  /* G8 */
                background: #f9fafb; color: #6b7280;
                font: 700 20px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  /* H3: hit box out to 44 without changing the 28px visual. */
+  .rst-close::after { content: ''; position: absolute; inset: -8px; }
   /* M-160: :active is the touch press feedback and stays ungated. */
   .rst-close:active { background: #f3f4f6; color: #1f2937; }
   @media (hover: hover) and (pointer: fine) {
@@ -3136,14 +4201,24 @@ MOBILE_UX_ASSETS = """
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     .rst-footer a:hover { text-decoration: underline; }
   }
-  .rst-chip { background: #3b9c4f; color: #fff; padding: 2px 8px;
-              border-radius: 4px; font-size: 11px; font-weight: 500; }
-  .rst-chip.rst-chip-off { background: #9ca3af; }
+  /* M-079: 11px on a coloured plate is the least legible text in the card
+     and it carries the single most decision-relevant fact in it. */
+  .rst-chip { display: inline-block;
+              background: #3b9c4f; color: #fff; padding: 2px 8px;
+              border-radius: 6px; font-size: 12px; font-weight: 500; }  /* G8 */
+  .rst-chip.rst-chip-off { background: #6b7280; }
   .rst-btn { padding: 4px 10px; font-size: 12px; cursor: pointer;
-             border: 1px solid #d1d5db; border-radius: 5px;
+             border: 1px solid #d1d5db; border-radius: 6px;   /* G8 */
              background: #f9fafb; color: #1f2937; }
+  /* M-078: on-state as a class instead of four inline style writes, so the
+     44px action bar can restyle the button without an !important fight.
+     aria-pressed still carries the state for assistive tech (M-089). */
+  .rst-btn.rst-on-fav   { background: #fef3c7; border-color: #fbbf24; }
+  .rst-btn.rst-on-black { background: #fee2e2; border-color: #dc2626; }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     .rst-btn:hover { background: #f3f4f6; }
+    .rst-btn.rst-on-fav:hover   { background: #fde68a; }
+    .rst-btn.rst-on-black:hover { background: #fecaca; }
   }
   /* Tablet+: tighter title, larger photos */
   @media (min-width: 700px) {
@@ -3151,11 +4226,15 @@ MOBILE_UX_ASSETS = """
     .rst-title { font-size: 18px; }
     .rst-photos { gap: 8px; }
   }
-  /* Desktop: 2-column info grid; photos still 3-up but bigger */
+  /* Desktop: photos still 3-up but bigger */
   @media (min-width: 1100px) {
     #bs-content { padding: 0 22px 22px; }
     .rst-card { font-size: 14px; }
     .rst-title { font-size: 20px; }
+  }
+  /* M-111: the info grid goes two-column on card width, not viewport width.
+     A 1440px desktop with the workbench open gives this card 384px. */
+  @container rstcard (min-width: 600px) {
     .rst-info { grid-template-columns: 1fr 1fr; column-gap: 24px; }
   }
   /* Banner shown above the restaurant card when the active result is
@@ -3193,7 +4272,7 @@ MOBILE_UX_ASSETS = """
     border: 1.5px dashed #374151; opacity: 0.7;
     pointer-events: none;
   }
-  .rst-approx { font-size: 11px; color: #6b7280; margin: 4px 0 0; }
+  .rst-approx { font-size: 12px; color: #6b7280; margin: 4px 0 0; }   /* M-079 */
   /* ---- M-093: permanently / temporarily closed ---- */
   /* The marker is desaturated but never removed — a favourited restaurant
      that vanishes from the map reads as lost data, not as a closed shop. */
@@ -3513,6 +4592,631 @@ BOTTOM_SHEET_HTML = """
   <div id="bs-banner" hidden></div>
   <div id="bs-content"></div>
 </div>
+"""
+
+
+# M-027: the workbench shell — top bar, left column, icon rail, detail
+# column and the non-modal filter popover. Injected after the filter panel
+# so its `body.wb-*` rules win the tie against the blocks they offset.
+#
+# Everything here is inert until wbApplyMode() (in FILTER_JS_TEMPLATE) puts
+# .wb-split / .wb-mid / .wb-wide on <body>. Below 520px no class is ever
+# set, no DOM is moved, and every one of these nodes stays display:none —
+# so the outer Fold screen renders exactly what it rendered before.
+WORKBENCH_HTML = """
+<style>
+  /* The four variables are the single source of truth for how much of the
+     viewport the chrome has taken away from the map. Default 0 => every
+     rule that reads them is a no-op on a phone. */
+  :root {
+    --wb-top: 0px;      /* top bar height          (mid 48, wide 56)       */
+    --wb-left: 0px;     /* left column width       (mid 320/58, wide 344)  */
+    --wb-right: 0px;    /* detail column width     (mid 0/340, wide 384)   */
+    --wb-bottom: 0px;   /* split-mode bottom panel (default 45% of height) */
+  }
+  /* Chrome stays display:none until a mode class asks for it. */
+  #wb-top, #wb-left, #wb-rail, #wb-detail, #wb-filter-pop, #wb-split-handle {
+    display: none;
+  }
+  #wb-filter-pop[hidden] { display: none; }
+
+  /* The map is folium's own #map_<hash> (id selector, position:relative,
+     100%/100%), so insetting it needs !important. */
+  body.wb-split .folium-map,
+  body.wb-mid   .folium-map,
+  body.wb-wide  .folium-map {
+    position: absolute !important;
+    top: var(--wb-top) !important;
+    left: var(--wb-left) !important;
+    right: var(--wb-right) !important;
+    bottom: var(--wb-bottom) !important;
+    width: auto !important;
+    height: auto !important;
+    transition: left 0.18s ease-out, right 0.18s ease-out;
+  }
+  .folium-map.no-anim { transition: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    body.wb-split .folium-map, body.wb-mid .folium-map,
+    body.wb-wide .folium-map { transition: none; }
+  }
+
+  /* ---------- top bar (mid / wide) ---------- */
+  #wb-top {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--wb-top);
+    z-index: 10004;          /* over the sheets (10002), under #bm-backdrop */
+    box-sizing: border-box;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    align-items: center; gap: 10px;
+    padding: 0 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  body.wb-mid #wb-top, body.wb-wide #wb-top { display: flex; }
+  #wb-brand {
+    display: inline-flex; align-items: center; gap: 7px;
+    flex-shrink: 0; font-weight: 700; font-size: 14px; color: #111827;
+    user-select: none;
+  }
+  #wb-brand img.emoji-img { width: 18px; height: 18px; }
+  body.wb-mid #wb-brand .wb-brand-t { display: none; }
+  #wb-top-search { flex: 1 1 auto; min-width: 0; display: flex; }
+  /* A2: the search box is the SAME element as the floating one —
+     wbApplyMode() appendChild()s it into the slot, so every listener, the
+     dropdown and the observers on #ss-list keep working untouched. */
+  body.wb-mid #ss-box, body.wb-wide #ss-box {
+    position: static; transform: none; width: auto;
+    flex: 1 1 auto; min-width: 0; max-width: 560px;
+  }
+  /* G1: search results render over the left column instead of hanging off
+     a floating box. The node does not move; only its box changes. */
+  body.wb-mid #ss-list.open, body.wb-wide #ss-list.open {
+    position: fixed; top: var(--wb-top); left: 0; bottom: 0;
+    max-height: none; margin-top: 0;
+    border-radius: 0; border-left: none; border-bottom: none;
+    box-shadow: 6px 0 16px rgba(0,0,0,0.10);
+    z-index: 10003;
+  }
+  /* Fixed widths, not var(--wb-left): with a card open on a mid viewport
+     the column is a 58px rail, and search results still want the full one. */
+  body.wb-mid  #ss-list.open { width: 320px; }
+  body.wb-wide #ss-list.open { width: 344px; }
+  .wb-top-btn {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 36px; padding: 0 12px;
+    border: 1px solid #d1d5db; border-radius: 999px;
+    background: #fff; color: #374151;
+    font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .wb-top-btn:hover { background: #f3f4f6; }
+  }
+  .wb-top-btn img.emoji-img { width: 14px; height: 14px; }
+  #wb-region-label { max-width: 8em; overflow: hidden;
+                     text-overflow: ellipsis; white-space: nowrap; }
+  body.wb-mid #wb-region-btn { max-width: 132px; }
+  .wb-filter-n { color: #2563eb; font-variant-numeric: tabular-nums; }
+  .wb-filter-n:empty { display: none; }
+  #wb-sync {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 32px; padding: 0 10px;
+    border: 1px solid #e5e7eb; border-radius: 999px;
+    background: #f9fafb; color: #6b7280;
+    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; max-width: 190px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wb-sync .wb-sync-t { overflow: hidden; text-overflow: ellipsis;
+                        white-space: nowrap; }
+  /* G4: colour is driven by data-kind, mirrored from setStatus(). */
+  #wb-sync::before {
+    content: ''; flex-shrink: 0;
+    width: 7px; height: 7px; border-radius: 50%; background: #9ca3af;
+  }
+  #wb-sync[data-kind="ok"]   { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
+  #wb-sync[data-kind="ok"]::before   { background: #16a34a; }
+  #wb-sync[data-kind="err"]  { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+  #wb-sync[data-kind="err"]::before  { background: #dc2626; }
+  #wb-sync[data-kind="busy"] { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+  #wb-sync[data-kind="busy"]::before { background: #2563eb; }
+  body.wb-mid #wb-sync .wb-sync-t { display: none; }
+  /* Account slot: #ss-avatar / #ss-avatar-dot / #ss-menu move in here, and
+     both the dot and the menu are position:absolute, so this slot has to be
+     the containing block exactly the way #ss-top was. */
+  #wb-top-acct { position: relative; flex-shrink: 0; display: flex;
+                 align-items: center; }
+  body.wb-mid #wb-top-acct #ss-menu, body.wb-wide #wb-top-acct #ss-menu {
+    top: 44px; right: 0;
+    max-height: calc(100dvh - var(--wb-top) - 24px);
+  }
+
+  /* ---------- left column / split-mode bottom panel ---------- */
+  #wb-left {
+    position: fixed;
+    z-index: 9990;
+    box-sizing: border-box;
+    background: #fff;
+    flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px; color: #111827;
+    overflow: hidden;
+    transition: transform 0.2s ease-out;
+  }
+  #wb-left.no-anim { transition: none !important; }
+  @media (prefers-reduced-motion: reduce) { #wb-left { transition: none; } }
+  body.wb-mid #wb-left, body.wb-wide #wb-left {
+    display: flex;
+    top: var(--wb-top); left: 0; bottom: 0; width: var(--wb-left);
+    border-right: 1px solid #e5e7eb;
+  }
+  /* A4: with a card open on a mid viewport the column slides off-canvas and
+     #wb-rail takes its place. Deliberately NOT display:none — the browser
+     drops scrollTop on a box that stops being laid out, and A9 requires the
+     list position to survive a rotation. */
+  body.wb-mid.wb-detail-open #wb-left {
+    width: 320px; transform: translateX(-100%); pointer-events: none;
+  }
+  body.wb-split #wb-left {
+    display: flex;
+    left: 0; right: 0; bottom: 0; height: var(--wb-bottom);
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -6px 18px rgba(0,0,0,0.10);
+  }
+  #wb-left-head {
+    flex-shrink: 0; padding: 8px 12px 6px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .wb-tabs { display: flex; align-items: center; gap: 6px; }
+  .wb-tab {
+    border: none; background: none; cursor: pointer;
+    padding: 8px; border-radius: 6px;
+    font: 700 14px/1 inherit; color: #6b7280;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wb-tab.on { color: #111827; box-shadow: inset 0 -2px 0 #2563eb; }
+  .wb-tab[hidden] { display: none; }
+  #wb-left-head .wb-filter-btn { margin-left: auto; }
+  body.wb-mid #wb-left-head .wb-filter-btn,
+  body.wb-wide #wb-left-head .wb-filter-btn { display: none; }
+  .wb-counts { margin-top: 5px; font-size: 12px; color: #6b7280; }
+  .wb-counts b { color: #2563eb; font-variant-numeric: tabular-nums; }
+  /* Slots owned by the result-list task — created empty here on purpose. */
+  #wb-list-tools { flex-shrink: 0; }
+  #wb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+             overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  #wb-list-foot { flex-shrink: 0; }
+
+  /* ---------- split-mode drag handle ---------- */
+  body.wb-split #wb-split-handle {
+    display: block;
+    position: fixed; left: 0; right: 0; bottom: var(--wb-bottom);
+    height: 16px; z-index: 9991;
+    background: transparent; cursor: row-resize; touch-action: none;
+  }
+  #wb-split-handle::before {
+    content: ''; display: block;
+    width: 44px; height: 4px; margin: 6px auto 0;
+    background: #d1d5db; border-radius: 999px;
+  }
+  #wb-split-handle:focus-visible { outline: 2px solid #2563eb;
+                                   outline-offset: -2px; }
+
+  /* ---------- mid-mode icon rail ---------- */
+  body.wb-mid.wb-detail-open #wb-rail {
+    display: flex;
+    position: fixed; top: var(--wb-top); left: 0; bottom: 0; width: 58px;
+    z-index: 9993;
+    flex-direction: column; align-items: center; gap: 6px;
+    padding: 8px 0;
+    box-sizing: border-box;
+    background: #fff; border-right: 1px solid #e5e7eb;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .wb-rail-btn {
+    width: 44px; height: 44px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid #e5e7eb; border-radius: 10px;
+    background: #fff; color: #374151; cursor: pointer;
+    font-size: 17px; line-height: 1;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wb-rail-btn img.emoji-img { width: 18px; height: 18px; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .wb-rail-btn:hover { background: #f3f4f6; }
+  }
+  .wb-rail-n { text-align: center; line-height: 1.15; padding: 2px 0; }
+  .wb-rail-n b { display: block; font-size: 14px; color: #2563eb;
+                 font-variant-numeric: tabular-nums; }
+  .wb-rail-n span { font-size: 11px; color: #9ca3af; }
+
+  /* ---------- detail column ---------- */
+  #wb-detail {
+    position: fixed; top: var(--wb-top); right: 0; bottom: 0;
+    z-index: 9992;
+    box-sizing: border-box;
+    background: #fff; border-left: 1px solid #e5e7eb;
+    flex-direction: column; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  body.wb-wide #wb-detail { display: flex; width: 384px; }
+  body.wb-mid  #wb-detail {
+    display: flex; width: 340px;
+    transform: translateX(100%);
+    transition: transform 0.22s ease-out;
+    box-shadow: -6px 0 18px rgba(0,0,0,0.12);
+  }
+  body.wb-mid.wb-detail-open #wb-detail { transform: translateX(0); }
+  #wb-detail.no-anim { transition: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    body.wb-mid #wb-detail { transition: none; }
+  }
+  #wb-detail-head { flex-shrink: 0; }
+  #wb-detail-body { flex: 1 1 auto; min-height: 0;
+                    display: flex; flex-direction: column; }
+  .wb-empty { margin: 0; padding: 28px 20px; text-align: center;
+              font-size: 13px; line-height: 1.6; color: #9ca3af; }
+  body.wb-detail-open .wb-empty { display: none; }
+
+  /* ---------- A3: non-modal filter popover (mid / wide) ---------- */
+  #wb-filter-pop {
+    position: fixed; top: calc(var(--wb-top) + 6px); right: 12px;
+    z-index: 10004;
+    box-sizing: border-box;
+    width: min(640px, calc(100vw - 24px));
+    max-height: calc(100dvh - var(--wb-top) - 24px);
+    background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 12px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.22);
+    flex-direction: column; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px; line-height: 1.5; color: #111827;
+  }
+  body.wb-mid #wb-filter-pop.open, body.wb-wide #wb-filter-pop.open {
+    display: flex;
+  }
+  #wb-filter-pop.no-anim { transition: none !important; }
+  #wb-filter-pop > #ff-sheet-content { flex: 1 1 auto; min-height: 0;
+                                       padding-top: 10px; }
+
+  /* ---------- offsets for fixed chrome this block does not own ---------- */
+  /* The bottom sheets are the phone/split presentation; on mid/wide the same
+     content lives in #wb-detail / #wb-filter-pop, so the sheets go off
+     screen entirely. openSheet() still adds .bs-open (the smoke test and
+     syncSheetOffset both read it) — it simply paints nothing. */
+  body.wb-mid #bs-sheet, body.wb-wide #bs-sheet,
+  body.wb-mid #bs-backdrop, body.wb-wide #bs-backdrop,
+  body.wb-mid #ff-sheet, body.wb-wide #ff-sheet,
+  body.wb-mid #ff-backdrop, body.wb-wide #ff-backdrop { display: none !important; }
+  /* A5: the split panel head carries its own 筛选 button, so the FAB goes. */
+  body.wb-split #ff-fab, body.wb-mid #ff-fab, body.wb-wide #ff-fab {
+    display: none !important;
+  }
+  /* max(), not a sum: in split mode an open card already covers the panel,
+     so adding both offsets would push the stack off the top edge.
+     M-071 rework (gate E3): --wb-bottom is the panel height and the JS
+     maxLift only ever clamped --sheet-h, so a tall panel (45% by default,
+     up to 75% by drag) could still lift the stack clean off the top —
+     measured stackTop = -41 at 657x416. The outer min() is the hard stop:
+     whatever the panel does, the stack starts below the search capsule.
+     --fab-h is the stack's live height, published by syncSheetOffset(); if
+     it is missing the clamp is merely looser, never wrong. */
+  body.wb-split .map-fab-stack {
+    bottom: min(calc(18px + env(safe-area-inset-bottom)
+                     + max(var(--sheet-h, 0px), var(--wb-bottom))),
+                max(0px, calc(100dvh - var(--fab-h, 0px) - 62px)));
+  }
+  /* AUTO-05 in split mode: --attr-h is the card's height measured from the
+     VIEWPORT bottom, but the credit lives inside the map box, whose bottom
+     is already the panel's top edge — so the full lift overshoots by exactly
+     the panel height and threw the credit off the top of the screen
+     (measured y = -38 at 657x416, y = -139 with the panel dragged to 75%).
+     Subtract what the map box already gave up; max() keeps it at the map's
+     bottom edge when the panel alone is taller than the card. */
+  body.wb-split .leaflet-control-attribution {
+    margin-bottom: max(0px, calc(var(--attr-h, 0px) - var(--wb-bottom))) !important;
+  }
+  body.wb-split #sync-stack {
+    bottom: calc(76px + env(safe-area-inset-bottom) + var(--wb-bottom));
+  }
+  body.wb-mid #sync-stack, body.wb-wide #sync-stack {
+    left: var(--wb-left); right: var(--wb-right);
+  }
+  body.wb-mid #sync-banner, body.wb-wide #sync-banner {
+    top: calc(var(--wb-top) + 12px);
+    left: calc(var(--wb-left) + (100vw - var(--wb-left) - var(--wb-right)) / 2);
+  }
+  body.wb-split #ff-empty-map, body.wb-mid #ff-empty-map,
+  body.wb-wide #ff-empty-map {
+    left: calc(var(--wb-left) + (100vw - var(--wb-left) - var(--wb-right)) / 2);
+    top: calc(var(--wb-top) + (100dvh - var(--wb-top) - var(--wb-bottom)) / 2);
+  }
+
+  /* A7 (simplified): a half-folded or vertically split window has no room
+     for a 75% sheet. CSS only, both sheets, every mode. */
+  @media (max-height: 419px) {
+    #ff-sheet, #bs-sheet { max-height: 60dvh; }
+  }
+
+  /* H8 / M-090: the credit lives inside the map container, so it inherits
+     the inset for free — all it ever lacked was the bottom safe-area inset.
+     env() is 0 on every non-notched device, so nothing moves there. */
+  .leaflet-control-attribution { padding-bottom: env(safe-area-inset-bottom); }
+  /* M-159: the scale bar has to clear #ff-fab (18px + 44px tall + slack);
+     on the workbench modes #ff-fab is gone, so it drops back down. */
+  .leaflet-control-scale { margin-bottom: 78px !important; }
+  body.wb-split .leaflet-control-scale, body.wb-mid .leaflet-control-scale,
+  body.wb-wide .leaflet-control-scale { margin-bottom: 12px !important; }
+</style>
+<!-- M-027: the workbench shell. Every node is display:none until
+     wbApplyMode() puts a wb-* class on <body>, so a phone never sees it and
+     nothing is ever moved into it. The four content slots (#wb-list-tools /
+     #wb-list / #wb-list-foot / #wb-detail-head) are deliberately empty —
+     they belong to the result-list and detail-card tasks. -->
+<header id="wb-top">
+  <div id="wb-brand"><span aria-hidden="true">🗾</span><span class="wb-brand-t">Japan Foodmap</span></div>
+  <div id="wb-top-search"></div>
+  <button id="wb-region-btn" class="wb-top-btn" type="button">
+    <span aria-hidden="true">📍</span><span id="wb-region-label">全部地区</span>
+  </button>
+  <button class="wb-top-btn wb-filter-btn" type="button">
+    <span>筛选</span><b class="wb-filter-n"></b>
+  </button>
+  <button id="wb-sync" type="button" data-kind=""><span class="wb-sync-t">同步</span></button>
+  <div id="wb-top-acct"></div>
+</header>
+<aside id="wb-left" aria-label="结果">
+  <div id="wb-left-head">
+    <div class="wb-tabs" role="tablist">
+      <button id="wb-tab-results" class="wb-tab on" type="button"
+              role="tab" aria-selected="true" aria-controls="wb-list">结果</button>
+      <!-- Third-phase "collections" tab. Present but hidden so the tablist
+           markup (and its ids) are already the shape phase 3 expects. -->
+      <button id="wb-tab-fav" class="wb-tab" type="button"
+              role="tab" aria-selected="false" hidden>收藏</button>
+      <button class="wb-top-btn wb-filter-btn" type="button">
+        <span>筛选</span><b class="wb-filter-n"></b>
+      </button>
+    </div>
+    <!-- M-022's two-segment reading, third instance. setCountText() writes
+         every .ff-count / .ff-inview on the page, so this needs no wiring. -->
+    <div class="wb-counts">命中 <b class="ff-count">–</b> · 视野内 <span class="ff-inview">–</span></div>
+  </div>
+  <div id="wb-list-tools"></div>
+  <div id="wb-list"></div>
+  <div id="wb-list-foot"></div>
+</aside>
+<div id="wb-split-handle" role="separator" aria-orientation="horizontal"
+     tabindex="0" aria-label="调整面板高度"></div>
+<nav id="wb-rail">
+  <button id="wb-rail-back" class="wb-rail-btn" type="button"
+          title="还原列表" aria-label="还原列表">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <div class="wb-rail-n"><b class="ff-count">–</b><span>命中</span></div>
+  <button id="wb-rail-search" class="wb-rail-btn" type="button"
+          title="聚焦搜索" aria-label="聚焦搜索">🔍</button>
+  <button class="wb-rail-btn wb-filter-btn" type="button"
+          title="筛选" aria-label="筛选">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+  </button>
+</nav>
+<section id="wb-detail" aria-label="详情">
+  <div id="wb-detail-head"></div>
+  <p class="wb-empty">点地图或列表里的店查看详情</p>
+  <div id="wb-detail-body"></div>
+</section>
+<div id="wb-filter-pop" role="dialog" aria-labelledby="ff-sheet-title"
+     aria-hidden="true" hidden></div>
+"""
+
+
+# M-027 / B1-B7: styling for the virtualized result list that lives in the
+# workbench left column. Style only — the containers (#wb-list-tools /
+# #wb-list / #wb-list-foot) come from WORKBENCH_HTML and everything inside
+# them is generated at runtime by the "Result list" JS block, which
+# pre-swaps emoji through emojiImg() and pre-translates through
+# localizeText() so no observer pass is needed on the scroll path.
+# Injected right after WORKBENCH_HTML so it can lean on the same variables.
+RESULT_LIST_HTML = """
+<style>
+  /* Fixed row height is what makes windowing possible: the scrollbar is a
+     spacer of N * --wb-row-h and only the visible slice exists in the DOM.
+     56 on a mouse, 60 where a finger has to hit it. */
+  :root { --wb-row-h: 60px; }
+  @media (hover: hover) and (pointer: fine) { :root { --wb-row-h: 56px; } }
+
+  /* ---------- tools bar (sort + select) ---------- */
+  .wb-tools {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-bottom: 1px solid #f3f4f6;
+  }
+  #wb-sort {
+    flex: 0 1 auto; min-width: 0; max-width: 62%;
+    min-height: 32px; padding: 0 6px;
+    box-sizing: border-box;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    background: #fff; color: #374151;
+    font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer;
+  }
+  .wb-tool-btn {
+    flex: 0 0 auto;
+    min-height: 32px; padding: 0 10px;
+    box-sizing: border-box;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    background: #fff; color: #374151;
+    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  #wb-select-btn { margin-left: auto; }
+  .wb-tool-btn.on { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .wb-tool-btn:hover { background: #f3f4f6; }
+  }
+  /* H3: a finger needs 44; a mouse does not, and 44-tall chrome would eat
+     a row of results on a 616x816 inner screen. */
+  @media (pointer: coarse) {
+    #wb-sort, .wb-tool-btn { min-height: 44px; }
+  }
+  #wb-bulk { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+  #wb-bulk[hidden] { display: none; }
+  #wb-sort:focus-visible, .wb-tool-btn:focus-visible, .wb-foot-btn:focus-visible {
+    outline: 2px solid #2563eb; outline-offset: 2px;
+  }
+
+  /* ---------- the scroller ---------- */
+  #wb-list:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  #wb-list-spacer { position: relative; width: 100%; }
+  #wb-list-win { position: absolute; left: 0; right: 0; top: 0; }
+  .wb-list-empty { padding: 28px 20px; text-align: center;
+                   font-size: 13px; line-height: 1.6; color: #9ca3af; }
+
+  /* ---------- one result row ---------- */
+  .wb-row {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    box-sizing: border-box;
+    width: 100%; height: var(--wb-row-h);
+    margin: 0; padding: 0 6px 0 10px;
+    border: 0; border-bottom: 1px solid #f3f4f6;
+    background: #fff; color: #111827;
+    font: 400 13px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    text-align: left; overflow: hidden;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .wb-row:hover { background: #f9fafb; }
+  }
+  .wb-row.is-active, .wb-row.is-checked { background: #eff6ff; }
+  .wb-row.is-active::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px; background: #2563eb;
+  }
+  .wb-row:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  /* Blacklisted rows stay in the list (a favourite that silently vanishes
+     reads as data loss) — dimmed, with a red mark so colour is not the
+     only signal. */
+  .wb-row.is-black { opacity: 0.4; }
+
+  .wb-row-chk {
+    flex: 0 0 auto; width: 18px; height: 18px;
+    box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1.5px solid #9ca3af; border-radius: 4px;
+    font-size: 12px; line-height: 1; color: #fff;
+  }
+  .wb-row.is-checked .wb-row-chk { background: #2563eb; border-color: #2563eb; }
+
+  .wb-row-ic {
+    position: relative; flex: 0 0 auto; width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .wb-row-dot {
+    position: absolute; right: -2px; bottom: -1px;
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1.5px solid #fff; box-sizing: border-box;
+  }
+
+  .wb-row-b { flex: 1 1 auto; min-width: 0;
+              display: flex; flex-direction: column; gap: 1px; }
+  .wb-row-l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .wb-row-x { flex: 0 0 auto; color: #dc2626; font-weight: 700; font-size: 12px; }
+  .wb-row-nm {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 600; font-size: 13px;
+  }
+  .wb-row-rt { flex: 0 0 auto; color: #c33; font-size: 12px; font-weight: 700;
+               font-variant-numeric: tabular-nums; }
+  .wb-row-l2, .wb-row-l3 {
+    display: flex; align-items: center; gap: 5px;
+    min-width: 0; white-space: nowrap; overflow: hidden;
+  }
+  .wb-row-l2 { font-size: 12px; color: #6b7280; }
+  .wb-row-l3 { font-size: 11px; color: #6b7280; }
+  .wb-row-l2 > span { overflow: hidden; text-overflow: ellipsis; }
+  .wb-row-sep { flex: 0 0 auto; color: #d1d5db; }
+  .wb-row-pr { font-variant-numeric: tabular-nums; }
+  /* A8: 246px-wide split screens never reach this list (it only exists at
+     >=520), but the rule is cheap insurance for a narrow host column. */
+  @media (max-width: 319px) { .wb-row-l3 { display: none; } }
+
+  .wb-badge {
+    flex: 0 0 auto; display: inline-block;
+    padding: 1px 5px; border-radius: 999px;
+    color: #fff; font-size: 11px; font-weight: 700; line-height: 1.35;
+    max-width: 7.5em; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Same palette as .rst-ribbon-* on the detail card. */
+  .wb-badge-gold   { background: #a08a55; }
+  .wb-badge-silver { background: #8e9398; }
+  .wb-badge-bronze { background: #8c6239; }
+  .wb-badge-hyaku  { background: #6a5a3a; }
+  .wb-badge-hot    { background: #c0392b; }
+  .wb-row-net { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
+                color: #15803d; font-weight: 700; }
+  .wb-row-net.off { color: #9ca3af; font-weight: 400; }
+
+  /* Row-end star / block. Visual 34, hit area 44 tall via ::after — the
+     -3px horizontal bleed keeps the two targets from overlapping in the
+     6px gap between them. */
+  .wb-row-acts { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+  .wb-row-fav, .wb-row-black {
+    position: relative; flex: 0 0 auto;
+    width: 34px; height: 34px;
+    display: inline-block;
+    border-radius: 999px; opacity: 0.32; cursor: pointer;
+    /* The glyph is the Apple PNG from docs/emoji, painted as a background so
+       a rendered window carries 30 <img> elements instead of 90. The two
+       URLs are set once on #wb-list by wbBuild(). */
+    background-repeat: no-repeat; background-position: center;
+    background-size: 16px 16px;
+  }
+  .wb-row-fav   { background-image: var(--wb-star); }
+  .wb-row-black { background-image: var(--wb-ban); }
+  .wb-row-fav::after, .wb-row-black::after {
+    content: ''; position: absolute; inset: -5px -3px;
+  }
+  .wb-row-fav.on, .wb-row-black.on { opacity: 1; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .wb-row-fav:hover, .wb-row-black:hover { opacity: 1; background-color: #f3f4f6; }
+  }
+
+  /* ---------- B7 footer ---------- */
+  #wb-list-foot:empty { display: none; }
+  .wb-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-top: 1px solid #e5e7eb;
+    background: #f9fafb; color: #374151;
+    font: 400 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .wb-foot b { color: #2563eb; font-variant-numeric: tabular-nums; }
+  .wb-foot-btn {
+    flex: 0 0 auto; margin-left: auto;
+    min-height: 32px; padding: 0 10px;
+    box-sizing: border-box;
+    border: 1px solid #93c5fd; border-radius: 6px;
+    background: #eff6ff; color: #1d4ed8;
+    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  @media (pointer: coarse) { .wb-foot-btn { min-height: 44px; } }
+
+  /* ---------- G2 / M-115: the same reading in the search dropdown -------
+     Overrides, not edits: this block ships after SEARCH_BOX_HTML, so an
+     equal-specificity rule here wins without touching that block. */
+  #ss-list .ss-icon { position: relative; }
+  #ss-list .ss-dot {
+    position: absolute; right: -1px; bottom: -1px;
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1.5px solid #fff; box-sizing: border-box;
+  }
+  #ss-list .ss-net { color: #15803d; font-weight: 700; }
+</style>
 """
 
 
@@ -3892,6 +5596,16 @@ FILTER_JS_TEMPLATE = r"""
   // off restaurants.json on every cold load.
   var BUCKET_COLOR = __BUCKET_COLORS__;
   var GENRE_EMOJI  = __GENRE_EMOJI__;
+  // M-023: the 47 prefectures, index-aligned with the integer `pref` on
+  // every restaurants.json row. Each entry is {ja, sc, tc, en, n} — the
+  // four display spellings plus this build's row count. The region filter
+  // compares integers only; never substring-match an address against these.
+  var PREFS = __PREFS__;
+  // Price buckets as [key, label, lower_inclusive, upper_exclusive], in the
+  // same order as PRICE_BUCKETS in map.py (colours come from BUCKET_COLOR
+  // above). Lets the detail card turn a raw ¥ upper bound back into the
+  // bucket label the filter panel shows. lo/hi are null when unbounded.
+  var PRICE_BUCKETS = __PRICE_BUCKETS__;
   // Per-char variant → canonical (simplified Chinese) table. Used by the
   // search box to normalize the query so "烧" matches names containing the
   // JP shinjitai 焼, etc. Restaurant names are canonicalized on demand
@@ -4301,6 +6015,16 @@ FILTER_JS_TEMPLATE = r"""
     for (var i = 0; i < parts.length; i++) out.push(localizeText(parts[i]));
     return out.join(sep) + (activeLang === 'en' ? '.' : '。');
   }
+  // H11: "已同步 14:07:33" used to format the clock with the *browser's*
+  // locale, so a zh-CN browser reading the page in ja saw a Chinese
+  // timestamp glued to a Japanese label (and vice versa). The page's own
+  // language tags are already valid BCP-47, so they can be handed straight
+  // to toLocaleTimeString.
+  function syncTimeText(d) {
+    var when = d || new Date();
+    try { return when.toLocaleTimeString(activeLang); }
+    catch (_) { return when.toLocaleTimeString(); }
+  }
   function localizeTree(root) {
     if (!root || !I18N_MAP) return;
     if (root.nodeType !== 1) return;
@@ -4384,6 +6108,21 @@ FILTER_JS_TEMPLATE = r"""
     ['#fab-bookmarks',                 'title',      '我的收藏'],
     ['#ss-clear',                      'aria-label', '清空'],
     ['#ss-avatar',                     'aria-label', '账户'],
+    // H6 / M-084 + M-159 + M-027 (workbench chrome).
+    ['#ss-input',                      'aria-label', '搜索餐厅 / 景点 / 地址'],
+    ['#fab-zoom-in',                   'title',      '放大'],
+    ['#fab-zoom-in',                   'aria-label', '放大'],
+    ['#fab-zoom-out',                  'title',      '缩小'],
+    ['#fab-zoom-out',                  'aria-label', '缩小'],
+    ['#wb-rail-back',                  'title',      '还原列表'],
+    ['#wb-rail-back',                  'aria-label', '还原列表'],
+    ['#wb-rail-search',                'title',      '聚焦搜索'],
+    ['#wb-rail-search',                'aria-label', '聚焦搜索'],
+    ['#wb-rail .wb-filter-btn',        'title',      '筛选'],
+    ['#wb-rail .wb-filter-btn',        'aria-label', '筛选'],
+    ['#wb-split-handle',               'aria-label', '调整面板高度'],
+    ['#wb-detail',                     'aria-label', '详情'],
+    ['#wb-left',                       'aria-label', '结果'],
     ['.bm-close',                      'aria-label', '关闭'],
     ['.bm-kind-seg',                   'aria-label', '类型'],
     ['#bm-emoji-more',                 'title',      '打开完整 emoji 选择器'],
@@ -4392,7 +6131,23 @@ FILTER_JS_TEMPLATE = r"""
     // Built at runtime — reached through observeDynamic below, which runs
     // this pass over every inserted subtree for exactly these two.
     ['.rst-close',                     'aria-label', '关闭'],
-    ['.ss-fav',                        'title',      '加入收藏']
+    ['.ss-fav',                        'title',      '加入收藏'],
+    // D4: the detail card's "第 n / N 家" stepper. Built at runtime inside
+    // #bs-content, so observeDynamic re-runs this pass over it.
+    ['.rst-prev',                      'aria-label', '上一家'],
+    ['.rst-next',                      'aria-label', '下一家'],
+    // H2 / C1 / G6 (filter panel, region select, bookmark modal).
+    ['.ff-close',                      'aria-label', '关闭'],
+    ['#kb-help .kb-close',             'aria-label', '关闭'],
+    ['#ff-region',                     'aria-label', '地区'],
+    ['#bm-copy',                       'aria-label', '复制坐标'],
+    ['#bm-copy',                       'title',      '复制坐标'],
+    // M-027 / B1-B2: the result list's sort control and per-row actions.
+    // The rows already ship localized labels; this is the belt-and-braces
+    // pass observeDynamic('#wb-left') runs over each rendered window.
+    ['#wb-sort',                       'aria-label', '排序'],
+    ['.wb-row-fav',                    'aria-label', '收藏'],
+    ['.wb-row-black',                  'aria-label', '弃用']
   ];
   function applyAttrL10n(root) {
     var scope = root || document;
@@ -4442,6 +6197,11 @@ FILTER_JS_TEMPLATE = r"""
     // Filter sheet has dynamic textContent rewrites (cuisine summary
     // "全部"/"无"/"已选 N / M", live count chips) but no runtime emoji.
     observeDynamic(document.getElementById('ff-sheet-content'), false, true);
+    // M-027: the workbench columns get runtime text written into them (list
+    // rows, region label, detail header). Each writer localizes explicitly;
+    // these two observers are the belt-and-braces pass.
+    observeDynamic(document.getElementById('wb-left'), false, true);
+    observeDynamic(document.getElementById('wb-detail'), false, true);
     // Reflect onto <html lang> — browsers use it for hyphenation and
     // accessibility (screen readers, especially).
     // M-083: unconditional. zh-CN has no I18N_MAP, so the old `if (I18N_MAP)`
@@ -4957,6 +6717,196 @@ FILTER_JS_TEMPLATE = r"""
       if (fn) { try { fn(); } catch (_) {} }
     });
 
+    // ===== H2 / M-074 · M-113: focus containment ============================
+    // Every overlay on this page set aria-modal="true" and then let Tab walk
+    // straight out into the map behind it. trapFocus() is the modal version
+    // (Tab cycles, background goes `inert`, focus is handed back on close);
+    // focusInto() is the non-modal one (land inside, hand focus back on
+    // close, never cage the user). Both return a release() — call it exactly
+    // once, from the matching close path.
+    var FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled])'
+      + ', select:not([disabled]), textarea:not([disabled])'
+      + ', [tabindex]:not([tabindex="-1"])';
+    function focusablesIn(el) {
+      var out = [];
+      var all = el.querySelectorAll(FOCUSABLE_SEL);
+      for (var i = 0; i < all.length; i++) {
+        var n = all[i];
+        // offsetParent is null for display:none subtrees; position:fixed
+        // elements report null too, so check the box as well.
+        if (n.hidden) continue;
+        if (n.offsetParent === null
+            && !(n.getClientRects && n.getClientRects().length)) continue;
+        out.push(n);
+      }
+      return out;
+    }
+    function focusFirstIn(el, focusSel) {
+      var target = null;
+      if (focusSel) {
+        try { target = el.querySelector(focusSel) || document.querySelector(focusSel); }
+        catch (_) { target = null; }
+      }
+      if (!target) target = focusablesIn(el)[0] || null;
+      if (target) { try { target.focus(); } catch (_) {} }
+      return target;
+    }
+    // Elements that must stop taking focus / pointer events while a true
+    // modal is up. `inert` is supported everywhere this page runs; the
+    // aria-hidden fallback keeps older engines announcing the right thing.
+    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack',
+                     '#wb-left', '#wb-top', '#wb-rail', '#wb-detail'];
+    function setBackgroundInert(on, exclude) {
+      for (var i = 0; i < INERT_SEL.length; i++) {
+        var nodes = document.querySelectorAll(INERT_SEL[i]);
+        for (var j = 0; j < nodes.length; j++) {
+          var n = nodes[j];
+          if (exclude && (n === exclude || n.contains(exclude))) continue;
+          if (on) { n.inert = true; n.setAttribute('data-ff-inert', '1'); }
+          else if (n.getAttribute('data-ff-inert')) {
+            n.inert = false; n.removeAttribute('data-ff-inert');
+          }
+        }
+      }
+    }
+    // `returnTo` is the fallback for the very common case where the overlay
+    // was opened by something that does not take focus itself (a Leaflet
+    // popup button, a programmatic .click(), a marker tap): activeElement is
+    // <body>, and handing focus back to <body> would leave the keyboard
+    // stranded wherever the trap happened to end.
+    function focusInto(el, focusSel, returnTo) {
+      if (!el) return null;
+      var last = document.activeElement;
+      if (!last || last === document.body || last === document.documentElement) {
+        last = returnTo || null;
+      }
+      focusFirstIn(el, focusSel);
+      return function release() {
+        if (last && last.isConnected && typeof last.focus === 'function') {
+          // Only pull focus back if it is still inside the thing we opened —
+          // the user may have clicked elsewhere in the meantime.
+          var a = document.activeElement;
+          if (!a || a === document.body || el.contains(a)) {
+            try { last.focus(); } catch (_) {}
+          }
+        }
+      };
+    }
+    function trapFocus(el, focusSel, returnTo) {
+      if (!el) return null;
+      var restore = focusInto(el, focusSel, returnTo);
+      setBackgroundInert(true, el);
+      function onKey(e) {
+        if (e.key !== 'Tab') return;
+        var items = focusablesIn(el);
+        if (!items.length) { e.preventDefault(); return; }
+        var first = items[0], lastEl = items[items.length - 1];
+        var a = document.activeElement;
+        if (e.shiftKey) {
+          if (a === first || !el.contains(a)) { e.preventDefault(); lastEl.focus(); }
+        } else if (a === lastEl || !el.contains(a)) {
+          e.preventDefault(); first.focus();
+        }
+      }
+      document.addEventListener('keydown', onKey, true);
+      return function release() {
+        document.removeEventListener('keydown', onKey, true);
+        setBackgroundInert(false, el);
+        if (restore) restore();
+      };
+    }
+
+    // ===== M-017 (G7): one global keyboard dispatcher ======================
+    // Seven single-key shortcuts plus a layered Escape. Everything runs in
+    // the capture phase and stops propagation once handled, so the five
+    // per-overlay Escape listeners that already exist can stay exactly as
+    // they are without firing twice for one press.
+    var kbHelp = document.getElementById('kb-help');
+    var kbHelpRelease = null;
+    function kbHelpOpen() {
+      if (!kbHelp || !kbHelp.hidden) return;
+      kbHelp.hidden = false;
+      uiPush('kbhelp');
+      kbHelpRelease = trapFocus(kbHelp);
+    }
+    function kbHelpClose() {
+      if (!kbHelp || kbHelp.hidden) return;
+      kbHelp.hidden = true;
+      if (kbHelpRelease) { var r = kbHelpRelease; kbHelpRelease = null; try { r(); } catch (_) {} }
+      uiDrop('kbhelp');
+    }
+    uiRegister('kbhelp', kbHelpClose);
+    if (kbHelp) {
+      var kbX = kbHelp.querySelector('.kb-close');
+      if (kbX) kbX.addEventListener('click', kbHelpClose);
+    }
+    function kbIsTyping(t) {
+      if (!t || t.nodeType !== 1) return false;
+      var tag = t.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+          || t.isContentEditable === true;
+    }
+    function kbCardBtn(sel) {
+      var host = document.getElementById('bs-content');
+      var b = host && host.querySelector(sel);
+      if (b) { b.click(); return true; }
+      return false;
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var typing = kbIsTyping(e.target);
+
+      if (e.key === 'Escape') {
+        // The search box owns its own Escape (clear, then close the
+        // dropdown) — leave that path alone.
+        var ssIn = document.getElementById('ss-input');
+        if (ssIn && document.activeElement === ssIn) return;
+        if (!uiStack.length) return;
+        var top = uiStack[uiStack.length - 1];
+        // Keep the card's existing two-step: full card -> peek -> closed.
+        var bsEl = document.getElementById('bs-sheet');
+        if (top === 'sheet' && wbIsPhoneLike() && bsActive
+            && bsEl && !bsEl.classList.contains('bs-peek')) {
+          bsSetPeek(true);
+        } else {
+          var closer = uiClosers[top];
+          if (!closer) return;
+          try { closer(); } catch (_) {}
+        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+
+      if (typing) return;
+      // A modal owns the keyboard while it is up.
+      var bmEl = document.getElementById('bm-modal');
+      if (bmEl && bmEl.classList.contains('bm-open')) return;
+      var impEl = document.getElementById('imp-modal');
+      if (impEl && impEl.classList.contains('imp-open')) return;
+
+      var k = e.key;
+      var handled = false;
+      if (k === '/') {
+        var inp = document.getElementById('ss-input');
+        if (inp) { inp.focus(); inp.select(); handled = true; }
+      } else if (k === '?') {
+        if (kbHelp && kbHelp.hidden) { kbHelpOpen(); handled = true; }
+      } else if (k === 'f' || k === 'F') {
+        handled = kbCardBtn('.ff-fav-btn');
+      } else if (k === 'x' || k === 'X') {
+        handled = kbCardBtn('.ff-black-btn');
+      } else if (k === 'j' || k === 'J') {
+        if (typeof window.__bsNav === 'function') { window.__bsNav(1); handled = true; }
+      } else if (k === 'k' || k === 'K') {
+        if (typeof window.__bsNav === 'function') { window.__bsNav(-1); handled = true; }
+      }
+      if (handled) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+
     // M-085: Leaflet's zoom/fade/marker animations and every flyTo ran at
     // full tilt even for a user who asked the OS for reduced motion — a
     // full-screen map that swoops is exactly the kind of movement that
@@ -5099,6 +7049,22 @@ FILTER_JS_TEMPLATE = r"""
       }
       return true;
     }
+    // M-159: explicit zoom buttons + a metric scale bar. folium builds the
+    // map with zoomControl off, so before this the only zoom affordances
+    // were the wheel, pinch and double-tap — nothing a trackpad-only laptop
+    // or a keyboard user could reach. The buttons live in the FAB stack
+    // (hidden under 700px, where pinch is the natural gesture).
+    (function wireZoomFabs() {
+      var zin  = document.getElementById('fab-zoom-in');
+      var zout = document.getElementById('fab-zoom-out');
+      if (zin)  zin.addEventListener('click',  function() { map.zoomIn(); });
+      if (zout) zout.addEventListener('click', function() { map.zoomOut(); });
+      try {
+        if (L.control && typeof L.control.scale === 'function') {
+          L.control.scale({imperial: false, position: 'bottomleft'}).addTo(map);
+        }
+      } catch (_) {}
+    })();
     if (!attachLocate()) {
       if (locateFab) {
         locateFab.style.display = 'none';
@@ -5502,11 +7468,154 @@ FILTER_JS_TEMPLATE = r"""
         return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
       });
     }
-    // Render the restaurant card from structured data. Mirrors the old
-    // Python fmt_popup() layout. `d` is the restaurants.json entry (name,
-    // rating, categories, bookable, detail_url already there); `p` is the
-    // popups.json positional array:
-    //   [genre, dinner, lunch, seat, station, address, policy, photos]
+    // ===== D1-D6 detail-card helpers =====================================
+    // Everything below builds one piece of the card. They are separate so
+    // the render order in renderPopup() reads as the decision order it is
+    // supposed to be (M-111), instead of as a wall of string concatenation.
+
+    // D2 / M-029: a raw Tabelog ceiling ("29999") back into the bucket the
+    // filter panel and the marker colours already speak in. PRICE_BUCKETS
+    // rows are [key, label, lo, hi]; lo/hi are null when unbounded and the
+    // trailing 'na' row is a sentinel that must never match a number.
+    function bucketOfUpper(n) {
+      if (n === null || n === undefined || n === '') return null;
+      var v = Number(n);
+      if (!isFinite(v)) return null;
+      if (typeof PRICE_BUCKETS === 'undefined' || !PRICE_BUCKETS) return null;
+      for (var i = 0; i < PRICE_BUCKETS.length; i++) {
+        var b = PRICE_BUCKETS[i];
+        if (b[0] === 'na') continue;
+        if ((b[2] === null || v >= b[2]) && (b[3] === null || v < b[3])) return b;
+      }
+      return null;
+    }
+    // D2: one price tile. The headline is always the bucket plus the word
+    // "上限" — the raw number is a ceiling Tabelog publishes, not a price
+    // anyone pays, and printing "¥29999" as the headline read as one (M-029).
+    // The raw value survives in title= for anyone who wants it.
+    function priceTile(keyHtml, upper) {
+      var b = bucketOfUpper(upper);
+      var val = b
+        ? escapeHtml(b[1]) + '<span class="rst-tile-u"> 上限</span>'
+        : 'NA';
+      var ttl = (upper === null || upper === undefined || upper === '')
+        ? '' : ' title="¥' + escapeHtml(String(upper)) + '"';
+      return '<div class="rst-tile"' + ttl + '>'
+           + '<div class="rst-tile-k">' + keyHtml + '</div>'
+           + '<div class="rst-tile-v">' + val + '</div></div>';
+    }
+    // Decision tile 3 + policy row 1. Returns 'net' | 'phone' | 'no' | null.
+    // p[9].b is the build-time first-word enum: 0 = not accepted, 1 =
+    // accepted, 2 = reservation-only (see policy_struct in map.py for the
+    // exact Japanese prefixes). When it disagrees with Tabelog's own
+    // online-booking flag the flag wins: that flag is live system state, the
+    // policy blurb is free text a shop typed once and never revisited.
+    function bookingMode(d, pol) {
+      if (d && d.bookable) return 'net';
+      var b = (pol && typeof pol.b === 'number') ? pol.b : null;
+      if (b === 0) return 'no';
+      if (b === 1 || b === 2) return 'phone';
+      return null;   // nothing extractable — say nothing (hard premise ④)
+    }
+    // Pure zh-CN runs; the #bs-content localizer turns them into EN / JA /
+    // zh-TW. Never a guess: null mode renders an em dash, not a default.
+    function bookingText(mode) {
+      if (mode === 'net')   return '网上可订';
+      if (mode === 'phone') return '仅电话 / 到店';
+      if (mode === 'no')    return '不接受预订';
+      return '—';
+    }
+    // D3 / §5.4: the policy table. Only rows the build step could actually
+    // extract are drawn — no placeholder dashes, no "shops like this
+    // usually…" inference (consensus #7). `pol` is popups slot 9 and may be
+    // null (no policy text at all, or a stale 9-slot cache).
+    function policyTable(d, pol, lang) {
+      var jaAttr = (lang === 'ja') ? ' lang="ja"' : '';
+      var rows = '';
+      function row(k, vHtml, attr) {
+        rows += '<div class="rst-policy-k">' + k + '</div>'
+             +  '<div class="rst-policy-v"' + (attr || '') + '>' + vHtml + '</div>';
+      }
+      var b = (pol && typeof pol.b === 'number') ? pol.b : null;
+      if (b === 0 && d && d.bookable) b = 1;   // flag beats blurb
+      if (b !== null) {
+        row('能否预订',
+            b === 0 ? '不接受预订' : (b === 2 ? '需要预订' : '可预订'));
+      }
+      // 100% coverage — derived from `bookable`, not from the blurb. Mixed
+      // Latin+CJK, so it is hand-written per language exactly like chipText
+      // (letting the run tokenizer at "Tabelog网上可订" produces nonsense).
+      var netTxt = d && d.bookable ? 'Tabelog 网上可订' : '仅电话 / 到店';
+      if (lang === 'en') {
+        netTxt = d && d.bookable ? 'Bookable on Tabelog' : 'Phone / walk-in only';
+      } else if (lang === 'ja') {
+        netTxt = d && d.bookable ? 'Tabelog でネット予約可' : '電話・来店のみ';
+      } else if (lang === 'zh-TW') {
+        netTxt = d && d.bookable ? 'Tabelog 網上可訂' : '僅電話 / 到店';
+      }
+      row('网上订位',
+          '<span class="rst-chip' + (d && d.bookable ? '' : ' rst-chip-off')
+          + '">' + escapeHtml(netTxt) + '</span>');
+      // lead / cancel / note are verbatim sentences lifted out of this
+      // language's own policy text. In JA they are the untranslated source,
+      // so lang="ja" stops localizeTree from rewriting them (M-098 sentinel).
+      if (pol && pol.lead)   row('提前多久', escapeHtml(pol.lead),   jaAttr);
+      if (pol && pol.cancel) row('取消规则', escapeHtml(pol.cancel), jaAttr);
+      if (pol && pol.note)   row('需要注意', escapeHtml(pol.note),   jaAttr);
+      return '<div class="rst-policy-tbl">' + rows + '</div>';
+    }
+    // M-030: p[10] is the Japanese source string — a weekday list, a
+    // "never closed" / "irregular" token, or a free-text phrase. Recognised
+    // tokens are re-emitted as zh-CN runs so the single i18n table covers all
+    // four languages; anything unrecognised is passed through verbatim under
+    // lang="ja" rather than guessed at.
+    // NB: the keys below are data the build-time CJK scanner does see, so each
+    // one has an entry in data/i18n/*.json; don't add examples to comments.
+    var HOLIDAY_TOKENS = {
+      '月曜日': '周一', '火曜日': '周二', '水曜日': '周三', '木曜日': '周四',
+      '金曜日': '周五', '土曜日': '周六', '日曜日': '周日',
+      '月曜': '周一', '火曜': '周二', '水曜': '周三', '木曜': '周四',
+      '金曜': '周五', '土曜': '周六', '日曜': '周日',
+      '祝日': '节假日', '祝祭日': '节假日',
+      '不定休': '不定休', '無休': '无休', '年中無休': '无休'
+    };
+    function holidayText(raw, lang) {
+      if (!raw) return '';
+      var sep = (lang === 'en') ? ', ' : '、';
+      var parts = String(raw).split(/[、,，･・\/／]/);
+      var out = [];
+      for (var i = 0; i < parts.length; i++) {
+        var t = parts[i].trim();
+        if (!t) continue;
+        out.push(HOLIDAY_TOKENS[t]
+          ? HOLIDAY_TOKENS[t]
+          : '<span lang="ja">' + escapeHtml(t) + '</span>');
+      }
+      return out.join(sep);
+    }
+    // D1: nearest station + walking minutes. p[11] is metres; 80 m/min is
+    // the figure Japanese property listings use, and it is what Tabelog's own
+    // walk-N-minutes line is derived from — so the number matches what a
+    // user who also opened the Tabelog page expects.
+    function stationLine(station, meters) {
+      if (!station) return '';
+      var s = '📍 <span lang="ja">' + escapeHtml(station) + '</span>';
+      var m = (meters === null || meters === undefined) ? NaN : Number(meters);
+      if (isFinite(m) && m > 0) {
+        s += ' <span class="rst-walk">步行 '
+           + Math.max(1, Math.round(m / 80)) + ' 分</span>';
+      }
+      return s;
+    }
+    // Render the restaurant card from structured data. `d` is the
+    // restaurants.json entry (name, rating, categories, bookable,
+    // detail_url already there); `p` is the popups.json positional array:
+    //   [genre, dinner, lunch, seat, station, address, policy, photos,
+    //    ribbons, policy_struct, holiday, station_metres]
+    // M-111 / D1: the render order is the decision order — identity, then
+    // the three numbers a plan turns on, then the rules, then the logistics,
+    // then the pictures, then the actions. It used to be Tabelog's own field
+    // order, which buried the reservation policy under a photo grid.
     function renderPopup(d, p) {
       // BUG-10: returning '' here painted a 33px white strip with a grip and
       // nothing else — no name, no close button, no way to tell what went
@@ -5532,12 +7641,17 @@ FILTER_JS_TEMPLATE = r"""
       // Slot 8 is server-rendered ribbon HTML — safe to inline as-is
       // (only static class names + escaped award labels).
       var ribbons = p[8] || '';
+      // Slots 9-11 shipped with M3. A Service Worker that cached the old
+      // 9-slot popups.json is still a valid deploy, so every one of them is
+      // length-checked rather than indexed blind — an old cache renders the
+      // pre-M3 subset of the card and nothing throws.
+      var pol = p.length > 9  ? p[9]  : null;   // {b, lead, cancel, note}
+      var hol = p.length > 10 ? p[10] : null;   // JA closing-days string
+      var stm = p.length > 11 ? p[11] : null;   // metres to the station
       var name    = escapeHtml(d.name || '');
       var rating  = d.rating == null ? '' : escapeHtml(d.rating);
       var bucket  = (d.categories && d.categories[0]) || '';
       var url     = escapeHtml(d.detail_url || '');
-      var dinnerS = (dinner != null) ? '¥' + dinner : 'NA';
-      var lunchS  = (lunch  != null) ? '¥' + lunch  : 'NA';
       var photoHtml = '';
       if (photos.length) {
         // 150x150_square (the old thumb) upscaled 2-3x on any hidpi
@@ -5551,26 +7665,24 @@ FILTER_JS_TEMPLATE = r"""
                          ? '640x640_rect_' : '320x320_square_';
         photoHtml = '<div class="rst-photos">' + photos.map(function(big) {
           var thumb = String(big).replace('640x640_rect_', thumbToken);
+          // H11: intrinsic size + decoding=async. The grid already pins the
+          // box with aspect-ratio, but the attributes keep the reserved space
+          // correct before any CSS applies and stop a slow decode from
+          // blocking the card's first paint.
           return '<a href="' + escapeHtml(big) + '" target="_blank" rel="noopener">'
                + '<img src="' + escapeHtml(thumb) + '" loading="lazy" alt="" '
+               + 'width="320" height="320" decoding="async" '
                + 'onload="this.parentElement.classList.add(\'ld\')" '
                + 'onerror="this.parentElement.style.display=\'none\'"></a>';
         }).join('') + '</div>';
       }
-      // Locale used for chip text + per-field translate-button gating below.
-      // Declared up front because EN / JA both need a hand-tuned chip phrase
-      // — relying on the runtime CJK localizer would split "可Tabelog预约"
-      // into independent runs and produce "AvailableTabelogBooking", which
-      // is what we're avoiding.
+      // Locale used for the hand-written mixed-script phrases (the runtime
+      // CJK localizer would split "可Tabelog预约" into independent runs and
+      // produce "AvailableTabelogBooking") and for per-field translate-button
+      // gating below. D3 moved the old standalone booking chip into the
+      // policy table's 网上订位 row, which says the same thing in the place
+      // a reader is already looking for it.
       var _lang = (typeof activeLang === 'undefined') ? 'zh-CN' : activeLang;
-      var chipText = d.bookable ? '可Tabelog预约' : '不可Tabelog预约';
-      if (_lang === 'en') {
-        chipText = d.bookable ? 'Bookable via Tabelog' : 'Not bookable via Tabelog';
-      } else if (_lang === 'ja') {
-        chipText = d.bookable ? 'Tabelog 予約可' : 'Tabelog 予約不可';
-      }
-      var chipCls = d.bookable ? 'rst-chip' : 'rst-chip rst-chip-off';
-      var chip = '<span class="' + chipCls + '">' + chipText + '</span>';
       // Per-field translate button. Hidden on the Japanese UI (source
       // text is already Japanese). The Chinese UIs (zh-CN / zh-TW) only
       // show the button for `seat` and `genre` — station and address
@@ -5614,8 +7726,8 @@ FILTER_JS_TEMPLATE = r"""
         if (_lang === 'en') gcalTxt = 'Location verified by Google Maps';
         else if (_lang === 'ja') gcalTxt = 'Google マップで位置補正済み';
         else if (_lang === 'zh-TW') gcalTxt = '已被 Google 地圖校準';
-        gcalNote = '<div class="rst-gcal" style="font-size:11px;color:#16a34a;'
-                 + 'margin:4px 0 0;">🛰️ ' + gcalTxt + '</div>';
+        gcalNote = '<div class="rst-gcal" style="font-size:12px;color:#16a34a;'
+                 + 'margin:4px 0 0;">🛰️ ' + gcalTxt + '</div>';   // M-079
       }
       // M-021: this row's coordinate is a street-block centroid, not a door
       // — GSI never matched a house number for it (median error 724 m). Say so
@@ -5638,6 +7750,45 @@ FILTER_JS_TEMPLATE = r"""
                     + (d.closed === 1 ? '已永久歇业' : '暂停营业')
                     + '</div>';
       }
+      // D4: hidden until bindCardExtras() finds this row in an ordered
+      // result set. Rendering it here (rather than injecting it later) keeps
+      // the header's flex layout stable across the two paints of one open.
+      var navHtml = '<span class="rst-nav" hidden>'
+        + '<button type="button" class="rst-prev" aria-label="上一家">↑</button>'
+        + '<span class="rst-nav-pos"></span>'
+        + '<button type="button" class="rst-next" aria-label="下一家">↓</button>'
+        + '</span>';
+      // D1 subtitle: cuisine bucket · station · walk. `genre` is the raw
+      // Tabelog string (kana-heavy, hence the translate button); `bucket` is
+      // our own category, already a zh-CN run the localizer handles.
+      // Each part is its own .rst-sub-i wrapper because the translate button
+      // resolves its target as `btn.parentNode.querySelector('.rst-value')`
+      // — two bare .rst-value siblings under one parent would make the
+      // station button translate the genre.
+      var subParts = [];
+      if (genre || bucket) {
+        subParts.push('<span class="rst-sub-i">'
+          + '<span class="rst-value"><span lang="ja">'
+          + escapeHtml(genre) + '</span></span>' + txBtn('genre', genre)
+          + (bucket ? ' <span class="rst-sub-sep">/</span> '
+                      + escapeHtml(bucket) : '')
+          + '</span>');
+      }
+      var stationHtml = stationLine(station, stm);
+      if (stationHtml) {
+        subParts.push('<span class="rst-sub-i"><span class="rst-value">'
+          + stationHtml + '</span>' + txBtn('station', station) + '</span>');
+      }
+      // D3: p[9] absent (no policy text, or a stale 9-slot cache) still
+      // yields the 网上订位 row — that one comes from `bookable`, not from
+      // the blurb — so the table is never empty and never a lone dash.
+      var polTbl = policyTable(d, pol, _lang);
+      var rawPolicy = policy
+        ? '<details class="rst-policy-raw"><summary>看原文</summary>'
+          + '<div' + (_lang === 'ja' ? ' lang="ja"' : '') + '>'
+          + escapeHtml(policy) + '</div></details>'
+        : '';
+      var holHtml = holidayText(hol, _lang);
       return '<div class="rst-card">'
         + ribbons
         + closedBadge
@@ -5645,32 +7796,172 @@ FILTER_JS_TEMPLATE = r"""
           + '<div class="rst-title"><span lang="ja">' + name + '</span>'
             + '<span class="rst-rating">★' + rating + '</span></div>'
           + '<div class="rst-actions">'
-            + gmapsBtn
-            + '<button class="ff-fav-btn rst-btn" data-url="' + url + '">'
-              + '<span class="ff-fav-label">☆ 收藏</span></button>'
-            + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
-              + '<span class="ff-black-label">🚫 弃用</span></button>'
+            + navHtml
             + '<button class="rst-close" type="button" aria-label="关闭">×</button>'
           + '</div>'
         + '</div>'
-        + photoHtml
-        + '<div class="rst-genre"><span class="rst-value"><span lang="ja">' + escapeHtml(genre) + '</span></span>' + txBtn('genre', genre) + ' / ' + escapeHtml(bucket) + '</div>'
+        + (subParts.length
+            ? '<div class="rst-sub">' + subParts.join('') + '</div>' : '')
+        // §5.3: the three numbers a plan turns on, above everything else.
+        + '<div class="rst-decision">'
+          + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '晚', dinner)
+          + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '午', lunch)
+          + '<div class="rst-tile"><div class="rst-tile-k">预订方式</div>'
+            + '<div class="rst-tile-v">'
+            + bookingText(bookingMode(d, pol)) + '</div></div>'
+        + '</div>'
+        + '<div class="rst-sec">预约政策</div>'
+        + polTbl
+        + rawPolicy
+        + (holHtml
+            ? '<div class="rst-holiday">'
+              + '<span class="rst-holiday-k">定休</span>' + holHtml + '</div>'
+            : '')
+        + '<div class="rst-sec">位置与座位</div>'
         + '<div class="rst-info">'
-          + '<div class="rst-info-row"><span class="rst-label">晚</span><span class="rst-value">' + escapeHtml(dinnerS) + '</span></div>'
-          + '<div class="rst-info-row"><span class="rst-label">车站</span><span class="rst-value">📍 <span lang="ja">' + escapeHtml(station) + '</span></span>' + txBtn('station', station) + '</div>'
-          + '<div class="rst-info-row"><span class="rst-label">午</span><span class="rst-value">' + escapeHtml(lunchS) + '</span></div>'
           + '<div class="rst-info-row"><span class="rst-label">座位</span><span class="rst-value">' + (seat ? escapeHtml(seat) : '—') + '</span>' + txBtn('seat', seat) + '</div>'
           + '<div class="rst-info-row"><span class="rst-label">地址</span><span class="rst-value" lang="ja">' + escapeHtml(addr) + '</span>' + txBtn('addr', addr) + '</div>'
         + '</div>'
         + gcalNote
         + approxNote
-        + (policy ? '<div class="rst-policy">' + escapeHtml(policy) + '</div>' : '')
-        + '<div class="rst-footer">'
-          + chip
-          + '<a href="' + url + '" target="_blank" rel="noopener">Tabelog 详情 ↗</a>'
+        + photoHtml
+        // D5: one 44px action row at the end of the card, Tabelog on the
+        // right where an "exit to the source" link belongs.
+        + '<div class="rst-actions-bar">'
+          + '<button class="ff-fav-btn rst-btn" data-url="' + url + '">'
+            + '<span class="ff-fav-label">☆ 收藏</span></button>'
+          + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
+            + '<span class="ff-black-label">🚫 弃用</span></button>'
+          + gmapsBtn
+          + '<a class="rst-tabelog" href="' + url + '" target="_blank" rel="noopener">Tabelog ↗</a>'
         + '</div>'
       + '</div>';
     }
+    // ---- D4 / H2: card navigation + focus bookkeeping --------------------
+    // The ordered set the ↑ / ↓ stepper walks. The result list owns the real
+    // one (window.wbResultsSorted); on phone / split, where there is no list,
+    // fall back to "everything that passes the current filter, best first" so
+    // J / K still work. That fallback is a full pass over ~9,800 rows, so it
+    // is memoised for a second — long enough to cover the two paints of one
+    // card open, short enough that a filter change is never stale on screen.
+    var bsNavCache = null, bsNavCacheAt = 0;
+    function bsNavList() {
+      if (window.wbResultsSorted && window.wbResultsSorted.length) {
+        return window.wbResultsSorted;
+      }
+      var now = Date.now();
+      if (!bsNavCache || now - bsNavCacheAt > 1000) {
+        bsNavCache = data.filter(passesFilter).sort(function(a, b) {
+          return (Number(b.rating) || 0) - (Number(a.rating) || 0);
+        });
+        bsNavCacheAt = now;
+      }
+      return bsNavCache;
+    }
+    function bsNavIndex(list, d) {
+      if (!d) return -1;
+      var i = list.indexOf(d);
+      if (i >= 0) return i;
+      // The list may hold different objects for the same restaurant if a
+      // future producer maps rather than filters — match on the stable key.
+      for (var j = 0; j < list.length; j++) {
+        if (list[j] && list[j].detail_url === d.detail_url) return j;
+      }
+      return -1;
+    }
+    // Mixed digits + CJK, so it is hand-written per language (chipText
+    // precedent) rather than run through the run tokenizer.
+    function navPosText(n, total) {
+      var lang = (typeof activeLang === 'undefined') ? 'zh-CN' : activeLang;
+      if (lang === 'en') return n + ' / ' + total;
+      if (lang === 'ja') return n + ' / ' + total + ' 件';
+      return '第 ' + n + ' / ' + total + ' 家';
+    }
+    // D4: step to the neighbouring result. Deliberately does not wrap — on a
+    // 31-result list, wrapping from the last back to the first reads as a
+    // glitch, not as a feature.
+    function bsNav(delta) {
+      if (!bsActive) return;
+      var list = bsNavList();
+      var i = bsNavIndex(list, bsActive);
+      if (i < 0) return;
+      var j = i + delta;
+      if (j < 0 || j >= list.length) return;
+      openSheet(list[j]);
+    }
+    // H2 / M-074: the card is an ad-hoc dialog. Give it an accessible name,
+    // and when it closes hand focus back to whatever opened it instead of
+    // dropping the caret on <body> (where the next Tab restarts at the top
+    // of the page). Only when focus was actually inside the card — a user
+    // who dismissed it by panning the map should not have focus yanked.
+    var bsOpener = null, bsFocusIn = false, bsWasOpen = false;
+    var bsA11yWired = false;
+    function wireCardA11y() {
+      if (bsA11yWired || !bsSheet || !bsContent) return;
+      bsA11yWired = true;
+      bsContent.addEventListener('focusin', function() { bsFocusIn = true; });
+      new MutationObserver(function() {
+        var open = bsSheet.classList.contains('bs-open');
+        if (bsWasOpen && !open) {
+          var ae = document.activeElement;
+          if (bsFocusIn && (!ae || ae === document.body
+                            || bsContent.contains(ae))) {
+            var back = (bsOpener && document.contains(bsOpener)) ? bsOpener : null;
+            if (!back) {
+              try { back = map.getContainer(); } catch (_) { back = null; }
+            }
+            if (!back) back = document.getElementById('ss-input');
+            if (back && back.focus) {
+              try { back.focus({preventScroll: true}); } catch (_) { back.focus(); }
+            }
+          }
+          bsFocusIn = false;
+        }
+        bsWasOpen = open;
+      }).observe(bsSheet, {attributes: true, attributeFilter: ['class']});
+    }
+    // Called from openSheet's paint() on every repaint of the card.
+    function bindCardExtras(d) {
+      wireCardA11y();
+      if (!d) return;
+      // A fresh open (rather than the second paint of one, or a ↑/↓ step)
+      // is exactly "the sheet was not open yet" — paint() runs before
+      // openSheet adds .bs-open.
+      if (bsSheet && !bsSheet.classList.contains('bs-open')) {
+        var ae = document.activeElement;
+        bsOpener = (ae && ae !== document.body && !bsContent.contains(ae))
+          ? ae : null;
+        bsFocusIn = false;
+      }
+      if (bsSheet) bsSheet.setAttribute('aria-label', d.name || '');
+      var nav = bsContent.querySelector('.rst-nav');
+      if (!nav) return;
+      // The stepper is only shown when there is a visible ordered list to
+      // step through — "第 7 / 31 家" beside a result list is a position,
+      // "第 7,484 / 7,626 家" on a 393px phone that has no list on screen is
+      // noise in the one row with no width to spare (§5.3 puts D4 in the
+      // desktop-comparison bucket). J / K keep working on every layout:
+      // bsNav() falls back to the filtered corpus.
+      var wbm = (typeof window.__wbMode === 'function') ? window.__wbMode() : 'phone';
+      var list = (wbm === 'phone') ? null : window.wbResultsSorted;
+      var i = list ? bsNavIndex(list, d) : -1;
+      if (i < 0 || list.length < 2) { nav.hidden = true; return; }
+      nav.hidden = false;
+      var posEl = nav.querySelector('.rst-nav-pos');
+      if (posEl) posEl.textContent = navPosText(i + 1, list.length);
+      var prev = nav.querySelector('.rst-prev');
+      var next = nav.querySelector('.rst-next');
+      if (prev) {
+        prev.disabled = i === 0;
+        prev.addEventListener('click', function() { bsNav(-1); });
+      }
+      if (next) {
+        next.disabled = i === list.length - 1;
+        next.addEventListener('click', function() { bsNav(1); });
+      }
+    }
+    // Cross-task handle: the global keyboard dispatcher binds J / K to this.
+    window.__bsNav = bsNav;
     function renderBookmark(bm) {
       // Metadata-only entries (category: "hidden") carry just an id —
       // they're a flag telling us a builtin should not render, not a pin
@@ -5975,11 +8266,22 @@ FILTER_JS_TEMPLATE = r"""
     }
 
     var bmInitialName = '';
+    var bmPlaceName = '';        // G5: the name the search result came with
+    var bmTrapRelease = null;    // H2 / M-074
+    var bmUsePlaceBtn = document.getElementById('bm-use-place');
+    var bmCopyBtn     = document.getElementById('bm-copy');
     function openBookmarkModal(latlng, prefillName) {
       bmPending = {lat: latlng.lat, lng: latlng.lng};
       bmCoordEl.textContent = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
       bmNameInput.value = prefillName || '';
       bmInitialName = bmNameInput.value;
+      // G5: keep the source name around so an edit is undoable with one tap.
+      bmPlaceName = prefillName || '';
+      if (bmUsePlaceBtn) {
+        bmUsePlaceBtn.classList.toggle('bm-show', !!bmPlaceName);
+        bmUsePlaceBtn.textContent = localizeText('用地点名填入');
+        bmUsePlaceBtn.title = bmPlaceName;
+      }
       bmEmojiInput.value = '📍';
       bmSetKind('bookmark');           // reset default each open
       bmShowError('');
@@ -5988,8 +8290,12 @@ FILTER_JS_TEMPLATE = r"""
       bmModal.classList.add('bm-open');
       bmModal.setAttribute('aria-hidden', 'false');
       uiPush('bookmark');                // M-015
+      bmSyncViewport();                  // M-080
       // Pull focus into the name field after the open transition starts so
-      // mobile keyboards pop up immediately.
+      // mobile keyboards pop up immediately. trapFocus() records the element
+      // to hand focus back to and keeps Tab inside the dialog.
+      if (bmTrapRelease) { try { bmTrapRelease(); } catch (_) {} }
+      bmTrapRelease = trapFocus(bmModal, '#bm-name', document.getElementById('ss-input'));
       setTimeout(function(){ bmNameInput.focus(); }, 50);
     }
     function closeBookmarkModal() {
@@ -5999,7 +8305,76 @@ FILTER_JS_TEMPLATE = r"""
       bmCollapsePicker();
       bmShowError('');
       bmPending = null;
+      bmPlaceName = '';
+      if (bmUsePlaceBtn) bmUsePlaceBtn.classList.remove('bm-show');
+      bmClearViewportStyle();            // M-080
+      if (bmTrapRelease) {
+        var r = bmTrapRelease;
+        bmTrapRelease = null;
+        try { r(); } catch (_) {}
+      }
       uiDrop('bookmark');                // M-015
+    }
+    // ----- M-080 / H8: soft-keyboard avoidance -----------------------------
+    // The CSS anchor (top: 7dvh) covers the common case; visualViewport is
+    // the exact one — when the keyboard is up, innerHeight does not change
+    // but visualViewport.height does. Only engage on a real shrink (>150px)
+    // so an address-bar collapse doesn't twitch the dialog.
+    function bmClearViewportStyle() {
+      bmModal.style.maxHeight = '';
+      bmModal.style.top = '';
+    }
+    function bmSyncViewport() {
+      var vv = window.visualViewport;
+      if (!vv || !bmModal.classList.contains('bm-open')) return;
+      if (vv.height < window.innerHeight - 150) {
+        bmModal.style.maxHeight = Math.max(160, vv.height - 16) + 'px';
+        bmModal.style.top = (vv.offsetTop + 8) + 'px';
+      } else {
+        bmClearViewportStyle();
+      }
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', bmSyncViewport);
+      window.visualViewport.addEventListener('scroll', bmSyncViewport);
+    }
+    if (bmUsePlaceBtn) {
+      bmUsePlaceBtn.addEventListener('click', function() {
+        if (!bmPlaceName) return;
+        bmNameInput.value = bmPlaceName;
+        bmShowError('');
+        bmNameInput.focus();
+      });
+    }
+    // G6: copy the coordinates. execCommand is the fallback for a
+    // non-secure origin / an older engine where navigator.clipboard is
+    // undefined — the modal is a plain text node, so a hidden input is the
+    // only way to reach the legacy path.
+    if (bmCopyBtn) {
+      bmCopyBtn.addEventListener('click', function() {
+        var txt = bmCoordEl.textContent || '';
+        if (!txt) return;
+        function done() { showToast(localizeText('已复制坐标'), {ms: 2000}); }
+        function legacy() {
+          try {
+            var ta = document.createElement('textarea');
+            ta.value = txt;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            bmModal.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            bmModal.removeChild(ta);
+            done();
+          } catch (_) {}
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(txt).then(done, legacy);
+        } else {
+          legacy();
+        }
+      });
     }
     uiRegister('bookmark', closeBookmarkModal);   // M-015
     function commitBookmark() {
@@ -6604,6 +8979,16 @@ FILTER_JS_TEMPLATE = r"""
       var icon = document.createElement('span');
       icon.className = 'ss-icon';
       icon.innerHTML = emojiImg(emojiChar);
+      // G2 / M-115: the price-bucket dot the result-list rows carry, so a
+      // search hit and a list row read the same way. Colour comes from the
+      // same BUCKET_COLOR table the markers use.
+      var ssDotColor = BUCKET_COLOR[d.bucket] || '#9ca3af';
+      if (/^#[0-9a-fA-F]{3,8}$/.test(ssDotColor)) {
+        var ssDot = document.createElement('i');
+        ssDot.className = 'ss-dot';
+        ssDot.style.background = ssDotColor;
+        icon.appendChild(ssDot);
+      }
       var text = document.createElement('div');
       text.className = 'ss-text';
       var n = document.createElement('div');
@@ -6621,9 +9006,33 @@ FILTER_JS_TEMPLATE = r"""
         citySpan.textContent = d.city;
         a.appendChild(citySpan);
       }
+      // G2 / M-115: nearest station. Japanese source text, hence lang="ja".
+      if (d.st) {
+        if (a.childNodes.length) a.appendChild(document.createTextNode(' · '));
+        var stSpan = document.createElement('span');
+        stSpan.setAttribute('lang', 'ja');
+        stSpan.textContent = d.st;
+        a.appendChild(stSpan);
+      }
       if (cat) {
         if (a.childNodes.length) a.appendChild(document.createTextNode(' | '));
         a.appendChild(document.createTextNode(cat));
+      }
+      // G2 / M-115: price band, same label the filter panel shows.
+      var ssPrice = WB_BUCKET_LABEL && WB_BUCKET_LABEL[d.bucket];
+      if (ssPrice) {
+        if (a.childNodes.length) a.appendChild(document.createTextNode(' · '));
+        a.appendChild(document.createTextNode(ssPrice));
+      }
+      // G2 / M-115: "can be booked online" micro-mark.
+      if (d.bookable) {
+        var ssNet = document.createElement('span');
+        ssNet.className = 'ss-net';
+        ssNet.textContent = '✓';
+        ssNet.setAttribute('title', localizeText('可网订'));
+        ssNet.setAttribute('aria-label', localizeText('可网订'));
+        a.appendChild(document.createTextNode(' '));
+        a.appendChild(ssNet);
       }
       text.appendChild(n); text.appendChild(a);
       var rating = document.createElement('span');
@@ -6671,7 +9080,12 @@ FILTER_JS_TEMPLATE = r"""
       favBtn.addEventListener('click', function(ev) {
         ev.stopPropagation();
         ssCloseDropdown();
-        openBookmarkModal({lat: it.lat, lng: it.lon}, it.name);
+        // G5: Nominatim leaves `name` empty for plain addresses and for a
+        // good share of POIs, and the modal then opened with a blank field
+        // even though the row on screen clearly said what the place was.
+        // First segment of the display address is the honest fallback.
+        openBookmarkModal({lat: it.lat, lng: it.lon},
+                          it.name || (it.address || '').split(/[,、]/)[0].trim());
       });
       (ssTarget || ssList).appendChild(row);
     }
@@ -6812,6 +9226,12 @@ FILTER_JS_TEMPLATE = r"""
       // dropdown is out (see #ss-box.ss-open).
       if (ssBox) ssBox.classList.add('ss-open');
       ssInput.setAttribute('aria-expanded', 'true');
+      // H6 / M-084: the result count had no non-visual channel at all. One
+      // announcement per finalize, through the existing #sync-sr live region.
+      try {
+        var ssN = ssList.querySelectorAll('.ss-row:not(.ss-empty)').length;
+        announce(ssN + ' ' + localizeText('条结果'));
+      } catch (_) {}
     }
     function ssRender(localMatch, apiItems, apiPending, genres) {
       ssRenderGenres(genres);      // M-105
@@ -6908,25 +9328,42 @@ FILTER_JS_TEMPLATE = r"""
       var TARGET_ZOOM = 17;
       var latlng = L.latLng(d.lat, d.lon);
       var targetZoom = Math.max(map.getZoom(), TARGET_ZOOM);
-      var onArrive = function() {
+      // Leaflet can emit a moveend *mid-flight* (seen at zoom ~8.8 on a 5→17
+      // flyTo right after a navigation). The old handler unhooked itself on
+      // that first moveend, judged "not arrived", dropped the pin — and the
+      // card never opened once the map actually landed (search → result row
+      // → nothing, the site's main entry). Now: stay hooked until we really
+      // land; a 3 s safety net catches interrupted / imprecise flights so
+      // neither the listener nor the reaper pin can leak.
+      var arriveTimer = 0;
+      function finishFlight() {
+        clearTimeout(arriveTimer);
         map.off('moveend', onArrive);
         if (ssFlightArrive === onArrive) ssFlightArrive = null;
-        // Only reveal if we actually landed — a drag that interrupts the
-        // flyTo also ends in a moveend, but nowhere near the target, and
-        // popping the card there would be the "ghost card" bug.
+      }
+      var onArrive = function() {
         var c = map.getCenter();
         var arrived = map.getZoom() >= targetZoom - 0.5
                    && Math.abs(c.lat - d.lat) < 0.005
                    && Math.abs(c.lng - d.lon) < 0.005;
-        if (arrived) {
-          reveal();
-        } else if (pinnedRow === d) {
-          pinnedRow = null;   // interrupted — release the reaper pin
-        }
+        if (!arrived) return;   // intermediate moveend — keep waiting
+        finishFlight();
+        reveal();
       };
       if (ssFlightArrive) map.off('moveend', ssFlightArrive);
       ssFlightArrive = onArrive;
       map.on('moveend', onArrive);
+      arriveTimer = setTimeout(function() {
+        if (ssFlightArrive !== onArrive) return;   // superseded or cancelled
+        finishFlight();
+        // A drag that interrupted the flight leaves us far away — no ghost
+        // card. Landing within a couple of hundred metres (slightly short of
+        // the strict check, e.g. a zoom-level rounding) still reveals.
+        var c = map.getCenter();
+        var near = Math.abs(c.lat - d.lat) < 0.01 && Math.abs(c.lng - d.lon) < 0.01;
+        if (near) reveal();
+        else if (pinnedRow === d) pinnedRow = null;   // interrupted — release the reaper pin
+      }, 3000);
       map.flyTo(latlng, targetZoom, {duration: 0.8});
     }
     // M-026: how tight to land for a place of this kind. Nominatim's
@@ -7343,6 +9780,15 @@ FILTER_JS_TEMPLATE = r"""
       statusEl.style.color = kind === 'err' ? '#dc2626'
                            : kind === 'ok'  ? '#16a34a'
                            : kind === 'busy'? '#2563eb' : '#6b7280';
+      // G4 / M-027: mirror onto the top-bar chip. data-kind drives the dot
+      // colour in CSS; the resting label is the generic 同步 so the chip is
+      // never a blank pill.
+      var wbChip = document.getElementById('wb-sync');
+      if (wbChip) {
+        var wbChipT = wbChip.querySelector('.wb-sync-t') || wbChip;
+        wbChipT.textContent = localizeText(text || '同步');
+        wbChip.dataset.kind = kind || '';
+      }
     }
     storageBlockedHook = function() {
       storageBlockedSeen = true;
@@ -7967,7 +10413,7 @@ FILTER_JS_TEMPLATE = r"""
     function afterPullSettled() {
       if (!dirty && !contentMatchesBase()) dirty = true;
       if (dirty) { push(); return; }
-      setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+      setStatus('已同步 ' + syncTimeText(), 'ok');   // H11
     }
     function pull(force) {
       if (!configured()) {
@@ -8215,7 +10661,7 @@ FILTER_JS_TEMPLATE = r"""
       if (syncBase.v > 0 && contentMatchesBase()) {
         dirty = false;
         if (saveCache(state, false)) refreshAllMarkers();
-        setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+        setStatus('已同步 ' + syncTimeText(), 'ok');   // H11
         updateNeedsSyncIndicator();
         return;
       }
@@ -8319,7 +10765,7 @@ FILTER_JS_TEMPLATE = r"""
             dirty = (stateGen !== genAtPush);
             if (saveCache(state, dirty)) refreshAllMarkers();
             if (!dirty) {
-              setStatus('已同步 ' + new Date().toLocaleTimeString(), 'ok');
+              setStatus('已同步 ' + syncTimeText(), 'ok');   // H11
             }
             // Still dirty → an edit raced the PUT; its own scheduled push
             // (or the queue below) uploads it within ~2.5 s.
@@ -8489,12 +10935,19 @@ FILTER_JS_TEMPLATE = r"""
       }, 300 + Math.floor(Math.random() * 1200));
     });
 
-    function toggleFav(url) {
+    // M-027 / B4: `opts.defer` skips the schedulePush() tail so a batch of N
+    // toggles costs ONE saveCache write, ONE refreshAllMarkers and ONE
+    // debounced PUT instead of N of each. The caller MUST call
+    // schedulePush() itself once the batch is done. Called with no opts
+    // (every existing call site) the behaviour is byte-for-byte the old one.
+    function toggleFav(url, opts) {
       if (state.fav.has(url)) state.fav.delete(url); else state.fav.add(url);
+      if (opts && opts.defer) return;
       schedulePush();
     }
-    function toggleBlack(url) {
+    function toggleBlack(url, opts) {
       if (state.black.has(url)) state.black.delete(url); else state.black.add(url);
+      if (opts && opts.defer) return;
       schedulePush();
     }
 
@@ -8504,11 +10957,16 @@ FILTER_JS_TEMPLATE = r"""
     // highlighted marker and the off-cluster ghost.
     var highlightedRow = null;
     var ghostMarker = null;
+    // M-027 / B3: the row the pointer or the keyboard cursor is on in the
+    // result list. Same blue treatment as the search highlight, but it does
+    // NOT touch the ghost marker / banner machinery — hovering a row that
+    // happens to be filtered out must not drop a pin on the map.
+    var wbHoverRow = null;
 
     // No hard border — price color is a radial-gradient halo behind the
     // emoji. Fav/black state shown via a small corner badge instead.
     function makeIcon(d) {
-      var highlighted = (d === highlightedRow);
+      var highlighted = (d === highlightedRow) || (d === wbHoverRow);   // M-027 B3
       var color = highlighted ? '#2563eb' : (BUCKET_COLOR[d.bucket] || '#9ca3af');
       var cat   = d.categories && d.categories[0];
       var emoji = (cat && GENRE_EMOJI[cat]) || '🍽️';
@@ -8603,6 +11061,23 @@ FILTER_JS_TEMPLATE = r"""
     function removeGhostMarker() {
       if (ghostMarker) { map.removeLayer(ghostMarker); ghostMarker = null; }
     }
+    // M-027 / B3: list row <-> marker. Deliberately NOT setHighlight() —
+    // that one hangs a ghost marker and the "not on the map right now"
+    // banner off rows the filter has dropped, which is the right answer for
+    // a search result and the wrong one for a mouse skimming a list. Only
+    // rows that already have a materialized marker are repainted, so one
+    // hover costs at most two makeIcon() calls (the one leaving, the one
+    // arriving) and never creates a marker.
+    function setHoverRow(d) {
+      if (wbHoverRow === d) return;
+      var prev = wbHoverRow;
+      wbHoverRow = d || null;
+      if (prev && prev._m && prev !== highlightedRow) prev._m.setIcon(makeIcon(prev));
+      if (wbHoverRow && wbHoverRow._m && wbHoverRow !== highlightedRow) {
+        wbHoverRow._m.setIcon(makeIcon(wbHoverRow));
+      }
+    }
+    function clearHoverRow() { setHoverRow(null); }
     function syncHighlight() {
       if (!highlightedRow) {
         removeGhostMarker();
@@ -8644,29 +11119,25 @@ FILTER_JS_TEMPLATE = r"""
       // invisible to a screen reader and to anyone who can't tell #fef3c7
       // from #f9fafb (WCAG 1.4.1).
       btn.setAttribute('aria-pressed', isFav(d) ? 'true' : 'false');
-      if (isFav(d)) {
-        label.textContent = '⭐ 已收藏';
-        btn.style.background = '#fef3c7';
-        btn.style.borderColor = '#fbbf24';
-      } else {
-        label.textContent = '☆ 收藏';
-        btn.style.background = '#f9fafb';
-        btn.style.borderColor = '#d1d5db';
-      }
+      // M-078: the on-state is a class now, not four inline style writes —
+      // the 44px action bar restyles these buttons, and an inline background
+      // beats any rule the bar could carry. Inline values written by an
+      // older paint are cleared so a re-used node can't keep a stale colour.
+      var on = isFav(d);
+      btn.classList.toggle('rst-on-fav', on);
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      label.textContent = on ? '⭐ 已收藏' : '☆ 收藏';
     }
     function syncBlackButton(btn, d) {
       var label = btn.querySelector('.ff-black-label');
       if (!label) return;
       btn.setAttribute('aria-pressed', isBlack(d) ? 'true' : 'false');  // M-089
-      if (isBlack(d)) {
-        label.textContent = '✕ 已弃用';
-        btn.style.background = '#fee2e2';
-        btn.style.borderColor = '#dc2626';
-      } else {
-        label.textContent = '🚫 弃用';
-        btn.style.background = '#f9fafb';
-        btn.style.borderColor = '#d1d5db';
-      }
+      var onB = isBlack(d);
+      btn.classList.toggle('rst-on-black', onB);   // M-078
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      label.textContent = onB ? '✕ 已弃用' : '🚫 弃用';
     }
 
     // ===== Bottom-sheet popup =====
@@ -8683,6 +11154,9 @@ FILTER_JS_TEMPLATE = r"""
     // in, so every place that flips .bs-peek goes through here rather than
     // touching the class directly. Peek = collapsed = aria-expanded false.
     function bsSetPeek(on) {
+      // M-027: peek is a bottom-sheet affordance. In the column layouts the
+      // card lives in #wb-detail, which is always fully expanded.
+      if (typeof wbDetailMode === 'function' && wbDetailMode()) return;
       bsSheet.classList.toggle('bs-peek', !!on);
       if (bsGrip) bsGrip.setAttribute('aria-expanded', on ? 'false' : 'true');
     }
@@ -8881,6 +11355,13 @@ FILTER_JS_TEMPLATE = r"""
     function keepSelectionVisible() {
       var d = bsActive;
       if (!d || typeof d.lat !== 'number' || typeof d.lon !== 'number') return;
+      // M-027: on mid/wide the card is a side column, not a bottom sheet —
+      // the map is already inset, so all that is needed is keeping the pin
+      // inside the (smaller) map box.
+      if (wbDetailMode()) {
+        try { map.panInside([d.lat, d.lon], {padding: [48, 48]}); } catch (_) {}
+        return;
+      }
       var container = map.getContainer();
       if (!container) return;
       var mrect = container.getBoundingClientRect();
@@ -8913,7 +11394,10 @@ FILTER_JS_TEMPLATE = r"""
     var fabStackEl = null;
     function syncSheetOffset() {
       var h = 0;
-      if (bsSheet.classList.contains('bs-open')) {
+      // M-027: #bs-sheet is display:none in the column layouts, so it takes
+      // nothing away from the bottom of the map — short-circuit rather than
+      // measuring a hidden box.
+      if (!wbDetailMode() && bsSheet.classList.contains('bs-open')) {
         // offsetHeight, not getBoundingClientRect(): the slide-in transform
         // must not be read as a height change mid-animation.
         h = bsSheet.offsetHeight;
@@ -8939,7 +11423,13 @@ FILTER_JS_TEMPLATE = r"""
         // column. Publish the column's live width (icon-only at ≤416px,
         // labelled above that) so the credit can stop short of it instead
         // of being overprinted by five buttons.
-        if (fabStackEl) rs.setProperty('--fab-w', fabStackEl.offsetWidth + 'px');
+        // M-071 rework: the split-mode lift rides on --wb-bottom, which no
+        // JS clamp can reach (it is the panel's own height). Publish the
+        // stack's live height so the CSS there can cap itself instead.
+        if (fabStackEl) {
+          rs.setProperty('--fab-w', fabStackEl.offsetWidth + 'px');
+          rs.setProperty('--fab-h', fabStackEl.offsetHeight + 'px');
+        }
       } catch (_) {}
     }
     // Peek <-> full, the placeholder growing into the real card, a photo
@@ -8963,8 +11453,15 @@ FILTER_JS_TEMPLATE = r"""
     // of flying across the screen.
     var noAnimTimer = 0;
     window.addEventListener('resize', function() {
+      // M-027: the workbench shell rides the same suppression — a Fold
+      // unfold moves the left column, the detail column and the map box in
+      // the same frame, and all three would otherwise animate across.
       var els = [bsSheet, document.getElementById('ff-sheet'),
-                 document.getElementById('bm-modal')];
+                 document.getElementById('bm-modal'),
+                 document.getElementById('wb-left'),
+                 document.getElementById('wb-detail'),
+                 document.getElementById('wb-filter-pop'),
+                 document.querySelector('.folium-map')];
       els.forEach(function(el) { if (el) el.classList.add('no-anim'); });
       clearTimeout(noAnimTimer);
       noAnimTimer = setTimeout(function() {
@@ -8980,19 +11477,20 @@ FILTER_JS_TEMPLATE = r"""
       var peek = !!(opts && opts.peek);
       setHighlight(d);
       // Mutual exclusion with the filter sheet — both dock to the bottom.
-      // ffSheet exists once the filter UI has booted; marker clicks can't
-      // fire earlier, so the guard is for paranoia, not for races.
-      var ffs = document.getElementById('ff-sheet');
-      if (ffs && ffs.classList.contains('ff-open')) {
-        ffs.classList.remove('ff-open');
-        document.getElementById('ff-backdrop').classList.remove('ff-open');
-        ffs.setAttribute('aria-hidden', 'true');
-        var ffb = document.getElementById('ff-fab');
-        if (ffb) ffb.hidden = false;
-        uiDrop('filter');               // M-015
-      }
+      // M-027: routed through closeFilterUI so the mid/wide popover host is
+      // closed too. Hoisted function declaration; marker clicks can't fire
+      // before it is defined, so the guard is for paranoia, not for races.
+      if (ffIsOpen()) closeFilterUI();
       bsSetPeek(peek);
       bsActive = d;
+      // M-027: the column layouts have no peek and no bottom slot — the card
+      // opens full height in #wb-detail, and on mid the left column collapses
+      // to the 58px rail so the map keeps ~420px.
+      if (wbDetailMode()) {
+        document.body.classList.add('wb-detail-open');
+        if (wbCur === 'mid') wbSetLeft(58);
+        wbSyncVars();
+      }
       // Reflect the selection in the top search box (title mode — the
       // user's typed query survives in ssQuery and comes back when the
       // sheet closes). The × button stays visible (via .has-text)
@@ -9013,6 +11511,7 @@ FILTER_JS_TEMPLATE = r"""
         // the popups.json fetch was in flight.
         if (bsActive !== d) return;
         bsContent.innerHTML = html;
+        bindCardExtras(d);   // D4 / H2: ↑↓ stepper, aria-label, focus origin
         var favBtn   = bsContent.querySelector('.ff-fav-btn');
         var blackBtn = bsContent.querySelector('.ff-black-btn');
         if (favBtn)   syncFavButton(favBtn, d);
@@ -9053,6 +11552,12 @@ FILTER_JS_TEMPLATE = r"""
       uiPush('sheet');                  // M-015
     }
     function closeSheet() {
+      // M-027: give the left column its width back before anything else, so
+      // the rail → list swap and the card slide-out run in the same frame.
+      if (document.body.classList.contains('wb-detail-open')) {
+        document.body.classList.remove('wb-detail-open');
+        wbSyncVars();
+      }
       bsSheet.classList.remove('bs-open');
       // Leave .bs-peek in place during the slide-out so the photos/info
       // section doesn't flash into view mid-animation. The next openSheet
@@ -9103,6 +11608,7 @@ FILTER_JS_TEMPLATE = r"""
     });
     uiRegister('sheet', closeSheet);   // M-015: Android back closes the card
     function expandSheet() {
+      if (wbDetailMode()) return;       // M-027: no peek state to expand
       if (bsSheet.classList.contains('bs-peek')) {
         bsSetPeek(false);
         // M-014: peek -> full is the single biggest height jump the card
@@ -9120,6 +11626,8 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('keydown', function(e){
       // Same staged dismiss as the swipe-down gesture: Full → Peek → Closed.
       if (e.key !== 'Escape' || !bsActive) return;
+      // M-027: one stage in the column layouts — there is no peek to fall to.
+      if (wbDetailMode()) { closeSheet(); return; }
       if (bsSheet.classList.contains('bs-peek')) closeSheet();
       else bsSetPeek(true);
     });
@@ -9275,9 +11783,23 @@ FILTER_JS_TEMPLATE = r"""
       return out;
     }
 
+    // M-164: markers are keyboard-focusable (Leaflet gives every one
+    // role="button" + tabIndex 0) but a divIcon has no accessible name —
+    // Leaflet only copies `alt` onto <img> icons. Carry the name in `alt`
+    // for forward compatibility and stamp it as aria-label when the icon
+    // element actually exists. Cluster bubbles are untouched.
+    function wbStampMarkerAlt() {
+      if (this._icon && this.options.alt) {
+        this._icon.setAttribute('aria-label', this.options.alt);
+      }
+    }
     function ensureMarker(d) {
       if (d._m) return d._m;
-      var m = L.marker([d.lat, d.lon], {icon: makeIcon(d)});
+      var m = L.marker([d.lat, d.lon], {
+        icon: makeIcon(d),
+        alt: (d.name || '') + ' ★' + (d.rating == null ? '–' : d.rating)
+      });
+      m.on('add', wbStampMarkerAlt);
       m._d = d;
       // Marker tap opens the full detail card directly — a deliberate tap
       // on a marker means "I want to read about this place". The peek
@@ -9333,6 +11855,24 @@ FILTER_JS_TEMPLATE = r"""
     });
     uiRegister('popup', function() { map.closePopup(); });
 
+    // D8 / M-031: re-sync every ⭐ / 🚫 button on the page that points at this
+    // restaurant. The undo path runs up to 5s after the click, by which time
+    // the card may have been repainted and the original button node dropped,
+    // so state is pushed by URL rather than to the node that was clicked.
+    function syncToggleButtons(d) {
+      var favs = document.querySelectorAll('.ff-fav-btn');
+      for (var i = 0; i < favs.length; i++) {
+        if (favs[i].getAttribute('data-url') === d.detail_url) {
+          syncFavButton(favs[i], d);
+        }
+      }
+      var blacks = document.querySelectorAll('.ff-black-btn');
+      for (var j = 0; j < blacks.length; j++) {
+        if (blacks[j].getAttribute('data-url') === d.detail_url) {
+          syncBlackButton(blacks[j], d);
+        }
+      }
+    }
     // One delegated handler for both ⭐ and 🚫 clicks anywhere in the DOM.
     document.addEventListener('click', function(e) {
       var favBtn   = e.target.closest && e.target.closest('.ff-fav-btn');
@@ -9341,17 +11881,29 @@ FILTER_JS_TEMPLATE = r"""
       if (!btn) return;
       var d = rowByUrl[btn.getAttribute('data-url')];
       if (!d) return;
-      if (favBtn) {
-        toggleFav(d.detail_url);
-        syncFavButton(favBtn, d);
-        updateFavCount();
-      } else {
-        toggleBlack(d.detail_url);
-        syncBlackButton(blackBtn, d);
-        updateBlackCount();
+      var isFavClick = !!favBtn;
+      // D8 / M-031: one code path for the toggle and for undoing it, so undo
+      // cannot drift out of step with the dirty-flag / push bookkeeping.
+      function runToggle() {
+        if (isFavClick) { toggleFav(d.detail_url); updateFavCount(); }
+        else            { toggleBlack(d.detail_url); updateBlackCount(); }
+        syncToggleButtons(d);
+        if (d._m) d._m.setIcon(makeIcon(d));
+        apply();
       }
-      if (d._m) d._m.setIcon(makeIcon(d));
-      apply();
+      runToggle();
+      var on = isFavClick ? isFav(d) : isBlack(d);
+      var msg = isFavClick
+        ? (on ? '已加入收藏' : '已取消收藏')
+        : (on ? '已加入弃用名单' : '已移出弃用名单');
+      // #sync-stack is not one of the observed containers, so the toast text
+      // is localized here rather than by the MutationObserver. showToast
+      // already routes it through announce() (aria-live).
+      showToast(localizeText(msg), {
+        actionLabel: localizeText('撤销'),
+        ms: 5000,
+        onAction: runToggle
+      });
     });
 
     var ratingSlider = document.getElementById('ff-rating');
@@ -9374,6 +11926,91 @@ FILTER_JS_TEMPLATE = r"""
       else genreSummaryEl.textContent = '已选 ' + n + ' / ' + total;
     }
 
+    // ===== C1 / M-023: region (prefecture) selector =====
+    // The 47 prefectures grouped the way a Japanese map legend groups them.
+    // Hand-written in all four languages rather than run through
+    // localizeText: the Chugoku region's name is written with the same two
+    // characters as the country China, and a run-by-run lookup gets it
+    // wrong every time. map.py strips this literal from the CJK scan.
+    var PREF_GROUPS = [[0,6,{'zh-CN':'北海道·东北','zh-TW':'北海道·東北','en':'Hokkaido & Tohoku','ja':'北海道・東北'}],[7,13,{'zh-CN':'关东','zh-TW':'關東','en':'Kanto','ja':'関東'}],[14,22,{'zh-CN':'中部','zh-TW':'中部','en':'Chubu','ja':'中部'}],[23,29,{'zh-CN':'近畿','zh-TW':'近畿','en':'Kinki','ja':'近畿'}],[30,38,{'zh-CN':'中国·四国','zh-TW':'中國·四國','en':'Chugoku & Shikoku','ja':'中国・四国'}],[39,46,{'zh-CN':'九州·冲绳','zh-TW':'九州·沖繩','en':'Kyushu & Okinawa','ja':'九州・沖縄'}]];
+    var regionSel = document.getElementById('ff-region');
+    var regionSumEl = document.getElementById('ff-region-sum');
+    var wbRegionLabel = document.getElementById('wb-region-label');
+    function prefName(i) {
+      var p = (typeof PREFS !== 'undefined' && PREFS) ? PREFS[i] : null;
+      if (!p) return '';
+      if (activeLang === 'en') return p.en || p.ja;
+      if (activeLang === 'ja') return p.ja;
+      if (activeLang === 'zh-TW') return p.tc || p.sc;
+      return p.sc || p.ja;
+    }
+    function buildRegionOptions() {
+      if (!regionSel || typeof PREFS === 'undefined' || !PREFS || !PREFS.length) return;
+      var frag = document.createDocumentFragment();
+      var all = document.createElement('option');
+      all.value = '';
+      all.textContent = localizeText('全部地区');
+      frag.appendChild(all);
+      for (var g = 0; g < PREF_GROUPS.length; g++) {
+        var grp = document.createElement('optgroup');
+        var labels = PREF_GROUPS[g][2];
+        grp.label = labels[activeLang] || labels['zh-CN'];
+        for (var i = PREF_GROUPS[g][0]; i <= PREF_GROUPS[g][1]; i++) {
+          if (!PREFS[i]) continue;
+          var o = document.createElement('option');
+          o.value = String(i);
+          o.textContent = prefName(i) + ' (' + PREFS[i].n + ')';
+          grp.appendChild(o);
+        }
+        frag.appendChild(grp);
+      }
+      regionSel.appendChild(frag);
+    }
+    buildRegionOptions();
+    // Bounding boxes are derived from the payload once, on first use — the
+    // build ships no geometry and none is needed: every row already carries
+    // its own lat/lon and its integer `pref`.
+    var prefBBoxCache = null;
+    function prefBBox(i) {
+      if (!prefBBoxCache) {
+        prefBBoxCache = {};
+        for (var k = 0; k < data.length; k++) {
+          var r = data[k];
+          if (typeof r.pref !== 'number') continue;
+          var b = prefBBoxCache[r.pref];
+          if (!b) { prefBBoxCache[r.pref] = [[r.lat, r.lon], [r.lat, r.lon]]; continue; }
+          if (r.lat < b[0][0]) b[0][0] = r.lat;
+          if (r.lon < b[0][1]) b[0][1] = r.lon;
+          if (r.lat > b[1][0]) b[1][0] = r.lat;
+          if (r.lon > b[1][1]) b[1][1] = r.lon;
+        }
+      }
+      return prefBBoxCache[i] || null;
+    }
+    // The panel's denominator and the top bar's chip both follow the region.
+    function syncRegionUi() {
+      var i = filterState.region;
+      var named = (i == null) ? localizeText('全部地区') : prefName(i);
+      var n = (i == null) ? data.length
+                          : ((PREFS && PREFS[i]) ? PREFS[i].n : data.length);
+      setCountText('ff-total', n);
+      if (regionSumEl) regionSumEl.textContent = (i == null) ? '' : named;
+      if (wbRegionLabel) wbRegionLabel.textContent = named;
+    }
+
+    // C2 / M-114: the shortcut chips are a view of the slider, not a
+    // separate control — highlight whichever one matches its value.
+    var ratingChipEls = document.querySelectorAll('#ff-rating-chips .ff-rchip');
+    function syncRatingChips() {
+      var v = filterState.minRating;
+      ratingChipEls.forEach(function(b) {
+        var target = parseFloat(b.getAttribute('data-rating'));
+        b.classList.toggle('on', Math.abs(target - v) < 0.001);
+        b.setAttribute('aria-pressed',
+                       Math.abs(target - v) < 0.001 ? 'true' : 'false');
+      });
+    }
+
     // Filter inputs are read once into this struct so `recompute()` (called
     // on every pan/zoom moveend) doesn't have to re-touch the DOM. `apply()`
     // is the user-callable side: it refreshes the cache, then recomputes.
@@ -9381,11 +12018,26 @@ FILTER_JS_TEMPLATE = r"""
       minRating: 3.4, pSet: {}, gSet: {}, gAny: false,
       aSet: {}, aAny: false,
       bookableOnly: false, onlyFav: false, hideBlack: true, hideForeign: true,
+      region: null,   // C1 / M-023: prefecture index 0-46, null = everywhere
       gcalOnly: false  // TEMP: Google-calibration filter, remove after full calibration
     };
     function readFilterInputs() {
       filterState.minRating = parseFloat(ratingSlider.value);
       ratingLabel.textContent = filterState.minRating.toFixed(2);
+      // C7 / M-088: the slider announces a bare number by default; the
+      // filter it actually applies is "at least this".
+      ratingSlider.setAttribute('aria-valuetext',
+                                '≥ ' + filterState.minRating.toFixed(2));
+      // C1 / M-023: integer index or null. Never a substring match.
+      if (regionSel) {
+        var rv = regionSel.value;
+        filterState.region = (rv === '') ? null : parseInt(rv, 10);
+        if (!(filterState.region >= 0 && filterState.region <= 46)) {
+          filterState.region = null;
+        }
+      }
+      syncRegionUi();
+      syncRatingChips();
       filterState.pSet = {};
       document.querySelectorAll('input[name=ff-price]:checked').forEach(function(c){ filterState.pSet[c.value]=1; });
       filterState.gSet = {};
@@ -9409,6 +12061,12 @@ FILTER_JS_TEMPLATE = r"""
       // filters. Hide-blacklist defeats only-fav so a starred-then-blacklisted
       // restaurant still hides — easier mental model.
       if (fs.hideBlack && isBlack(d)) return false;
+      // C1 / M-023: integer compare against the build-time prefecture index.
+      // Deliberately NOT a substring test on the address — Tokyo-to and
+      // Kyoto-fu share two of their three characters, which is exactly the
+      // bug that motivated the integer. A row without `pref` (an old cached
+      // restaurants.json) is only excluded once a region is actually picked.
+      if (fs.region != null && d.pref !== fs.region) return false;
       // Slider min 3.4 covers the whole dataset, so we only filter when
       // the user actually moves it above the minimum.
       if (fs.minRating > 3.4) {
@@ -9500,10 +12158,17 @@ FILTER_JS_TEMPLATE = r"""
       // the "缩放到全部结果" button needs.
       var matchTotal = 0;
       var mS = 90, mN = -90, mW = 180, mE = -180;
+      // M-027 / B1: the result list rides along on this pass instead of
+      // running a second full passesFilter sweep. wbHits is the (unsorted)
+      // match set; wbSig is a cheap order-sensitive hash of the matching
+      // indices, so the list can tell "same set, repaint" from "different
+      // set, re-sort" without diffing 7k rows.
+      var wbHits = [], wbSig = 0;
       for (var mi = 0; mi < data.length; mi++) {
         var md = data[mi];
         if (!passesFilter(md)) continue;
         matchTotal++;
+        wbHits.push(md); wbSig = (wbSig * 33 + mi) | 0;   // M-027 B1
         if (md.lat < mS) mS = md.lat;
         if (md.lat > mN) mN = md.lat;
         if (md.lon < mW) mW = md.lon;
@@ -9515,6 +12180,13 @@ FILTER_JS_TEMPLATE = r"""
       setCountText('ff-count', matchTotal);
       setCountText('ff-inview', desired.size);
       updateEmptyState(matchTotal, desired.size);   // M-028 / M-022
+      // M-027 / B1: publish the match set for the result list. Synchronous
+      // listeners only schedule work on a rAF, so this stays off recompute's
+      // critical path.
+      wbResults = wbHits;
+      window.wbResults = wbHits;
+      wbResultsSig = wbSig;
+      document.dispatchEvent(new CustomEvent('wb:results'));
       // Filter/viewport changed — re-evaluate whether the active highlight
       // should be the cluster marker (visible) or the gray ghost (hidden).
       syncHighlight();
@@ -9536,24 +12208,174 @@ FILTER_JS_TEMPLATE = r"""
     var chipsBoxEl    = document.getElementById('ff-active-chips');
     var chipForeignEl = document.getElementById('ff-chip-foreign');
     var chipForeignN  = document.getElementById('ff-chip-foreign-n');
-    function updateActiveChips() {
-      if (!chipsBoxEl || !chipForeignEl) return;
-      var on = !!filterState.hideForeign;
-      if (on) {
-        var saved = filterState.hideForeign;
-        filterState.hideForeign = false;
-        var withForeign = 0;
-        for (var i = 0; i < data.length; i++) {
-          if (passesFilter(data[i])) withForeign++;
-        }
-        filterState.hideForeign = saved;
-        var hiddenN = withForeign - lastMatchTotal;
-        if (hiddenN < 0) hiddenN = 0;
-        if (chipForeignN) chipForeignN.textContent = hiddenN;
-        on = hiddenN > 0;
+    var priceSumEl    = document.getElementById('ff-price-sum');
+    var awardSumEl    = document.getElementById('ff-award-sum');
+    var foreignHintEl = document.getElementById('ff-foreign-hint');
+    var foreignHintTx = document.getElementById('ff-foreign-hint-txt');
+    var priceBoxes    = document.querySelectorAll('input[name=ff-price]');
+    var awardBoxes    = document.querySelectorAll('input[name=ff-award]');
+
+    // C5: one chip per condition that is currently narrowing the map, each
+    // with its own ×. Rebuilt from filterState on every apply() — there is
+    // no separate chip model to drift out of sync.
+    function makeChip(label, onClear) {
+      var chip = document.createElement('span');
+      chip.className = 'ff-chip';
+      var txt = document.createElement('span');
+      txt.textContent = label;
+      chip.appendChild(txt);
+      if (onClear) {
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'ff-chip-x';
+        x.textContent = '×';
+        x.setAttribute('aria-label', localizeText('清除') + ' ' + label);
+        x.addEventListener('click', onClear);
+        chip.appendChild(x);
       }
-      chipForeignEl.hidden = !on;
-      chipsBoxEl.hidden = !on;
+      return chip;
+    }
+    function awardSummaryText() {
+      var names = [];
+      awardBoxes.forEach(function(c) {
+        if (!c.checked) return;
+        var lab = c.parentNode && c.parentNode.textContent;
+        lab = (lab || c.value).replace(/\s*\(\d+\)\s*$/, '').trim();
+        names.push(lab);
+      });
+      return names.join(' · ');
+    }
+    function updateActiveChips() {
+      if (!chipsBoxEl) return;
+      var fs = filterState;
+      var i;
+
+      // --- per-section summaries (C5) -----------------------------------
+      var pOn = 0;
+      priceBoxes.forEach(function(c){ if (c.checked) pOn++; });
+      if (priceSumEl) {
+        priceSumEl.textContent = (pOn === priceBoxes.length) ? ''
+          : (pOn + ' / ' + priceBoxes.length + ' ' + localizeText('档'));
+      }
+      var awardTxt = awardSummaryText();
+      if (awardSumEl) awardSumEl.textContent = awardTxt;
+
+      // --- the foreign-cuisine derivation, reused by the chip and by B8 --
+      var hiddenN = 0, hiddenBookable = 0;
+      if (fs.hideForeign) {
+        var saved = fs.hideForeign;
+        fs.hideForeign = false;
+        var withForeign = 0;
+        for (i = 0; i < data.length; i++) {
+          var d = data[i];
+          if (!passesFilter(d)) continue;
+          withForeign++;
+          var cats = d.categories || [];
+          var isForeign = (d.foreign === 1)
+                       || (cats.length > 0 && FOREIGN_GENRES.has(cats[0]));
+          if (isForeign && d.bookable) hiddenBookable++;
+        }
+        fs.hideForeign = saved;
+        hiddenN = withForeign - lastMatchTotal;
+        if (hiddenN < 0) hiddenN = 0;
+        if (hiddenBookable > hiddenN) hiddenBookable = hiddenN;
+      }
+      if (chipForeignN) chipForeignN.textContent = hiddenN;
+
+      // --- B8: the honest cost of the default-on toggle ------------------
+      if (foreignHintEl && foreignHintTx) {
+        if (hiddenN > 0) {
+          // Assembled from whole CJK runs plus numbers (the l10nSentence
+          // precedent) — one long string with the numbers inside would be
+          // tokenized into nonsense in EN/JA.
+          foreignHintTx.textContent =
+            localizeText('这次筛选里有') + ' ' + hiddenN + ' '
+            + localizeText('家因此被挡住') + l10nComma()
+            + localizeText('其中') + ' ' + hiddenBookable + ' '
+            + localizeText('家能在网上订');
+          foreignHintEl.hidden = false;
+        } else {
+          foreignHintEl.hidden = true;
+        }
+      }
+
+      // --- the chip row --------------------------------------------------
+      // #ff-chip-foreign is static markup (M-022) — keep it, move it.
+      var frag = document.createDocumentFragment();
+      var n = 0;
+      if (fs.region != null) {
+        frag.appendChild(makeChip(
+          localizeText('地区') + (activeLang === 'en' ? ': ' : '：')
+            + prefName(fs.region),
+          function() { if (regionSel) { regionSel.value = ''; } apply(); }));
+        n++;
+      }
+      if (fs.minRating > 3.4) {
+        frag.appendChild(makeChip(
+          localizeText('评分') + ' ≥' + fs.minRating.toFixed(2),
+          function() { ratingSlider.value = '3.4'; apply(); }));
+        n++;
+      }
+      if (pOn < priceBoxes.length) {
+        frag.appendChild(makeChip(
+          localizeText('价格') + ' ' + pOn + ' / ' + priceBoxes.length,
+          function() {
+            priceBoxes.forEach(function(c){ c.checked = true; });
+            apply();
+          }));
+        n++;
+      }
+      var gOn = 0;
+      genreBoxes.forEach(function(c){ if (c.checked) gOn++; });
+      if (gOn < genreBoxes.length) {
+        frag.appendChild(makeChip(
+          localizeText('菜系') + ' ' + gOn + ' / ' + genreBoxes.length,
+          function() {
+            genreBoxes.forEach(function(c){ c.checked = true; });
+            apply();
+          }));
+        n++;
+      }
+      if (awardTxt) {
+        frag.appendChild(makeChip(
+          localizeText('获奖') + ' ' + awardTxt,
+          function() {
+            awardBoxes.forEach(function(c){ c.checked = false; });
+            apply();
+          }));
+        n++;
+      }
+      if (fs.bookableOnly) {
+        frag.appendChild(makeChip(localizeText('只看网订'), function() {
+          var b = document.getElementById('ff-bookable-only');
+          if (b) b.checked = false;
+          apply();
+        }));
+        n++;
+      }
+      if (fs.onlyFav) {
+        frag.appendChild(makeChip(localizeText('只看收藏'), function() {
+          onlyFavEl.checked = false;
+          apply();
+        }));
+        n++;
+      }
+      // Rebuild: drop every generated chip, keep the static foreign one.
+      var kids = Array.prototype.slice.call(chipsBoxEl.children);
+      for (i = 0; i < kids.length; i++) {
+        if (kids[i] !== chipForeignEl) chipsBoxEl.removeChild(kids[i]);
+      }
+      chipsBoxEl.insertBefore(frag, chipForeignEl || null);
+      var foreignOn = !!fs.hideForeign && hiddenN > 0;
+      if (chipForeignEl) chipForeignEl.hidden = !foreignOn;
+      if (foreignOn) n++;
+      chipsBoxEl.hidden = (n === 0);
+
+      // C5: the top bar's "筛选 · N" badge is the same count.
+      var badges = document.querySelectorAll('.wb-filter-n');
+      for (i = 0; i < badges.length; i++) {
+        badges[i].textContent = n > 0 ? String(n) : '';
+      }
     }
 
     // rAF-coalesce moveend so a long pan with many fired events still maps
@@ -9567,6 +12389,636 @@ FILTER_JS_TEMPLATE = r"""
       });
     }
     map.on('moveend', scheduleRecompute);
+
+    // ===== M-027 / B1-B7: the result list ================================
+    // The left column's scrolling list of matching restaurants. Everything
+    // here is inert on a phone (<520px): wbListOn() is false, no scaffolding
+    // is built and not one .wb-row is ever created, so the outer-screen
+    // layout is byte-identical to before.
+    //
+    // Windowing (B6, hard prerequisite): #wb-list-spacer is N * --wb-row-h
+    // tall so the scrollbar is honest, and #wb-list-win holds only the
+    // visible slice plus 8 rows of overscan. A scroll schedules one rAF and
+    // rewrites the window only when its first index actually moved. Rows are
+    // built as an HTML string with emoji already swapped by emojiImg() and
+    // text already run through localizeText(); the window element is
+    // replaced wholesale so #wb-left's fallback MutationObserver sees one
+    // added node per render instead of thirty.
+    var WB_LIST_KEY = 'tabelog.listView';   // {sort, select} — this device only
+    var WB_SORTS = ['rating', 'price', 'award', 'distance', 'name'];
+    var WB_SORT_LABEL = {rating: '评分', price: '价位', award: '奖项',
+                         distance: '距地图中心', name: '名称'};
+    var WB_OVERSCAN = 8;
+    var WB_AWARD_RANK = {gold: 0, silver: 1, bronze: 2, hyaku: 3, hot: 4};
+    // Kanji, not colour alone: the badge has to be readable in greyscale.
+    var WB_AWARD_BADGE = {
+      gold:   ['wb-badge-gold',   '金奖'],
+      silver: ['wb-badge-silver', '银奖'],
+      bronze: ['wb-badge-bronze', '铜奖'],
+      hyaku:  ['wb-badge-hyaku',  '百名店'],
+      hot:    ['wb-badge-hot',    '热门']
+    };
+    var WB_HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+    var WB_BUCKET_RANK = {}, WB_BUCKET_LABEL = {};
+    for (var wbBi = 0; wbBi < PRICE_BUCKETS.length; wbBi++) {
+      WB_BUCKET_RANK[PRICE_BUCKETS[wbBi][0]] = wbBi;
+      WB_BUCKET_LABEL[PRICE_BUCKETS[wbBi][0]] = PRICE_BUCKETS[wbBi][1];
+    }
+
+    var wbList = {
+      sort: 'rating',
+      select: false,
+      activeIdx: -1,
+      firstIdx: -1,
+      winCount: 0,
+      checked: {},        // detail_url -> 1, survives sorting and filtering
+      checkedN: 0
+    };
+    var wbResults = [];          // assigned by recompute(), unsorted
+    var wbResultsSig = 0;
+    var wbResultsSorted = [];
+    var wbSortedSig = -1;
+    var wbBookableN = 0;
+    var wbEls = null;            // built on the first non-phone mode
+    var wbRowH = 60;
+    var wbRenderRaf = 0, wbRenderForce = false;
+    var wbSortRaf = 0;
+    var wbHoverRaf = 0, wbHoverNext = null;
+    var wbNameCollator = null;
+
+    function wbT(s) { return localizeText(s); }
+    // Same Apple-PNG resolution emojiImg() does, but as a bare URL: the two
+    // row-end glyphs are identical on every row, so painting them from a CSS
+    // custom property saves 60 <img> elements per rendered window (30 rows x
+    // 2) and the layout pass that goes with them.
+    function wbEmojiUrl(ch) {
+      var key = EMOJI_MAP[ch];
+      return key ? ('emoji/' + key + '.png')
+                 : ('https://emojicdn.elk.sh/' + encodeURIComponent(ch) +
+                    '?style=apple');
+    }
+    function wbListOn() {
+      var m = (typeof wbMode === 'function') ? wbMode() : 'phone';
+      return m === 'split' || m === 'mid' || m === 'wide';
+    }
+    function wbReadRowH() {
+      var h = 0;
+      try {
+        h = parseFloat(getComputedStyle(document.documentElement)
+                       .getPropertyValue('--wb-row-h'));
+      } catch (_) {}
+      wbRowH = (h > 0) ? h : 60;
+    }
+    function wbLoadListView() {
+      try {
+        var raw = localStorage.getItem(WB_LIST_KEY);
+        if (!raw) return;
+        var o = JSON.parse(raw);
+        if (!o || typeof o !== 'object') return;
+        if (WB_SORTS.indexOf(o.sort) >= 0) wbList.sort = o.sort;
+        wbList.select = (o.select === true);
+      } catch (_) {}      // unreadable / unknown shape -> defaults, never throw
+    }
+    function wbSaveListView() {
+      try {
+        localStorage.setItem(WB_LIST_KEY,
+          JSON.stringify({sort: wbList.sort, select: wbList.select}));
+      } catch (_) {}
+    }
+    wbLoadListView();
+
+    // ---- sorting (B2) ---------------------------------------------------
+    function wbRating(d) { return d.rating == null ? -1 : d.rating; }
+    function wbAwardRank(d) {
+      var aw = d.awards;
+      if (!aw || !aw.length) return 9;
+      var best = 9;
+      for (var i = 0; i < aw.length; i++) {
+        var r = WB_AWARD_RANK[aw[i]];
+        if (r != null && r < best) best = r;
+      }
+      return best;
+    }
+    // Array.prototype.sort is stable, so every comparator below can fall
+    // through to "corpus order" without an explicit tie-break — and none of
+    // them calls localeCompare, which at 7.6k rows costs ~100k collations.
+    function wbApplySort() {
+      var arr = wbResults.slice();
+      var s = wbList.sort, i;
+      if (s === 'price') {
+        arr.sort(function(a, b) {
+          var pa = WB_BUCKET_RANK[a.bucket], pb = WB_BUCKET_RANK[b.bucket];
+          if (pa == null) pa = 99;
+          if (pb == null) pb = 99;
+          return (pa - pb) || (wbRating(b) - wbRating(a));
+        });
+      } else if (s === 'award') {
+        arr.sort(function(a, b) {
+          return (wbAwardRank(a) - wbAwardRank(b)) || (wbRating(b) - wbRating(a));
+        });
+      } else if (s === 'distance') {
+        var c = map.getCenter();
+        for (i = 0; i < arr.length; i++) {
+          arr[i]._wbD = bmHaversineM(arr[i].lat, arr[i].lon, c.lat, c.lng);
+        }
+        arr.sort(function(a, b) { return a._wbD - b._wbD; });
+      } else if (s === 'name') {
+        if (!wbNameCollator) {
+          try { wbNameCollator = new Intl.Collator('ja'); } catch (_) {
+            wbNameCollator = {compare: function(a, b) {
+              return a < b ? -1 : (a > b ? 1 : 0);
+            }};
+          }
+        }
+        arr.sort(function(a, b) {
+          return wbNameCollator.compare(a.name || '', b.name || '');
+        });
+      } else {
+        arr.sort(function(a, b) { return wbRating(b) - wbRating(a); });
+      }
+      wbResultsSorted = arr;
+      // Cross-task handle: the detail card's "第 n / N 家" navigation walks
+      // this array, so it is kept current even on a phone, where the list
+      // itself is never rendered.
+      window.wbResultsSorted = arr;
+      if (wbList.activeIdx >= arr.length) wbList.activeIdx = arr.length - 1;
+    }
+    // Signature + length, so a 1-in-4-billion hash collision can't convince
+    // the list that a different match set is the one it already sorted.
+    function wbNeedsSort() {
+      return wbResultsSig !== wbSortedSig ||
+             wbResultsSorted.length !== wbResults.length;
+    }
+    function wbScheduleSort() {
+      if (wbSortRaf) return;
+      wbSortRaf = requestAnimationFrame(function() {
+        wbSortRaf = 0;
+        wbApplySort();
+        wbSortedSig = wbResultsSig;
+        wbListRender(true);
+      });
+    }
+
+    // ---- row markup (B1) -------------------------------------------------
+    function wbRowHtml(d, i) {
+      var cat = d.categories && d.categories[0];
+      var emojiChar = (cat && GENRE_EMOJI[cat]) || '🍽️';
+      var color = BUCKET_COLOR[d.bucket] || '#9ca3af';
+      if (!WB_HEX_RE.test(color)) color = '#9ca3af';
+      var fav = isFav(d), black = isBlack(d);
+      var checked = wbList.select && !!wbList.checked[d.detail_url];
+      var cls = 'wb-row';
+      if (black) cls += ' is-black';
+      if (checked) cls += ' is-checked';
+      if (i === wbList.activeIdx) cls += ' is-active';
+      var sel = wbList.select ? (checked ? 'true' : 'false')
+                              : (i === wbList.activeIdx ? 'true' : 'false');
+
+      var label = WB_BUCKET_LABEL[d.bucket] || '';
+      var price = '';
+      if (label) {
+        price = (d.bucket === 'na') ? wbT(label) : (label + ' ' + wbT('上限'));
+      }
+      var l2 = '';
+      if (price) l2 += '<span class="wb-row-pr">' + escAttr(price) + '</span>';
+      if (d.st) {
+        if (l2) l2 += '<span class="wb-row-sep" aria-hidden="true">·</span>';
+        l2 += '<span lang="ja">' + escAttr(d.st) + '</span>';
+      }
+      var l3 = '', aw = d.awards;
+      if (aw && aw.length) {
+        for (var ai = 0; ai < aw.length; ai++) {
+          var bd = WB_AWARD_BADGE[aw[ai]];
+          if (bd) l3 += '<span class="wb-badge ' + bd[0] + '">' +
+                        escAttr(wbT(bd[1])) + '</span>';
+        }
+      }
+      l3 += d.bookable
+        ? '<span class="wb-row-net">✓ ' + escAttr(wbT('可网订')) + '</span>'
+        : '<span class="wb-row-net off">' + escAttr(wbT('仅电话')) + ' / ' +
+          escAttr(wbT('到店')) + '</span>';
+
+      return '<button type="button" class="' + cls + '" role="option"' +
+        ' tabindex="-1" id="wb-row-' + i + '" data-i="' + i +
+        '" aria-selected="' + sel + '">' +
+        (wbList.select
+          ? '<span class="wb-row-chk" aria-hidden="true">' +
+            (checked ? '✓' : '') + '</span>'
+          : '') +
+        '<span class="wb-row-ic">' +
+          emojiImg(emojiChar, 'width:18px;height:18px;') +
+          '<i class="wb-row-dot" style="background:' + color + '"></i></span>' +
+        '<span class="wb-row-b">' +
+          '<span class="wb-row-l1">' +
+            (black ? '<span class="wb-row-x" aria-hidden="true">✕</span>' : '') +
+            '<span class="wb-row-nm" lang="ja">' + escAttr(d.name || '') + '</span>' +
+            '<span class="wb-row-rt">★' +
+            (d.rating == null ? '–' : d.rating) + '</span>' +
+          '</span>' +
+          '<span class="wb-row-l2">' + l2 + '</span>' +
+          '<span class="wb-row-l3">' + l3 + '</span>' +
+        '</span>' +
+        '<span class="wb-row-acts">' +
+          '<span class="wb-row-fav' + (fav ? ' on' : '') + '" role="button"' +
+          ' tabindex="-1" aria-label="' + escAttr(wbT('收藏')) +
+          '" aria-pressed="' + (fav ? 'true' : 'false') + '"></span>' +
+          '<span class="wb-row-black' + (black ? ' on' : '') + '" role="button"' +
+          ' tabindex="-1" aria-label="' + escAttr(wbT('弃用')) +
+          '" aria-pressed="' + (black ? 'true' : 'false') + '"></span>' +
+        '</span>' +
+        '</button>';
+    }
+
+    // ---- windowing (B6) --------------------------------------------------
+    function wbScheduleRender(force) {
+      if (force) wbRenderForce = true;
+      if (wbRenderRaf) return;
+      wbRenderRaf = requestAnimationFrame(function() {
+        wbRenderRaf = 0;
+        var f = wbRenderForce;
+        wbRenderForce = false;
+        wbListRender(f);
+      });
+    }
+    function wbSwapWindow(html, topPx) {
+      var win = document.createElement('div');
+      win.id = 'wb-list-win';
+      win.setAttribute('role', 'presentation');
+      win.style.top = topPx + 'px';
+      win.innerHTML = html;
+      wbEls.spacer.replaceChild(win, wbEls.win);
+      wbEls.win = win;
+    }
+    function wbListRender(force) {
+      if (!wbListOn()) return;
+      if (!wbBuild()) return;
+      var rows = wbResultsSorted, n = rows.length;
+      var listEl = wbEls.list;
+      var hPx = (n * wbRowH) + 'px';
+      if (wbEls.spacer.style.height !== hPx) wbEls.spacer.style.height = hPx;
+      if (!n) {
+        if (wbList.firstIdx !== -2) {
+          wbSwapWindow('<div class="wb-list-empty">' + wbT('没有符合的店') +
+                       '</div>', 0);
+          wbList.firstIdx = -2;
+          wbList.winCount = 0;
+          listEl.removeAttribute('aria-activedescendant');
+        }
+        return;
+      }
+      var vh = listEl.clientHeight || 0;
+      var first = Math.floor(listEl.scrollTop / wbRowH) - WB_OVERSCAN;
+      if (first < 0) first = 0;
+      var count = Math.ceil(vh / wbRowH) + WB_OVERSCAN * 2 + 1;
+      if (first + count > n) count = n - first;
+      if (!force && first === wbList.firstIdx && count === wbList.winCount) return;
+      var t0 = performance.now();
+      var html = '';
+      for (var i = first; i < first + count; i++) html += wbRowHtml(rows[i], i);
+      wbSwapWindow(html, first * wbRowH);
+      wbList.firstIdx = first;
+      wbList.winCount = count;
+      // Perf gate hook (PLAN 1.5: one window <= 8 ms). Two clock reads per
+      // *actual* rewrite — a scroll that does not move the window index
+      // returns above and costs nothing.
+      window.__wbRenderMs = performance.now() - t0;
+    }
+
+    // Repaint ONE row in place. Ticking a checkbox or moving the keyboard
+    // cursor must not rebuild the window: a rebuild detaches the element the
+    // click landed on (and any focus with it). Returns false when that row is
+    // not currently rendered, so the caller can fall back to a full pass.
+    function wbRowEl(i) {
+      return (wbEls && wbEls.win)
+        ? wbEls.win.querySelector('.wb-row[data-i="' + i + '"]') : null;
+    }
+    function wbPaintRow(i) {
+      var el = wbRowEl(i), d = wbResultsSorted[i];
+      if (!el || !d) return false;
+      var checked = wbList.select && !!wbList.checked[d.detail_url];
+      var active = (i === wbList.activeIdx);
+      el.classList.toggle('is-checked', checked);
+      el.classList.toggle('is-active', active);
+      el.setAttribute('aria-selected',
+        (wbList.select ? checked : active) ? 'true' : 'false');
+      var chk = el.querySelector('.wb-row-chk');
+      if (chk) chk.textContent = checked ? '✓' : '';
+      return true;
+    }
+
+    // ---- hover / keyboard cursor (B3) ------------------------------------
+    // M-160: only where hovering is a real thing. On a touch screen every tap
+    // fires mouseover, and the "hover" would then stick to the tapped row and
+    // leave its marker blue long after the card closed.
+    var wbCanHover = false;
+    try { wbCanHover = window.matchMedia('(hover: hover)').matches; } catch (_) {}
+    function wbScheduleHover(d) {
+      if (!wbCanHover) return;
+      wbHoverNext = d || null;
+      if (wbHoverRaf) return;
+      wbHoverRaf = requestAnimationFrame(function() {
+        wbHoverRaf = 0;
+        setHoverRow(wbHoverNext);
+      });
+    }
+    function wbScrollToIdx(i) {
+      var el = wbEls && wbEls.list;
+      if (!el) return;
+      var top = i * wbRowH, bottom = top + wbRowH;
+      if (top < el.scrollTop) el.scrollTop = top;
+      else if (bottom > el.scrollTop + el.clientHeight) {
+        el.scrollTop = bottom - el.clientHeight;
+      }
+    }
+    function wbSetActive(i, scroll) {
+      var n = wbResultsSorted.length;
+      if (i < 0) i = 0;
+      if (i > n - 1) i = n - 1;
+      var prev = wbList.activeIdx;
+      wbList.activeIdx = i;
+      var d = wbResultsSorted[i];
+      if (wbEls && wbEls.list) {
+        if (d) wbEls.list.setAttribute('aria-activedescendant', 'wb-row-' + i);
+        else wbEls.list.removeAttribute('aria-activedescendant');
+      }
+      if (scroll) wbScrollToIdx(i);
+      wbScheduleHover(d || null);
+      var okPrev = (prev < 0 || prev === i) || wbPaintRow(prev);
+      if (!okPrev || !wbPaintRow(i)) wbScheduleRender(true);
+    }
+
+    // ---- select mode + batch (B4) ----------------------------------------
+    function wbSyncBulkLabels() {
+      if (!wbEls) return;
+      var n = wbList.checkedN;
+      var suffix = n ? (' (' + n + ')') : '';
+      wbEls.bulkFav.textContent = wbT('批量收藏') + suffix;
+      wbEls.bulkBlack.textContent = wbT('批量弃用') + suffix;
+      wbEls.bulkFav.disabled = !n;
+      wbEls.bulkBlack.disabled = !n;
+    }
+    function wbSetSelect(on) {
+      wbList.select = !!on;
+      if (!on) { wbList.checked = {}; wbList.checkedN = 0; }
+      if (wbEls) {
+        wbEls.bulk.hidden = !wbList.select;
+        wbEls.selectBtn.setAttribute('aria-pressed', wbList.select ? 'true' : 'false');
+        wbEls.selectBtn.classList.toggle('on', wbList.select);
+      }
+      wbSyncBulkLabels();
+      wbSaveListView();
+      wbListRender(true);
+    }
+    function wbToggleCheck(d, i) {
+      var u = d && d.detail_url;
+      if (!u) return;
+      if (wbList.checked[u]) { delete wbList.checked[u]; wbList.checkedN--; }
+      else { wbList.checked[u] = 1; wbList.checkedN++; }
+      wbSyncBulkLabels();
+      if (i == null || !wbPaintRow(i)) wbListRender(true);
+    }
+    function wbCheckVisible() {
+      var el = wbEls && wbEls.list;
+      if (!el) return;
+      var from = Math.floor(el.scrollTop / wbRowH);
+      var to = Math.ceil((el.scrollTop + el.clientHeight) / wbRowH);
+      if (from < 0) from = 0;
+      if (to > wbResultsSorted.length) to = wbResultsSorted.length;
+      for (var i = from; i < to; i++) {
+        var u = wbResultsSorted[i] && wbResultsSorted[i].detail_url;
+        if (u && !wbList.checked[u]) { wbList.checked[u] = 1; wbList.checkedN++; }
+      }
+      wbSyncBulkLabels();
+      wbListRender(true);
+    }
+    // B4 + H2: N toggles, ONE saveCache write, ONE marker refresh, ONE
+    // debounced PUT. The state itself still goes through toggleFav /
+    // toggleBlack so there is exactly one place that mutates state.fav.
+    function wbBulk(kind) {
+      var urls = Object.keys(wbList.checked);
+      if (!urls.length) return;
+      var changed = 0, i, u;
+      for (i = 0; i < urls.length; i++) {
+        u = urls[i];
+        if (kind === 'fav') {
+          if (state.fav.has(u)) continue;
+          toggleFav(u, {defer: true});
+        } else {
+          if (state.black.has(u)) continue;
+          toggleBlack(u, {defer: true});
+        }
+        changed++;
+      }
+      if (!changed) { wbSetSelect(false); return; }
+      schedulePush();        // one saveCache + one 2.5s-debounced push
+      refreshAllMarkers();   // repaints icons, updates both counters, re-applies
+      showToast(wbT(kind === 'fav' ? '已收藏' : '已弃用') + ' ' + changed +
+                ' ' + wbT('家'));
+      wbSetSelect(false);
+    }
+
+    // ---- B7: "N of these can be booked online" ---------------------------
+    function wbCountBookable() {
+      var n = 0;
+      for (var i = 0; i < wbResults.length; i++) if (wbResults[i].bookable) n++;
+      return n;
+    }
+    function wbUpdateFoot() {
+      if (!wbEls) return;
+      var bEl = document.getElementById('ff-bookable-only');
+      var already = bEl ? bEl.checked : false;
+      if (!wbBookableN || already || !wbResults.length) {
+        if (wbEls.foot.firstChild) wbEls.foot.innerHTML = '';
+        return;
+      }
+      wbEls.foot.innerHTML =
+        '<div class="wb-foot"><span>' + wbT('其中') + ' <b>' + wbBookableN +
+        '</b> ' + wbT('家能在网上订') + '</span>' +
+        '<button id="wb-foot-bookable" class="wb-foot-btn" type="button">' +
+        wbT('只看这') + ' ' + wbBookableN + ' ' + wbT('家可网订的店') +
+        '</button></div>';
+    }
+
+    // ---- scaffolding + wiring --------------------------------------------
+    function wbBuild() {
+      if (wbEls) return wbEls;
+      var listEl = document.getElementById('wb-list');
+      var toolsEl = document.getElementById('wb-list-tools');
+      var footEl = document.getElementById('wb-list-foot');
+      if (!listEl || !toolsEl || !footEl) return null;
+      wbReadRowH();
+
+      var opts = '';
+      for (var i = 0; i < WB_SORTS.length; i++) {
+        opts += '<option value="' + WB_SORTS[i] + '">' +
+                escAttr(wbT(WB_SORT_LABEL[WB_SORTS[i]])) + '</option>';
+      }
+      toolsEl.innerHTML =
+        '<div class="wb-tools">' +
+          '<select id="wb-sort" aria-label="' + escAttr(wbT('排序')) + '">' +
+          opts + '</select>' +
+          '<button id="wb-select-btn" class="wb-tool-btn" type="button"' +
+          ' aria-pressed="false">' + wbT('选择') + '</button>' +
+        '</div>' +
+        '<div id="wb-bulk" hidden>' +
+          '<button id="wb-bulk-all" class="wb-tool-btn" type="button">' +
+          wbT('全选可见') + '</button>' +
+          '<button id="wb-bulk-fav" class="wb-tool-btn" type="button" disabled>' +
+          wbT('批量收藏') + '</button>' +
+          '<button id="wb-bulk-black" class="wb-tool-btn" type="button" disabled>' +
+          wbT('批量弃用') + '</button>' +
+          '<button id="wb-bulk-cancel" class="wb-tool-btn" type="button">' +
+          wbT('取消') + '</button>' +
+        '</div>';
+      listEl.setAttribute('role', 'listbox');
+      listEl.setAttribute('tabindex', '0');
+      listEl.style.setProperty('--wb-star', 'url("' + wbEmojiUrl('⭐') + '")');
+      listEl.style.setProperty('--wb-ban', 'url("' + wbEmojiUrl('🚫') + '")');
+      listEl.innerHTML = '<div id="wb-list-spacer" role="presentation">' +
+                         '<div id="wb-list-win" role="presentation"></div></div>';
+
+      wbEls = {
+        list: listEl,
+        tools: toolsEl,
+        foot: footEl,
+        spacer: document.getElementById('wb-list-spacer'),
+        win: document.getElementById('wb-list-win'),
+        sort: document.getElementById('wb-sort'),
+        selectBtn: document.getElementById('wb-select-btn'),
+        bulk: document.getElementById('wb-bulk'),
+        bulkFav: document.getElementById('wb-bulk-fav'),
+        bulkBlack: document.getElementById('wb-bulk-black')
+      };
+      wbEls.sort.value = wbList.sort;
+      wbEls.bulk.hidden = !wbList.select;
+      wbEls.selectBtn.setAttribute('aria-pressed', wbList.select ? 'true' : 'false');
+      wbEls.selectBtn.classList.toggle('on', wbList.select);
+      wbSyncBulkLabels();
+
+      wbEls.sort.addEventListener('change', function() {
+        if (WB_SORTS.indexOf(wbEls.sort.value) < 0) return;
+        wbList.sort = wbEls.sort.value;
+        wbSaveListView();
+        wbList.activeIdx = -1;
+        wbEls.list.scrollTop = 0;
+        wbScheduleSort();
+      });
+      wbEls.selectBtn.addEventListener('click', function() {
+        wbSetSelect(!wbList.select);
+      });
+      wbEls.bulk.addEventListener('click', function(ev) {
+        var b = ev.target.closest ? ev.target.closest('button') : null;
+        if (!b) return;
+        if (b.id === 'wb-bulk-all') wbCheckVisible();
+        else if (b.id === 'wb-bulk-fav') wbBulk('fav');
+        else if (b.id === 'wb-bulk-black') wbBulk('black');
+        else if (b.id === 'wb-bulk-cancel') wbSetSelect(false);
+      });
+      footEl.addEventListener('click', function(ev) {
+        if (!ev.target.closest || !ev.target.closest('#wb-foot-bookable')) return;
+        var b = document.getElementById('ff-bookable-only');
+        if (!b) return;
+        b.checked = true;
+        apply();
+      });
+
+      listEl.addEventListener('scroll', function() { wbScheduleRender(); },
+                              {passive: true});
+      listEl.addEventListener('click', function(ev) {
+        var row = ev.target.closest ? ev.target.closest('.wb-row') : null;
+        if (!row) return;
+        var i = parseInt(row.getAttribute('data-i'), 10);
+        var d = wbResultsSorted[i];
+        if (!d) return;
+        var act = ev.target.closest('.wb-row-fav, .wb-row-black');
+        if (act) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (act.classList.contains('wb-row-fav')) toggleFav(d.detail_url);
+          else toggleBlack(d.detail_url);
+          // schedulePush -> saveCache -> refreshAllMarkers -> apply ->
+          // recompute -> 'wb:results' normally repaints the row; force a
+          // render too so a blocked localStorage can't leave it stale.
+          wbScheduleRender(true);
+          return;
+        }
+        if (wbList.select) { wbToggleCheck(d, i); return; }
+        wbSetActive(i, false);
+        openSheet(d);
+      });
+      listEl.addEventListener('mouseover', function(ev) {
+        var row = ev.target.closest ? ev.target.closest('.wb-row') : null;
+        if (!row) return;
+        wbScheduleHover(wbResultsSorted[parseInt(row.getAttribute('data-i'), 10)]);
+      });
+      listEl.addEventListener('mouseleave', function() { wbScheduleHover(null); });
+      // The list is a single tab stop with aria-activedescendant; rows carry
+      // tabindex="-1" so 7.6k results never become 7.6k tab stops. Handled
+      // here rather than on document so the global key dispatcher stays out
+      // of it.
+      listEl.addEventListener('focus', function() {
+        if (wbList.activeIdx < 0 && wbResultsSorted.length) wbSetActive(0, true);
+      });
+      listEl.addEventListener('keydown', function(ev) {
+        var n = wbResultsSorted.length;
+        if (!n) return;
+        var k = ev.key, page = Math.max(1, Math.floor(listEl.clientHeight / wbRowH) - 1);
+        if (k === 'ArrowDown' || k === 'ArrowUp') {
+          ev.preventDefault();
+          wbSetActive(wbList.activeIdx < 0 ? 0
+                      : wbList.activeIdx + (k === 'ArrowDown' ? 1 : -1), true);
+        } else if (k === 'PageDown' || k === 'PageUp') {
+          ev.preventDefault();
+          wbSetActive((wbList.activeIdx < 0 ? 0 : wbList.activeIdx) +
+                      (k === 'PageDown' ? page : -page), true);
+        } else if (k === 'Home' || k === 'End') {
+          ev.preventDefault();
+          wbSetActive(k === 'Home' ? 0 : n - 1, true);
+        } else if (k === 'Enter') {
+          var d = wbResultsSorted[wbList.activeIdx];
+          if (!d) return;
+          ev.preventDefault();
+          openSheet(d);
+        } else if (k === ' ' || k === 'Spacebar') {
+          if (!wbList.select) return;
+          ev.preventDefault();
+          wbToggleCheck(wbResultsSorted[wbList.activeIdx], wbList.activeIdx);
+        }
+      });
+      return wbEls;
+    }
+
+    // ---- the two events that drive everything ----------------------------
+    document.addEventListener('wb:results', function() {
+      if (wbNeedsSort()) {
+        // Different match set: recount the bookable subset, re-sort, repaint.
+        wbBookableN = wbCountBookable();
+        wbUpdateFoot();
+        wbScheduleSort();
+      } else if (wbList.sort === 'distance' && wbListOn()) {
+        wbScheduleSort();          // same rows, the map moved under them
+      } else {
+        wbScheduleRender(true);    // same rows, but a star may have changed
+      }
+    });
+    document.addEventListener('wb:mode', function() {
+      if (!wbListOn()) {
+        // Dropped to phone. Nothing was ever built on a cold phone boot; on
+        // a resize down from a column layout, release the window so no
+        // .wb-row survives in a DOM that can no longer show one.
+        if (wbEls && wbList.firstIdx !== -1) {
+          wbSwapWindow('', 0);
+          wbList.firstIdx = -1;
+          wbList.winCount = 0;
+        }
+        return;
+      }
+      wbReadRowH();
+      if (!wbBuild()) return;
+      wbUpdateFoot();
+      if (wbNeedsSort()) wbScheduleSort();
+      else wbListRender(true);
+    });
 
     function apply() {
       readFilterInputs();
@@ -9620,6 +13072,10 @@ FILTER_JS_TEMPLATE = r"""
           onlyFav: onlyFavEl.checked,
           hideBlack: hideBlackEl.checked,
           hideForeign: hideForeignEl.checked,
+          // C1 / M-023: additive field. An older build reading this state
+          // simply ignores it and shows every region — which is the same
+          // thing it did yesterday.
+          region: filterState.region,
           gcalOnly: gcEl ? gcEl.checked : false
         }));
       } catch (e) {}
@@ -9674,6 +13130,23 @@ FILTER_JS_TEMPLATE = r"""
       // checkbox stays unchecked (show everything), so no one loses results.
       var gcEl = document.getElementById('ff-gcal-only');
       if (gcEl && typeof s.gcalOnly === 'boolean') gcEl.checked = s.gcalOnly;
+      // C1 / M-023: only an integer in 0..46 selects a region. A missing
+      // field, a string ("京都"), a float, or an out-of-range index all mean
+      // "every region" — never a throw, never an empty map. Same forward-
+      // compat contract as the bookable radio → checkbox migration above.
+      if (regionSel) {
+        var rIdx = null;
+        if (typeof s.region === 'number' && isFinite(s.region)
+            && s.region === Math.floor(s.region)
+            && s.region >= 0 && s.region <= 46) {
+          rIdx = s.region;
+        }
+        var want = (rIdx == null) ? '' : String(rIdx);
+        // Only accept it if the option actually exists in this build.
+        if (want === '' || regionSel.querySelector('option[value="' + want + '"]')) {
+          regionSel.value = want;
+        }
+      }
     }
 
     // Live update on drag — routed through the rAF-coalesced scheduler. A
@@ -9687,7 +13160,38 @@ FILTER_JS_TEMPLATE = r"""
       scheduleRecompute();
     });
     ratingSlider.addEventListener('change', apply);
-    document.querySelectorAll('#ff-sheet input[type=checkbox], #ff-sheet input[type=radio]').forEach(function(el) {
+    // C2 / M-114: one-tap thresholds. Setting .value then apply() keeps the
+    // slider the single source of truth — no parallel state.
+    ratingChipEls.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        ratingSlider.value = btn.getAttribute('data-rating');
+        apply();
+      });
+    });
+    // C1 / M-023: pick a prefecture -> filter, then take the map there. The
+    // bbox is derived from the rows themselves (prefBBox), so it is always
+    // consistent with what the filter is about to show.
+    if (regionSel) {
+      regionSel.addEventListener('change', function() {
+        apply();
+        var i = filterState.region;
+        if (i == null) return;
+        var bb = prefBBox(i);
+        if (bb) map.flyToBounds(bb, {maxZoom: 11, padding: [40, 40]});
+      });
+    }
+    // B8: "show them too" is exactly the checkbox, nothing more.
+    var foreignShowBtn = document.getElementById('ff-foreign-show');
+    if (foreignShowBtn) {
+      foreignShowBtn.addEventListener('click', function() {
+        hideForeignEl.checked = false;
+        apply();
+      });
+    }
+    // M-027: scoped to the CONTENT, not the sheet — on mid/wide the content
+    // is appendChild'd into #wb-filter-pop and would no longer be a
+    // descendant of #ff-sheet. Same node set either way at bind time.
+    document.querySelectorAll('#ff-sheet-content input[type=checkbox], #ff-sheet-content input[type=radio]').forEach(function(el) {
       el.addEventListener('change', apply);
     });
     document.getElementById('ff-price-all').addEventListener('click', function(e) {
@@ -9737,26 +13241,77 @@ FILTER_JS_TEMPLATE = r"""
     var ffGrip     = document.getElementById('ff-grip');
     var ffFab      = document.getElementById('ff-fab');
 
-    function openFilterSheet() {
-      if (bsActive) closeSheet();        // restaurant detail yields to filter
-      ffSheet.classList.add('ff-open');
-      ffBackdrop.classList.add('ff-open');
-      ffSheet.setAttribute('aria-hidden', 'false');
-      ffFab.hidden = true;
+    // M-027: two hosts for the SAME #ff-sheet-content element — the bottom
+    // sheet (phone / split) and the anchored non-modal popover (mid / wide).
+    // openFilterUI/closeFilterUI route by mode; openFilterSheet /
+    // closeFilterSheet stay as aliases because #ff-fab, uiRegister and the
+    // avatar menu all reference them by the old names.
+    // opts.focus  = selector to focus once the panel is up (the top bar's
+    //               region button uses it to land on #ff-region)
+    // opts.anchor = element the popover should hang under
+    // H2 / M-074: release() for the modal (phone / split) host. Null on the
+    // mid / wide popover, which is deliberately non-modal — the left column
+    // has to stay reachable while filters change, so there we only restore
+    // focus on close.
+    var ffTrapRelease = null;
+    function openFilterUI(opts) {
+      opts = opts || {};
+      if (wbIsPhoneLike()) {
+        if (bsActive) closeSheet();      // restaurant detail yields to filter
+        ffSheet.classList.add('ff-open');
+        ffBackdrop.classList.add('ff-open');
+        ffSheet.setAttribute('aria-hidden', 'false');
+        ffFab.hidden = true;
+        // aria-modal="true" was already on #ff-sheet but nothing enforced
+        // it: Tab walked straight out into the map behind the scrim.
+        if (ffTrapRelease) { try { ffTrapRelease(); } catch (_) {} }
+        ffTrapRelease = trapFocus(ffSheet, opts.focus, opts.anchor || ffFab);
+      } else if (wbFilterPop) {
+        wbFilterAnchor = opts.anchor
+          || document.querySelector('#wb-top .wb-filter-btn')
+          || document.querySelector('.wb-filter-btn');
+        wbFilterPop.hidden = false;
+        wbFilterPop.classList.add('open');
+        wbFilterPop.setAttribute('aria-hidden', 'false');
+        wbPositionFilterPop();
+        if (ffTrapRelease) { try { ffTrapRelease(); } catch (_) {} }
+        ffTrapRelease = focusInto(wbFilterPop, opts.focus, wbFilterAnchor);
+      }
       uiPush('filter');                  // M-015
     }
-    function closeFilterSheet() {
+    function closeFilterUI() {
       ffSheet.classList.remove('ff-open');
       ffBackdrop.classList.remove('ff-open');
       ffSheet.setAttribute('aria-hidden', 'true');
       ffFab.hidden = false;
+      if (wbFilterPop) {
+        wbFilterPop.classList.remove('open');
+        wbFilterPop.hidden = true;
+        wbFilterPop.setAttribute('aria-hidden', 'true');
+      }
+      if (ffTrapRelease) {
+        var r = ffTrapRelease;
+        ffTrapRelease = null;
+        try { r(); } catch (_) {}
+      }
       uiDrop('filter');                  // M-015
     }
+    function openFilterSheet()  { openFilterUI(); }
+    function closeFilterSheet() { closeFilterUI(); }
     uiRegister('filter', closeFilterSheet);   // M-015
-    function ffIsOpen() { return ffSheet.classList.contains('ff-open'); }
+    function ffIsOpen() {
+      return ffSheet.classList.contains('ff-open')
+          || !!(wbFilterPop && wbFilterPop.classList.contains('open'));
+    }
 
     ffFab.addEventListener('click', openFilterSheet);
     ffBackdrop.addEventListener('click', closeFilterSheet);
+    // H2 / M-074: the explicit × in the panel header. Lives inside
+    // #ff-sheet-content, so it travels with the content between the two
+    // hosts and one listener covers both.
+    document.querySelectorAll('#ff-sheet-content .ff-close').forEach(function(b) {
+      b.addEventListener('click', closeFilterSheet);
+    });
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && ffIsOpen()) closeFilterSheet();
     });
@@ -9765,6 +13320,8 @@ FILTER_JS_TEMPLATE = r"""
     function makeSheetDrag(sheet, onClose) {
       var drag = null;
       function start(e) {
+        // M-027: swipe-to-dismiss only exists for the bottom-sheet hosts.
+        if (!wbIsPhoneLike()) return;
         var p = e.touches ? e.touches[0] : e;
         drag = { y0: p.clientY, t0: Date.now() };
         sheet.style.transition = 'none';
@@ -9804,6 +13361,297 @@ FILTER_JS_TEMPLATE = r"""
       document.addEventListener('mouseup',   ffMouseUp);
     });
 
+    // ===== M-027: workbench layout state machine =====
+    // Four modes, decided by innerWidth alone. Existing 480 / 700 / 1100
+    // media queries are untouched; these three thresholds are additive.
+    //   phone  <520   — the shipped layout, byte-for-byte. No body class,
+    //                   no DOM move, every #wb-* node display:none.
+    //   split  520-699— floating search + map on top, #wb-left as a
+    //                   draggable bottom panel; sheets unchanged.
+    //   mid    700-1099— top bar 48 + left column 320 + map; a card collapses
+    //                   the column to the 58px #wb-rail and slides #wb-detail
+    //                   in from the right.
+    //   wide   >=1100 — top bar 56 + left 344 + map + resident detail 384.
+    //
+    // The only structural work is appendChild(): #ff-sheet-content,
+    // #bs-content, #ss-box and the avatar trio are MOVED, not cloned, so
+    // every getElementById reference, every bound listener and every
+    // MutationObserver from startDynamicObservers() survives untouched —
+    // which is what lets readFilterInputs / restoreFilterState /
+    // saveFilterState stay literally unchanged.
+    var WB_BP_SPLIT = 520, WB_BP_MID = 700, WB_BP_WIDE = 1100;
+    var wbCur = '';                  // '' until the first wbApplyMode()
+    var wbSplitPct = 45;             // split-mode panel height, % of viewport
+    var wbTopEl      = document.getElementById('wb-top');
+    var wbTopSearch  = document.getElementById('wb-top-search');
+    var wbTopAcct    = document.getElementById('wb-top-acct');
+    var wbLeftEl     = document.getElementById('wb-left');
+    var wbDetailEl   = document.getElementById('wb-detail');
+    var wbDetailBody = document.getElementById('wb-detail-body');
+    var wbFilterPop  = document.getElementById('wb-filter-pop');
+    var wbSplitHandle= document.getElementById('wb-split-handle');
+    var wbFilterAnchor = null;
+
+    function wbModeFor(w) {
+      if (w >= WB_BP_WIDE)  return 'wide';
+      if (w >= WB_BP_MID)   return 'mid';
+      if (w >= WB_BP_SPLIT) return 'split';
+      return 'phone';
+    }
+    function wbMode() { return wbCur || 'phone'; }
+    // Everything that still uses the bottom sheets. Deliberately written as
+    // "not the two column modes" so the pre-init '' state is phone-like —
+    // a click that somehow lands before initMap finishes takes the old path.
+    function wbIsPhoneLike() { return !(wbCur === 'mid' || wbCur === 'wide'); }
+    function wbDetailMode()  { return wbCur === 'mid' || wbCur === 'wide'; }
+    function wbDetailOpen()  { return document.body.classList.contains('wb-detail-open'); }
+
+    function wbMove(el, parent) {
+      if (el && parent && el.parentElement !== parent) parent.appendChild(el);
+    }
+    // A2: the DOM relocation. Runs only when the mode actually changed, and
+    // wbMove is a no-op when the element is already home — so on a phone
+    // (the first and only call is 'phone') nothing is touched at all.
+    function wbRelocate() {
+      var col = wbDetailMode();
+      wbMove(document.getElementById('ff-sheet-content'),
+             col ? wbFilterPop : ffSheet);
+      wbMove(bsContent, col ? wbDetailBody : bsSheet);
+      wbMove(document.getElementById('ss-box'),
+             col ? wbTopSearch : document.body);
+      var ssTopEl = document.getElementById('ss-top');
+      var acctHome = col ? wbTopAcct : ssTopEl;
+      // Order matters on the way back: avatar, badge, menu — same as the
+      // markup in SEARCH_BOX_HTML.
+      wbMove(document.getElementById('ss-avatar'), acctHome);
+      wbMove(document.getElementById('ss-avatar-dot'), acctHome);
+      wbMove(document.getElementById('ss-menu'), acctHome);
+      // Peek is a bottom-sheet-only state and its CSS selectors are scoped
+      // to #bs-sheet, which #bs-content has just left. Reset it so a
+      // rotation back to the sheet never lands on a half-hidden card.
+      if (bsSheet) bsSheet.classList.remove('bs-peek');
+      if (bsGrip) bsGrip.setAttribute('aria-expanded', 'true');
+      // The popover host is meaningless on a phone; make sure it is shut.
+      if (!col && wbFilterPop) {
+        wbFilterPop.classList.remove('open');
+        wbFilterPop.hidden = true;
+      }
+      // Tab order: in the column modes the shell IS the primary UI, so it
+      // moves to the front of <body> — ahead of the map and the FAB column,
+      // which are map chrome and were reached first purely because folium
+      // emits its div before anything we inject. Purely a tab-order move:
+      // every node involved carries an explicit z-index, so nothing
+      // repaints differently. Never runs on a phone (col is false there).
+      if (col && wbTopEl && wbLeftEl && document.body.firstChild !== wbTopEl) {
+        // A9 again: re-parenting a scroll container is a remove + insert, and
+        // the browser zeroes scrollTop on the way through. This move happens
+        // once per page (split -> mid/wide the first time), and without the
+        // save/restore the result list jumps back to the top on exactly that
+        // one rotation. Read before, write after — both synchronous, so no
+        // intermediate paint sees the reset.
+        var wbListEl = document.getElementById('wb-list');
+        var wbKeepTop = wbListEl ? wbListEl.scrollTop : 0;
+        document.body.insertBefore(wbTopEl, document.body.firstChild);
+        document.body.insertBefore(wbLeftEl, wbTopEl.nextSibling);
+        if (wbListEl && wbKeepTop) wbListEl.scrollTop = wbKeepTop;
+      }
+      // A9: a card that was open in a bottom-sheet mode has to become the
+      // detail column when the viewport crosses 700px, and go back to being
+      // a sheet on the way down. bsActive is the state; the class is only
+      // how the layout reads it.
+      var bcl = document.body.classList;
+      if (col && bsActive) bcl.add('wb-detail-open');
+      else if (!col) bcl.remove('wb-detail-open');
+    }
+
+    // Writes the four CSS variables from (mode, detail-open). Everything the
+    // shell does to the map's box goes through here.
+    function wbSyncVars() {
+      var top = 0, left = 0, right = 0, bottom = 0;
+      if (wbCur === 'wide') {
+        top = 56; left = 344; right = 384;
+      } else if (wbCur === 'mid') {
+        top = 48;
+        left  = wbDetailOpen() ? 58 : 320;
+        right = wbDetailOpen() ? 340 : 0;
+      } else if (wbCur === 'split') {
+        bottom = Math.round(window.innerHeight * wbSplitPct / 100);
+      }
+      try {
+        var rs = document.documentElement.style;
+        rs.setProperty('--wb-top', top + 'px');
+        rs.setProperty('--wb-left', left + 'px');
+        rs.setProperty('--wb-right', right + 'px');
+        rs.setProperty('--wb-bottom', bottom + 'px');
+      } catch (_) {}
+      wbScheduleInvalidate();
+    }
+    // Exposed for openSheet/closeSheet — they change the detail state and
+    // then need the left column recomputed.
+    function wbSetLeft(px) {
+      try {
+        document.documentElement.style.setProperty('--wb-left', px + 'px');
+      } catch (_) {}
+      wbScheduleInvalidate();
+    }
+    // Hard prerequisite 7: Leaflet caches the container size, so every box
+    // change needs an invalidateSize. Once immediately (so a click lands on
+    // the right lat/lng straight away) and once after the 0.18-0.22s slide,
+    // which is when the final size is real.
+    var wbInvTimer = 0;
+    function wbInvalidateNow() {
+      try { map.invalidateSize({animate: false}); } catch (_) {}
+    }
+    function wbScheduleInvalidate() {
+      wbInvalidateNow();
+      clearTimeout(wbInvTimer);
+      wbInvTimer = setTimeout(wbInvalidateNow, 260);
+    }
+
+    function wbApplyMode() {
+      var m = wbModeFor(window.innerWidth);
+      var changed = (m !== wbCur);
+      wbCur = m;
+      var cl = document.body.classList;
+      cl.toggle('wb-split', m === 'split');
+      cl.toggle('wb-mid',   m === 'mid');
+      cl.toggle('wb-wide',  m === 'wide');
+      if (changed) {
+        // A9: bsActive is untouched and #bs-content moves as a live node, so
+        // the open card survives the rotation without a repaint; #wb-list is
+        // never removed from layout, so its scrollTop survives too.
+        wbRelocate();   // also reconciles .wb-detail-open with bsActive
+      }
+      wbSyncVars();
+      if (changed) {
+        try {
+          document.dispatchEvent(new CustomEvent('wb:mode', {detail: {mode: m}}));
+        } catch (_) {}
+      }
+      if (ffIsOpen() && !wbIsPhoneLike()) wbPositionFilterPop();
+    }
+    var wbRaf = 0;
+    function wbSchedule() {
+      if (wbRaf) return;
+      wbRaf = requestAnimationFrame(function() { wbRaf = 0; wbApplyMode(); });
+    }
+    // A8: ResizeObserver rather than matchMedia — a Fold unfold produces a
+    // burst of intermediate widths and rAF coalescing turns them into one
+    // relayout. resize is the fallback for browsers without RO.
+    if (window.ResizeObserver) {
+      try { new ResizeObserver(wbSchedule).observe(document.documentElement); }
+      catch (_) { window.addEventListener('resize', wbSchedule); }
+    } else {
+      window.addEventListener('resize', wbSchedule);
+    }
+    window.addEventListener('orientationchange', wbSchedule);   // M-090
+
+    // A3: anchor the popover under whatever opened it, clamped to the
+    // viewport so a mid-width top bar can't push it off the right edge.
+    function wbPositionFilterPop() {
+      if (!wbFilterPop) return;
+      var a = wbFilterAnchor;
+      if (!a || !a.getBoundingClientRect) return;
+      var r = a.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      var w = wbFilterPop.offsetWidth || 640;
+      var left = r.right - w;
+      if (left < 12) left = 12;
+      if (left + w > window.innerWidth - 12) left = Math.max(12, window.innerWidth - 12 - w);
+      wbFilterPop.style.left = left + 'px';
+      wbFilterPop.style.right = 'auto';
+    }
+    // Click-outside dismissal. The popover is non-modal by design (the left
+    // column has to stay readable while filters change), so there is no
+    // backdrop to hang this on.
+    document.addEventListener('click', function(e) {
+      if (!wbFilterPop || !wbFilterPop.classList.contains('open')) return;
+      var t = e.target;
+      if (wbFilterPop.contains(t)) return;
+      if (t.closest && (t.closest('.wb-filter-btn') || t.closest('#wb-region-btn'))) return;
+      // The help popover and the emoji picker render at body level.
+      if (t.closest && t.closest('#ff-help-pop')) return;
+      closeFilterUI();
+    });
+
+    // ----- split-mode drag handle -----
+    function wbSetSplitPct(pct) {
+      if (pct < 20) pct = 20;
+      if (pct > 75) pct = 75;
+      wbSplitPct = pct;
+      if (wbCur === 'split') wbSyncVars();
+    }
+    var wbSplitDrag = false;
+    function wbSplitMove(e) {
+      if (!wbSplitDrag) return;
+      var p = e.touches ? e.touches[0] : e;
+      var h = window.innerHeight || 1;
+      wbSetSplitPct(Math.round((h - p.clientY) / h * 100));
+    }
+    function wbSplitEnd() {
+      wbSplitDrag = false;
+      document.removeEventListener('mousemove', wbSplitMove);
+      document.removeEventListener('mouseup', wbSplitEnd);
+    }
+    if (wbSplitHandle) {
+      wbSplitHandle.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        wbSplitDrag = true;
+        document.addEventListener('mousemove', wbSplitMove);
+        document.addEventListener('mouseup', wbSplitEnd);
+      });
+      wbSplitHandle.addEventListener('touchstart', function() { wbSplitDrag = true; },
+                                     {passive: true});
+      wbSplitHandle.addEventListener('touchmove', wbSplitMove, {passive: true});
+      wbSplitHandle.addEventListener('touchend', wbSplitEnd);
+      wbSplitHandle.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowUp')        { e.preventDefault(); wbSetSplitPct(wbSplitPct + 5); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); wbSetSplitPct(wbSplitPct - 5); }
+      });
+    }
+
+    // ----- rail + top-bar wiring -----
+    var wbRailBack = document.getElementById('wb-rail-back');
+    if (wbRailBack) {
+      wbRailBack.addEventListener('click', function() { closeSheet(); });
+    }
+    var wbRailSearch = document.getElementById('wb-rail-search');
+    if (wbRailSearch) {
+      wbRailSearch.addEventListener('click', function() {
+        var inp = document.getElementById('ss-input');
+        if (inp) { inp.focus(); inp.select(); }
+      });
+    }
+    document.querySelectorAll('.wb-filter-btn').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (ffIsOpen()) closeFilterUI();
+        else openFilterUI({anchor: btn});
+      });
+    });
+    var wbRegionBtn = document.getElementById('wb-region-btn');
+    if (wbRegionBtn) {
+      wbRegionBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        // #ff-region is built by the filter task; opening the panel is the
+        // useful half either way, so a missing select is not an error.
+        openFilterUI({anchor: wbRegionBtn, focus: '#ff-region'});
+      });
+    }
+    var wbSyncChip = document.getElementById('wb-sync');
+    if (wbSyncChip) {
+      wbSyncChip.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openAvatarMenu();
+      });
+    }
+
+    // Cross-task handles. Callers must `typeof`-guard: these only exist once
+    // this block has run.
+    window.__wbMode = wbMode;
+    window.__wbOpenFilter = openFilterUI;
+    window.__wbCloseFilter = closeFilterUI;
+
     // Filter reset. Extracted from an inline #ff-reset handler so the avatar
     // dropdown's reset row can call it too — see the menu wiring below.
     function resetFilters() {
@@ -9818,6 +13666,7 @@ FILTER_JS_TEMPLATE = r"""
       onlyFavEl.checked = false;
       hideBlackEl.checked = true;
       hideForeignEl.checked = true;
+      if (regionSel) regionSel.value = '';   // C1 / M-023
       apply();
     }
 
@@ -10133,11 +13982,20 @@ FILTER_JS_TEMPLATE = r"""
       refreshAuthUI();
       ssMenu.hidden = false;
       ssMenu.classList.add('open');
+      if (ssAvatar) ssAvatar.setAttribute('aria-expanded', 'true');   // H7 / M-088
       uiPush('account');                 // M-015
     }
     function closeAvatarMenu() {
+      // H7 / M-088: hand focus back to the trigger, but only when it is
+      // still inside the menu — closing from an outside click must not yank
+      // the caret out of whatever the user just clicked.
+      var refocus = !!(document.activeElement && ssMenu.contains(document.activeElement));
       ssMenu.classList.remove('open');
       ssMenu.hidden = true;
+      if (ssAvatar) {
+        ssAvatar.setAttribute('aria-expanded', 'false');
+        if (refocus) { try { ssAvatar.focus(); } catch (_) {} }
+      }
       uiDrop('account');                 // M-015
     }
     uiRegister('account', closeAvatarMenu);   // M-015
@@ -10259,12 +14117,22 @@ FILTER_JS_TEMPLATE = r"""
       impModal.classList.add('imp-open');
       impModal.setAttribute('aria-hidden', 'false');
       uiPush('import');                  // M-015
+      // H2 / M-074: aria-modal without focus containment is a claim the
+      // page was not honouring.
+      if (impTrapRelease) { try { impTrapRelease(); } catch (_) {} }
+      impTrapRelease = trapFocus(impModal);
     }
+    var impTrapRelease = null;
     function closeImportModal() {
       impBackdrop.classList.remove('imp-open');
       impModal.classList.remove('imp-open');
       impModal.setAttribute('aria-hidden', 'true');
       pendingImport = null;
+      if (impTrapRelease) {
+        var r = impTrapRelease;
+        impTrapRelease = null;
+        try { r(); } catch (_) {}
+      }
       uiDrop('import');                  // M-015
     }
     uiRegister('import', closeImportModal);   // M-015
@@ -10272,6 +14140,19 @@ FILTER_JS_TEMPLATE = r"""
     document.getElementById('ssm-import').addEventListener('click', function() {
       impFile.click();
     });
+    // H11: import used to report every outcome through window.alert() — a
+    // browser-chrome dialog that blocks the page, cannot be styled, is
+    // suppressed outright in some in-app webviews, and (in the installed
+    // PWA) looks like it came from somewhere else entirely. Failures before
+    // the modal opens go to a toast; failures with the modal up go to
+    // #imp-error, right next to the controls that caused them.
+    function impFail(msg) {
+      if (impModal.classList.contains('imp-open')) {
+        impError.textContent = msg;
+      } else {
+        showToast(msg, {ms: 6000});
+      }
+    }
     impFile.addEventListener('change', function() {
       var file = impFile.files && impFile.files[0];
       impFile.value = '';   // let the same file be re-selected later
@@ -10281,12 +14162,15 @@ FILTER_JS_TEMPLATE = r"""
       reader.onload = function() {
         var parsed;
         try { parsed = JSON.parse(reader.result); }
-        catch (_) { alert(localizeText('无法解析该文件，请确认它是导出的 favorites.json')); return; }
+        catch (_) {
+          impFail(localizeText('无法解析该文件，请确认它是导出的') + ' favorites.json');
+          return;
+        }
         var norm = normalizeImport(parsed);
-        if (!norm) { alert(localizeText('文件格式无法识别')); return; }
+        if (!norm) { impFail(localizeText('文件格式无法识别')); return; }
         openImportModal(norm);
       };
-      reader.onerror = function() { alert(localizeText('读取文件失败')); };
+      reader.onerror = function() { impFail(localizeText('读取文件失败')); };
       reader.readAsText(file);
     });
 
@@ -10372,8 +14256,11 @@ FILTER_JS_TEMPLATE = r"""
       refreshAllMarkers();
       if (changed) schedulePush();
       closeImportModal();
-      alert(localizeText(
-        changed ? ('导入完成：' + report.join('，')) : '没有新增内容（全部已存在）'));
+      // H11: the success report is a toast too — it stays out of the way and
+      // does not need a click to dismiss before the map is usable again.
+      showToast(localizeText(
+        changed ? ('导入完成：' + report.join('，')) : '没有新增内容（全部已存在）'),
+        {ms: 6000});
     }
 
     impModal.querySelector('.imp-confirm').addEventListener('click', doImport);
@@ -10385,7 +14272,9 @@ FILTER_JS_TEMPLATE = r"""
     });
 
     document.querySelectorAll('#ss-menu [data-lang]').forEach(function(b) {
-      if (b.dataset.lang === activeLang) b.classList.add('on');
+      var on = (b.dataset.lang === activeLang);
+      if (on) b.classList.add('on');
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');   // H7 / M-088
       b.addEventListener('click', function() { setLanguage(b.dataset.lang); });
     });
 
@@ -10588,6 +14477,12 @@ FILTER_JS_TEMPLATE = r"""
     } else {
       setTimeout(warmNames, 2500);
     }
+    // M-027: first layout pass. Deliberately last — every
+    // document.querySelectorAll('#ff-sheet-content input…') binding above
+    // has already run against the panel in its original host, so moving the
+    // subtree now cannot orphan a listener. After this the ResizeObserver
+    // owns the mode.
+    wbApplyMode();
     // Restore what a language-switch reload carried over: reopen the card
     // that was on screen, or put the typed query back. openSheet itself
     // writes the restaurant name into the search box, so the query only
@@ -10685,6 +14580,12 @@ def popup_data(row: dict) -> list:
     # Positional layout, matched in JS renderPopup():
     #   [genre, dinner_upper, lunch_upper, seat, station, address, policy,
     #    photos, ribbons_html]
+    # Slots 9 (policy struct, M-029), 10 (holiday, M-030) and 11 (station
+    # distance in metres, M-030) are appended by main() — 9 because it has
+    # to be derived AFTER each variant's slot 6 has been overlaid with that
+    # language's text, 10/11 because they are language-independent. Readers
+    # must length-check every slot past 8: a service worker cache from
+    # before 2.0.0 still serves 9-slot arrays.
     # name / rating / bucket / bookable / detail_url are NOT included — they
     # already live in restaurants.json, so the JS reader pulls them from there.
     # Dropping the duplicates + the static HTML scaffold takes popups.json
@@ -11024,6 +14925,11 @@ def main(argv: list[str] | None = None) -> None:
     approx_count = 0            # M-021
     closed_perm = closed_temp = 0   # M-093
     foreign_any = foreign_first = 0  # M-095
+    pref_counts: dict[int, int] = {}     # M-023
+    pref_missing = 0                     # M-023
+    st_count = 0                         # B1/G2
+    b_map: dict[str, int] = {}           # M-029 (verdict from the JA original)
+    holiday_count = station_m_count = 0  # M-030
     for row, loc in geocoded:
         bkey, _blabel, _bcolor = price_bucket(row)
         try:
@@ -11109,6 +15015,25 @@ def main(argv: list[str] | None = None) -> None:
         city = extract_city(addr_raw)
         if city:
             entry["city"] = city
+        # M-023: integer prefecture index for the region filter. Falls back to
+        # the Google 日本語 address only if the Tabelog one has no prefecture
+        # prefix (never happens in the current corpus). Absent = "no region",
+        # which the filter treats as "never matches a region selection".
+        pref_idx = prefecture_index(addr_raw)
+        if pref_idx is None and gcal and gcal.get("addr_ja"):
+            pref_idx = prefecture_index(gcal["addr_ja"])
+        if pref_idx is None:
+            pref_missing += 1
+        else:
+            entry["pref"] = pref_idx
+            pref_counts[pref_idx] = pref_counts.get(pref_idx, 0) + 1
+        # B1/G2: nearest-station short name on the row itself. The result list
+        # and the search rows show it, and popups-*.json (which also carries
+        # it, slot 4) is only fetched the first time a card opens.
+        st = (row.get("station") or "").strip()
+        if st and st != "-":
+            entry["st"] = st
+            st_count += 1
         # M-021: block-level coordinate disclaimer. Only for rows we did NOT
         # replace with a Google POI coordinate — a calibrated row is precise
         # by construction. Almost every row here was skipped by the geocode
@@ -11139,6 +15064,19 @@ def main(argv: list[str] | None = None) -> None:
             # gets Google's English address via en_popup_array below.
             if gcal and gcal["addr_ja"]:
                 parr[5] = gcal["addr_ja"]
+            # Slots 9 / 10 / 11 (M-029 / M-030). Slot 9 stays None here: it
+            # is language-specific and gets filled per variant below, after
+            # each variant's slot 6 has been overlaid.
+            hol = holiday_slot(row.get("holiday"))
+            stm = station_m_slot(row.get("station_distance_m"))
+            parr += [None, hol, stm]
+            if hol:
+                holiday_count += 1
+            if stm is not None:
+                station_m_count += 1
+            b = policy_b(row.get("reservation_policy"))
+            if b is not None:
+                b_map[url] = b
             popups_map[url] = parr
     if unmapped_tokens:
         print(f"  unmapped genre tokens (fell into 其他): {sorted(unmapped_tokens)}")
@@ -11179,6 +15117,34 @@ def main(argv: list[str] | None = None) -> None:
     if nudged:
         print(f"  fanned out {nudged} markers sharing identical coords")
 
+    # M-023 / B1-G2: how well the two new row fields covered the corpus.
+    print(
+        f"  pref index (M-023): {len(core_rows) - pref_missing}/{len(core_rows)} rows "
+        f"across {len(pref_counts)}/47 prefectures ({pref_missing} without one)"
+    )
+    print(f"  st (station short name): {st_count}/{len(core_rows)} rows")
+
+    # M-029: slot 9 is language-specific — it is extracted from the text the
+    # card actually shows in that language, so it has to be filled once per
+    # variant, after the variant's slot 6 has been overlaid. `b` is the one
+    # field that must be identical everywhere; it comes from the Japanese
+    # original via b_map, never from the translated text.
+    def _fill_policy_slots(variant: dict[str, list], lang: str) -> str:
+        hits = {"b": 0, "lead": 0, "cancel": 0, "note": 0}
+        for u, arr in variant.items():
+            struct = policy_struct(arr[6] if len(arr) > 6 else "", lang, b_map.get(u))
+            arr[9] = struct
+            if struct:
+                for key in hits:
+                    if key in struct:
+                        hits[key] += 1
+        return (
+            f"b {hits['b']}/{len(variant)}, lead {hits['lead']}, "
+            f"cancel {hits['cancel']}, note {hits['note']}"
+        )
+
+    print(f"  policy slot (M-029) zh-CN: {_fill_policy_slots(popups_map, 'zh-CN')}")
+
     DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
     restaurants_bytes = json.dumps(
         core_rows, ensure_ascii=False, separators=(",", ":")
@@ -11193,6 +15159,7 @@ def main(argv: list[str] | None = None) -> None:
     atomic_write_bytes(RESTAURANTS_JSON, restaurants_bytes)
     atomic_write_bytes(POPUPS_JSON, popups_bytes)
     popups_tw_map = {url: trad_popup_array(arr) for url, arr in popups_map.items()}
+    print(f"  policy slot (M-029) zh-TW: {_fill_policy_slots(popups_tw_map, 'zh-TW')}")
     popups_tw_bytes = json.dumps(
         popups_tw_map, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -11204,6 +15171,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         for url, arr in popups_map.items()
     }
+    print(f"  policy slot (M-029) en:    {_fill_policy_slots(popups_en_map, 'en')}")
     popups_en_bytes = json.dumps(
         popups_en_map, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -11213,6 +15181,11 @@ def main(argv: list[str] | None = None) -> None:
     popups_ja_map = {
         url: ja_popup_array(arr, policy_ja.get(url)) for url, arr in popups_map.items()
     }
+    print(f"  policy slot (M-029) ja:    {_fill_policy_slots(popups_ja_map, 'ja')}")
+    print(
+        f"  holiday slot (M-030): {holiday_count}/{len(popups_map)} · "
+        f"station_m slot: {station_m_count}/{len(popups_map)}"
+    )
     popups_ja_bytes = json.dumps(
         popups_ja_map, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -11236,7 +15209,8 @@ def main(argv: list[str] | None = None) -> None:
 
     gcal_count = sum(1 for e in core_rows if e.get("gcal"))
     panel_html = build_filter_panel_html(
-        cat_counts, award_counts, gcal_count, foreign_any  # M-095
+        cat_counts, award_counts, gcal_count, foreign_any,  # M-095
+        pref_counts=pref_counts,  # M-023
     )
     default_off_json = json.dumps(sorted(DEFAULT_OFF_GENRES), ensure_ascii=False)
     bookmarks_json = json.dumps(load_bookmarks(), ensure_ascii=False)
@@ -11245,6 +15219,19 @@ def main(argv: list[str] | None = None) -> None:
         {key: color for key, _label, color, _lo, _hi in PRICE_BUCKETS}
     )
     genre_emoji_json = json.dumps(GENRE_EMOJI, ensure_ascii=False)
+    # M-023: the region table, index-aligned with the `pref` field on every
+    # row. Emitted on one line so _PREFS_LITERAL_RE can strip it from the
+    # CJK-run scan (its place names are data, not page text).
+    prefs_json = json.dumps(
+        pref_l10n_table(pref_counts), ensure_ascii=False, separators=(",", ":")
+    )
+    # D2: (key, label, lo, hi) — colours already ship in BUCKET_COLOR, so the
+    # card can map a raw ¥ upper bound back to the bucket label without them.
+    price_buckets_json = json.dumps(
+        [[key, label, lo, hi] for key, label, _color, lo, hi in PRICE_BUCKETS],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     # Apple-style PNG cache built by build_emoji_cache.py. Inlined as the
     # EMOJI_MAP lookup the JS uses to decide local-path vs. emojicdn fallback.
     # Missing manifest is non-fatal: every emoji falls back to the runtime CDN,
@@ -11294,6 +15281,8 @@ def main(argv: list[str] | None = None) -> None:
         .replace("__FAVORITES_BUILTIN__", favorites_builtin_json)
         .replace("__BUCKET_COLORS__", bucket_colors_json)
         .replace("__GENRE_EMOJI__", genre_emoji_json)
+        .replace("__PREFS__", prefs_json)  # M-023
+        .replace("__PRICE_BUCKETS__", price_buckets_json)  # D2
         .replace("__EMOJI_MANIFEST__", emoji_manifest_json)
         .replace("__HAN_VARIANTS__", han_variants_json)
         .replace("__KNOWN_LOCS__", known_locs_json)
@@ -11406,6 +15395,11 @@ def main(argv: list[str] | None = None) -> None:
     # wins the tie against the earlier blocks it decorates.
     m.get_root().html.add_child(folium.Element(SYNC_UI_HTML))
     m.get_root().html.add_child(folium.Element(panel_html))
+    # M-027: after panel_html so the `body.wb-*` offset rules outrank the
+    # #ff-sheet / #ff-fab / #bs-sheet blocks they reposition.
+    m.get_root().html.add_child(folium.Element(WORKBENCH_HTML))
+    # M-027 / B1: result-list styling, right after the shell it fills.
+    m.get_root().html.add_child(folium.Element(RESULT_LIST_HTML))
     m.get_root().html.add_child(folium.Element(filter_js))
 
     # M-020: folium writes with a plain open('w'), and the old code then

@@ -212,6 +212,220 @@ def check_popup_parity() -> None:
     )
 
 
+def check_popup_slots() -> None:
+    """M-029 / M-030 — the shape of the three slots the 2.0.0 card reads.
+
+    Deliberately NOT a slot-count assertion (check_popup_parity owns that,
+    and only as "the four agree"). These are per-value contracts:
+
+      p[9]   None, or a dict whose keys are a subset of {b, lead, cancel,
+             note}; b ∈ {0,1,2} and IDENTICAL across the four variants (it
+             is the bookability verdict, read off the Japanese original, so
+             a language-dependent b would mean the card told an EN reader
+             the opposite of what it told a JA reader); lead / cancel / note
+             non-empty strings. b must cover ≥99% of rows — the corpus has
+             43 rows whose policy text does not start with an enumeration
+             word, and a sudden drop means the head-word list broke.
+      p[10]  None, or a non-empty string that is not the literal '-'
+             (7,926 rows have a non-empty `holiday`, 2,578 of them are '-';
+             rendering those would put "休 -" on a quarter of the cards).
+      p[11]  None, or a non-negative int (metres to the station).
+    """
+    variants: dict[str, dict] = {}
+    for name, path in POPUP_FILES.items():
+        data = load_json(path)
+        if not isinstance(data, dict):
+            fail("popup-slots", f"{name} is not a JSON object")
+            return
+        variants[name] = data
+
+    ref = variants["popups.json"]
+    if not ref:
+        fail("popup-slots", "popups.json is empty")
+        return
+    if len(next(iter(ref.values()))) <= 11:
+        fail(
+            "popup-slots",
+            "popup arrays have no slot 9/10/11 — map.py did not append the "
+            "policy struct / holiday / station distance (M-029, M-030).",
+        )
+        return
+
+    allowed = {"b", "lead", "cancel", "note"}
+    problems: list[str] = []
+    b_hits = 0
+    holiday_hits = 0
+    station_hits = 0
+
+    def _slot(arr, i):
+        return arr[i] if isinstance(arr, list) and len(arr) > i else None
+
+    for url, arr in ref.items():
+        if len(problems) >= 5:
+            break
+        # --- p[9] ---------------------------------------------------------
+        bs = []
+        for name, data in variants.items():
+            pol = _slot(data.get(url), 9)
+            if pol is None:
+                bs.append(None)
+                continue
+            if not isinstance(pol, dict):
+                problems.append(f"{url} [{name}] p[9] is {type(pol).__name__}, not dict/None")
+                break
+            extra = set(pol) - allowed
+            if extra:
+                problems.append(f"{url} [{name}] p[9] has unknown keys {sorted(extra)}")
+                break
+            b = pol.get("b")
+            if "b" in pol and b not in (0, 1, 2):
+                problems.append(f"{url} [{name}] p[9].b is {b!r}, expected 0/1/2")
+                break
+            bad = [
+                k for k in ("lead", "cancel", "note")
+                if k in pol and (not isinstance(pol[k], str) or not pol[k].strip())
+            ]
+            if bad:
+                problems.append(f"{url} [{name}] p[9] has empty/non-str {bad}")
+                break
+            bs.append(b)
+        else:
+            if len(set(bs)) > 1:
+                problems.append(
+                    f"{url} p[9].b differs between variants: "
+                    f"{dict(zip(variants, bs))} — the verdict comes from the "
+                    f"Japanese original and must be the same in all four"
+                )
+            elif bs and bs[0] is not None:
+                b_hits += 1
+        # --- p[10] / p[11] ------------------------------------------------
+        hol = _slot(arr, 10)
+        if hol is not None:
+            if not isinstance(hol, str) or not hol.strip() or hol.strip() == "-":
+                problems.append(f"{url} p[10] is {hol!r} (expected a real closing-day string or None)")
+            else:
+                holiday_hits += 1
+        stm = _slot(arr, 11)
+        if stm is not None:
+            if not isinstance(stm, int) or isinstance(stm, bool) or stm < 0:
+                problems.append(f"{url} p[11] is {stm!r} (expected a non-negative int or None)")
+            else:
+                station_hits += 1
+
+    if problems:
+        fail("popup-slots", "; ".join(problems))
+        return
+
+    total = len(ref)
+    pct = 100.0 * b_hits / total if total else 0.0
+    if pct < 99.0:
+        fail(
+            "popup-slots",
+            f"p[9].b covers only {b_hits:,}/{total:,} ({pct:.1f}%), expected "
+            f">=99%. policy_b()'s head-word list (完全予約制 / 予約不可 / 予約可) "
+            f"no longer matches the corpus.",
+        )
+    else:
+        ok("popup-slots", f"p[9].b on {b_hits:,}/{total:,} rows ({pct:.1f}%), same in all 4 variants")
+
+    if not 5000 <= holiday_hits <= 5700:
+        fail(
+            "popup-slots",
+            f"p[10] (closing days) present on {holiday_hits:,} rows, expected "
+            f"5,000-5,700. Either the day-token filter stopped rejecting the "
+            f"2,578 '-' rows, or it started rejecting real ones.",
+        )
+    else:
+        ok("popup-slots", f"p[10] closing days on {holiday_hits:,} rows")
+    ok("popup-slots", f"p[11] station distance on {station_hits:,} rows")
+
+
+def check_restaurant_fields() -> None:
+    """M-023 / B1 — the two fields the region filter and the result list
+    read off every restaurants.json row, plus the PREFS table they are
+    index-aligned with."""
+    data = load_json(RESTAURANTS_JSON)
+    if not isinstance(data, list):
+        fail("row-fields", "restaurants.json is not a JSON array")
+        return
+
+    seen_pref: set[int] = set()
+    bad_pref: list[str] = []
+    bad_st: list[str] = []
+    pref_hits = st_hits = 0
+    for r in data:
+        if not isinstance(r, dict):
+            continue
+        if "pref" in r:
+            p = r["pref"]
+            if not isinstance(p, int) or isinstance(p, bool) or not 0 <= p <= 46:
+                if len(bad_pref) < 5:
+                    bad_pref.append(f"{r.get('detail_url')}: pref={p!r}")
+            else:
+                pref_hits += 1
+                seen_pref.add(p)
+        if "st" in r:
+            s = r["st"]
+            if not isinstance(s, str) or not s.strip():
+                if len(bad_st) < 5:
+                    bad_st.append(f"{r.get('detail_url')}: st={s!r}")
+            else:
+                st_hits += 1
+    if bad_pref:
+        fail("row-fields", "pref must be an int 0-46: " + "; ".join(bad_pref))
+    if bad_st:
+        fail("row-fields", "st must be a non-empty string: " + "; ".join(bad_st))
+
+    total = len(data)
+    pct = 100.0 * pref_hits / total if total else 0.0
+    if pct < 99.0:
+        fail(
+            "row-fields",
+            f"pref covers only {pref_hits:,}/{total:,} ({pct:.1f}%), expected "
+            f">=99%. prefecture_index() stopped matching addresses — the "
+            f"region filter would silently hide those rows.",
+        )
+    elif len(seen_pref) != 47:
+        fail(
+            "row-fields",
+            f"only {len(seen_pref)}/47 prefectures appear in the payload "
+            f"(missing indices {sorted(set(range(47)) - seen_pref)}). The "
+            f"region <select> would offer an empty option.",
+        )
+    else:
+        ok("row-fields", f"pref on {pref_hits:,}/{total:,} rows, all 47 prefectures present")
+    ok("row-fields", f"st (station) on {st_hits:,}/{total:,} rows")
+
+    if not MAP_HTML.exists():
+        fail("row-fields", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    hits = re.findall(r"var PREFS\s*=\s*(\[.*?\]);", html, re.S)
+    if len(hits) != 1:
+        fail(
+            "row-fields",
+            f"expected exactly one `var PREFS = [...]` in docs/index.html, "
+            f"found {len(hits)}",
+        )
+        return
+    try:
+        prefs = json.loads(hits[0])
+    except json.JSONDecodeError as e:
+        fail("row-fields", f"the inlined PREFS table is not valid JSON: {e}")
+        return
+    if not isinstance(prefs, list) or len(prefs) != 47:
+        fail("row-fields", f"PREFS has {len(prefs) if isinstance(prefs, list) else '?'} entries, expected 47")
+        return
+    missing_keys = [
+        i for i, p in enumerate(prefs)
+        if not isinstance(p, dict) or not {"ja", "sc", "tc", "en", "n"} <= set(p)
+    ]
+    if missing_keys:
+        fail("row-fields", f"PREFS entries missing ja/sc/tc/en/n at indices {missing_keys[:5]}")
+        return
+    ok("row-fields", "PREFS: 47 entries inlined, each with ja/sc/tc/en/n")
+
+
 def check_restaurants(baseline: dict, update_baseline: bool) -> None:
     data = load_json(RESTAURANTS_JSON)
     if not isinstance(data, list):
@@ -491,7 +705,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         check_popup_parity()
+        check_popup_slots()          # M-029 / M-030
         check_restaurants(baseline, args.update_baseline)
+        check_restaurant_fields()    # M-023 / B1
         check_localstorage_keys()
         check_service_worker()
         check_i18n(args.build_log, baseline, args.update_baseline)

@@ -44,6 +44,10 @@ from lib_browser import (  # noqa: E402
 VIEWPORTS = {
     "fold-outer": {"width": 416, "height": 657, "mobile": True},
     "fold-inner": {"width": 616, "height": 816, "mobile": True},
+    # M-027: the fourth layout mode (top bar + left column + icon rail) only
+    # exists between 700 and 1099px, and the Fold's inner screen in landscape
+    # is the device that lives there.
+    "fold-inner-landscape": {"width": 816, "height": 616, "mobile": True},
     "iphone": {"width": 393, "height": 852, "mobile": True},
     "desktop": {"width": 1440, "height": 900, "mobile": False},
 }
@@ -59,14 +63,29 @@ def eq(actual, expected, what: str) -> None:
 
 
 def open_filter_panel(page) -> None:
-    if not page.eval_on_selector("#ff-sheet", "el => el.classList.contains('ff-open')"):
-        page.eval_on_selector("#ff-fab", "el => el.click()")
-        page.wait_for_function(
-            "() => document.getElementById('ff-sheet')"
-            "  .classList.contains('ff-open')",
-            timeout=15000,
-        )
-        page.wait_for_timeout(350)
+    """M-027: two hosts for the same #ff-sheet-content. Below 700px it is the
+    bottom sheet behind #ff-fab; at 700px and up it is the non-modal popover
+    behind the top bar's 筛选 button. Assert on the content being laid out
+    (offsetParent) rather than on either host's class."""
+    if page.eval_on_selector(
+            "#ff-sheet-content", "el => el.offsetParent !== null"):
+        return
+    opened = page.evaluate(
+        "() => { const b = Array.from(document.querySelectorAll('.wb-filter-btn'))"
+        "         .find(e => e.offsetParent !== null);"
+        "  if (b) { b.click(); return true; }"
+        "  const f = document.getElementById('ff-fab');"
+        "  if (f) { f.click(); return true; }"
+        "  return false; }"
+    )
+    if not opened:
+        raise AssertionError("no way to open the filter panel on this viewport")
+    page.wait_for_function(
+        "() => { const c = document.getElementById('ff-sheet-content');"
+        "  return c && c.offsetParent !== null; }",
+        timeout=15000,
+    )
+    page.wait_for_timeout(350)
 
 
 # --- the six checks ---------------------------------------------------------
@@ -135,7 +154,7 @@ def check_card(page, name):
     if not txt:
         raise AssertionError("detail sheet opened empty")
     page.evaluate(
-        "() => { const b = document.querySelector('#bs-sheet .rst-close');"
+        "() => { const b = document.querySelector('#bs-content .rst-close');"
         "  if (b) b.click(); }"
     )
     page.wait_for_timeout(300)
@@ -176,7 +195,7 @@ def check_save(page, name):
     page.eval_on_selector("#bs-content .ff-fav-btn", "el => el.click()")
     page.wait_for_timeout(300)
     page.evaluate(
-        "() => { const b = document.querySelector('#bs-sheet .rst-close');"
+        "() => { const b = document.querySelector('#bs-content .rst-close');"
         "  if (b) b.click(); }"
     )
     return f"{n_before} -> {n_after} favorites, persisted"

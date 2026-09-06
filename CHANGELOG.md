@@ -15,6 +15,110 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ### Added
 
+- A region filter. `#ff-region` at the top of the filter panel lists all 47
+  prefectures grouped the way a Japanese map legend groups them, each with
+  this build's row count, in the reader's own language; picking one filters
+  and then flies the map to that prefecture's bounding box (derived at
+  runtime from the rows themselves, so it can never disagree with what the
+  filter is about to show). The comparison is an **integer index**, never a
+  substring test on the address — 東京都 and 京都府 share two of three
+  characters, and 936 Tokyo rows would have leaked into a Kyoto search.
+  `tabelog.filterState` gains one additive `region` field; a state written
+  before this build, or one carrying a string / out-of-range value, silently
+  means "every region" and never throws. (M-023)
+- Rating shortcuts: the 3.4-4.5 slider gets tick marks, both end labels, a
+  24px thumb and a row of one-tap thresholds (全部 / ≥3.6 / ≥3.8 / ≥4.0 /
+  ≥4.2). A `?` next to it explains that 3.4 is the corpus floor, not a UI
+  limit — so the left end really does mean "no rating filter". (M-114)
+- Every condition that is currently narrowing the map gets a chip with its
+  own × — region, rating, price tiers, cuisines, awards, 只看网订, 只看收藏,
+  plus the pre-existing 隐藏非日本料理 one. The same count is written into
+  the top bar's 筛选 badge, and each section header carries a live summary
+  (`≥3.80`, `5 / 7 档`, `Silver · Bronze`) that survives the section being
+  scrolled past. (C5, on top of M-022)
+- An amber line under 隐藏非日本料理 saying how many restaurants *this*
+  filter combination is hiding because of it and how many of those can be
+  booked online, with a 一起显示 button that just unticks the box. The
+  toggle is on by default and is the single largest silent subtraction on
+  the page; the numbers are derived by re-running `passesFilter` with the
+  flag flipped, never hard-coded. (B8)
+- Keyboard shortcuts, dispatched from one capture-phase handler so the five
+  existing per-overlay Escape listeners cannot double-fire: `/` focuses
+  search, `J` / `K` step through the results, `F` saves the open card, `X`
+  discards it, `Esc` closes exactly one layer (respecting the card's
+  full → peek → closed ladder), and `?` opens a shortcut sheet. Typing in a
+  field, any modifier, and an open modal all suppress the single-key
+  bindings. (M-017)
+- 用地点名填入 in the pin dialog, plus ⛩️ and ♨️ as the 7th and 8th emoji
+  presets. A Nominatim result with no `name` now prefills from the first
+  segment of its address instead of opening a blank field. (G5)
+- A copy button next to the coordinates in the pin dialog
+  (`navigator.clipboard` with an `execCommand` fallback). (G6)
+
+- The workbench layout shell — the page grows three wide-screen modes on top
+  of the phone layout, driven by one `ResizeObserver` on
+  `<html>` and a single `wbApplyMode()`. **≥1100px**: 56px top bar (brand,
+  search, region, 筛选, sync chip, avatar) + 344px result column + map +
+  384px resident detail column. **700-1099px**: 48px top bar + 320px column
+  + map; opening a card collapses the column to a 58px icon rail (☰ back /
+  live 命中 count / 🔍 / 筛选) and slides a 340px detail column in from the
+  right, leaving the map ≥410px on an 816px Fold. **520-699px**: the phone
+  chrome (floating search, bottom-right FABs, bottom sheets) plus a draggable
+  bottom panel at 45% of the viewport (`#wb-split-handle`, ↑↓ moves it 5% at
+  a time). **<520px is untouched** — no body class, no DOM move, and every
+  `#wb-*` node stays `display:none`; a masked pixel diff of the 416x657 outer
+  screen against the previous build is 0 differing pixels outside the F2/
+  M-159 regions below. Filtering, the detail card and the search dropdown are
+  the *same DOM nodes* re-parented by `appendChild` (`#ff-sheet-content` ↔
+  `#wb-filter-pop`, `#bs-content` ↔ `#wb-detail-body`, `#ss-box` ↔ the top
+  bar, the avatar trio ↔ `#wb-top-acct`), so every listener, every id lookup
+  and every MutationObserver survives, and `readFilterInputs` /
+  `saveFilterState` / `restoreFilterState` are byte-for-byte unchanged.
+  Crossing 700px with a card open keeps the selection, the card's content and
+  the list's scroll position. On ≥1100/700 the filter panel is a non-modal
+  popover anchored under its button (no backdrop, click-outside to close), so
+  the result list stays readable while filters change. (M-027)
+- Explicit map zoom: a `+ / −` pair at the top of the FAB stack (≥700px, where
+  there is no pinch) and a metric scale bar bottom-left. folium builds the map
+  with Leaflet's own zoom control off, so before this a trackpad-only laptop
+  had no zoom affordance at all and nothing on the page said what a screen
+  distance meant. (M-159)
+
+- Build-time structure behind the reservation policy, so the card can stop
+  printing one undifferentiated blob. `docs/data/popups*.json` grows three
+  append-only slots — no existing slot changes, and a service-worker cache
+  still holding 9-slot arrays keeps working because every reader
+  length-checks. Slot 9 is `{b, lead, cancel, note}` or `null`: `b`
+  (0 = 予約不可 / 1 = 予約可 / 2 = 完全予約制, 99.6% coverage) is read off the
+  **Japanese** head word so all four language variants agree on the verdict,
+  while `lead` / `cancel` / `note` are extracted from each variant's own text
+  with that language's keywords. Every emitted string is a verbatim sentence
+  from the text the card would otherwise have shown — nothing is inferred,
+  and a field that cannot be found is simply absent. Slot 10 is the closing
+  days (5,346 rows; the 2,578 rows whose `holiday` is the literal `-` stay
+  `null`) and slot 11 the metres to the nearest station (5,047 rows).
+  (M-029, M-030)
+- `pref` on every `restaurants.json` row: the prefecture as an integer index
+  into map.py's `_PREFECTURES` (0-46, all 9,807 rows, all 47 prefectures
+  represented), plus the matching `PREFS` table inlined in the page
+  (`{ja, sc, tc, en, n}` per entry). The region filter compares integers —
+  substring-matching an address would make 京都 match 東京都. (M-023)
+- `st` on every `restaurants.json` row: the nearest station's short name, so
+  the result list and the search rows can show it without waiting for the
+  6 MB popups payload to arrive. (B1/G2)
+- `PRICE_BUCKETS` inlined into the page as `[key, label, lo, hi]`, letting the
+  detail card turn a raw ¥ upper bound back into the bucket label the filter
+  panel uses. (D2)
+- `scripts/verify_build.py` gains two checks: `popup-slots` (slot 9 is
+  `null`/dict with keys ⊆ {b,lead,cancel,note}, `b` ∈ {0,1,2} and identical
+  across the four variants at ≥99% coverage; slot 10 never the literal `-`
+  and present on 5,000-5,700 rows; slot 11 a non-negative int) and
+  `row-fields` (`pref` an int 0-46 on ≥99% of rows with all 47 present, `st`
+  a non-empty string, exactly one 47-entry `PREFS` table in the HTML). The
+  slot **count** is still only asserted as "the four variants agree", never
+  against a hard-coded number. (M-029, M-030, M-023, M-056)
+- `tests/pipeline/run.py` gains `t_policy_struct`, `t_holiday_slot` and
+  `t_prefecture_index`.
 - The Android / PWA back button now closes the topmost floating layer
   instead of leaving the app. Detail card, filter sheet, add-bookmark modal,
   import modal, account menu, help popover and the Leaflet coordinate /
@@ -110,8 +214,151 @@ carry the mechanism, the evidence and the red lines for each change.
   Self-contained, no `/vendor/`, readable offline, all three languages at
   once. (M-049)
 
+- The restaurant card leads with a three-tile decision strip — 人均·晚 /
+  人均·午 / 预订方式 — directly under the name, so the two numbers and the
+  one fact a plan actually turns on are readable without scrolling, in the
+  bottom sheet and in the workbench's detail column alike. (§5.3, M-111)
+- A five-row reservation-policy table (能否预订 / 网上订位 / 提前多久 /
+  取消规则 / 需要注意) built from the structured policy the build step now
+  extracts. **Only rows that were actually extracted are drawn** — no
+  placeholder dashes, no inferred "shops like this usually…" line — and the
+  machine-translated original is always one click away behind 看原文, now
+  12.5px `#374151` instead of decorative 12px grey. Most restaurants show
+  two rows; that is the true shape of the data, not a gap. (M-029, §5.4)
+- A 定休 line, tokenised out of the Japanese closing-days string: the seven
+  weekdays plus 祝日 / 不定休 / 無休 are re-emitted as translatable runs
+  (zh-CN 周一 · zh-TW 週一 · EN Mon · JA 月曜日); anything unrecognised is
+  passed through verbatim under `lang="ja"` rather than guessed at. (M-030)
+- 步行 N 分 next to the nearest station, derived from the station distance
+  at the 80 m/min rate Tabelog's own walk time uses. (D1)
+- 第 n / N 家 with ↑ / ↓ in the card header, stepping through the result
+  list without going back to it (and reachable as `window.__bsNav`, which is
+  what the J / K keys call). Hidden on the phone layout, where there is no
+  list on screen and the header has no width to spare. (D4)
+- Saving or discarding a restaurant now says so: a toast with a 5-second
+  撤销 that runs the same toggle back through the same sync bookkeeping, and
+  is announced on the existing `aria-live` region. (M-031)
+
+- The result list. On every screen 520px and wider the left column now holds
+  the matching restaurants as a scrollable list instead of leaving them as
+  dots on a map: cuisine emoji with a price-band dot, name, ★rating, price
+  band + 上限 + nearest station, award badges (金奖 / 银奖 / 铜奖 / 百名店 /
+  热门 — kanji, so colour is never the only signal), 可网订 or 仅电话 / 到店,
+  and a ⭐ / 🚫 pair at the row end (34px visual, 44px hit area). Rows are
+  56px on a mouse, 60px under a finger, and a discarded restaurant stays in
+  the list at 40% opacity with a red ✕ rather than vanishing. The whole
+  corpus goes through one code path: `#wb-list-spacer` carries the full
+  scroll height and only the visible slice ±8 rows exists in the DOM, so an
+  unfiltered "all of Japan" list is ~30 nodes and one window rewrite measures
+  1.6 ms (gate: 8 ms). (M-027 / B1 / B6)
+- Five sort orders for that list — 评分 / 价位 / 奖项 / 距地图中心 / 名称 —
+  in a `<select>` above it. Distance re-sorts on `moveend`, and only while
+  that order is the active one. The choice is remembered per browser in a new
+  `tabelog.listView` key (`{sort, select}`); an unreadable or unknown value
+  falls back to 评分 and never throws. Sorting is deliberately **not** part of
+  `tabelog.filterState`, which stays a description of what counts as a match.
+  (M-027 / B2)
+- Hovering or keyboard-cursoring a row lights that restaurant's marker in the
+  same blue the search highlight uses, and clears it on the way out. It is a
+  separate, narrower state than `setHighlight()`: no ghost marker, no banner,
+  and only markers that already exist get repainted — one hover costs at most
+  two icon rebuilds, rAF-coalesced. The list is a single tab stop driven by
+  `aria-activedescendant` (↑↓ / PgUp / PgDn / Home / End / Enter / Space), so
+  7,626 results never become 7,626 tab stops. (M-027 / B3)
+- Batch save / batch discard. 选择 turns the rows into checkboxes with
+  全选可见 / 批量收藏 / 批量弃用 / 取消 above them. `toggleFav()` and
+  `toggleBlack()` take an optional `{defer: true}` that skips their
+  `schedulePush()` tail, so starring twelve places writes
+  `omakase_state_cache_v2` **once**, repaints the markers once and schedules
+  one debounced PUT instead of twelve of each. Called with no options — every
+  pre-existing call site — the behaviour is unchanged. (M-027 / B4, H2)
+- A footer under the list: 其中 N 家能在网上订 · 只看这 N 家可网订的店, where
+  the button just ticks 只看网订. Hidden when the number is zero or the box is
+  already ticked. (M-027 / B7)
+- The search dropdown's restaurant rows read the same way as the list rows:
+  price-band dot on the icon, nearest station (`lang="ja"`) and price band in
+  the sub-line, ✓ for online booking. Same `.ss-row` structure, so the
+  dropdown's observer and keyboard navigation are untouched. (M-115 / G2)
+- Restaurant markers carry an accessible name. Leaflet makes every marker a
+  focusable `role="button"` but only copies `alt` onto `<img>` icons, and
+  these are `divIcon`s — so every marker was an unnamed button in the tab
+  order. Each one now announces "name ★rating". Cluster bubbles are
+  unchanged. (M-164)
+
 ### Changed
 
+- The filter panel's option rows are real touch targets: 40px on a mouse,
+  44px under a coarse pointer, 18px checkboxes. The inline `display:block`
+  that made this impossible to fix from a stylesheet is gone from the
+  generated markup. The `?` badges are 18px with a 44px hit halo that stays
+  inside their (≥40px) header row, so they can no longer steal a tap from
+  the checkbox on the line below. The cuisine list lost its 180px inner
+  scroller — a second scrollbar inside a scrolling sheet, on the one list
+  people scrub through — and lays out in two columns above 360px; the
+  `<details>` still collapses the whole box. The pin dialog's inputs, save /
+  cancel and close button are 44, its emoji chips 34 with a 44px halo.
+  (M-078)
+- The 7 `<a href="#">` 全选 / 全清 controls in the filter panel are
+  `<button type="button">`. They were links that went nowhere, announced as
+  links, draggable, and one missed `preventDefault` away from writing `#`
+  into the URL. The rating slider gained a real `<label for>` and an
+  `aria-valuetext` that says `≥ 3.80` rather than a bare number. (M-088)
+- Overlays that declare `aria-modal="true"` now behave like it. The filter
+  sheet (phone / split), the pin dialog and the import dialog trap Tab,
+  mark the map / search / FAB stack / workbench columns `inert`, and hand
+  focus back to whatever opened them. The mid/wide filter popover stays
+  deliberately non-modal — it only lands focus inside and returns it on
+  close — and the panel header gained an explicit × (44px) so closing it no
+  longer requires finding the backdrop or the FAB it hid.
+  (M-074, M-113)
+- The pin dialog's keyboard avoidance applies to every touch device, not
+  only viewports ≤480px — a Fold inner screen is 616 CSS px wide and very
+  much has a soft keyboard. When `visualViewport` reports a real shrink the
+  dialog is also clamped to the visible height and pinned to its top.
+  (M-080)
+- Import reports outcomes in the page instead of `window.alert()` — into
+  `#imp-error` when the dialog is open, otherwise a toast. Four call sites;
+  a blocking browser dialog is suppressed outright in some in-app webviews
+  and, inside the installed PWA, looks like it came from somewhere else.
+  The three "已同步 hh:mm:ss" timestamps are formatted with the page's
+  language, not the browser's. (H11)
+
+- Touch targets on the always-on chrome now clear 44px: the search pill is
+  44 high (12px input padding), the avatar keeps its 36px face but grows a
+  44px hit area (the round crop moved from the button to its `<img>` so the
+  button is no longer `overflow:hidden`), the locate FAB is 44×44, every
+  layer FAB is at least 44 tall, and below 480px they are square 44×44 icon
+  buttons instead of a 37×35 pill. The account-menu rows are 40 high.
+  (M-078)
+- Search result rows give the name two lines instead of one ellipsized line —
+  Japanese restaurant names routinely run past 20 characters, so two
+  different branches of the same shop used to render identically. The address
+  keeps one line, and the box itself widens from a flat 380px to
+  `clamp(380px, 64vw, 560px)` (it is `flex:1; max-width:560px` inside the top
+  bar). (M-086)
+- The search field's focus ring moved from the `<input>` to
+  `#ss-input-wrap:focus-within`, so the whole pill lights up and the ring no
+  longer depends on an `outline:none` with nothing replacing it. The field
+  also gained an `aria-label` (a placeholder is not an accessible name — it
+  disappears the moment you type) and `aria-haspopup="listbox"`, and each
+  render of the dropdown announces its row count through the existing
+  `#sync-sr` live region. (M-084)
+- The account dropdown is a disclosure, not a menu: `role="menu"` is gone
+  (its contents are a settings pane, not menu items), `#ss-avatar` carries
+  `aria-expanded` / `aria-controls`, closing it hands focus back to the
+  avatar when focus was inside, and the four language buttons carry
+  `aria-pressed`. (M-088)
+- Safe-area insets reach the last few fixed elements: the FAB column's right
+  edge, the filter FAB's left edge, the search box's top offset below 480px
+  (it was a hard-coded 8px, i.e. under the status bar on a notched phone) and
+  the basemap credit's bottom padding. `env()` is 0 on every device without
+  a cutout, so nothing moves there. (M-090)
+- Corner radii and small type on the map chrome and the search box converge
+  on the four-step scale (control 6 / card 10 / popover 12 / pill 999) and
+  the 11px floor; the strings that carry real information — the result
+  address, the rating, the sync status — go to 12px. (G8, M-079)
+- A viewport under 420px tall caps both bottom sheets at 60dvh, so a
+  half-folded or vertically split window keeps a usable strip of map.
 - The bottom sheets and the add-bookmark modal no longer fly across the
   screen when the viewport changes. `#bs-sheet` / `#ff-sheet` are centred with
   auto margins at every width, so the ≥700px breakpoint changes only their
@@ -248,6 +495,38 @@ carry the mechanism, the evidence and the red lines for each change.
   御臺場). Names only — every `fb-*` id is unchanged, as they are permanent
   by contract. (M-180, M-102)
 
+- The detail card is ordered by decision, not by Tabelog's field order:
+  awards and the closed badge, then the name, then cuisine · station · walk,
+  then the decision tiles, the policy table and the closing days, then
+  seats / address, then the photos, then a 44px action row. The photo grid
+  used to sit between the name and everything worth reading. (M-111, D1)
+- Prices are always a bucket plus the word 上限 (`¥20,000+ 上限`), matching
+  the labels the filter panel and the marker colours already use. The raw
+  Tabelog ceiling survives in `title=`; printing `¥39999` as the headline
+  read as a price the restaurant charges. (M-029, D2)
+- Card actions moved out of the header into one bottom row —
+  [⭐ 收藏][🚫 弃用][🗺 Google Maps] and Tabelog on the right — every control
+  44px tall, and × keeps its 28px look with a 44px hit box. The header now
+  carries only the result stepper and ×. (D5, H3)
+- The card's two-column info grid switches on the **card's** width, not the
+  viewport's: at 1440px with the workbench open the card is 384px wide, and
+  a viewport media query was giving it two columns it had no room for.
+  (M-111)
+- The outer-screen peek state is a decision surface: ribbons, name, rating,
+  cuisine · station, the three tiles and ⭐ / 🚫, inside 40% of the viewport.
+  The "已被 Google 地图校准" note in particular is reassurance about the pin,
+  not a decision input, and no longer competes for that space. (D6, M-112)
+- ⭐ / 🚫 state is a class rather than four inline style writes, so the
+  action row can style the buttons; `aria-pressed` still carries the state.
+  Card text below 11px is gone, the booking chip is 12px, and the card's
+  radii collapse onto the four-step scale. (M-078, M-079, G8)
+- Card photos declare `width` / `height` / `decoding="async"` alongside
+  `loading="lazy"`. (H11)
+- The open card names itself for assistive tech (`aria-label` on the sheet),
+  and closing it hands focus back to whatever opened it instead of dropping
+  the caret on `<body>` — only when focus was inside the card, so dismissing
+  it by panning the map does not yank focus. (M-074)
+
 ### Fixed
 
 - The layer FABs and the basemap attribution ride above the restaurant
@@ -261,7 +540,25 @@ carry the mechanism, the evidence and the red lines for each change.
   the credit fully visible on all seven. The lift backs off entirely when it
   would leave under 60px of map, and is capped so no button is pushed off the
   top edge. The credit also stops short of the FAB column, which at 246px used
-  to overprint it. (M-071, AUTO-05, AUTO-12)
+  to overprint it. The two viewports left at 3/5 here are finished off by the
+  short-viewport row below. (M-071, AUTO-05, AUTO-12)
+
+- On a short viewport the FAB stack lies down. Growing every button to 44px
+  (F2/M-078) made the column 252px tall, and this release's fuller detail
+  card opens 469px tall — 252 + 469 + 56 (the search capsule) is 777px, which
+  does not fit on a 657px-tall Fold cover screen in portrait or a 416px one
+  in landscape. No clamp wins on a single axis, so below 561px tall, and in
+  portrait below 796px tall and 700px wide, the stack becomes a 252x44 row
+  above the card instead of a column beside it (`wrap-reverse`, so a second
+  row grows upward and never falls off the bottom). Buttons stay 44x44 and
+  the order is unchanged; taller phones (393x852, 616x816, 370x800) keep the
+  familiar right-hand column. Split mode also gains a hard ceiling on the
+  stack's offset — the results panel's height fed the same `bottom` calc with
+  no upper bound and pushed `#fab-locate` to y = -41 at 657x416 — and the
+  basemap credit stops subtracting a panel height it never had, which used to
+  throw it off the top of the screen. Measured 5/5 reachable on 416x657,
+  393x852, 657x416, 616x816, 246x816 and 370x800 with the card open, the
+  panel at its 75% ceiling, or both. (M-071 follow-up)
 
 - The service worker's tile pattern (`^[a-c]\.tile\.` /
   `.tile.openstreetmap.org`) never matched a single request: the basemap is
