@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English sign-in strings. See values/strings_signin.xml for what each one is for and
+     why the first two are handed to the page instead of living in data/i18n/*.json. -->
+<resources>
+    <string name="signin_label">Sign in with Google</string>
+    <string name="settings_label">App settings</string>
+    <string name="open_in_browser">Open in browser</string>
+
+    <string name="signin_failed_hint">Sign in from the browser, then come back</string>
+    <string name="signin_dialog_title">Sign-in is not available in the app yet</string>
+    <string name="signin_not_configured">Google sign-in is not available on this device yet. Sign in at jpfoodmap.com in the browser instead — everything else in the app works, and your saved places are kept on this phone.</string>
+</resources>

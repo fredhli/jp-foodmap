@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English shell strings; see values/strings_shell.xml for what these are and why they
+     never name a URL. -->
+<resources>
+    <string name="shell_error_title">Can\'t open the page</string>
+    <string name="shell_error_offline">No connection. Check the network and try again.</string>
+    <string name="shell_error_ssl">The connection is not secure, so it was stopped.</string>
+    <string name="shell_error_http">The server answered %1$d.</string>
+    <string name="shell_error_stalled">The page did not load.</string>
+    <string name="shell_error_retry">Retry</string>
+    <string name="shell_error_settings">Settings</string>
+    <string name="shell_renderer_crashed">The page crashed and was reloaded.</string>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #fdf6e3 is the site's own background_color (docs/manifest.webmanifest) and the
+         ground of its icon. Window background, splash background and the adaptive icon's
+         background layer are all this one value, so a cold start is beige from the first
+         frame to the map's first paint and never flashes white. STANDARDS §1.4/§1.5. -->
+    <color name="shell_background">#fdf6e3</color>
+    <color name="splash_background">#fdf6e3</color>
+    <color name="ic_launcher_background">#fdf6e3</color>
+</resources>

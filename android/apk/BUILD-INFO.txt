@@ -1,0 +1,15 @@
+jpfoodmap.apk
+  version   2.0.0 (versionCode 20000)
+  built     2026-09-06 12:42:23  (local time on the build box)
+  published 2026-09-06 12:42:23
+  variant   release (R8-minified, debug-signed)
+  size      1.6MiB
+  sha256    68d03ce05a399ab558dfdad514f00f4112397657c9add29bcd16817e6ca213b3
+  from      /home/fred/.cache/jpfoodmap-android/app/build/outputs/apk/release/app-release.apk
+
+Debug-signed, sideload only. Install: open this file in the Dropbox app on the phone
+(proj_2026 > tabelog > android > apk), allow "install unknown apps" for Dropbox once,
+install over the previous version. Same certificate as every earlier build, so it
+upgrades in place and keeps its data.
+
+Built by android/build.sh from the sources beside this folder.

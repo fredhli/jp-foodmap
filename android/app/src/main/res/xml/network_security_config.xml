@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Everything this app talks to is https: jpfoodmap.com (Cloudflare Pages) and
+    api.jpfoodmap.com (the Worker). There is no local mock server and no LAN mode, so the
+    cleartext gate stays shut at the platform level and a plain-http URL reaching the
+    WebView by any route — a redirect, a link in the page, a hand-typed deep link — fails
+    at the socket rather than loading. No custom trust anchors either: the system store is
+    the only one, so a user-installed CA cannot silently sit in front of the session cookie.
+    STANDARDS §13.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

@@ -1,0 +1,28 @@
+<!--
+    The status-bar icon for the app's one notification channel: a torii, the same idea as
+    the site's own launcher icon.
+
+    A status-bar icon is alpha-masked and tinted white by the system — only the SHAPE of the
+    opaque pixels survives, never the colour. That is why @mipmap/ic_launcher can never be
+    used here (it is flat colour on a flat background and would render as a white square)
+    and why this is one flat single-colour path with nothing to lose in the mask. It is its
+    own file rather than a reuse of the launcher or splash drawable so that an icon tweak on
+    either of those can never silently change what the shade shows.
+
+    24dp is the platform's status-bar icon size; the shape is inset from the edges so the
+    system's own padding does not clip the posts.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <!-- kasagi (the overhanging top beam), shimaki (the beam under it), two posts. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2.4,3.6 H21.6 V6.0 H2.4 Z
+                          M5.2,7.4 H18.8 V9.4 H5.2 Z
+                          M6.4,6.0 H8.8 V20.8 H6.4 Z
+                          M15.2,6.0 H17.6 V20.8 H15.2 Z" />
+</vector>

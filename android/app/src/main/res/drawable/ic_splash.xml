@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- windowSplashScreenAnimatedIcon for Theme.Jpfm.Splash. The same foreground bitmap the
+     launcher icon uses, centred and not scaled up: the platform draws the splash icon at
+     288dp with the artwork expected inside a 192dp circle, and this canvas puts its
+     content at 62.5% of the drawable = 180dp, just inside it. The beige square around the
+     glyph is the same colour as windowSplashScreenBackground, so what the user sees is the
+     map glyph alone on a beige screen. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@mipmap/ic_launcher_foreground"
+    android:gravity="center"
+    android:filter="true" />

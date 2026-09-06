@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The notification channel's own strings, and the test entry's. Simplified Chinese, like
+    every other values/ file here (docs/PLAN.md D17); values-en/ carries the English.
+
+    These four are the ONLY user-visible text this feature owns. The settings row around the
+    switch — its label, its hints, the button — belongs to the settings screen and lives in
+    T5's strings_settings.xml, so the two tasks never collide in one file.
+
+    The channel name and description are what Android shows in
+    Settings > Apps > Japan Foodmap > Notifications. The description says out loud that
+    nothing is pushed yet, because a channel with no traffic looks like a broken feature
+    otherwise.
+-->
+<resources>
+    <string name="notify_channel_name">通知</string>
+    <string name="notify_channel_desc">来自 Japan Foodmap 的提醒。目前没有服务器推送，这个渠道只用来验证通知是否送得到。</string>
+    <string name="notify_test_title">Japan Foodmap</string>
+    <string name="notify_test_text">测试通知：通知可以正常送达。点一下回到 APP。</string>
+</resources>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Sign-in strings (T3). values/ is Simplified Chinese — see values/strings.xml for why
+    that is the default rather than English (docs/PLAN.md D17).
+
+    The first two are unusual: they are handed to the PAGE, through Bridge.FACADE_JS's
+    label slots, and rendered by the page's own avatar menu. They are here rather than in
+    data/i18n/*.json because those tables are a build input for the website and must not
+    grow strings that exist only inside the app (docs/PLAN.md D13). Consequence worth
+    knowing: they follow the SYSTEM language, while everything around them follows the
+    site's own language switch. Keep them short — they sit in a 260 px popover.
+-->
+<resources>
+    <!-- The button that replaces Google's GIS button inside the page's avatar menu. -->
+    <string name="signin_label">使用 Google 登录</string>
+    <!-- The extra avatar-menu row that opens this app's settings screen. -->
+    <string name="settings_label">应用设置</string>
+    <!-- Offered by the page's link handling; also the dialog button below. -->
+    <string name="open_in_browser">在浏览器中打开</string>
+
+    <!-- Shown as a toast after any failed interactive sign-in except a cancellation. -->
+    <string name="signin_failed_hint">请在浏览器中登录后再回来</string>
+    <string name="signin_dialog_title">暂时无法在应用内登录</string>
+    <!-- The "no Android OAuth client yet" / "no Google account here" dead end. Deliberately
+         does not blame the user: the fix is either Fred registering the client, or signing
+         in from Chrome once. Sync is optional — everything works signed out. -->
+    <string name="signin_not_configured">这台设备上的 Google 登录暂时不可用。可以先在浏览器里登录 jpfoodmap.com；应用的其它功能都能正常使用，收藏会保存在本机。</string>
+</resources>

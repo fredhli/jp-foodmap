@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Links.kt's own strings — one of them, because the navigation gate is allowed to say
+    exactly one thing to the user and it may never name the URL it failed on (STANDARDS
+    §0.4). Simplified Chinese here, English in values-en/ (docs/PLAN.md D17).
+
+    A separate file from strings.xml because several builders write this APK in parallel and
+    Android merges every file under res/values/: one file per owner is the whole
+    conflict-avoidance scheme.
+-->
+<resources>
+    <!-- Shown when nothing on the phone can open a link: no browser at all, a `tel:` on a
+         device with no dialer, an `intent://` whose app is not installed and whose
+         S.browser_fallback_url is missing. Deliberately says what happened and not which
+         link it was. -->
+    <string name="links_no_handler">没有应用可以打开这个链接</string>
+</resources>

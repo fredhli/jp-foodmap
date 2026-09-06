@@ -13,7 +13,33 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **An Android app.** `android/` is a Kotlin WebView shell around
+  jpfoodmap.com, sideloaded as `android/apk/jpfoodmap.apk` and version-locked
+  to the site (2.0.0 / `versionCode 20000`, `minSdk 31`, `targetSdk 36`,
+  built for the Galaxy Z Fold 8). It exists for the five things a browser
+  tab cannot do on a folding phone: survive a fold/unfold without reloading
+  the document, take `jpfoodmap.com` links through App Links, sign in with
+  Google (which refuses web sign-in inside a WebView), open an off-site link
+  in a Custom Tab that Back returns from, and raise the system share sheet.
+  The shell never reads or writes anything the page owns — no localStorage,
+  no favourites, no language, no map position — so a phone and a desktop
+  hold exactly the same state through the same Worker. Its own history is
+  `android/CHANGELOG-ANDROID.md`; install and setup are `android/README.md`.
+- `docs/.well-known/assetlinks.json` — App Links verification for
+  `com.fredhli.jpfoodmap` (and the `.debug` variant), both under the
+  sideloading certificate's fingerprint. Deployed with the site; it makes a
+  tapped jpfoodmap link open in the app instead of a browser tab.
+- One guarded `// ===== APP BRIDGE (Android shell) =====` block in
+  `src/tabelog/scrape/map.py`. Inside the app it hides the PWA install
+  prompts (the shell *is* the install), swaps the GIS sign-in button for a
+  native one, routes sharing through the system sheet, adds an "App
+  settings" row to the avatar menu, and clears the native credential on
+  sign-out. In a browser it defines two side-effect-free globals
+  (`__jpfmBootId`, `__jpfmOpenShare`) and returns on its third line. No new
+  localStorage key, no change to the KV blob shape, the Worker API or the
+  built-in landmark ids.
 
 ## [2.0.0] - 2026-09-06
 

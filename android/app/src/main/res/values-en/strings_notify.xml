@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    English half of strings_notify.xml. See the note in values/ for what belongs here and
+    what belongs to the settings screen.
+-->
+<resources>
+    <string name="notify_channel_name">Notifications</string>
+    <string name="notify_channel_desc">Reminders from Japan Foodmap. Nothing is pushed from a server yet; this channel exists so you can check that notifications get through.</string>
+    <string name="notify_test_title">Japan Foodmap</string>
+    <string name="notify_test_text">Test notification — notifications are getting through. Tap to return to the app.</string>
+</resources>

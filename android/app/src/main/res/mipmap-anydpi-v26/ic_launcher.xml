@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/mipmap-anydpi-v26/ic_launcher.xml (and ic_launcher_round.xml, identical).
+     minSdk 31 means adaptive-only is fine — no legacy square PNG mipmaps needed.
+
+     The foreground is the site's own maskable icon (🗾 on #fdf6e3), whose artwork already
+     sits inside the middle 62.5% of its canvas — inside the 66.7% an adaptive icon
+     guarantees is visible — so it is used at full canvas size with no re-inset. It is
+     opaque rather than cut out to alpha: the glyph has a soft shadow over the beige and
+     any alpha extraction leaves a halo. The background layer is that same beige, so the
+     seam is invisible whatever mask the launcher applies.
+
+     No <monochrome>: an opaque foreground would themed-render as a solid block. Without
+     the tag Android 13+ falls back to this icon as drawn, which is the right picture. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@color/ic_launcher_background"/>
+  <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>

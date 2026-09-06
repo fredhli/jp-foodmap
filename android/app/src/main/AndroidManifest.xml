@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The whole shell's surface area. Written once (docs/PLAN.md §5.2) so the parallel
+    builders of the WebView, the bridge, the deep links and the notifications all start
+    from one agreed manifest; after T1 only T1/T8 change this file.
+
+    FIVE permissions, and the audit in docs/STANDARDS.md §10.3 asserts exactly these:
+      INTERNET                 the page
+      ACCESS_NETWORK_STATE     NOT used by any of our own code — it is what Chromium's
+                               NetworkChangeNotifierAutoDetect needs before it will
+                               register a connectivity callback. Without it navigator.onLine
+                               inside the WebView is stuck at true forever, so the site's
+                               own "当前离线 · 显示的是本机缓存的数据" bar (#net-offline)
+                               never appears and an offline user is told nothing
+                               (STANDARDS §9.1). Protection level "normal": granted at
+                               install, never prompted, invisible on the system permission
+                               page, and it reads only "is there a network, of what kind" —
+                               no location, no identity, no traffic. Added 2026-09-06 after
+                               gate_emulator failed §9.1 on it; see docs/STATUS.md.
+      ACCESS_COARSE/FINE_LOCATION  the map's "locate me" FAB, granted at the moment the
+                                   user taps it (WebChromeClient.onGeolocationPermissions-
+                                   ShowPrompt), never at launch
+      POST_NOTIFICATIONS       requested only from the settings screen, only when the user
+                               turns the switch on
+    No storage, no camera, no contacts, no foreground-service, no boot-completed.
+
+    The <queries> block is what makes Android 11+ package visibility answer honestly:
+    without it isPackageEnabled("com.android.chrome") is always false, CustomTabsService
+    resolution finds nothing, and the share chooser cannot be pre-checked.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <queries>
+        <package android:name="com.android.chrome" />
+        <intent><action android:name="android.support.customtabs.action.CustomTabsService" /></intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent><action android:name="android.intent.action.SEND" /><data android:mimeType="text/plain" /></intent>
+    </queries>
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="false"
+        android:enableOnBackInvokedCallback="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Jpfm.Splash"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="jpfoodmap.com" />
+            </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+        </activity>
+        <activity
+            android:name=".AppSettingsActivity"
+            android:exported="true"
+            android:label="@string/settings_title"
+            android:theme="@style/Theme.Jpfm.Settings">
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

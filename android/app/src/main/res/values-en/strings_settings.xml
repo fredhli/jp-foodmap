@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English half of strings_settings.xml. Same key set, same order; see the Chinese file
+     for why each string says what it says. -->
+<resources>
+
+    <string name="settings_links_label">External links open in</string>
+    <string name="settings_links_custom_tab">In-app browser (Custom Tab)</string>
+    <string name="settings_links_chrome">Chrome</string>
+    <string name="settings_links_system">Default browser</string>
+    <string name="settings_links_hint">Only links that leave this site — the Tabelog and Google Maps buttons on a restaurant card. An in-app browser stacks on top of the app and the back arrow returns to the map; the other two hand the link to a browser. If the phone has the Google Maps or Tabelog app, those links go straight to it whatever is chosen here.</string>
+
+    <string name="settings_zoom_label">Text size</string>
+    <string name="settings_zoom_system">Follow system</string>
+    <string name="settings_zoom_pct">%1$d%%</string>
+    <string name="settings_zoom_hint">Scales the text only; the layout reflows around it. Follow system uses the phone\'s Display → Font size setting — a web page does not follow it on its own, so the app multiplies it in.</string>
+
+    <string name="settings_notify_label">Notifications</string>
+    <string name="settings_notify_switch">Allow notifications</string>
+    <string name="settings_notify_test">Send a test notification</string>
+    <string name="settings_notify_hint_off">Off. This version has no server push, so even with it on only the test notification below would ever appear.</string>
+    <string name="settings_notify_hint_needs_permission">On, but Android has not granted the permission yet — turn this off and back on to ask again. If no dialog appears, open it in Settings → Apps → Japan Foodmap → Notifications.</string>
+    <string name="settings_notify_hint_blocked">On, but notifications for this app are turned off in Android settings; nothing can be posted until they are turned back on there.</string>
+    <string name="settings_notify_hint_on">On. This version has no server push, so only the test notification below will appear; tapping it returns to the map.</string>
+    <string name="settings_notify_test_sent">Test notification sent</string>
+    <string name="settings_notify_test_failed">Cannot post: turn the switch above on and grant the notification permission first</string>
+
+    <string name="settings_open_browser">Open this site in a browser</string>
+    <string name="settings_open_diagnostics">Diagnostics…</string>
+    <string name="settings_about">Japan Foodmap %1$s · WebView %2$s</string>
+
+    <string name="diag_title">Diagnostics</string>
+    <string name="diag_copy">Copy</string>
+    <string name="diag_again">Run again</string>
+    <string name="diag_close">Close</string>
+    <string name="diag_copied">Copied to the clipboard</string>
+</resources>

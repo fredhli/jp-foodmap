@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English shell strings. app_name is repeated here so an English device reads the same
+     launcher name as the default locale — see values/strings.xml for the split. -->
+<resources>
+    <string name="app_name">Japan Foodmap</string>
+    <string name="settings_title">Settings</string>
+    <string name="shortcut_settings">Settings</string>
+    <string name="shortcut_settings_long">Japan Foodmap settings</string>
+</resources>

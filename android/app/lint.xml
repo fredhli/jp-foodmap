@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Lint's severities for this app, and the reason for each one. `lintDebug` must end at
+    0 errors (docs/PLAN.md §8 gate_static #8), so nothing here is set to `error` unless the
+    thing it forbids is genuinely absent today — every `error` below is a tripwire for a
+    change nobody has made yet, not a note about existing code.
+
+    The three groups, in order: the one default that is wrong for this project's locale
+    layout, the security and power invariants that STANDARDS §10 states in prose and this
+    file states in a form the build can check, and the two checks that fire on things that
+    are deliberate here.
+-->
+<lint>
+
+    <!--
+        values/ is ALREADY Simplified Chinese (docs/PLAN.md D17 — Fred reads Chinese, so his
+        language is the default), values-en/ carries the English, and values-zh-rCN/ exists
+        to override exactly ONE string: the launcher name, which STANDARDS §1.6 wants as
+        日本美食地图 on a zh-CN device while everyone else sees "Japan Foodmap". Lint sees
+        that one-string folder and calls every other string "not translated in zh" — but a
+        zh-CN device already resolves them from values/. Copying the whole table into
+        values-zh-rCN to satisfy the check would create two Chinese copies to keep in step,
+        which is a real bug source traded for a false one.
+
+        A WARNING rather than `ignore`, so a genuinely missing values-en/ string still shows
+        up. This duplicates `lint { warning += "MissingTranslation" }` in app/build.gradle.kts
+        on purpose: the Gradle block is what T1 shipped and app/build.gradle.kts is not this
+        task's file to edit, and a severity stated in both places cannot drift into an error
+        if one of them is ever removed.
+    -->
+    <issue id="MissingTranslation" severity="warning" />
+
+    <!-- ======================= security / power invariants ======================= -->
+
+    <!--
+        The bridge is addWebMessageListener, origin-scoped to https://jpfoodmap.com, and
+        nothing else (STANDARDS §10.6). addJavascriptInterface hands a Java object to every
+        frame the WebView ever loads, which for an app whose whole content is remote is the
+        difference between "a page can call four named things" and "a page can call
+        anything". tools/static-audit.sh greps for it too; this is the half that runs inside
+        the build.
+    -->
+    <issue id="AddJavascriptInterface" severity="error" />
+
+    <!--
+        Power. None of these exist in this app and none may: STANDARDS §10.1 is "no
+        WorkManager, no Service, no AlarmManager, no JobScheduler, no wakelock, no FCM, no
+        background network", and a wakelock is the one of those a plausible future edit
+        ("keep the screen on while navigating") reaches for first.
+    -->
+    <issue id="Wakelock" severity="error" />
+    <issue id="WakelockTimeout" severity="error" />
+    <issue id="InvalidWakeLockTag" severity="error" />
+    <issue id="BatteryLife" severity="error" />
+
+    <!--
+        Permissions. The manifest declares four and the audit asserts four (STANDARDS §10.3).
+        QUERY_ALL_PACKAGES is the one a "why can't I see whether Chrome is installed"
+        debugging session ends at; the <queries> block in the manifest is the answer instead.
+        ScopedStorage covers the legacy-storage flags, which is the other easy regression.
+    -->
+    <issue id="QueryAllPackagesPermission" severity="error" />
+    <issue id="ScopedStorage" severity="error" />
+    <issue id="ProtectedPermissions" severity="error" />
+
+    <!-- Backup and transfer are off, and the WebView data directory holds a 90-day session
+         cookie (res/xml/data_extraction_rules.xml). Both of these fire if that stops
+         being true. -->
+    <issue id="AllowBackup" severity="error" />
+    <issue id="DataExtractionRules" severity="error" />
+
+    <!-- An implicit intent built out of one this app received is how a deep link becomes a
+         way to launch something else. T4 parses intents; this is the check that watches it. -->
+    <issue id="UnsafeIntentLaunch" severity="error" />
+    <issue id="UnsafeProtectedBroadcastReceiver" severity="error" />
+
+    <!-- targetSdk is the contract the whole shell is written against: edge-to-edge, and
+         predictive back (STANDARDS §1.2, §4.1). Lowering it silently would take both away. -->
+    <issue id="OldTargetApi" severity="error" />
+    <issue id="ExpiredTargetSdkVersion" severity="error" />
+
+    <!-- ======================= deliberate, so quiet ======================= -->
+
+    <!--
+        JavaScript IS the app. jpfoodmap.com is a Leaflet map; a WebView with JavaScript off
+        shows a blank page. The risk lint is pointing at is answered by the settings around
+        it instead — file access off, content access off, mixed content never, no
+        addJavascriptInterface, and a network security config that refuses cleartext — all of
+        which tools/static-audit.sh asserts on every run.
+    -->
+    <issue id="SetJavaScriptEnabled" severity="ignore" />
+
+    <!--
+        There is no Play listing and never will be: this APK is sideloaded from Dropbox onto
+        one phone (STANDARDS §14.7). App-indexing metadata would be markup for a search
+        result nobody will ever see.
+    -->
+    <issue id="GoogleAppIndexingWarning" severity="ignore" />
+
+</lint>

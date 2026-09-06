@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The running theme. DeviceDefault.Light, NOT DayNight: the site declares
+         `color-scheme: only light` and has no dark palette, so following the system into
+         dark mode would give a light page under dark system-bar icons. Pinning light here
+         (plus setAlgorithmicDarkeningAllowed(false) in the WebView) is the whole of the
+         dark-mode story. docs/PLAN.md D9, STANDARDS §1.3.
+
+         Bars transparent and light-icon flags on: the page runs edge-to-edge and pads
+         itself with env(safe-area-inset-*) — the shell must not consume those insets. -->
+    <style name="Theme.Jpfm" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/shell_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+
+    <!-- Cold-start splash (core-splashscreen). Plain Theme.SplashScreen, not the
+         IconBackground variant: the icon's own ground is already #fdf6e3, the same colour
+         as windowSplashScreenBackground, so a second disc behind it would only draw a
+         visible edge. installSplashScreen() swaps to postSplashScreenTheme before the
+         first frame. -->
+    <style name="Theme.Jpfm.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.Jpfm</item>
+    </style>
+
+    <!-- The settings screen. A normal light activity WITH the platform action bar, so it
+         carries its own title and up affordance and needs no chrome of its own. -->
+    <style name="Theme.Jpfm.Settings" parent="@android:style/Theme.DeviceDefault.Light">
+        <item name="android:windowBackground">@color/shell_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

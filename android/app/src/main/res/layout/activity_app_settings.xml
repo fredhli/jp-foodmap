@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The shell's settings screen: a scrolling column of 14sp bold labels over 16sp framework
+    controls, 24dp of padding, on Theme.Jpfm.Settings (DeviceDefault.Light) and nothing
+    else. No PreferenceFragment and no AppCompat: the shell owns three settings and three
+    buttons, and a preferences library to draw them would cost more APK than the shell.
+
+    Everything is wrap_content vertically so a 130 % system font scale grows the screen
+    rather than clipping it, and fillViewport keeps the column top-aligned on the Fold's
+    inner screen instead of letting a short page float in the middle.
+
+    The root has an id because AppSettingsActivity pads it by the system bars at runtime: at
+    targetSdk 36 every window is edge-to-edge with no opt-out, and a framework theme does
+    not pad for it. The padding goes on the ScrollView and not on the column inside it, so
+    the bar regions stay the window background (#fdf6e3) while the content scrolls between
+    them, and insets are read but never consumed (STANDARDS §1.2 — one rule everywhere).
+
+    Screen title: the activity keeps its platform action bar, which already shows
+    @string/settings_title, so there is no heading TextView here to say it twice.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settings_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- Outbound links. The first control because it is the one a user actually
+             re-decides: every restaurant card has a "Tabelog ↗" and a Google Maps button,
+             and which of the three ways those open is a matter of taste. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_links_label"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/link_policy_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/link_custom_tab"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_links_custom_tab"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/link_chrome"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_links_chrome"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/link_system"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_links_system"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_links_hint"
+            android:textSize="12sp" />
+
+        <!-- Text size. The five percentage labels carry no android:text: they are formatted
+             from settings_zoom_pct in AppSettingsActivity, so the numbers live in
+             ShellPrefs.TEXT_ZOOM_CHOICES and not in two places. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/settings_zoom_label"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/text_zoom_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/zoom_system"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_zoom_system"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/zoom_90"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/zoom_95"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/zoom_100"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/zoom_115"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/zoom_130"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_zoom_hint"
+            android:textSize="12sp" />
+
+        <!-- Notifications. A Switch rather than a two-button RadioGroup: it is one on/off
+             fact, and it is the only control on this screen that can pop a system dialog —
+             the API 33+ POST_NOTIFICATIONS grant, asked for ONLY when the switch is turned
+             on here and never at launch (STANDARDS §11.2). The hint below it is not
+             decoration: it is the row that explains why nothing arrived. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/settings_notify_label"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Switch
+            android:id="@+id/notify_enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/settings_notify_switch"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/notify_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/notify_test"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_notify_test"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/open_browser"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/settings_open_browser"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/open_diagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_open_diagnostics"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/about"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

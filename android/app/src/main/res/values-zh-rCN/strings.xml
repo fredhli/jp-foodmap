@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- zh-CN overrides ONE string: the launcher name. Every other shell string already comes
+     from values/, which is Simplified Chinese, so repeating them here would be two copies
+     of the same text drifting apart. STANDARDS §1.6 wants `application-label-zh-CN` in the
+     badging output, and this file is what puts it there. -->
+<resources>
+    <string name="app_name">日本美食地图</string>
+</resources>

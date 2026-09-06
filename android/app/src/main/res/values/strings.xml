@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The shell's own strings, and only those: everything the user reads INSIDE the page is
+    the site's, switched by the site's own language control, and the shell never touches it
+    (STANDARDS §0.1).
+
+    values/ is Simplified Chinese, values-en/ is English (docs/PLAN.md D17) — Fred reads
+    Chinese, so the default locale is his. app_name is the one exception: the launcher name
+    is "Japan Foodmap" everywhere except a zh-CN device, which gets 日本美食地图 from
+    values-zh-rCN/ (STANDARDS §1.6).
+
+    Later tasks add their own files beside this one (strings_shell.xml, strings_signin.xml,
+    strings_settings.xml, strings_links.xml, strings_notify.xml) rather than editing this
+    one, so parallel work does not collide.
+-->
+<resources>
+    <string name="app_name">Japan Foodmap</string>
+    <string name="settings_title">设置</string>
+    <string name="shortcut_settings">设置</string>
+    <string name="shortcut_settings_long">Japan Foodmap 设置</string>
+</resources>

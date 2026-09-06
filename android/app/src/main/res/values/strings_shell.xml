@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The WebView shell's own strings: the error panel and the one toast it can raise. This
+    is the whole of the text the shell puts on screen over the page — everything else the
+    user reads is the site's, in the site's own language (STANDARDS §0.1).
+
+    values/ is Simplified Chinese (docs/PLAN.md D17); values-en/ carries the English.
+
+    No message here names a URL or a host, deliberately: STANDARDS §0.4 keeps URLs out of
+    anything the user might screenshot, and "which address failed" is never the useful half
+    of the answer anyway — the site has exactly one.
+-->
+<resources>
+    <string name="shell_error_title">页面打不开</string>
+    <!-- The common case by far: no network, and no service-worker cache to fall back on. -->
+    <string name="shell_error_offline">连接不上，请检查网络后重试。</string>
+    <string name="shell_error_ssl">连接不安全，已停止加载。</string>
+    <string name="shell_error_http">服务器返回了 %1$d。</string>
+    <!-- A load that never became a page: a navigation that never started, or one that keeps
+         being sent somewhere else. The 10 s watchdog in MainActivity ends up here. -->
+    <string name="shell_error_stalled">页面没有加载出来。</string>
+    <string name="shell_error_retry">重试</string>
+    <string name="shell_error_settings">设置</string>
+    <string name="shell_renderer_crashed">页面崩溃了，已重新载入。</string>
+</resources>

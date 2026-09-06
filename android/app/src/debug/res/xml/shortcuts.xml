@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One static launcher shortcut (long-press the icon): the settings screen, which has no
+    other entry point outside the page's own menu.
+
+    android:targetPackage cannot be ${applicationId}: resource XML is not manifest XML and
+    gets no placeholder substitution. The debug variant therefore has its own copy of this
+    file under app/src/debug/res/xml/ naming com.fredhli.jpfoodmap.debug. If the two ever
+    disagree the debug build's shortcut silently does nothing — the launcher resolves a
+    component in a package that is not installed.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="settings"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_settings"
+        android:shortcutLongLabel="@string/shortcut_settings_long">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.fredhli.jpfoodmap.debug"
+            android:targetClass="com.fredhli.jpfoodmap.AppSettingsActivity" />
+    </shortcut>
+</shortcuts>

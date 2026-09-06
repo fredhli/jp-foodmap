@@ -25,6 +25,36 @@ The restaurant database, default-language popup data, and transit renderer
 are warmed by the service worker. Live map tiles, place search, and cloud
 sync still require a network connection.
 
+## Android APP
+
+`android/` holds a Kotlin WebView shell around this site, shipped as a
+sideloaded APK (`android/apk/jpfoodmap.apk`, carried to the phone by
+Dropbox — the APK is gitignored, the `BUILD-INFO.txt` stamp beside it is
+not). It is version-locked to the site: **2.0.0**, `versionCode 20000`,
+`minSdk 31`, `targetSdk 36`, built for one device (Galaxy Z Fold 8).
+
+What the shell adds over the PWA: the page survives a fold/unfold without
+reloading, `jpfoodmap.com` links open in it (App Links), sign-in goes
+through Android's Credential Manager because Google refuses web sign-in
+inside a WebView, off-site links open in a Custom Tab that Back returns
+from, and sharing raises the system sheet. Everything else is the site
+itself — the shell never reads or writes a favourite, a pin, a language or
+anything else the page owns.
+
+```bash
+cd android && ./build.sh          # → apk/jpfoodmap.apk + apk/BUILD-INFO.txt
+```
+
+Install steps, the one-time Google Cloud Console step that sign-in needs,
+and the on-phone checklist are in [android/README.md](android/README.md);
+the acceptance harness is `android/tools/VERIFY.md` and the per-task state
+is `android/docs/STATUS.md`.
+
+Two things outside `android/` belong to the app: `docs/.well-known/
+assetlinks.json` (App Links verification, deployed with the site) and one
+guarded `// ===== APP BRIDGE (Android shell) =====` block in
+`src/tabelog/scrape/map.py`, which changes nothing in a browser.
+
 ## Install / run locally
 
 Python 3.13, managed by [`uv`](https://docs.astral.sh/uv/). No JS build step

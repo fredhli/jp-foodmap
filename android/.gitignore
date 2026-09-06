@@ -1,0 +1,15 @@
+# Gradle never runs in this tree (build.sh syncs it to an ext4 scratch copy), but an
+# accidental `./gradlew` here would litter Dropbox with build/ and .gradle/ — ignore them
+# so that mistake is never committed.
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+
+# The APK is a build product carried to the phone by Dropbox, not a source. Only the
+# stamp beside it (apk/BUILD-INFO.txt) is committed, so "did the new build reach the
+# phone?" is answerable from the repo without a 6 MB binary in every commit.
+*.apk
+apk/.*.part

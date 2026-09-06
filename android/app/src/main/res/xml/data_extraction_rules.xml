@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nothing leaves the device. The shell itself stores only three preferences, but the
+    WebView's data directory next to them holds the site's localStorage and the
+    api.jpfoodmap.com session cookie — a 90-day credential. Neither cloud backup nor
+    device-to-device transfer is a place for that, and `allowBackup=false` in the manifest
+    only covers the first of the two.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>

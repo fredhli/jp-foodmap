@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The settings screen and the diagnostics dialog. Simplified Chinese here, English in
+    values-en/ (docs/PLAN.md D17: Fred reads Chinese, so his language is the default
+    locale). A separate file from strings.xml because several builders write this APK in
+    parallel and Android merges every file under res/values/.
+
+    `settings_title` is NOT here: it is in values/strings.xml, where T1 put it because the
+    manifest's android:label for this activity points at it.
+
+    The words are the shell's own and are chosen not to collide with the site's four names
+    (收藏 / 书签 / 弃用 / 景点, CLAUDE.md M-106): nothing on this screen touches anything
+    the page owns, so nothing on it borrows the page's vocabulary.
+-->
+<resources>
+
+    <!-- ============================================================ outbound links -->
+    <string name="settings_links_label">外部链接的打开方式</string>
+    <!-- Custom Tab has no settled Chinese name; "应用内浏览器" is what it behaves like,
+         with the English term kept in brackets so a search finds it. -->
+    <string name="settings_links_custom_tab">应用内浏览器（Custom Tab）</string>
+    <string name="settings_links_chrome">Chrome</string>
+    <string name="settings_links_system">系统默认浏览器</string>
+    <string name="settings_links_hint">只影响离开本站的链接（餐厅卡里的 Tabelog、Google 地图）。应用内浏览器会盖在本应用上面，按返回箭头就回到地图；另外两种会切到浏览器。如果手机装了 Google 地图或 Tabelog 应用，对应的链接会直接交给它们打开，不受这里影响。</string>
+
+    <!-- ============================================================ text size -->
+    <string name="settings_zoom_label">文字大小</string>
+    <string name="settings_zoom_system">跟随系统</string>
+    <!-- A percentage of the page's own default. %% is a literal percent sign. -->
+    <string name="settings_zoom_pct">%1$d%%</string>
+    <string name="settings_zoom_hint">只放大文字，版面会跟着重排。「跟随系统」用手机「显示 → 字体大小」的设置——网页默认不会跟随它，所以这里由本应用乘进去。</string>
+
+    <!-- ============================================================ notifications -->
+    <string name="settings_notify_label">通知</string>
+    <string name="settings_notify_switch">允许通知</string>
+    <string name="settings_notify_test">发送测试通知</string>
+    <!-- Four states, one row: off, on-but-never-asked, on-but-blocked-in-Android, on.
+         The middle two are what answer "我开了开关，为什么什么都没有". -->
+    <string name="settings_notify_hint_off">关闭。本版本没有服务器推送，开着也只有这里的测试通知会出现。</string>
+    <string name="settings_notify_hint_needs_permission">已打开，但系统还没有授予通知权限——关掉再打开可以重新询问；如果不再弹窗，请到「系统设置 → 应用 → Japan Foodmap → 通知」里打开。</string>
+    <string name="settings_notify_hint_blocked">已打开，但系统设置里这个应用的通知是关的，在那里打开之前发不出任何通知。</string>
+    <string name="settings_notify_hint_on">已打开。本版本没有服务器推送，只有下面的测试通知会出现；点通知会回到地图。</string>
+    <string name="settings_notify_test_sent">测试通知已发送</string>
+    <string name="settings_notify_test_failed">发不出通知：请先打开上面的开关并授予通知权限</string>
+
+    <!-- ============================================================ the three doors -->
+    <!-- Not "open the site": it exists for the case where something has to happen OUTSIDE
+         the WebView — Google 登录在 WebView 里被 Google 拒绝（STANDARDS §7.4）。 -->
+    <string name="settings_open_browser">在浏览器中打开本站</string>
+    <string name="settings_open_diagnostics">诊断…</string>
+    <!-- App version, then the WebView package version the page actually runs on — the first
+         thing to ask for when the site behaves differently here than in Chrome. -->
+    <string name="settings_about">Japan Foodmap %1$s · WebView %2$s</string>
+
+    <!-- ============================================================ diagnostics dialog -->
+    <string name="diag_title">诊断</string>
+    <string name="diag_copy">复制</string>
+    <string name="diag_again">再跑一次</string>
+    <string name="diag_close">关闭</string>
+    <string name="diag_copied">已复制到剪贴板</string>
+</resources>

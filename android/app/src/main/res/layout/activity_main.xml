@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shell: a container the WebView is created into (in code, so it can be thrown away
+     and rebuilt after a renderer crash) and an error panel laid over it.
+
+     Nothing here fits system windows. The page runs edge-to-edge and pads itself with
+     env(safe-area-inset-*) — the shell must not consume the bar insets (STANDARDS §1.2) —
+     so the container's insets listener (MainActivity.installInsetsListener) exists only to
+     record them and, on WebViews older than 144, to pad for the keyboard. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <FrameLayout
+        android:id="@+id/web_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- clickable + focusable: while the panel is up, touches must not fall through to the
+         WebView underneath, which is deliberately KEPT (a stale map beats a blank screen).
+         32dp of padding clears the status bar on every geometry of the Fold, because the
+         panel is drawn under the transparent bars like everything else. -->
+    <LinearLayout
+        android:id="@+id/error_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/shell_background"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/error_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/shell_error_title"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/error_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/error_retry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/shell_error_retry" />
+
+        <Button
+            android:id="@+id/error_settings"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/shell_error_settings" />
+    </LinearLayout>
+</FrameLayout>

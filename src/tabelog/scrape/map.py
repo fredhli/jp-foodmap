@@ -18105,6 +18105,183 @@ FILTER_JS_TEMPLATE = r"""
         }
       }
     } catch (_) {}
+
+    // ===== APP BRIDGE (Android shell) =====
+    // The Android shell (android/, docs/PLAN.md §6) is this same page in a WebView. It
+    // publishes window.Native through an origin-scoped WebMessage listener; everything
+    // below is feature-detected off that object, so a browser reaches `return` two
+    // statements in and behaves exactly as it did before this block existed.
+    // Comments here are English on purpose: the build scans the page for CJK runs and
+    // demands a data/i18n entry for each, and this block may only reuse existing keys.
+    (function appBridge() {
+      var N = window.Native;
+      var isApp = !!(N && N.app === 'jpfoodmap')
+               || /\bJpFoodMapApp\//.test(navigator.userAgent || '');
+      // Proof for the shell's diagnostics screen that a fold / rotate / split-screen
+      // resize did NOT reload the page: it reads this back and compares.
+      window.__jpfmBootId = Date.now().toString(36)
+                          + Math.random().toString(36).slice(2, 8);
+      // Hot deep link: an https://jpfoodmap.com/?r=<id> intent arrived while the page was
+      // already up. false => the shell falls back to a full load. Same three steps the
+      // cold path above takes, minus the replaceState (there is no ?r= in the URL bar).
+      window.__jpfmOpenShare = function(id) {
+        var row = shareRowById(String(id || ''));
+        if (!row) return false;
+        try {
+          if (typeof row.lat === 'number' && typeof row.lon === 'number') {
+            map.setView([row.lat, row.lon], Math.max(map.getZoom(), 16), {animate: false});
+          }
+        } catch (_) {}
+        openSheet(row);
+        return true;
+      };
+      if (!isApp) return;                  // browser: nothing below this line runs
+
+      // 1. Install UI. The shell IS the installed app, so the menu row, the snackbar and
+      //    the help sheet are all offers to do something already done.
+      obMaybeSnack = function() {};
+      obRefreshInstallUi = function() {
+        if (obInstallRow) obInstallRow.hidden = true;
+        obHideSnack();
+        try { if (obInstall.isOpen()) obInstall.close(); } catch (_) {}
+      };
+      obOnInstallState = obRefreshInstallUi;   // the module-scope install listeners
+      obRefreshInstallUi();
+
+      // 2. Sign-in. Google refuses GIS/OAuth inside a WebView (disallowed_useragent) and
+      //    the shell blocks the gsi script outright, so the id_token comes from Android's
+      //    Credential Manager instead. From the token on, this is the browser's own flow:
+      //    onGoogleCredential -> POST /api/session -> cookie -> reload. The shell never
+      //    sees the cookie and never talks to the Worker.
+      if (N && typeof N.signIn === 'function') {
+        var jpfmPending = {};
+        // Called by the façade when the shell answers. Late/duplicate answers for a
+        // request that already timed out find no callback and are dropped.
+        window.__jpfmNativeCredential = function(req, idToken, err) {
+          var key = String(req || '');
+          var cb = jpfmPending[key];
+          delete jpfmPending[key];
+          if (cb) { try { cb(idToken || null, err || null); } catch (_) {} }
+        };
+        // cb(idToken|null, error|null). Always calls back exactly once: a shell that
+        // never answers would otherwise strand silentReAuth's callers forever.
+        function jpfmSignIn(silent, cb) {
+          var req = 'r' + Date.now().toString(36)
+                  + Math.random().toString(36).slice(2, 6);
+          jpfmPending[req] = cb;
+          setTimeout(function() {
+            if (!jpfmPending[req]) return;
+            delete jpfmPending[req];
+            try { cb(null, 'error'); } catch (_) {}
+          }, silent ? 10000 : 45000);      // silent is UI-less; the chooser is not
+          try {
+            N.signIn(req, !!silent);
+          } catch (_) {
+            if (jpfmPending[req]) { delete jpfmPending[req]; cb(null, 'error'); }
+          }
+        }
+        // Replaces the GIS button with a plain one. The label comes from the shell's own
+        // Android resources when it offers them, so the app can say "Sign in with Google"
+        // in the system language without a new entry in the page's i18n tables.
+        renderSignInButton = function() {
+          if (!signinBtnContainer) return;
+          if (signinBtnContainer.querySelector('.jpfm-native-signin')) return;
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ssm-row jpfm-native-signin';
+          b.style.cssText = 'justify-content:center;border:1px solid #dadce0;'
+                          + 'border-radius:4px;font-weight:500';
+          b.textContent = (N.labels && N.labels.signIn)
+                       || ('Google ' + localizeText('登录'));
+          b.addEventListener('click', function() {
+            b.disabled = true;
+            cfgMsg.style.color = '';
+            cfgMsg.textContent = localizeText('登录中') + '…';
+            jpfmSignIn(false, function(tok, err) {
+              b.disabled = false;
+              if (tok) { onGoogleCredential({credential: tok}); return; }
+              // Same two strings the browser shows, so nothing new to translate. The
+              // shell adds its own "sign in from the browser instead" hint on top.
+              cfgMsg.style.color = '#dc2626';
+              cfgMsg.textContent = localizeText(
+                err === 'cancelled' ? '登录被取消' : '登录处理失败');
+            });
+          });
+          signinBtnContainer.textContent = '';
+          signinBtnContainer.appendChild(b);
+        };
+        // The 90-day cookie renewal (STANDARDS §7.5). Credential Manager's silent mode is
+        // authorized-accounts-only + auto-select, so it either returns a token with no UI
+        // at all or fails; either way the page stays where it is.
+        silentReAuth = function(cb) {
+          cb = cb || function() {};
+          jpfmSignIn(true, function(tok) {
+            if (!tok) { cb(false); return; }
+            exchangeForSession(tok, function(ok, p) {
+              if (ok && p) { saveSessionProfile(p); cb(true); }
+              else cb(false);
+            });
+          });
+        };
+        // whenGIS() waits ~3s for a script the shell deliberately blocks and then gives
+        // up WITHOUT calling back, which would strand fallbackSilentGIS' callers. There
+        // is nothing left to wait for once silentReAuth is native, so run it now.
+        whenGIS = function(fn) { try { fn(); } catch (_) {} };
+        refreshAuthUI();                   // repaint: the GIS button may already be there
+      }
+
+      // 3. Share. A WebView has no navigator.share, so the card's share button would fall
+      //    through to "copy link". The shell puts the real system chooser back.
+      if (N && typeof N.share === 'function') {
+        shareRestaurant = function(d, ev) {
+          if (ev && ev.preventDefault) ev.preventDefault();
+          var u = shareUrlFor(d);
+          if (!u) return;
+          try { N.share((d && d.name) || '', u); } catch (_) {}
+        };
+        window.__shareRestaurant = shareRestaurant;   // the card reads it off window
+      }
+
+      // 4. One extra avatar-menu row for the shell's own settings (outbound links, text
+      //    size, notifications). Label from the shell, for the same reason as the sign-in
+      //    button: the page's i18n tables are a build input and must not grow a string
+      //    that only exists inside the app.
+      if (N && typeof N.openSettings === 'function') {
+        (function mountAppSettingsRow() {
+          var menu = document.getElementById('ss-menu');
+          if (!menu || document.getElementById('ssm-app-settings')) return;
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ssm-row';
+          b.id = 'ssm-app-settings';
+          var icon = document.createElement('span');
+          icon.setAttribute('aria-hidden', 'true');
+          icon.textContent = '⚙';          // text-presentation: emojify() leaves it alone
+          var label = document.createElement('span');
+          label.textContent = (N.labels && N.labels.settings) || 'Settings';
+          b.appendChild(icon);
+          b.appendChild(label);
+          b.addEventListener('click', function() {
+            closeAvatarMenu();
+            try { N.openSettings(); } catch (_) {}
+          });
+          var anchor = document.getElementById('ssm-install');
+          if (anchor && anchor.parentNode === menu) menu.insertBefore(b, anchor.nextSibling);
+          else menu.appendChild(b);
+        })();
+      }
+
+      // 5. Sign-out drops the native credential state too, so the next sign-in shows the
+      //    account chooser instead of silently reusing the account just signed out of.
+      if (N && typeof N.signOut === 'function') {
+        var jpfmOrigSignOut = signOut;
+        signOut = function() {
+          try { N.signOut(); } catch (_) {}
+          return jpfmOrigSignOut.apply(this, arguments);
+        };
+      }
+    })();
+    // ===== /APP BRIDGE =====
   }
   // M-075: a hung request used to sit on 加载中… forever, because fetch has
   // no timeout of its own. 9s is past the p99 for this 3MB payload on 4G
