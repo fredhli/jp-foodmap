@@ -41,10 +41,22 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 AVD_NAME="${JPFM_AVD:-foldcover}"
 EMU_PORT="${JPFM_EMU_PORT:-5554}"
 SERIAL="emulator-${EMU_PORT}"
-PKG="${JPFM_PKG:-com.fredhli.jpfoodmap.debug}"
-
 # shellcheck source=/dev/null
 source "$HOME/tools/android-env.sh" >/dev/null 2>&1 || true
+
+# Same rule as emu.sh's pkg(): JPFM_PKG wins (lib-verify.sh reads it off the APK under
+# test with aapt2), otherwise take whichever of the two ids is actually installed, debug
+# first. Defaulting to `.debug` against a release install used to look exactly like a build
+# with no diagnostics at all — see the comment on emu.sh's pkg(). After the toolchain is
+# sourced, because that is what puts adb on PATH.
+PKG="${JPFM_PKG:-}"
+if [ -z "$PKG" ]; then
+    for _id in com.fredhli.jpfoodmap.debug com.fredhli.jpfoodmap; do
+        if adb -s "$SERIAL" shell pm path "$_id" >/dev/null 2>&1; then PKG="$_id"; break; fi
+    done
+    PKG="${PKG:-com.fredhli.jpfoodmap}"
+    unset _id
+fi
 
 die() { printf 'diag.sh: %s\n' "$*" >&2; exit 2; }
 

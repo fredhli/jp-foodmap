@@ -189,6 +189,14 @@ class MainActivity : ComponentActivity() {
     private var lastIme: GraphicsInsets = GraphicsInsets.NONE
 
     /**
+     * Last value written into the page's `--app-inset-top`, in CSS px, or -1 for "never
+     * written". Only a change is pushed, so a fold that ends with the same status bar height
+     * costs nothing; a new document resets it to -1 because the variable lives on that
+     * document's `documentElement` and did not survive the navigation.
+     */
+    private var appInsetTopCss = -1
+
+    /**
      * Back walks the WebView's history while there is any, and on this site that history is
      * the overlay stack: every open card, filter sheet and modal pushed one state-only
      * entry (map.py M-015), so goBack() closes the topmost one. With no history the callback
@@ -605,6 +613,10 @@ class MainActivity : ComponentActivity() {
         if (view !== webView) return
         keepSplash = false
         committedUrl = url
+        // The new document has its own documentElement, so whatever was written into the old
+        // one is gone. First paint rather than onPageFinished so the top bar is never drawn
+        // once without the padding and then again with it.
+        pushAppInsetTop(force = true)
         Diagnostics.Startup.onFirstPaint(SystemClock.uptimeMillis())
     }
 
@@ -633,6 +645,10 @@ class MainActivity : ComponentActivity() {
         state = PageState.READY
         keepSplash = false
         hidePanel()
+        // Belt and braces for the first-paint push: a document that replaced its own
+        // documentElement, or one that committed before this activity had insets, still ends
+        // up with the variable set.
+        pushAppInsetTop(force = true)
         // The first READY of the process is the end of the cold start, and the one moment
         // reportFullyDrawn() means anything: it tells the framework (and `am start -W`) that
         // the app is not merely drawn but usable.
@@ -762,6 +778,11 @@ class MainActivity : ComponentActivity() {
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             lastBars = bars
             lastIme = ime
+            // A-1: hand the page the same top inset it should be reading out of
+            // env(safe-area-inset-top). This listener is the one place that hears about a
+            // fold, a rotation and a multi-window resize, so re-pushing from here covers all
+            // three without a second observer.
+            pushAppInsetTop()
             when (imeMode) {
                 // Chromium shrinks its own visual viewport for the keyboard: pass everything
                 // through untouched, bars and IME alike. The page turns the bar insets into
@@ -781,6 +802,32 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Write the top inset into the page as `--app-inset-top` (A-1).
+     *
+     * The insets are NOT consumed by this — [installInsetsListener] still passes them
+     * through, the page still gets `env(safe-area-inset-top)`, and the page takes the max of
+     * the two, so a WebView that reports env() correctly (every one measured so far) is
+     * padded exactly once. This exists for the opposite case: a build that hands the page 0
+     * while the shell can see a 40dp status bar, which would leave the site's fixed top bar
+     * underneath the clock.
+     *
+     * [lastBars] is systemBars | displayCutout — the same union env() is computed from — and
+     * its top edge is the status bar on every geometry this app runs in.
+     *
+     * @param force write even when the value has not changed, for a document that cannot
+     *   have the old value any more (a fresh navigation).
+     */
+    private fun pushAppInsetTop(force: Boolean = false) {
+        val css = Insets.cssPxFromPx(lastBars.top, resources.displayMetrics.density)
+        if (!force && css == appInsetTopCss) return
+        val current = webView ?: return
+        appInsetTopCss = css
+        // No URL, no value, no tag: this runs on every fold and every load, and STANDARDS
+        // §0.4 keeps navigation out of the log entirely.
+        current.evaluateJavascript(Insets.appInsetTopJs(css), null)
     }
 
     // =========================================================================================
@@ -880,10 +927,14 @@ class MainActivity : ComponentActivity() {
         val cfg = resources.configuration
         return metricsJson()
             .put("pageState", state.name)
-            // The sibling dashboard shell has a fallback that writes --safe-* into the page
-            // when env() comes back zero; this site pads straight from env() and has no such
-            // variables, so the field is here for shape only and is always false.
-            .put("safeVar", false)
+            // The sibling dashboard shell writes --safe-* into the page when env() comes
+            // back zero; since 2.1.0 this one has the same kind of fallback for the top edge
+            // alone (--app-inset-top, bug A-1), so the field finally says something: true
+            // once the shell has pushed a value into the current document. appInsetTop is
+            // that value in CSS px, or -1 before the first push — compare it with page.env.t,
+            // which is what the page uses when the two disagree in env()'s favour.
+            .put("safeVar", appInsetTopCss >= 0)
+            .put("appInsetTop", appInsetTopCss)
             .put(
                 "webViewFeatures",
                 JSONObject()

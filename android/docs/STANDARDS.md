@@ -1,4 +1,4 @@
-# jpfoodmap Android APP 2.0.0 · 标准（STANDARDS）
+# jpfoodmap Android APP 2.1.0 · 标准（STANDARDS）
 
 > 给主人的 10 行版本：这份文件规定「APP 做成什么样才算合格」。每一条都带**验收方法**——
 > 要么是模拟器上能跑的命令，要么是真机上你自己按一下就能确认的动作。检查员按这里逐条打勾；
@@ -35,6 +35,7 @@
 |---|---|---|
 | 1.1 | 壳**没有**地址栏、标题栏、底部栏、浮动按钮；屏幕上只有页面。 | 三几何截图：页面顶到状态栏、底到导航条，无壳 chrome。 |
 | 1.2 | **Edge-to-edge**（targetSdk 36 强制）：状态栏/导航条透明；系统栏 inset **不由壳消费**，透传给 WebView，页面用 `env(safe-area-inset-*)` 自己留白（页面已有 `viewport-fit=cover` 与 10 处 `env()`）。 | 诊断 JSON：`env.t` ≈ `insets.top/density`、`env.b` ≈ `insets.bottom/density`（±1）。cover AVD 期望 `env.t=24`、`env.b=24`（模拟器的条）；真机期望 42/15（cover）、40/15（inner）、40/0（split）。 |
+| 1.2a | **顶部 inset 的双保险**（2.1.0，bug A-1）。页面的固定顶栏按 `max(env(safe-area-inset-top), var(--app-inset-top))` 留白；壳在每次 inset 变化（折叠 / 旋转 / 分屏改尺寸）与每个文档首帧把 `statusBars∪cutout` 的顶边 inset 换算成 CSS px 写进 `--app-inset-top`。inset 仍然**不消费**、仍然透传，所以 `env()` 依旧是主来源，变量只在「WebView 报 0 而状态栏确实存在」时起作用；两者都对时相等，`max()` 只留白一次。 | 诊断 JSON：`safeVar=true` 且 `appInsetTop` == 页面半的 `env.t`。或 debug 包上 `tools/wv-eval.py "getComputedStyle(document.documentElement).getPropertyValue('--app-inset-top')"`。模拟器上开关 `cmd overlay enable com.android.internal.display.cutout.emulation.tall` 可以造出一次真实的 inset 变化（24 → 48）来验证重发。 |
 | 1.3 | **强制浅色**：网站 `color-scheme: only light`、`theme-color #ffffff`。壳主题 `Theme.DeviceDefault.Light.NoActionBar`，状态栏/导航条图标始终深色（`windowLightStatusBar=true`），`setAlgorithmicDarkeningAllowed(false)`，`forceDarkAllowed=false`。系统切深色模式**不**改变页面。 | 模拟器 `adb shell cmd uimode night yes` 后截图：页面仍浅色、状态栏图标仍深色、Activity 未重建（`activityCreates` 不变）。 |
 | 1.4 | **窗口底色**与页面首屏一致：`windowBackground` / WebView 背景 = `#fdf6e3`（manifest `background_color`），冷启动无白闪。 | 冷启动录屏或连续截图：splash → 页面之间无纯白帧。 |
 | 1.5 | **启动画面**：`core-splashscreen`，图标 = 网站 maskable 图标（`docs/icons/icon-japan-emoji-v2-maskable-512.png`），底色 `#fdf6e3`；splash 保持到页面首帧（`onPageCommitVisible`），上限 3 s。 | `am start -W` 后立即截图：splash；≤3 s 后截图：页面。 |
@@ -167,7 +168,7 @@
 | # | 规则 | 验收 |
 |---|---|---|
 | 12.1 | 设置页「诊断…」→ 对话框：页面半（`innerWidth/Height`、`dpr`、`visualViewport`、`env()` 四边、`bootId`、`lang`、`url` 去 query、`navigator.userAgent`、`!!window.Native`）+ 壳半（WebView 版本、insets px、`imeMode`、`textZoom`、`fontScale`、`density`、`widthDp/heightDp`、`pageState`、`pageLoads`、`activityCreates`、启动耗时、最近 5 次进程退出原因）。可「复制」。 | 对话框截图；复制后粘贴出完整 JSON。 |
-| 12.2 | 脚本化入口：`am start -n <pkg>/.MainActivity --ez diagnostics_log true` → READY 后把同一 JSON 单行打到 logcat tag `JpfmDiag`（release 也有；无秘密）。 | `adb logcat -d -s JpfmDiag` 取到一行合法 JSON。 |
+| 12.2 | 脚本化入口：`am start -n <pkg>/.MainActivity --ez diagnostics_log true` → READY 后把同一 JSON 单行打到 logcat tag `JpfmDiag`（release 也有；无秘密）。**`<pkg>` 必须是真正装着的那个**：debug 包是 `com.fredhli.jpfoodmap.debug`，发布包没有后缀，发到没装的那个 id 上 `am` 只回一句谁也不看的 `result code=-92`，看起来和「这个构建没有诊断」一模一样（2.0.0 审计就是这样误判成「R8 剥掉了日志」；合并后的 R8 配置里从来没有 `android.util.Log` 的 `-assumenosideeffects`）。`tools/emu.sh` 与 `tools/diag.sh` 现在向设备问一次。 | `adb logcat -d -s JpfmDiag` 取到一行合法 JSON。 |
 | 12.3 | 诊断里**没有** cookie、token、query。 | 静态审查 + 输出审查。 |
 
 ---
@@ -184,7 +185,7 @@
 
 | # | 规则 | 验收 |
 |---|---|---|
-| 14.1 | `versionName = "2.0.0"`，`versionCode = 20000`（= major×10000 + minor×100 + patch；与网站 `APP_VERSION` 同步更新）。 | `aapt2 dump badging` |
+| 14.1 | `versionName = "2.1.0"`，`versionCode = 20100`（= major×10000 + minor×100 + patch；与网站 `APP_VERSION` 同步更新；2.0.0 = 20000）。 | `aapt2 dump badging` |
 | 14.2 | `applicationId = com.fredhli.jpfoodmap`（debug 加 `.debug`）；**永久身份**，不改。 | badging |
 | 14.3 | 签名：release 用 `~/.android/debug.keystore`（alias `androiddebugkey`，storepass `android`），与 dashboard 同一证书（升级路径 + assetlinks 都钉在它上；备份责任在主人，见 `dashboard/deploy/SIGNING-KEY.md`）。 | `apksigner verify --print-certs android/apk/jpfoodmap.apk` SHA-256 = `78:9F:E3:5F:02:40:43:2A:CF:C7:E1:71:50:1B:94:1C:29:B9:91:55:D3:58:CF:33:9C:78:AE:C2:10:16:85:D1` |
 | 14.4 | 构建：`android/build.sh`（rsync → `$HOME/.cache/jpfoodmap-android` → `./gradlew assembleRelease`，R8 `-dontobfuscate` + shrinkResources → 原子拷回 `android/apk/jpfoodmap.apk` + `BUILD-INFO.txt`）。Gradle **从不**在 `/mnt/d` 运行。 | `find android -name build -o -name .gradle` 为空；`BUILD-INFO.txt` 有 built/published/size/sha256。 |

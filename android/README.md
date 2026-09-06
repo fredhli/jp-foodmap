@@ -44,7 +44,7 @@
 | 外链 | 新标签页，回不来 | 应用内浏览器（Custom Tab）盖在上面，返回箭头一下回到地图 |
 | 分享 | 复制链接 | 系统分享面板 |
 
-版本与网站同步：**2.0.0**（`versionCode 20000`）。网站发版，APP 跟着发。
+版本与网站同步：**2.1.0**（`versionCode 20100`）。网站发版，APP 跟着发。
 
 ---
 
@@ -166,7 +166,9 @@ APP 自己声明五个权限，**没有一个会向你弹窗要「同意」，�
 
 - 壳**不读写**页面的任何存储：没有 localStorage 访问、没有收藏、没有 token 落盘。
   登录拿到的 id_token 从 Credential Manager 直接进一条桥消息交给页面，不记日志、不存盘、
-  不二次引用。
+  不二次引用。壳往页面里写的东西只有一个 CSS 变量 `--app-inset-top`（2.1.0 起，就是状态栏
+  高度换算成 CSS px），页面拿它和自己的 `env(safe-area-inset-top)` 取大的那个来留白，
+  免得顶栏被状态栏压住。
 - 壳自己只存三个偏好（外链策略、文字大小、通知开关），在 SharedPreferences 里，
   `allowBackup=false`，不进云备份。
 - `cleartextTrafficPermitted="false"`，没有自定义信任锚；WebView 关掉了文件访问、

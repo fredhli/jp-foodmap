@@ -566,3 +566,68 @@ release APK 上 `have_probe` 报 `no` —— `setWebContentsDebuggingEnabled(Bui
 - `MainActivity.onDestroy()` 补上 `bridge.dispose()`，T3 遗留的「提供了但无人调用」就此关闭。
 
 之后重建的 APK 由 gate_emulator 第二轮验收（`apk/BUILD-INFO.txt` 的 sha256 以那一份为准）。
+
+---
+
+## 2.1.0 `android` — A-1 壳侧兜底 / A-2 图标 / release 诊断 / 版本 · **done**（2026-09-06）
+
+方案是 `audit_outputs/2.1.0-fix/PLAN.md` 的 A-1 / A-2 / 「安卓其它」三节；根因报告是
+`audit_outputs/2.1.0-verify/app/REPORT.md`。本轮证据在
+`audit_outputs/2.1.0-fix/impl/android/`，模拟器验收在
+`audit_outputs/android-2026-09-06/fix-2.1.0/android/`。
+
+### A-1 顶栏被状态栏盖住 —— 壳侧兜底（页面 CSS 由网站侧改）
+
+- `Insets.cssPxFromPx()` / `Insets.appInsetTopJs()`（纯函数，`InsetsTest` 钉住）+
+  `MainActivity.pushAppInsetTop()`。inset 监听里每次 inset 变化写一次，
+  `onPageCommitVisible`（首帧）与 `finishReady` 各强制重写一次；值不变就不写。
+- **insets 依旧不消费**（STANDARDS §1.2 原样），页面读的仍是
+  `max(env(safe-area-inset-top), var(--app-inset-top))`，两边都对时相等，不会双倍留白。
+- 实测（fold8inner，release 包 + debug 包各一遍）：内屏 932×704 与外屏 475×751 上
+  `--app-inset-top` == `env(safe-area-inset-top)` == 24px；打开 `cutout.emulation.tall`
+  之后**不重载页面**就变成 48px == env —— 折叠/旋转触发的重发路径由此坐实。
+- 诊断里 `safeVar` 从「恒 false 占位」改成真值，并新增 `appInsetTop`（CSS px，未写过为 -1）。
+
+### A-2 启动器图标
+
+- `tools/gen-launcher-icon.py` 加 `FG_SCALE = 0.76`（取源图 (0,0) 像素当底色居中贴），
+  五个密度的 `ic_launcher_foreground.png` 重生成；另出一套 `ic_splash_foreground.png`
+  （scale 1.0）供 `drawable/ic_splash.xml` 用，启动图尺寸不受影响。
+- 三处「62.5% < 66.7% 所以不用缩」的注释（两个 `mipmap-anydpi-v26/ic_launcher*.xml`
+  与脚本 docstring）全部改写，并写明 66.7% 是下限不是目标。
+- Pillow 量测：新前景图案 206/432 = **47.7%** 画布（mdpi 48.1%），落在 47–48% 目标内；
+  按 2.0.0 那次实测的遮罩口径（可见圆 = 画布的 77.2%）折算，图案占可见圆 **61.8%**，
+  与 PWA 实测的 63.0% 基本一致（原来是 81.0%）。
+- 模拟器 Pixel 启动器截图 `a2-drawer-2.1.0.png`：圆形遮罩下四周有均匀米色留白，
+  白边框不再被切；启动图 `a2-splash.png` 仍是原大小。
+- **`docs/icons/` 与 `manifest.webmanifest` 一个字节没动。**
+
+### release 包的 `JpfmDiag`：不是 R8，是脚本发错了包名
+
+- 合并后的 R8 配置（`app/build/outputs/mapping/release/configuration.txt`）里**没有**
+  `android.util.Log` 的 `-assumenosideeffects`；`-keep class com.fredhli.jpfoodmap.**`
+  让 `logDiagnostics` 进了 seeds；release dex 里 `JpfmDiag` 字符串在。
+- 真因：`tools/emu.sh` 与 `tools/diag.sh` 把 `JPFM_PKG` 默认成 `.debug`，对着手装的发布包
+  `am start` 到一个没装的 id 上，只回一句没人看的 `result code=-92`，等到超时 exit 3 ——
+  和「这个构建没有诊断」长得一模一样。两个脚本改成「`JPFM_PKG` 优先，否则问设备装的是哪个，
+  debug 优先」。`verify-geometry.sh` / `verify-flows.sh` 一直是从 APK 里 `aapt2` 读包名的，
+  **没受影响**，本轮在 release 包上 `imeMode` / `pageLoads` / `activityCreates` 三条都是
+  PASS 不是 SKIP。
+
+### 版本与门禁
+
+- `versionName 2.1.0` / `versionCode 20100`；`CHANGELOG-ANDROID.md` 加 [2.1.0]；
+  README 版本字样、STANDARDS §14.1 / §1.2a / §12.2 同步。
+- 门禁：`build.sh`（assembleRelease，1.7 MiB）、`testDebugUnitTest` **109 条全绿**、
+  lint **0 error / 72 warning**、`static-audit.sh` 36 PASS / 0 FAIL、
+  `power-audit.sh --no-device` 6 PASS / 0 FAIL、
+  `verify-geometry.sh fold8inner` 19 PASS / 0 FAIL / 3 SKIP、
+  `verify-geometry.sh foldcover` 7 PASS / 0 FAIL / 0 SKIP、
+  `verify-flows.sh` 18 PASS / 0 FAIL / 4 SKIP。模拟器只用 5554，跑完 `emu.sh stop`。
+
+### 真机待验
+
+- A-1 的最终确认要主人在 Fold 8 上开一次 设置 → 诊断，把 `env` 四个数与
+  `appInsetTop` 报回来：两者相等说明 `env()` 本来就对、兜底空转；`env.t` 是 0 而
+  `appInsetTop` 是 40 说明兜底正在救场。
+- A-2 的验收是主人自己那张同屏对比：PWA 图标与 APP 图标目视等大。

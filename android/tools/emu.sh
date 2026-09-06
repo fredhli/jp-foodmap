@@ -71,7 +71,7 @@ SERIAL="emulator-${EMU_PORT}"
 STATE_DIR="$HOME/.android"
 LOG="$STATE_DIR/jpfm-emu-${EMU_PORT}.log"
 PIDFILE="$STATE_DIR/jpfm-emu-${EMU_PORT}.pid"
-PKG="${JPFM_PKG:-com.fredhli.jpfoodmap.debug}"
+PKG="${JPFM_PKG:-}"                         # empty = resolve from the device, see pkg()
 MAIN="com.fredhli.jpfoodmap.MainActivity"   # class names are NOT suffixed by the build type
 
 # shellcheck source=/dev/null
@@ -80,6 +80,31 @@ EMULATOR="$ANDROID_HOME/emulator/emulator"
 
 die() { printf 'emu.sh: %s\n' "$*" >&2; exit 1; }
 note() { printf '  %s\n' "$*"; }
+
+# ------------------------------------------------------------------------ package id
+# Which of the two application ids to address. The debug build carries `.debug`, the
+# shipped one does not, and `am start -n` at the wrong one is not an error: the activity
+# manager answers `result code=-92` on stderr that nobody reads and the app never starts.
+# That is exactly how the 2.0.0 audit concluded "release builds have no JpfmDiag line" —
+# `emu.sh diag` had defaulted to the debug id against a release install, waited out its
+# timeout and exited 3 (2.1.0, audit_outputs/2.1.0-verify/app/REPORT.md "顺带发现 1").
+#
+# So: JPFM_PKG wins if set (that is how lib-verify.sh passes down what `aapt2 dump badging`
+# read off the APK under test), otherwise ask the device. Debug first when BOTH are
+# installed, which keeps every earlier invocation of this script doing what it did.
+# Memoised because it costs an adb round trip and `diag` calls it in a loop.
+pkg() {
+    if [ -z "$PKG" ]; then
+        local id
+        for id in com.fredhli.jpfoodmap.debug com.fredhli.jpfoodmap; do
+            if adb -s "$SERIAL" shell pm path "$id" >/dev/null 2>&1; then PKG="$id"; break; fi
+        done
+        # Neither installed (or no device yet): name the shipped one, so the failure that
+        # follows is "not installed" rather than a silent no-op against a phantom .debug.
+        PKG="${PKG:-com.fredhli.jpfoodmap}"
+    fi
+    printf '%s' "$PKG"
+}
 
 # ------------------------------------------------------------------------ accel probe
 # Writable /dev/kvm is the real test, not group membership: a stale shell can carry the
@@ -413,9 +438,9 @@ cmd_launch() {
     local url="${1:-}"
     if [ -n "$url" ]; then
         adb -s "$SERIAL" shell am start -W -a android.intent.action.VIEW \
-            -d "$url" -n "$PKG/$MAIN" 2>&1 | tr -d '\r' | sed 's/^/  /'
+            -d "$url" -n "$(pkg)/$MAIN" 2>&1 | tr -d '\r' | sed 's/^/  /'
     else
-        adb -s "$SERIAL" shell am start -W -n "$PKG/$MAIN" 2>&1 | tr -d '\r' | sed 's/^/  /'
+        adb -s "$SERIAL" shell am start -W -n "$(pkg)/$MAIN" 2>&1 | tr -d '\r' | sed 's/^/  /'
     fi
 }
 
@@ -445,7 +470,7 @@ cmd_diag() {
 
     local before after waited=0 raw=""
     before="$(adb -s "$SERIAL" logcat -d -s JpfmDiag:V 2>/dev/null | wc -l | tr -d ' ')"
-    adb -s "$SERIAL" shell am start -n "$PKG/$MAIN" --ez diagnostics_log true \
+    adb -s "$SERIAL" shell am start -n "$(pkg)/$MAIN" --ez diagnostics_log true \
         >/dev/null 2>&1 || true
 
     while [ "$waited" -lt "$timeout" ]; do

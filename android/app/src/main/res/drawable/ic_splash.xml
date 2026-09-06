@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- windowSplashScreenAnimatedIcon for Theme.Jpfm.Splash. The same foreground bitmap the
-     launcher icon uses, centred and not scaled up: the platform draws the splash icon at
-     288dp with the artwork expected inside a 192dp circle, and this canvas puts its
-     content at 62.5% of the drawable = 180dp, just inside it. The beige square around the
-     glyph is the same colour as windowSplashScreenBackground, so what the user sees is the
-     map glyph alone on a beige screen. -->
+<!-- windowSplashScreenAnimatedIcon for Theme.Jpfm.Splash. The platform draws the splash
+     icon on a 288dp canvas expecting the artwork inside a 192dp circle; ic_splash_foreground
+     is the site's icon at FULL canvas size, which puts its content at 62.5% of the drawable
+     = 180dp, just inside it.
+
+     Its own bitmap since 2.1.0, no longer @mipmap/ic_launcher_foreground: the launcher
+     foreground is now inset to 47.5% (bug A-2) and sharing it would have shrunk the splash
+     glyph to 137dp. Both bitmaps still come out of one run of tools/gen-launcher-icon.py
+     from one source image, so they cannot drift apart.
+
+     The beige square around the glyph is the same colour as windowSplashScreenBackground,
+     so what the user sees is the map glyph alone on a beige screen. -->
 <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@mipmap/ic_launcher_foreground"
+    android:src="@mipmap/ic_splash_foreground"
     android:gravity="center"
     android:filter="true" />

@@ -140,6 +140,13 @@ tools/emu.sh net on|off            # svc wifi + svc data
 `diag` 的退出码是有意义的：**0** 拿到合法 JSON、**3** 这个版本没有诊断日志（骨架 APK 就是，
 按 SKIP 处理）、**1** 打了一行但不是合法 JSON（真缺陷）。
 
+**退出码 3 先怀疑包名，别急着怀疑构建。** debug 包是 `com.fredhli.jpfoodmap.debug`，发布包
+没有后缀；`am start` 到一个没装的 id 上不报错，只在没人看的 stderr 上回一句
+`result code=-92`，于是 `diag` 只能等到超时 —— 长得和「这个构建没有诊断」一模一样。
+2.0.0 的审计就是这样得出「R8 把 release 的 `JpfmDiag` 剥掉了」的（不成立：合并后的 R8 配置里
+没有 `android.util.Log` 的 `-assumenosideeffects`）。2.1.0 起 `emu.sh` / `diag.sh` 会向设备问
+一次装的是哪个（`JPFM_PKG` 仍然优先，两个都装时取 debug）；手动 `adb shell am start` 时自己看清楚。
+
 `shot` 在本机镜像上会先试 `screencap`，失败一次后就记住改走模拟器控制台截图
 （`~/.android/jpfm-shot-<port>.mode`）。`screencap` 在 android-37.0 镜像上必然
 abort（`hasReadColorBufferDma`），一次没事，一轮验收二十次就会把 `system_server` 拖死——

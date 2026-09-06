@@ -13,11 +13,30 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-07
+
+The first release driven by the owner's own bug report on 2.0.0
+(`audit_outputs/2.0.0_BUG_REPORT/`), verified line-by-line in
+`audit_outputs/2.1.0-verify/` and specified in
+`audit_outputs/2.1.0-fix/PLAN.md`. Twelve web issues (W-1 … W-12) and three
+app issues (A-1 … A-3): the wide layout stops spending three quarters of a
+1440px window on two columns, the detail card's photos stop being cropped to
+a sliver, picking a restaurant actually flies the map to it, and the Android
+shell ships with a status bar the top bar no longer hides under. It also
+carries the Android app, which was written after 2.0.0 was cut and had been
+sitting in `[Unreleased]`.
+
+Nothing here changes a localStorage key name, the KV blob shape, the Worker
+API, a built-in landmark id, or the 12-slot popup array. Exactly one new
+localStorage key exists in the whole release (`tabelog.oovHintDismissed`,
+W-12a); every other new piece of remembered state rides in the existing
+`tabelog.listView` object as an additive field.
+
 ### Added
 
 - **An Android app.** `android/` is a Kotlin WebView shell around
   jpfoodmap.com, sideloaded as `android/apk/jpfoodmap.apk` and version-locked
-  to the site (2.0.0 / `versionCode 20000`, `minSdk 31`, `targetSdk 36`,
+  to the site (2.1.0 / `versionCode 20100`, `minSdk 31`, `targetSdk 36`,
   built for the Galaxy Z Fold 8). It exists for the five things a browser
   tab cannot do on a folding phone: survive a fold/unfold without reloading
   the document, take `jpfoodmap.com` links through App Links, sign in with
@@ -40,6 +59,204 @@ carry the mechanism, the evidence and the red lines for each change.
   (`__jpfmBootId`, `__jpfmOpenShare`) and returns on its third line. No new
   localStorage key, no change to the KV blob shape, the Worker API or the
   built-in landmark ids.
+- **A photo lightbox inside the detail card** (W-4). A thumbnail is now a
+  `<button>`, not an `<a target=_blank>`: tapping it opens the 640px image
+  full-screen over everything (`#ph-lb`, `object-fit: contain`), and the
+  overlay registers with the same `uiRegister`/`uiPush` stack every other
+  layer uses, so the system Back button closes the photo and leaves the card
+  open. Inside the Android shell this replaces a jump out to a Custom Tab.
+  Pinch-zoom works because the map's `gesturestart` interception is bound to
+  `.leaflet-container`, which the overlay covers.
+- **A language chooser on first visit below 700px** (W-9). When
+  `tabelog.lang` has never been written and the layout is phone or split,
+  `#lang-gate` asks once, in four languages at once, with the four buttons
+  labelled in their own language; picking one calls the existing
+  `setLanguage()` and nothing else. `navigator.language` only decides which
+  button gets a hint border — it never reaches `activeLang` and is never
+  stored. The intro bar waits for that answer instead of competing with it.
+- **A language button in the wide/mid top bar** (W-9). `#wb-lang` sits left
+  of `#wb-sync` and opens a four-row popover; in mid mode only the 🌐
+  remains. The four labels are written by JS in each language's own name, so
+  the runtime localizer cannot translate "简体" into "Simplified". The
+  account menu's language row moved up from below "delete my cloud data" to
+  just above "reset filters" — it used to sit 657px down a menu.
+- **A left drawer on phones** (W-6). The 🔍 at the head of the search capsule
+  becomes a 44px ≡ below 520px and opens `#wb-left` as a left-hand drawer
+  (`min(86vw, 380px)`, full height) with three tabs: results / Saved /
+  filters. "Filters" opens the existing `#ff-sheet` *on top of* the drawer
+  rather than instead of it, so Back closes the filters first and the drawer
+  second. The drawer, its backdrop, its focus trap and its Back registration
+  are the 2.0.0 ones, unchanged.
+- **A collapsible left column in wide mode** (W-3). A "收起列表" button at the
+  right end of `.wb-tabs` slides the result column out and brings up the icon
+  rail (☰ + the hit count) that mid mode already had; ☰ brings it back. The
+  state persists as an additive `leftCollapsed` boolean inside
+  `tabelog.listView` — no new key, and anything that is not exactly `true`
+  means "expanded".
+- **An "其它" section in the filter panel** (W-11) collecting the five
+  standalone switches (Tabelog booking / Saved / Hidden / non-Japanese
+  cuisine / Google-verified coordinates) that used to be five separate
+  one-row sections. All five `input` ids are unchanged —
+  `#ff-bookable-only`, `#ff-only-fav`, `#ff-hide-black`, `#ff-hide-foreign`,
+  `#ff-gcal-only` — because `tabelog.filterState` and every deployed page
+  address them by id.
+- **A dismissable "not in the current view" hint** (W-12a). The card now
+  carries a × (this page load only) and a "不再提示" that writes
+  `tabelog.oovHintDismissed = '1'`; either way it appears at most once per
+  page load. The read is `try/catch` and anything but `'1'` counts as unset.
+  The `matched === 0` branch is deliberately not latched — that one is the
+  answer to "why is the map empty", and it has to keep answering.
+- `desktop-mid` (1000×800) in `tests/smoke_playwright.py`, plus four new
+  checks — `lang`, `chrome`, `workbench`, `filter-copy`, `goto-zoom` — and a
+  rewritten `fav-drawer`. Six viewports × twelve checks.
+
+### Changed
+
+- **The wide layout stops paying for a column nobody is looking at** (W-2).
+  `#wb-detail` in wide mode now behaves the way mid mode already did: it sits
+  outside the viewport until a restaurant is selected and slides back out
+  when the card is closed, so an unselected 1440×900 window gives the map
+  1096px instead of 712px. The card's × is the collapse control; every inset
+  change still goes through `wbSyncVars()` → `wbScheduleInvalidate()` and
+  nothing writes `--wb-right` directly.
+- **`WB_BP_WIDE` 1100 → 1280.** At 1100px the old wide mode left the map
+  372px — narrower than the mid layout it replaced, so widening the window by
+  one pixel shrank the map by 407px. 1100–1279 is now mid.
+- The detail column gets its top margin back (W-1): `body.wb-mid #bs-content`
+  gets `padding-top: 14px`, `body.wb-wide` 18px. The `#bs-content` padding
+  shorthand is untouched — on phones the sheet's grip provides that space and
+  a top padding there would be wrong.
+- The mid rail is down to ☰ and the hit count (W-3): the rail's search and
+  filter buttons are gone, both of which duplicated a control the top bar
+  already has. Their `data/i18n` entries stay as orphans.
+- **Detail-card photos are 4:3 and no longer cropped** (W-4). The root cause
+  was H11's `width="320" height="320"` presentational hints: `width: 100%`
+  overrode one of them and nothing overrode the other, so `aspect-ratio`
+  never applied and each photo was a 320px-tall column clipped to about 11%
+  of itself. `height: auto` restores it. Tabelog's `320x320_square_` token
+  became `320x320_rect_` (`640x640_rect_` on high-dpr or wide screens) so the
+  server stops square-cropping too, and a failed image now goes
+  `visibility: hidden` instead of `display: none`, which used to collapse the
+  three-column grid.
+- **Picking a restaurant flies the map to it** (W-5). `gotoRestaurant(d,
+  {zoom, peek, animate})`, factored out of `ssGotoRestaurant()`, is now the
+  one path used by the result rows, Enter on a result row, the Saved tab, the
+  card's ↑↓, the search box and `?r=` (cold start and the app's hot deep
+  link). Target zoom is `Math.max(getZoom(), 17)` — `GOTO_ZOOM`, the same
+  number as MarkerCluster's `disableClusteringAtZoom`, so the marker is
+  always uncluttered on arrival. Clicking a marker flies only when the map is
+  below zoom 15 (`MARKER_MIN_ZOOM`), which keeps the surrounding area
+  visible. The order is fly, then open the card — never the reverse. The
+  `?r=` path also picked up the `ensureMarker` / `pinnedRow` handling it had
+  been missing.
+- **Cluster bubbles are misty blue** (W-8): outer
+  `rgba(91,119,153,0.11)`, inner `rgba(91,119,153,0.28)`, `#172033` at weight
+  700 — legible against both the light basemap and the marker colours,
+  where the old translucent `#2563eb` read as a second kind of marker. The
+  legend's sample circle changed with it, in the same values.
+- **The filter panel's row height is one variable** (W-11).
+  `#ff-sheet-content` carries `--ff-row: 34px; --ff-head: 30px`, and
+  `@media (pointer: coarse)` raises them to 44/40 — so a mouse gets a compact
+  panel and a finger gets the 44px target it needs, from one declaration
+  instead of four scattered overrides. Option text is 13px everywhere; the
+  11px inline size on the cuisine grid and the 12px on award rows are gone.
+- **The counts read as sentences** (W-12b). "命中 7626 视野内 631" in the
+  left column header, the filter panel header and the FAB's aria-label is now
+  "筛选后 7626 家餐厅符合标准 · 其中屏幕内 631 家"; the Saved tab says "你的
+  收藏夹共 N 家餐厅 · 不受筛选影响"; the workbench footer says "其中 N 家能在
+  Tabelog 上订座" over a "只看这 N 家" button. Every one of those is a
+  per-language whole-sentence template (`COUNT_TPL` / `FAV_TPL` / `FOOT_TPL`
+  / `FOOT_BTN_TPL`, the `LOCATE_STRINGS` pattern) — a sentence with a number
+  in it can never go through the CJK-run translation table, which is what
+  M-103 was. The phone's `#ff-fab` pill and the rail keep the short labels;
+  they have 44px to work with, not a line.
+- The legend explains the cluster number ("圆里的数字是这一片符合当前筛选条件
+  的餐厅数量") and the marker colour ("标记颜色取决于这家店申报的晚餐价格上限",
+  plus the lunch fallback that `price_bucket()` really does apply), and the
+  sign-in panel says "不登录也完全可用" (W-12b ④⑤⑥).
+- The empty-map card names the number it is talking about — "当前筛选的 N 家
+  餐厅都不在地图范围内" over "缩放回全部结果" — and dropped the subtitle that
+  restated the title (W-12b ⑦⑧).
+- **Uncalibrated coordinates say what to do about it** (W-12b ③). A row whose
+  address only geocoded to block level now shows, in red and bold, "餐厅的
+  地址无法被 Google 地图校准，请确认好餐厅的具体位置再前往！"; a row that is
+  merely not Google-verified gets a grey line. Both are visible in the
+  half-open `bs-peek` state, which is exactly the screen someone is looking
+  at when they are about to walk somewhere. The four languages are written
+  out literally per `_lang` (a sentence containing "Google" cannot go through
+  the run table) and stripped from the build-time CJK scan the way
+  `PREFS` already is.
+- **The bottom-right FABs line up with the filter pill on every phone**
+  (W-7). The `(orientation: portrait) and (max-width: 699px) and
+  (max-height: 795px)` rule with its `max(56px, var(--sheet-h))` floor is
+  deleted: it existed because five stacked buttons needed 252px, and A11 moved
+  four of those into the layers popover. The landscape `max-height: 560px`
+  rule is untouched.
+- **The top overlays share one inset** (W-10). `--chrome-inset` is 12px, 8px
+  below 480px, and both `#ss-box` and `#intro-bar` read it; below 480px the
+  intro bar's right edge clears the avatar and lands on the search input's
+  edge. `#ff-fab` hides its labels below 360px instead of 420px, so 393 /
+  430 / 475px phones all look the same. The intro bar's × is a 44px target.
+  The scale bar is clear of the pills again, because the ⭐ pill that used to
+  sit on it is gone.
+- **The top bar respects the status bar** (A-1). `--wb-top` is now
+  `calc(var(--wb-top-h) + max(env(safe-area-inset-top, 0px),
+  var(--app-inset-top, 0px)))`, `#wb-top` pads by the same `max()`, and the
+  phone search capsule's `--chrome-top` follows suit. On a desktop browser
+  both terms are 0 and every measured offset is byte-for-byte what 2.0.0
+  produced. The Android shell writes the second term from its own inset
+  listener (see below), so the bar is correct even if `env()` reports 0 —
+  and because it is a `max()`, a device where both are right does not get
+  double padding.
+- **The launcher icon is inset** (A-2). `gen-launcher-icon.py` grew
+  `FG_SCALE = 0.76` and renders the foreground centred on a plate of the
+  source image's own corner colour, so the mask no longer eats the artwork;
+  the splash screen keeps a full-size image of its own
+  (`ic_splash_foreground.png`, scale 1.0) because a splash icon is specified
+  inside a 192dp circle. Same script, same source, one run — the two cannot
+  drift apart. `docs/icons/` and `docs/manifest.webmanifest` are untouched.
+- **No blue tap boxes** (A-3). `html { -webkit-tap-highlight-color:
+  transparent }`, with `:active` backgrounds on `.map-fab`, `#ff-fab` and
+  `.wb-row` so the feedback the highlight was providing is still there, and
+  `user-select: none` on rows and card titles. No Kotlin change.
+- `scripts/verify_build.py` reads `APP_VERSION` and `DATA_SCRAPED_AT` out of
+  `map.py` instead of hard-coding "v2.0.0", and fails when `APP_VERSION` is
+  not the release this tree claims to be (`EXPECTED_APP_VERSION`) — so
+  forgetting the version bump now fails the gate instead of shipping the
+  previous number in the About sheet.
+
+### Fixed
+
+- `android/tools/emu.sh` and `android/tools/diag.sh` defaulted `JPFM_PKG` to
+  `com.fredhli.jpfoodmap.debug`, so reading the diagnostics line out of a
+  hand-installed **release** build sent the intent to a package that was not
+  there; `am` answered `result code=-92` on a stream nobody reads and the
+  script timed out, which looked exactly like "this build has no diagnostics
+  logging". They now ask the device (`pm path`) which of the two is
+  installed. R8 was never stripping the log line —
+  `proguard-android-optimize.txt` carries no `-assumenosideeffects` for
+  `android.util.Log`, and `JpfmDiag` is in the release `classes.dex`.
+  `verify-geometry.sh` / `verify-flows.sh` were always right: they read the
+  package name out of the APK under test.
+- `en.json`'s legend line for the Hidden list read "A place you hid / hidden
+  from the map by default"; the second half is now "Not shown on the map by
+  default", which reads as a sentence next to the first.
+- `_TRAD_FIXUPS` gains 谷歌地圖 → Google 地圖: Taiwan writes the product name,
+  not a transliteration. A 訂座 → 訂位 rule was tried and reverted before
+  release — `to_trad()` replacements are literal and unbounded, and every one
+  of the 198 訂座 in the Tabelog policy corpus is followed by 位 (預訂座位 /
+  只訂座位), so the rule only ever produced 預訂位位 in `popups-tw.json`.
+
+### Removed
+
+- The ⭐ Saved pill at the bottom-left of phone screens (`#wb-fav-fab`) and
+  its `wbFavFabSync()` observer — the ≡ in the search capsule replaces it,
+  and the pill was what covered the scale bar. The "≡ 命中 N · 视野内 M" pill
+  next to it stays; it is the filter panel's entry point.
+- The `.wb-empty` placeholder text in the detail column, which no longer has
+  a moment in which it can be read (the column is off-screen until something
+  is selected). The node stays so its translation entries stay valid.
+- The rail's search and filter buttons (see Changed).
 
 ## [2.0.0] - 2026-09-06
 

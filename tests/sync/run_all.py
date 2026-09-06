@@ -32,6 +32,7 @@ def reference_shots(br):
     U = L.urls(3)
     W.STATE.reset({'favorites': [U[0], U[1]], 'blacklist': [], 'bookmarks': [], 'v': 1, 'w': 'ref'})
     seed = {'tabelog.auth': L.AUTH,
+            'tabelog.lang': 'zh-CN',   # 2.1.0: keep the first-visit language chooser out of the reference shots
             'omakase_state_cache_v2': L.cache_blob([U[0], U[1]], [], False),
             'tabelog.syncBase': L.sync_base(1, [U[0], U[1]], [], []),
             'tabelog.bookmarks': []}

@@ -77,6 +77,30 @@ JAPAN_BBOX = (20.0, 46.2, 122.5, 154.5)  # lat_min, lat_max, lon_min, lon_max
 # build is considered broken.
 MAX_SHRINK_PCT = 5.0
 
+# The release this tree is supposed to be. Kept here (not read blindly from
+# map.py) so that forgetting to bump APP_VERSION fails the gate instead of
+# silently shipping the previous version number in the 关于本站 sheet.
+# Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
+EXPECTED_APP_VERSION = "2.1.0"
+
+# map.py is the single source of both build-time facts the About sheet states.
+# Parsed as text rather than imported: importing map.py runs the whole render
+# module (folium, the corpus, the i18n tables) as a side effect.
+MAP_PY = REPO / "src" / "tabelog" / "scrape" / "map.py"
+_APP_VERSION_RE = re.compile(r'^APP_VERSION\s*=\s*"([^"]+)"', re.M)
+_SCRAPED_AT_RE = re.compile(r'^DATA_SCRAPED_AT\s*=\s*"([^"]+)"', re.M)
+
+
+def _read_map_py_stamps() -> tuple[str | None, str | None]:
+    """(APP_VERSION, DATA_SCRAPED_AT) as literals in map.py, or (None, None)."""
+    try:
+        src = MAP_PY.read_text(encoding="utf-8")
+    except OSError:
+        return None, None
+    v = _APP_VERSION_RE.search(src)
+    d = _SCRAPED_AT_RE.search(src)
+    return (v.group(1) if v else None, d.group(1) if d else None)
+
 # CLAUDE.md "Backwards compatibility": these key names are load-bearing for
 # every deployed browser. The page must still mention every one of them.
 REQUIRED_LOCALSTORAGE_KEYS = [
@@ -677,8 +701,22 @@ def check_about_stamps() -> None:
     if not MAP_HTML.exists():
         fail("about", f"{MAP_HTML} does not exist — run map.py first")
         return
+    app_version, scraped_at = _read_map_py_stamps()
+    if app_version is None or scraped_at is None:
+        fail("about", "could not read APP_VERSION / DATA_SCRAPED_AT out of "
+                      "src/tabelog/scrape/map.py")
+        return
+    if app_version != EXPECTED_APP_VERSION:
+        fail(
+            "about",
+            f"map.py APP_VERSION is {app_version!r}, expected "
+            f"{EXPECTED_APP_VERSION!r} — bump one of the two (map.py, "
+            f"scripts/verify_build.py EXPECTED_APP_VERSION) and CHANGELOG.md "
+            f"together.",
+        )
+        return
     html = MAP_HTML.read_text(encoding="utf-8")
-    missing = [s for s in ("v2.0.0", "2026-05-19") if s not in html]
+    missing = [s for s in (f"v{app_version}", scraped_at) if s not in html]
     if missing:
         fail(
             "about",
@@ -691,7 +729,7 @@ def check_about_stamps() -> None:
         fail("about", "an unsubstituted __APP_VERSION__/__DATA_SCRAPED_AT__ "
                       "placeholder reached docs/index.html")
         return
-    ok("about", "version v2.0.0 + scrape date 2026-05-19 present")
+    ok("about", f"version v{app_version} + scrape date {scraped_at} present")
 
 
 def check_i18n(build_log: Path | None, baseline: dict, update_baseline: bool) -> None:

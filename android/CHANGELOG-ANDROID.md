@@ -8,6 +8,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 `versionCode` = major×10000 + minor×100 + patch, so it can be derived from the name and
 always increases.
 
+## [2.1.0] - 2026-09-07 · `versionCode 20100`
+
+Ships with the 2.1.0 site. Three shell-visible fixes out of Fred's 2.0.0 bug report, plus a
+tooling fix that had been quietly turning a release-APK acceptance run into a partial one.
+
+### Fixed
+
+- **The site's top bar no longer sits under the status bar on the inner screen** (bug A-1).
+  The fix is in the page — its fixed top bar now pads itself by
+  `max(env(safe-area-inset-top), var(--app-inset-top))` — and the shell supplies the second
+  half of that `max()`: every time the window insets change (a fold, a rotation, a
+  multi-window resize) it writes the status-bar inset, converted to CSS px, into the page as
+  `--app-inset-top`, and rewrites it at first paint of every document. The insets are still
+  passed through and never consumed, so `env()` remains the primary source; the variable only
+  matters on a build that reports 0 for `safe-area-inset-top` under a status bar that is
+  really there. Where both are right they are equal and `max()` pads once. Measured on the
+  emulator: 24 px from both, and 48 px from both with a display cutout switched on.
+- **The launcher icon is no longer blown up** (bug A-2). `tools/gen-launcher-icon.py` insets
+  the artwork to 47.5 % of the 108dp adaptive canvas (`FG_SCALE = 0.76`) instead of drawing
+  the site's icon at full canvas size, which had put it at 62.5 % — filling ~82 % of the
+  visible circle and letting a round mask slice the map glyph's white border off. It now
+  measures the same as the PWA icon of the same site on the same launcher, which is the
+  comparison Fred asked for. The splash screen keeps the full-size artwork: it has its own
+  bitmap (`ic_splash_foreground`) out of the same script and the same source.
+- **Blue boxes when tapping a button** (bug A-3) are gone, fixed on the page with one global
+  `-webkit-tap-highlight-color: transparent`. Android WebView's default for that property is
+  Holo blue and rectangular; Chrome's is a faint grey, which is why it had never been visible
+  outside the app. No shell change.
+- **`emu.sh diag` addressed the wrong package on a release install**, and the activity
+  manager answers a launch at a package that is not installed with a quiet `result code=-92`.
+  Both `tools/emu.sh` and `tools/diag.sh` defaulted `JPFM_PKG` to the `.debug` id, so a
+  hand-installed release APK produced no diagnostics line at all — which was read during the
+  2.0.0 audit as "R8 strips the `JpfmDiag` log from release builds". It does not: there is no
+  `-assumenosideeffects` for `android.util.Log` anywhere in the merged R8 configuration, and
+  the tag survives in the release dex. The two scripts now ask the device which of the two
+  ids is installed (`JPFM_PKG` still overrides, which is how `lib-verify.sh` passes down what
+  `aapt2` read off the APK under test). `verify-geometry.sh` / `verify-flows.sh` were never
+  affected — they detect the package from the APK — so their `imeMode` / `pageLoads` /
+  `activityCreates` assertions were real, not silent SKIPs.
+
+### Changed
+
+- The diagnostics field `safeVar` used to be hard-coded `false` "for shape"; it now reports
+  whether the shell has pushed `--app-inset-top` into the current document, and a new
+  `appInsetTop` field carries the value in CSS px (`-1` before the first push). Compare it
+  with the page half's `env.t`.
+
 ## [2.0.0] - 2026-09-06 · `versionCode 20000`
 
 First release. A Kotlin WebView shell around `https://jpfoodmap.com/`, built for one phone
