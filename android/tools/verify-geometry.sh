@@ -107,6 +107,12 @@ one_orientation() {   # one_orientation <orient> <expected width>
     # made this frame a permanent SKIP on four of the five windows, i.e. no filter evidence
     # on exactly the geometries the Fold is bought for.
     if [ "$(card_open)" = "true" ]; then cold_start >/dev/null; wait_page 30; fi
+    # AND get the first-visit language chooser out of the way (2.2.0, android-back). On a
+    # freshly installed APK that modal's scrim is over the FAB — which still measures a real
+    # rect, so tap_element reports a tap it made into a scrim and the panel "did not open".
+    # This was FAIL on foldcover natural and fold8inner60 landscape against the pending build
+    # AND against the live one; it is device state, not a product defect.
+    dismiss_first_run
     if tap_element '#ff-fab' || tap_element '.wb-filter-btn'; then
         # POLL, and re-tap once. The mid/wide pill sits in the page's top bar, a few CSS px
         # under the status bar, and a tap there is occasionally eaten by the system window

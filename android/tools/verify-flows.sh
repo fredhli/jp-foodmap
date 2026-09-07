@@ -67,30 +67,125 @@ logcat_has_secret() {
 
 # ---------------------------------------------------------------------------- the flows
 flow_back() {
-    head2 "back key — one BACK closes the card, the next leaves the app (§4.1)"
+    head2 "back key — one BACK closes the topmost overlay, the last one leaves the app (§4.1)"
+
+    # WHY THIS FLOW LOOKS LIKE THIS (2.2.0, android-back). Until 2.2.0 the whole flow hung
+    # off open_card, whose only release-capable rung is the cold `?r=` deep link — and that
+    # is the ONE path where leaving the app on the first BACK is correct, because the page
+    # opened the card with no user activation and Chromium's history-manipulation
+    # intervention makes the entry underneath unreachable (the same thing Chrome does with
+    # that URL in a fresh tab). So the acceptance was measuring the exception, reporting the
+    # two interesting lines as probe-only SKIPs on every release build, and INTEGRATE-1 §6
+    # read the result as "the App's back key is broken". It is not: an overlay the user
+    # opened with a finger pops one layer per press.
+    #
+    # Now there are three segments, and the assertions in all three are probe-free — they
+    # read `dumpsys window` and the shell's own `back` block (2.2.0+) and nothing else, so
+    # they can go red on the release APK that ships.
+    local st base idx t
+    cold_start >/dev/null
+    wait_page 40
+    # A first run — a fresh AVD, or anything after `pm clear` — puts the page's language
+    # chooser over the map, and its scrim eats every tap the segment below wants to make.
+    dismiss_first_run
+    wait_page 20
+    back_source_reset
+    st="$(back_state cold)"
+    # back_state retries with the native source forced before it gives up, so the two cases
+    # below really are different things and must not read the same. Saying "pre-2.2.0" about
+    # a 2.2.0 APK whose block was simply unreadable is how this segment quietly went back to
+    # being decorative (review-1).
+    if [ "$(back_source)" = native ]; then
+        info "back readings: forced the native JpfmDiag source (this run detected '${JPFM_DIAG_SOURCE:-auto}', which carries no \`back\` block)"
+    fi
+    if [ -z "$st" ] && [ "$(back_source)" = none ]; then
+        skip "back stack readings (this build's diagnostics carry no \`back\` block — pre-2.2.0)"
+    elif [ -z "$st" ]; then
+        skip "back stack readings (the app reported no diagnostics line at all, native included — the device, not the build)"
+    else
+        info "back stack after a cold start: index ${st%% *}, callback enabled ${st#* }"
+    fi
+
+    # ---- 1. an overlay opened WITH A FINGER pops, and the app stays ----------------------
+    base="${st%% *}"
+    if [ -n "$st" ]; then
+        if ! tap_element '#fab-layers'; then tap_map_fab "$base"; fi
+        st="$(back_state opened)"
+        idx="${st%% *}"
+        if [ -z "$st" ] || [ "$idx" = "$base" ]; then
+            skip "first BACK on a finger-opened overlay (could not open one: index still ${idx:-?})"
+        else
+            info "overlay open: index $base -> $idx, callback enabled ${st#* }"
+            expect "the shell takes the back press while an overlay is open" "${st#* }" "true"
+            adbs shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+            sleep 2
+            # The focused window FIRST: back_state asks for the diagnostics line with
+            # `am start`, which would haul the app back to the front and hide the answer.
+            t="$(top_pkg_settled)"
+            shot back-1-after-first >/dev/null
+            if [ "$t" != "$PKG" ]; then
+                fail "the first BACK left the app with an overlay open (top window is now ${t:-<none>})"
+            else
+                pass "the app is still in front after the first BACK (top window $t)"
+                st="$(back_state popped)"
+                expect "the overlay's history entry is gone after the first BACK" \
+                       "${st%% *}" "$base"
+            fi
+        fi
+    fi
+
+    # ---- 2. with the overlay stack empty, BACK leaves --------------------------------------
+    adbs shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+    sleep 3
+    t="$(top_pkg_settled)"
+    if [ -z "$t" ]; then
+        skip "BACK on an empty overlay stack (could not read the focused window)"
+    elif [ "$t" = "$PKG" ]; then
+        fail "BACK on an empty overlay stack stayed in the app (top window is still $t)"
+    else
+        pass "BACK on an empty overlay stack left the app (top window is now $t)"
+    fi
+    shot back-2-after-second >/dev/null
+
+    # ---- 3. a cold `?r=` deep link: one BACK leaves, and NEVER does nothing ---------------
+    # The documented exception, asserted as an invariant rather than as an outcome so that a
+    # future change which makes the card pop instead is a PASS and only a SWALLOWED press —
+    # app still in front, history where it was, nothing on screen changed — is a FAIL. That
+    # is the failure mode a naive fix produces: trusting copyBackForwardList().currentIndex
+    # enables the callback, goBackOrForward(-1) then moves nothing, and the back key dies.
     local rung
     rung="$(open_card "$SHARE_ID" cold || true)"
     if [ -z "$rung" ]; then
-        skip "back (no card could be opened — nothing to pop)"
-        return
+        # No probe to confirm the card with, so fall back to the shell's own witness: the
+        # page pushed an entry for the card it opened, which is index 1 on a fresh document.
+        st="$(back_state deeplink)"
+        if [ -z "$st" ] || [ "${st%% *}" = "0" ] || [ "${st%% *}" = "-1" ]; then
+            skip "cold deep-link BACK (no card could be opened — nothing to pop)"
+            return
+        fi
+        info "cold ?r= pushed a history entry (index ${st%% *}, callback enabled ${st#* })"
+    else
+        info "card opened via $rung"
+        st="$(back_state deeplink)"
+        [ -n "$st" ] && info "cold ?r= back stack: index ${st%% *}, callback enabled ${st#* }"
     fi
-    info "card opened via $rung"
-    adbs shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
-    sleep 2
-    expect "card closed by the first BACK" "$(card_open)" "false"
-    expect "app still in front after the first BACK" "$(top_pkg)" "$PKG"
-    shot back-1-after-first >/dev/null
+    local before="${st%% *}"
     adbs shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
     sleep 3
-    local t; t="$(top_pkg)"
-    if [ -z "$t" ]; then
-        skip "second BACK (could not read the focused window)"
-    elif [ "$t" = "$PKG" ]; then
-        fail "the second BACK stayed in the app (top window is still $t)"
+    t="$(top_pkg_settled)"
+    shot back-3-deeplink >/dev/null
+    if [ "$t" != "$PKG" ]; then
+        pass "one BACK on a cold ?r= deep link left the app (as Chrome does with that URL)"
     else
-        pass "the second BACK left the app (top window is now $t)"
+        st="$(back_state deeplink-after)"
+        if [ -z "$st" ]; then
+            skip "cold deep-link BACK (app still in front and no back stack to read)"
+        elif [ "${st%% *}" != "$before" ]; then
+            pass "one BACK on a cold ?r= deep link popped the card instead (index $before -> ${st%% *})"
+        else
+            fail "one BACK on a cold ?r= deep link did nothing at all (index still $before)"
+        fi
     fi
-    shot back-2-after-second >/dev/null
 }
 
 flow_deeplink() {

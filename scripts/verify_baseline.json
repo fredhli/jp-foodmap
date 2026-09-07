@@ -1,7 +1,7 @@
 {
   "__doc__": "Baseline for scripts/verify_build.py. Captured 2026-09-05 from git HEAD (commit 84835a8, the last build before the 2.0.0 milestone work) — docs/index.html with the injected TEXT_*_MAP tables stripped, intersected with data/i18n/{en,ja}.json at that same commit. missing_en / missing_ja are the CJK runs the page showed with no translation entry; they are almost all built-in attraction names that are intentionally untranslated. A run that is NOT on this list and is missing today means someone added Chinese UI copy without adding its en.json / ja.json entry. Update with: uv run python scripts/verify_build.py --update-baseline",
   "captured_from": "git HEAD 84835a8 (2026-09-05, pre-2.0.0)",
-  "restaurants_rows": 9807,
+  "restaurants_rows": 10250,
   "missing_en": [
     "一乗谷朝倉氏遺跡",
     "一乘谷朝仓氏遗迹",

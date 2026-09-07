@@ -1,4 +1,4 @@
-# jpfoodmap Android APP 2.0.0 · 状态（STATUS）
+# jpfoodmap Android APP 2.2.0 · 状态（STATUS）
 
 每个任务完成后在下面追加自己的一段（**只追加，不改别人的段**）。T8 在集成时汇总成给主人的
 版本。格式：任务 key、状态、实际做了什么、偏离计划的地方、留给别人的东西、真机待验项。
@@ -631,3 +631,78 @@ release APK 上 `have_probe` 报 `no` —— `setWebContentsDebuggingEnabled(Bui
   `appInsetTop` 报回来：两者相等说明 `env()` 本来就对、兜底空转；`env.t` 是 0 而
   `appInsetTop` 是 40 说明兜底正在救场。
 - A-2 的验收是主人自己那张同屏对比：PWA 图标与 APP 图标目视等大。
+
+---
+
+## 2.2.0 `android-back` — 系统返回键的归因与门禁补洞 · **done**（2026-09-07）
+
+### 结论：壳没有缺陷，缺的是门禁能看见的东西
+
+INTEGRATE-1 §6 报的「App 里开卡之后按返回直接退桌面」在模拟器上复现了，但**只在页面
+没有用户手势的那条路上**。用带探针的 staging debug 包量了一整轮（证据与逐行读数在
+`audit_outputs/2.2.0-fix/impl/android-back/`）：
+
+| 怎么打开的浮层 | `copyBackForwardList()` | `canGoBack()` | 一次 BACK |
+|---|---|---|---|
+| 手指点 marker 开卡 | size 2 / idx 1 | **true** | 关卡片，App 留在前台 |
+| 卡片里点图 → lightbox | size 3 / idx 2 | **true** | 关大图，卡片还在 |
+| 抽屉 + 筛选叠上去 | size 3 / idx 2 | **true** | 逐层关，第三次才退出 |
+| 冷 `?r=` 深链开卡 | size 2 / idx 1 | **false** | 退出 App（卡片还开着） |
+| 热 `?r=` 深链开卡 | size 2 / idx 1 | **false** | 退出 App |
+
+差别是 Chromium 的 **history-manipulation intervention**：文档在没有用户激活时
+`pushState`，它下面那条历史会被标 `skip_on_back_forward_ui`，`CanGoBack()` 会跳过所有
+skippable 条目再回答 —— 所以 `idx > 0` 而 `canGoBack()` 是 false。Chrome 新标签页打开同一
+个 `?r=` URL 也是这个表现。
+
+**壳侧没有任何 API 能绕过（实测，不是推断）**：同一状态下 `canGoBackOrForward(-1)` 也是
+false；把判据换成 `currentIndex > 0` 并强行 `goBackOrForward(-1)`，历史一动不动，**这次
+返回被吞掉**，App 既不退也不关浮层 —— 比现状更糟。所以 `refreshBack()` 的
+`canGoBack()` 判据一个字没改，只把这段实测写进了它的 KDoc 和 STANDARDS §4.1a。
+
+### 为什么门禁一直没抓到
+
+`verify-flows.sh` 的 back 段整段挂在 `open_card` 上，而 release 包唯一能走通的那一级
+（rung 1）恰好是冷 `?r=` 深链 —— 也就是**唯一一条「第一次返回就该退出」的路**；判词又全
+是 DOM 断言，release 包没有 DevTools 探针，于是全部 SKIP。用 HEAD 的脚本对同一个 release
+包复跑，读数是 `SKIP / SKIP / PASS(第二次 BACK 离开)` —— 和 INTEGRATE-1 记的一模一样。
+
+### 改了什么
+
+- **`MainActivity.diagnosticsNativeJson()` 加 `back` 块**（`enabled` / `canGoBack` /
+  `index` / `size`）。纯诊断，行为零变化；这是 release 包上唯一能证明「有浮层开着」的见证。
+- **`verify-flows.sh` 的 `flow_back` 重写成三段**，判词只读 `dumpsys window` 与那个
+  `back` 块：① 手指开的浮层 → 一次 BACK 关掉且 App 在前台、历史 index 回到基线；
+  ② 栈空 → BACK 离开；③ 冷 `?r=` → 断言的是**不变式**（要么退出、要么弹一层，
+  **绝不能什么都不发生**），这样将来真把它改成弹一层也是 PASS，只有「吞掉返回」才红。
+- **`lib-verify.sh` 加三个 helper**：`back_state`（读诊断里的 back 块）、
+  `tap_map_fab`（从 `wm size`/`wm density` 瞄地图右下角的 FAB，不需要探针）、
+  `top_pkg_settled`（`mCurrentFocus` 在转场中会读空，旧代码就是在这里把 FAIL 变成 SKIP 的）、
+  以及 `dismiss_first_run`。
+- **`dismiss_first_run` 也接到了 `verify-geometry.sh` 的筛选段**：新装的包第一次开页会弹
+  语言选择模态，它的 scrim 吃掉点击但被点的元素仍有真实 rect，于是 `tap_element` 报「点到了」
+  而面板没开。这条在**本次待发布页面和线上 v1 页面上都会 FAIL**（做了 A/B），是设备状态不是
+  产品缺陷；补上之后 foldcover 与 fold8inner60 那两条从 FAIL 变 PASS。
+
+### 门禁（全部对 staging release 包 + 本机 `docs/` 跑；本机模拟器连不上线上站）
+
+- `testDebugUnitTest` **109 条全绿**；lint **0 error / 67 warning**；
+  `static-audit.sh` **36 PASS / 0 FAIL**；`power-audit.sh --no-device` **6 PASS / 0 FAIL**。
+- `build.sh` → `apk/jpfoodmap.apk` 1.7 MiB，`BUILD-INFO.txt` 写 2.2.0 / 20200。
+- `verify-flows.sh back`（**release 包**）：foldcover **5 PASS / 0 FAIL / 0 SKIP**，
+  fold8inner **5 PASS / 0 FAIL / 0 SKIP**。
+- **反向验证**：把 `refreshBack()` 改成恒 false 重新出一个 release 包，同一条 back 段
+  **2 FAIL**（「浮层开着时壳不接返回」+「第一次 BACK 带着浮层离开了 App」）—— 门禁确实能红。
+- `verify-geometry.sh foldcover fold8inner fold8inner60`：**0 FAIL**
+  （7/0/0、19/0/3、14/0/0）。
+- `verify-flows.sh` 全量：external 段 **1 FAIL**（「没有 tabelog.com 的 VIEW intent」）。
+  **不是本次改动造成的**：用 `git show HEAD:` 取出的未改脚本对同一台机器同一个包复跑，
+  同一条同样 FAIL。这台 AVD 上现在装了 Chrome（2.1.0 那轮没有），`Links.leave` 走的是
+  Custom Tab 而不是裸 VIEW intent，而这一段脚本自己就写了「只能在真机上收尾」。
+
+### 真机待验 / 留给主人
+
+- 冷 / 热 `?r=` 深链的第一次返回会退出 App（卡片还开着）。这是 Chrome 一致的行为，
+  README「返回键」那条已经按事实写清楚了。要改成「先关卡片」得让页面和壳之间多一条
+  异步的浮层状态通道，或者让热深链退回整页重载（会破坏 STANDARDS §6.3 的 pageLoads 1→1），
+  两条都不值当，本次不做。

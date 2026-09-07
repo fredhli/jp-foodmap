@@ -13,6 +13,88 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-07
+
+Performance release. Nothing visible changed; the map should pan the way it
+did in 1.x again, and a phone should stop warming up while you drag it.
+Diagnosis and numbers: `audit_outputs/2.2.0-perf/DIAGNOSIS.md`; the plan the
+fixes follow: `audit_outputs/2.2.0-perf/PLAN.md`.
+
+### Performance
+
+The idle page was already free (0.0 ms of script/layout/style over 15 s on
+both 1.x and 2.1.0), so the heat was not a stray timer. It was per-frame work
+while panning, plus Service Worker tile churn.
+
+- **Scale control (P1).** `L.control.scale` without `updateWhenIdle` subscribes
+  to `move`, so every drag frame rewrote the control's DOM and turned a
+  compositor-only pan into Layout + Paint on the main thread. It now refreshes
+  on `moveend`. Desktop, Tokyo z12, 10 drags: LayoutCount 410 → 32 (1.x: 25).
+  This one line recovers most of the regression on its own.
+- **Results list (P2).** A pure pan no longer rebuilds the 30-row window (568
+  nodes + 30 `<img>` per moveend). `wbListRender` computes a window signature
+  from row identity and the ★ / ✕ / checked / cursor bits and returns early
+  when it matches; a star toggled from the card still repaints the row.
+  Review caught that hoisting the `scrollTop` read above the spacer write let
+  a shrinking filter leave the list on a stale page with a RangeError; the
+  read stays after the write, with `first`/`count` clamped.
+- **Full-corpus scan (P3).** `recompute()` on moveend recounts only the
+  viewport; the 9.8k-row pass that produces the "N 家符合标准" total runs when
+  filters, Saved, Hidden or a sub-collection focus change, behind a
+  `fullPassStale()` fuse keyed on the set sizes so a write that bypasses
+  `apply()` still triggers it.
+- **Counts (P4) and i18n observer (P6).** Count sentences are written only
+  when a number changes (textContent, not innerHTML); the `#wb-left`
+  MutationObserver that re-localised every rebuilt row is narrowed to
+  `#wb-detail`.
+- **Result** (desktop 1440×900, medians of 4 alternating 1.x/2.2.0 pairs):
+  TaskDuration 1.07× 1.x, ScriptDuration 1.13× (2.1.0 sat at ~1.5×);
+  per-moveend main thread 6.75 → 1.42 ms (1.x 1.08); Fold cover at 4× CPU
+  9.59 → 5.48 ms (1.x 4.75); idle 15 s stays 0.0 ms.
+- **Service Worker tiles (P5).** Tiles were stale-while-revalidate, so every
+  tile was fetched twice, and they were stored as opaque responses, which
+  Cache Storage bills at 4–7 MB each: 70 tiles ≈ 300–520 MB, a 200 MB phone
+  quota was full on first paint and the data cache (`tabelog-data-v1`) got
+  evicted and re-downloaded. Now the tile layer requests with
+  `crossOrigin: "anonymous"`, the SW serves tiles cache-first, stores only
+  non-opaque responses (review: storing opaque ones under the new 400-entry
+  cap would have made the quota bomb 5.7× bigger for a tab still on the old
+  page during a deploy), caps the bucket at 400 entries ≈ 13 MB and moves it
+  to `tabelog-tiles-v2` so `activate` reclaims the old one. A page-side guard
+  drops crossOrigin and redraws once if 6 consecutive tiles fail while
+  online, for a CDN edge that omits ACAO. Desktop, 20 drags: Cache Storage
+  growth +186 MB → +1 MB; 200 MB quota 100.7% → 8.9%; tile requests with the
+  SW on/off 104/72 → 112/112. Offline panning over seen tiles still works.
+  The three SW rules (atomic install, no `skipWaiting` in install, activate
+  only after the new shell holds `./`) are untouched.
+
+### Fixed
+
+- **Android:** the system Back key closes the top layer (card, lightbox,
+  drawer, filter sheet) before leaving the app; a cold `?r=` deep link still
+  exits on the first Back, matching Chrome. `verify-flows.sh`'s back segment
+  now carries a probe-free hard assertion (`versionCode 20200`).
+
+### Data
+
+- **Tokyo top-up.** `scrape_topup --tokyo` walks Tabelog's filtered list (RC
+  category, dinner ¥3,000–¥20,000) from page 10 because the plain list's
+  60-page cap was exhausted. 443 main-meal restaurants added (Tokyo 936 →
+  1,379; published corpus 9,807 → 10,250), geocoded, 442 of 443
+  Google-verified. `google_enrich --tokyo` added, and the script now refuses
+  to spend API calls on rows that have no GSI point yet. `tests/compat` reads
+  the corpus size from the build instead of pinning 9,807.
+
+### Deferred to 2.3.0 (found in review, not shipped)
+
+- `verify-flows.sh` detects its diagnostics source before the app has ever
+  been READY, so a default run still SKIPs the back segment
+  (`JPFM_DIAG_SOURCE=native` works).
+- A `tests/perf` regression gate; `p2p4check.py` / `shrink_rows_ok.py` under
+  `audit_outputs/2.2.0-fix` are worth promoting into `tests/`.
+- `wbSetLeft()` is dead; `#lang-gate` should be excluded from `localizeTree`;
+  a superseded `gotoRestaurant()` flight leaves its 3 s timer idling.
+
 ## [2.1.0] - 2026-09-07
 
 The first release driven by the owner's own bug report on 2.0.0

@@ -204,6 +204,18 @@ class MainActivity : ComponentActivity() {
      *
      * A dispatcher callback, never an onBackPressed override: overriding it turns predictive
      * back off for the whole activity at targetSdk 36 (STANDARDS §4.1).
+     *
+     * `canGoBack()`, NOT `copyBackForwardList().currentIndex > 0` (measured on the emulator,
+     * 2026-09-07 — the numbers are in audit_outputs/2.2.0-fix/impl/android-back.md). The two
+     * disagree, and only on entries the page created with no user activation: Chromium's
+     * history-manipulation intervention marks the entry underneath such a pushState
+     * `skip_on_back_forward_ui`, and `CanGoBack()` walks back over every skippable entry
+     * before it answers. That is why a `?r=` deep link — cold or hot — leaves the card open
+     * and the first BACK leaves the app, while every overlay the user opened with a finger
+     * pops one layer per press. The index is NOT the better test: `canGoBackOrForward(-1)`
+     * answers false in the same state and a forced `goBackOrForward(-1)` moves nothing, so
+     * trusting the index would only swallow the press and strand the user. Chrome behaves
+     * the same way with the same URL in a fresh tab.
      */
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -935,6 +947,26 @@ class MainActivity : ComponentActivity() {
             // which is what the page uses when the two disagree in env()'s favour.
             .put("safeVar", appInsetTopCss >= 0)
             .put("appInsetTop", appInsetTopCss)
+            // Everything the back key has to work with (STANDARDS §4.1), because the
+            // acceptance has to be able to go red on a RELEASE APK and there is no DevTools
+            // probe there to read the page's own history with. `enabled` is the whole
+            // answer: false means the next BACK leaves the app. `index`/`size` are the
+            // WebView's own list, and `canGoBack` is what Chromium says AFTER skipping every
+            // entry its history-manipulation intervention marked `skip_on_back_forward_ui` —
+            // an entry a document created with pushState and no user activation. So
+            // `index > 0` with `canGoBack` false is not a shell bug: it is a card the page
+            // opened for a `?r=` deep link rather than for a finger, and Chrome does the
+            // same thing with that URL in a fresh tab. Measured 2026-09-07: nothing on
+            // WebView walks past such an entry — canGoBackOrForward(-1) is false as well and
+            // goBackOrForward(-1) is a silent no-op — so the callback follows canGoBack.
+            .put(
+                "back",
+                JSONObject()
+                    .put("enabled", backCallback.isEnabled)
+                    .put("canGoBack", webView?.canGoBack() == true)
+                    .put("index", webView?.copyBackForwardList()?.currentIndex ?: -1)
+                    .put("size", webView?.copyBackForwardList()?.size ?: 0),
+            )
             .put(
                 "webViewFeatures",
                 JSONObject()

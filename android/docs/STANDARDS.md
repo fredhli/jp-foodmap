@@ -1,4 +1,4 @@
-# jpfoodmap Android APP 2.1.0 · 标准（STANDARDS）
+# jpfoodmap Android APP 2.2.0 · 标准（STANDARDS）
 
 > 给主人的 10 行版本：这份文件规定「APP 做成什么样才算合格」。每一条都带**验收方法**——
 > 要么是模拟器上能跑的命令，要么是真机上你自己按一下就能确认的动作。检查员按这里逐条打勾；
@@ -76,7 +76,8 @@
 
 | # | 规则 | 验收 |
 |---|---|---|
-| 4.1 | 网站用 `history.pushState` 浮层栈（每个浮层一条 state-only 记录）。壳：`OnBackPressedCallback`，**仅当 `webView.canGoBack()` 为真时启用**，回调调 `webView.goBack()` → `popstate` → 页面关掉最上层浮层。栈空时回调禁用，系统预测式返回退出 APP。**绝不**重写 `onBackPressed`。 | 脚本：深链打开卡 → `input keyevent BACK` → 卡关、APP 仍在前台 → 再 BACK → APP 退到 launcher（`dumpsys activity` 顶层非本包）。 |
+| 4.1 | 网站用 `history.pushState` 浮层栈（每个浮层一条 state-only 记录）。壳：`OnBackPressedCallback`，**仅当 `webView.canGoBack()` 为真时启用**，回调调 `webView.goBack()` → `popstate` → 页面关掉最上层浮层。栈空时回调禁用，系统预测式返回退出 APP。**绝不**重写 `onBackPressed`，也**绝不**改用 `copyBackForwardList().currentIndex > 0` 当判据（2.2.0 实测，见 4.1a）。 | 脚本：`verify-flows.sh back` 三段，判据只读 `dumpsys window` 与诊断 JSON 的 `back` 块，release 包上照样能红。读不到 `back` 块时先强制一次 `JPFM_DIAG_SOURCE=native` 再判 SKIP：跑法自己的 source 探测在 APP 第一次 READY 之前就跑完（预算 8 s），会把冷启动慢的 2.2.0 包误判成 probe，而 probe 半边（页面视角）根本没有 `back` 块 —— 2026-09-07 复核抓到这条曾让整段在默认跑法下回落成 SKIP。 |
+| 4.1a | **例外，不修，与 Chrome 一致**：页面在**没有用户手势**时 `pushState`（`?r=` 深链冷启动开卡、热深链 `__jpfmOpenShare` 开卡）会触发 Chromium 的 history-manipulation intervention —— 下面那条历史被标成 `skip_on_back_forward_ui`，`canGoBack()` 因此答 false，第一次返回直接退出 APP，卡片不先关。2026-09-07 实测：`canGoBackOrForward(-1)` 同样是 false，强行 `goBackOrForward(-1)` 一动不动**并把这次返回吞掉**，所以壳侧没有任何 API 能绕过；在 Chrome 里新标签页打开同一 URL 行为相同。 | 诊断 JSON：`back.index > 0` 而 `back.canGoBack=false`。`verify-flows.sh` 的第三段断言的是**不变式**（要么退出、要么弹掉一层，绝不能什么都不发生）。 |
 | 4.2 | 已知：语言切换是整页导航（`?lang=`），返回会回到上一语言页面，与 Chrome 一致，不修。 | 记录。 |
 
 ---
@@ -167,7 +168,7 @@
 
 | # | 规则 | 验收 |
 |---|---|---|
-| 12.1 | 设置页「诊断…」→ 对话框：页面半（`innerWidth/Height`、`dpr`、`visualViewport`、`env()` 四边、`bootId`、`lang`、`url` 去 query、`navigator.userAgent`、`!!window.Native`）+ 壳半（WebView 版本、insets px、`imeMode`、`textZoom`、`fontScale`、`density`、`widthDp/heightDp`、`pageState`、`pageLoads`、`activityCreates`、启动耗时、最近 5 次进程退出原因）。可「复制」。 | 对话框截图；复制后粘贴出完整 JSON。 |
+| 12.1 | 设置页「诊断…」→ 对话框：页面半（`innerWidth/Height`、`dpr`、`visualViewport`、`env()` 四边、`bootId`、`lang`、`url` 去 query、`navigator.userAgent`、`!!window.Native`）+ 壳半（WebView 版本、insets px、`imeMode`、`textZoom`、`fontScale`、`density`、`widthDp/heightDp`、`pageState`、`pageLoads`、`activityCreates`、`back`（2.2.0：`enabled` / `canGoBack` / `index` / `size`，返回键验收在 release 包上唯一的见证）、启动耗时、最近 5 次进程退出原因）。可「复制」。 | 对话框截图；复制后粘贴出完整 JSON。 |
 | 12.2 | 脚本化入口：`am start -n <pkg>/.MainActivity --ez diagnostics_log true` → READY 后把同一 JSON 单行打到 logcat tag `JpfmDiag`（release 也有；无秘密）。**`<pkg>` 必须是真正装着的那个**：debug 包是 `com.fredhli.jpfoodmap.debug`，发布包没有后缀，发到没装的那个 id 上 `am` 只回一句谁也不看的 `result code=-92`，看起来和「这个构建没有诊断」一模一样（2.0.0 审计就是这样误判成「R8 剥掉了日志」；合并后的 R8 配置里从来没有 `android.util.Log` 的 `-assumenosideeffects`）。`tools/emu.sh` 与 `tools/diag.sh` 现在向设备问一次。 | `adb logcat -d -s JpfmDiag` 取到一行合法 JSON。 |
 | 12.3 | 诊断里**没有** cookie、token、query。 | 静态审查 + 输出审查。 |
 
@@ -185,7 +186,7 @@
 
 | # | 规则 | 验收 |
 |---|---|---|
-| 14.1 | `versionName = "2.1.0"`，`versionCode = 20100`（= major×10000 + minor×100 + patch；与网站 `APP_VERSION` 同步更新；2.0.0 = 20000）。 | `aapt2 dump badging` |
+| 14.1 | `versionName = "2.2.0"`，`versionCode = 20200`（= major×10000 + minor×100 + patch；与网站 `APP_VERSION` 同步更新；2.0.0 = 20000）。 | `aapt2 dump badging` |
 | 14.2 | `applicationId = com.fredhli.jpfoodmap`（debug 加 `.debug`）；**永久身份**，不改。 | badging |
 | 14.3 | 签名：release 用 `~/.android/debug.keystore`（alias `androiddebugkey`，storepass `android`），与 dashboard 同一证书（升级路径 + assetlinks 都钉在它上；备份责任在主人，见 `dashboard/deploy/SIGNING-KEY.md`）。 | `apksigner verify --print-certs android/apk/jpfoodmap.apk` SHA-256 = `78:9F:E3:5F:02:40:43:2A:CF:C7:E1:71:50:1B:94:1C:29:B9:91:55:D3:58:CF:33:9C:78:AE:C2:10:16:85:D1` |
 | 14.4 | 构建：`android/build.sh`（rsync → `$HOME/.cache/jpfoodmap-android` → `./gradlew assembleRelease`，R8 `-dontobfuscate` + shrinkResources → 原子拷回 `android/apk/jpfoodmap.apk` + `BUILD-INFO.txt`）。Gradle **从不**在 `/mnt/d` 运行。 | `find android -name build -o -name .gradle` 为空；`BUILD-INFO.txt` 有 built/published/size/sha256。 |

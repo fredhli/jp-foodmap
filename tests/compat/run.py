@@ -26,6 +26,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
 
+# The published row count moves with every scrape (2.2.0 shipped 10,250 after
+# the Tokyo top-up), so read it from the build instead of pinning a number.
+EXPECTED_TOTAL = len(json.loads(
+    (REPO / "docs" / "data" / "restaurants.json").read_text(encoding="utf-8")))
+
 from lib_browser import (  # noqa: E402
     boot,
     reload_and_wait,
@@ -92,7 +97,7 @@ def t01_filter_state(page, base):
     """Old filterState shape: page boots, the legacy `bookable` string is
     derived into the bookableOnly checkbox, the unknown `book` key is ignored,
     and the corpus total is untouched."""
-    eq(total_count(page), 9807, "total restaurant count")
+    eq(total_count(page), EXPECTED_TOTAL, "total restaurant count")
     checked = page.eval_on_selector("#ff-bookable-only", "el => el.checked")
     eq(checked, True, "legacy bookable:'yes' derived into bookableOnly")
     if shown_count(page) <= 0:
@@ -201,7 +206,7 @@ def t04_syncbase_preserved(page, base):
 def t05_filterstate_pre_region(page, base):
     """filterState written before the region selector (C1 / M-023) existed:
     no `region` key, plus an unknown key from a hypothetical future build."""
-    eq(total_count(page), 9807, "corpus total unaffected by the region filter")
+    eq(total_count(page), EXPECTED_TOTAL, "corpus total unaffected by the region filter")
     open_filter_panel(page)
     sel = page.eval_on_selector("#ff-region", "el => el.value")
     eq(sel, "", "a state without `region` selects 全部地区")
@@ -229,7 +234,7 @@ def t05_filterstate_pre_region(page, base):
 def t06_filterstate_bad_region(page, base):
     """A `region` of the wrong TYPE (a prefecture name) degrades to 全部地区
     rather than throwing or emptying the map."""
-    eq(total_count(page), 9807, "corpus total unaffected")
+    eq(total_count(page), EXPECTED_TOTAL, "corpus total unaffected")
     open_filter_panel(page)
     eq(page.eval_on_selector("#ff-region", "el => el.value"), "",
        "a non-integer region falls back to 全部地区")

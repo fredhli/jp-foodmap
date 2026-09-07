@@ -8,6 +8,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 `versionCode` = major×10000 + minor×100 + patch, so it can be derived from the name and
 always increases.
 
+## [2.2.0] - 2026-09-07 · `versionCode 20200`
+
+Ships with the 2.2.0 site. One entry, and it is about a bug report that turned out to be a
+gate hole rather than a shell defect.
+
+### Fixed
+
+- **The back acceptance can finally go red on the APK that ships.** INTEGRATE-1 §6 reported
+  that the system back key leaves the app instead of closing the open card, and the reason
+  the gate had never caught it was that `tools/verify-flows.sh`'s back segment hung entirely
+  off `open_card`, whose only rung a release build can reach is the cold `?r=` deep link —
+  and every line that looked at the result read the DOM over the DevTools endpoint, which a
+  release build does not publish. So the flow measured one path and then reported it as
+  SKIP. The segment is now three, and every assertion in all three reads only
+  `dumpsys window` and the shell's own diagnostics line.
+
+  What the measurements say (`audit_outputs/2.2.0-fix/impl/android-back.md`): an overlay the
+  user opened **with a finger** already pops one layer per press, on the unmodified 2.1.0
+  shell — card, photo lightbox, results drawer, and the filter sheet stacked on top of the
+  drawer, in that order, and only then does the app close. What does not pop is an overlay
+  the **page** opened with no user activation, which is what a `?r=` deep link does: Chromium
+  marks the entry underneath such a `pushState` `skip_on_back_forward_ui`, `canGoBack()`
+  answers false with an entry right there, and the press falls through to the system. That is
+  the same thing Chrome does with the same URL in a fresh tab. No WebView API walks past such
+  an entry — `canGoBackOrForward(-1)` is false as well, and a forced `goBackOrForward(-1)`
+  moves nothing and silently eats the press — so the shell's `canGoBack()` test is kept
+  exactly as it was, now with the measurement written beside it.
+
+- **…and it goes red in the DEFAULT run, not just when told which diagnostics source to
+  use.** The first cut of the segment above still reported `SKIP back stack readings` on a
+  plain `./verify-flows.sh back` against the release APK, in wording that claimed the build
+  was pre-2.2.0. Both verify scripts choose native-vs-probe once, seconds after the install
+  and before the app has ever reached READY, with an 8s budget that a cold start on this
+  emulator image regularly overruns — so a 2.2.0 APK gets labelled "probe", and the probe
+  half is the page's own view, which has no `back` block whether or not a DevTools endpoint
+  exists. `back_state()` now retries once with `JPFM_DIAG_SOURCE=native` forced before it
+  gives up, latches the answer for the rest of the run, and only calls a build pre-2.2.0
+  when `native` itself answered without a `back` block. Measured on the release APK from a
+  cold-booted emulator: 5 PASS / 0 FAIL / 0 SKIP where the same run used to report
+  1 PASS / 2 SKIP, and a shell patched to leave `backCallback` disabled still goes
+  2 PASS / 2 FAIL / 0 SKIP on that same default path.
+
+### Added
+
+- **`back` in the diagnostics JSON** — `enabled`, `canGoBack`, `index`, `size`. The
+  acceptance needs a witness for "an overlay is open" that survives a release build, and
+  everything else that could see one goes through the DevTools probe. Diagnostics only: no
+  behaviour changed, and the block is read by `tools/verify-flows.sh` through
+  `diag.sh get … back.index`.
+
 ## [2.1.0] - 2026-09-07 · `versionCode 20100`
 
 Ships with the 2.1.0 site. Three shell-visible fixes out of Fred's 2.0.0 bug report, plus a

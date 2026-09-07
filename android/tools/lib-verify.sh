@@ -172,6 +172,19 @@ install_apk() {
 top_window() { { adbs shell dumpsys window 2>/dev/null || true; } | tr -d '\r' \
                | sed -n 's/.*mCurrentFocus=Window{[^ ]* [^ ]* \([^}]*\)}.*/\1/p' | awk 'NR==1'; }
 top_pkg()    { local w; w="$(top_window)"; printf '%s' "${w%%/*}"; }
+# top_pkg, but waits out the transition. `mCurrentFocus` reads empty while a window is
+# animating in or out, and the back acceptance samples exactly then — a BACK that leaves
+# the app used to report "could not read the focused window" as often as it reported the
+# launcher. Polls for up to ~8s and prints whatever it settles on, empty included.
+top_pkg_settled() {
+    local i p
+    for i in 1 2 3 4; do
+        p="$(top_pkg)"
+        [ -n "$p" ] && { printf '%s' "$p"; return 0; }
+        sleep 2
+    done
+    printf ''
+}
 app_alive()  { [ -n "$(adbs shell pidof "$PKG" 2>/dev/null | tr -d '\r')" ] && echo true || echo false; }
 
 cold_start() {   # cold_start [url] — force-stop first, so this really is a cold start
@@ -282,6 +295,131 @@ open_card() {   # open_card <share-id> [cold|hot]
     fi
     printf ''
     return 1
+}
+
+# ------------------------------------------------------------------------- the back stack
+# THE PROBE-FREE WITNESS (2.2.0, android-back). Everything else in this file that can see
+# whether an overlay is open goes through the DevTools endpoint, which a release APK does
+# not publish — so the back acceptance used to SKIP on exactly the build that ships, and
+# INTEGRATE-1 §6 could report "one BACK leaves the app" for weeks without the gate noticing.
+# The shell's own diagnostics line carries the back stack since 2.2.0 (`back.index` /
+# `back.enabled` / `back.canGoBack` / `back.size`), and that line exists on a release build.
+#
+# Prints "<index> <enabled>" — e.g. "1 true" — or nothing at all when the shell under test
+# does not report the block (a pre-2.2.0 APK), which every caller treats as SKIP.
+#
+# READ THE FOCUSED WINDOW BEFORE CALLING THIS, never after: `diag.sh capture` asks for the
+# line with `am start`, which brings the app back to the front and would erase the very
+# thing "did BACK leave the app" is trying to measure.
+#
+# AND IT MUST NOT TRUST THE RUN-WIDE SOURCE DETECTION (review-1, 2026-09-07). Both verify
+# scripts pick native-vs-probe once, seconds after `install_apk`, with an 8s budget and
+# before the app has ever been READY — a cold start on this image regularly takes longer
+# than that, so a perfectly good 2.2.0 APK is labelled "probe" for the whole run. The probe
+# half is the PAGE's view (diag.sh probe_js) and has no `back` block at all, with or without
+# DevTools, so every reading here came back empty and the whole segment fell through to the
+# pre-2.2.0 SKIP — which is exactly the hole INTEGRATE-1 §6 went unseen through, reopened by
+# a different door. So: an empty reading is retried ONCE with the native source forced, and
+# only a build that stays silent under `native` is reported as carrying no `back` block.
+#
+# The latch that remembers the answer is a FILE, not a variable: every caller reads
+# back_state through `$(...)`, and a variable set inside a command substitution dies with
+# its subshell — which is how the first cut of this fix silently retried on every single
+# call and never got its wording branch. `back_source` is the accessor; the values are
+#   ""        not decided yet
+#   native    the run-wide source cannot see the block; force `native` from here on
+#   none      `native` answered and this build really has no `back` block (pre-2.2.0)
+back_source_file() { printf '%s' "$OUT_ROOT/$CUR_AVD/back-source.txt"; }
+back_source()      { cat "$(back_source_file)" 2>/dev/null || true; }
+back_source_reset() { rm -f "$(back_source_file)" 2>/dev/null || true; }
+back_state() {   # back_state <name-for-the-json>
+    local f="$OUT_ROOT/$CUR_AVD/back-$1.json" i e src
+    src="$(back_source)"
+    # rm first, same reason as the deep-link flow: diag.sh leaves the previous file behind
+    # when it cannot read a line, and a stale reading is worse than no reading. `|| true`
+    # because OUT_ROOT can live on a Windows-backed mount, where a file the previous capture
+    # has only just closed answers EPERM for a moment.
+    rm -f "$f" 2>/dev/null || true
+    if [ "$src" = native ]; then
+        ( export JPFM_DIAG_SOURCE=native; diagsh capture "$f" ) >/dev/null 2>&1 || true
+    else
+        diagsh capture "$f" >/dev/null 2>&1 || true
+    fi
+    i="$(diagsh get "$f" back.index 2>/dev/null || true)"
+    e="$(diagsh get "$f" back.enabled 2>/dev/null || true)"
+    if [ -z "$i" ] && [ -z "$src" ]; then
+        rm -f "$f" 2>/dev/null || true
+        # A subshell, not a `VAR=x func` prefix: an assignment in front of a shell FUNCTION
+        # can survive the call, and leaking JPFM_DIAG_SOURCE into the rest of the run would
+        # silently re-source every other capture in the script.
+        ( export JPFM_DIAG_SOURCE=native; diagsh capture "$f" ) >/dev/null 2>&1 || true
+        i="$(diagsh get "$f" back.index 2>/dev/null || true)"
+        e="$(diagsh get "$f" back.enabled 2>/dev/null || true)"
+        if [ -n "$i" ]; then
+            printf 'native' > "$(back_source_file)" 2>/dev/null || true
+        elif [ -s "$f" ]; then
+            # native answered with a JSON line, and there is no `back` in it.
+            printf 'none' > "$(back_source_file)" 2>/dev/null || true
+        fi
+    fi
+    [ -n "$i" ] || return 0
+    printf '%s %s' "$i" "${e:-?}"
+}
+
+# Open ONE overlay with a real touch and no help from the page. The map's FAB stack is
+# position:fixed to the bottom-right corner of the window in every layout (map.py
+# `.map-fab-stack`: bottom 18px + safe-area, right 14px + safe-area), and the 图层 circle is
+# its last child — so it can be aimed at from `wm size` and `wm density` alone. Two rungs,
+# because the safe-area inset the emulator's navigation bar contributes moves the circle up
+# by exactly its height: 64 dp above the bottom edge with a bar, 40 dp without.
+#
+# The locate circle above it is deliberately NOT in the ladder: tapping it raises the system
+# location dialog, which would sit on top of the app and make every later reading a lie.
+#
+# Never asserts and never fails — the caller decides from the shell's own back index whether
+# anything actually opened. On a debug build the caller has tap_element and should prefer it.
+tap_map_fab() {   # tap_map_fab <the back index before the tap>
+    local base="${1:-0}" size dens w h d dy x y st
+    size="$({ adbs shell wm size 2>/dev/null || true; } | tr -d '\r' \
+            | sed -n 's/.*: *\([0-9]\{2,\}\)x\([0-9]\{2,\}\).*/\1 \2/p' | tail -1)"
+    dens="$({ adbs shell wm density 2>/dev/null || true; } | tr -d '\r' \
+            | sed -n 's/.*: *\([0-9]\{2,\}\).*/\1/p' | tail -1)"
+    [ -n "$size" ] && [ -n "$dens" ] || return 0
+    read -r w h <<<"$size"
+    d="$dens"
+    for dy in 64 40; do
+        x=$(( w - 36 * d / 160 ))
+        y=$(( h - dy * d / 160 ))
+        adbs shell input tap "$x" "$y" >/dev/null 2>&1 || true
+        sleep 2
+        info "tapped the map FAB corner at ${x},${y} (${dy}dp above the bottom edge)"
+        # One rung is enough whenever it worked; the caller re-reads the index either way,
+        # so a second tap on an already-open popover is the only cost of guessing wrong.
+        st="$(back_state fabtry)"
+        [ -n "$st" ] || return 0            # no witness: nothing to iterate on
+        [ "${st%% *}" != "$base" ] && return 0
+    done
+}
+
+# The page's first-visit language chooser (#lang-gate) is a modal with a scrim, and on a
+# freshly installed APK it is up on the first load of every acceptance. It eats every tap
+# aimed at the page underneath while leaving those elements a perfectly real rect, so
+# tap_element "succeeds" and the thing it aimed at never opens — measured 2026-09-07, and it
+# is what made `verify-geometry`'s filter frame fail on foldcover and fold8inner60 against
+# BOTH the pending build and the live one (audit_outputs/2.2.0-fix/impl/android-back/).
+#
+# One blind tap at the middle of the window dismisses it: that is where the chooser's first
+# button (简体中文, the page's own default) sits. On any later run the same point is map,
+# where a tap opens a card at worst — so callers that care re-read their own state after.
+# Probe-free on purpose: this has to work on the release APK too.
+dismiss_first_run() {
+    local wsz ww wh
+    wsz="$({ adbs shell wm size 2>/dev/null || true; } | tr -d '\r' \
+           | sed -n 's/.*: *\([0-9]\{2,\}\)x\([0-9]\{2,\}\).*/\1 \2/p' | tail -1)"
+    [ -n "$wsz" ] || return 0
+    read -r ww wh <<<"$wsz"
+    adbs shell input tap $(( ww / 2 )) $(( wh * 42 / 100 )) >/dev/null 2>&1 || true
+    sleep 2
 }
 
 card_open() { page_bool 'document.getElementById("bs-sheet")&&document.getElementById("bs-sheet").classList.contains("bs-open")||/\bwb-detail-open\b/.test(document.body.className)'; }

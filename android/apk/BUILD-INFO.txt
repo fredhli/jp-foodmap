@@ -1,10 +1,10 @@
 jpfoodmap.apk
-  version   2.1.0 (versionCode 20100)
-  built     2026-09-06 19:45:30  (local time on the build box)
-  published 2026-09-06 22:37:22
+  version   2.2.0 (versionCode 20200)
+  built     2026-09-07 02:37:08  (local time on the build box)
+  published 2026-09-07 02:37:08
   variant   release (R8-minified, debug-signed)
   size      1.7MiB
-  sha256    72b4d656517956a32665a5cc97af406afa81822f1e86449ea5ca39a685f4dafe
+  sha256    4262baea3678b4253fedb5c2308dafa980222a7729e00b14afef7dc5021f3623
   from      /home/fred/.cache/jpfoodmap-android/app/build/outputs/apk/release/app-release.apk
 
 Debug-signed, sideload only. Install: open this file in the Dropbox app on the phone
