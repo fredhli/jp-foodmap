@@ -22,17 +22,33 @@ Deficits are recomputed live from tabelog.csv + the totals cache at
 data/cache/region_totals.json — refresh that cache via
 audit_main_meal_coverage.py if the region list has changed.
 
+--tokyo mode (Tokyo can't be topped up the normal way: the plain list caps
+at 60 pages = the top 1,200 by rating, and the original scrape already used
+all 60, so max(source_page)+1 = page 61 returns nothing). Instead of the
+plain list, --tokyo paginates Tabelog's own pre-filtered list —
+`/tokyo/rstLst/RC/{page}/` with dinner budget ¥3,000–¥20,000 and the RC
+("restaurant") category, which server-side drops ramen shops, cafés and the
+like. That list has its own, deeper pagination, so we start from --start-page
+(default 10, where the operator had already scrolled to) and walk onward.
+The same three keep-gates still apply as a safety net, and dedupe against the
+existing Tokyo rows means overlap with the original scrape is just skipped.
+The `/cn/` UI-language prefix is deliberately dropped: the genre gate matches
+Japanese genre tokens, so the list must come back in Japanese.
+
 Usage:
   uv run python src/tabelog/scrape/scrape_topup.py
   uv run python src/tabelog/scrape/scrape_topup.py tokyo nagano   # subset
   uv run python src/tabelog/scrape/scrape_topup.py --hard-cap 500
   uv run python src/tabelog/scrape/scrape_topup.py --dry-run
   uv run python src/tabelog/scrape/scrape_topup.py --no-translate
+  uv run python src/tabelog/scrape/scrape_topup.py --tokyo               # Tokyo, filtered list from page 10
+  uv run python src/tabelog/scrape/scrape_topup.py --tokyo --hard-cap 900   # fill the whole deficit in one run
 """
 
 import argparse
 import asyncio
 import csv
+import datetime
 import json
 import math
 import sys
@@ -65,6 +81,21 @@ MAIN_MEAL_RATIO = 0.008
 HARD_CAP_DEFAULT = 300
 CHEAP_EATS_THRESHOLD_YEN = 3000
 
+# --tokyo: Tabelog's own pre-filtered list. {region}/{page} are filled by
+# scrape_list_page; {svd} (a reservation-date form value) is filled at run
+# time. RC = the "restaurant" category (ramen / cafés / sweets shops sit in
+# other categories and never appear here); LstCos=3..LstCosT=10 with
+# RdoCosTp=2 = dinner budget ¥3,000-¥20,000; SrtT=rt = sort by rating.
+# svd/svps/svt ride along inertly because vac_net=0 turns the
+# seat-vacancy filter off — they are kept only so the URL matches the page
+# the operator validated by hand.
+TOKYO_LIST_TEMPLATE = (
+    "https://tabelog.com/{region}/rstLst/RC/{page}/"
+    "?LstCos=3&LstCosT=10&LstSmoking=0&RdoCosTp=2&SrtT=rt"
+    "&svd={svd}&svps=2&svt=1900&vac_net=0"
+)
+TOKYO_DEFAULT_START_PAGE = 10
+
 
 def _int_or_zero(v) -> int:
     try:
@@ -73,8 +104,8 @@ def _int_or_zero(v) -> int:
         return 0
 
 
-def _is_cheap_eats(row: dict) -> bool:
-    """Effective price (dinner first, lunch fallback) <= ¥3,000. Mirrors
+def _is_cheap_eats(row: dict, floor: int = CHEAP_EATS_THRESHOLD_YEN) -> bool:
+    """Effective price (dinner first, lunch fallback) <= floor. Mirrors
     map.price_bucket()'s convention — dinner is the primary signal of how
     expensive a sit-down meal here actually is."""
     n = row.get("dinner_upper")
@@ -83,7 +114,7 @@ def _is_cheap_eats(row: dict) -> bool:
     if n is None or n == "":
         return False
     try:
-        return int(n) <= CHEAP_EATS_THRESHOLD_YEN
+        return int(n) <= floor
     except (TypeError, ValueError):
         return False
 
@@ -118,18 +149,29 @@ async def collect_topup(
     start_page: int,
     target: int,
     seen_urls: set[str],
+    url_template: str | None = None,
+    cheap_floor: int = CHEAP_EATS_THRESHOLD_YEN,
 ) -> list[dict]:
     """Paginate from start_page. Keep a card iff:
        (a) detail_url not already in seen_urls,
        (b) neither price >= ¥20,000 (drop fine-dining),
-       (c) effective price > ¥3,000 (drop cheap eats),
+       (c) effective price > cheap_floor (drop cheap eats),
        (d) its genre bucket is in MEAL_GROUPS["正餐"].
-    Stop at `target` kept rows, or when the list is exhausted."""
+    Stop at `target` kept rows, or when the list is exhausted.
+
+    url_template, when given, replaces the plain rating-sorted list with a
+    server-side-filtered one (the --tokyo path). The four gates still run:
+    Tabelog's filters and ours overlap but aren't identical, so the gates
+    stay as a net and the per-page log shows how often each one fires."""
     kept: list[dict] = []
     page_num = start_page
     while len(kept) < target:
         try:
-            rows, _total = await scrape_list_page(session, region, page_num)
+            if url_template:
+                rows, _total = await scrape_list_page(
+                    session, region, page_num, url_template)
+            else:
+                rows, _total = await scrape_list_page(session, region, page_num)
         except Exception as e:
             print(f"[{region} p{page_num}] gave up: {e}")
             break
@@ -148,7 +190,7 @@ async def collect_topup(
             if _is_fine_dine(row):
                 p_fd += 1
                 continue
-            if _is_cheap_eats(row):
+            if _is_cheap_eats(row, cheap_floor):
                 p_cheap += 1
                 continue
             if not is_main_meal(row.get("genre") or ""):
@@ -170,7 +212,7 @@ async def collect_topup(
         page_num += 1
 
     print(f"[{region}] topup done: kept {len(kept)} main-meal rows "
-          f"(all >¥{CHEAP_EATS_THRESHOLD_YEN:,} and <¥{FINE_DINE_THRESHOLD_YEN:,})")
+          f"(all >¥{cheap_floor:,} and <¥{FINE_DINE_THRESHOLD_YEN:,})")
     return kept
 
 
@@ -212,6 +254,47 @@ def plan_topup(
     return plans
 
 
+def plan_tokyo(
+    stats: dict[str, dict[str, int]],
+    totals: dict[str, int],
+    existing: dict[str, dict],
+    hard_cap: int,
+    ratio: float,
+    start_page: int,
+    url_template: str,
+    cheap_floor: int,
+) -> list[dict]:
+    """One plan for Tokyo off the filtered list. Same deficit math as
+    plan_topup, but start_page comes from the operator (the filtered list has
+    its own pagination, unrelated to the plain list's max source_page) and the
+    filtered url_template + cheap_floor ride on the plan."""
+    region = "tokyo"
+    s = stats.get(region)
+    total = totals.get(region)
+    if s is None:
+        print(f"[{region}] no rows in tabelog.csv; nothing to do")
+        return []
+    if total is None:
+        print(f"[{region}] no total in cache; run audit_main_meal_coverage.py")
+        return []
+    threshold = math.ceil(total * ratio)
+    deficit = threshold - s["main_meal"]
+    if deficit <= 0:
+        print(f"[{region}] already at threshold "
+              f"(main={s['main_meal']} >= {threshold}); nothing to do")
+        return []
+    return [{
+        "region": region,
+        "total": total,
+        "deficit": deficit,
+        "target": min(deficit, hard_cap),
+        "start_page": start_page,
+        "seen_urls": existing.get(region, {}).get("urls", set()),
+        "url_template": url_template,
+        "cheap_floor": cheap_floor,
+    }]
+
+
 def print_plan(plans: list[dict], hard_cap: int) -> None:
     if not plans:
         return
@@ -251,6 +334,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run", action="store_true",
         help="print the per-region plan and exit without scraping",
     )
+    ap.add_argument(
+        "--tokyo", action="store_true",
+        help="Tokyo-only, off Tabelog's own filtered list (dinner "
+             "¥1,000-¥20,000, RC restaurant category). Use this because the "
+             "plain list caps at 60 pages, which Tokyo already exhausted.",
+    )
+    ap.add_argument(
+        "--start-page", type=int, default=TOKYO_DEFAULT_START_PAGE,
+        help=f"--tokyo only: first page of the filtered list to fetch "
+             f"(default: {TOKYO_DEFAULT_START_PAGE}). Earlier pages are the "
+             f"highest-rated and mostly already collected; dedupe skips overlap.",
+    )
+    ap.add_argument(
+        "--cheap-floor", type=int, default=CHEAP_EATS_THRESHOLD_YEN,
+        help=f"drop cards whose effective price <= this (default: "
+             f"{CHEAP_EATS_THRESHOLD_YEN}). --tokyo's URL already floors "
+             f"dinner at ¥3,000, matching this default.",
+    )
+    ap.add_argument(
+        "--svd", type=str, default=None,
+        help="--tokyo only: the svd reservation-date form value in the URL "
+             "(YYYYMMDD). Inert (vac_net=0) but kept to match the hand-checked "
+             "page; defaults to today.",
+    )
     return ap.parse_args(argv)
 
 
@@ -265,7 +372,19 @@ async def amain(argv: list[str] | None = None) -> None:
     totals = load_totals_cache()
     only = [r.strip().lower() for r in args.regions] if args.regions else None
 
-    plans = plan_topup(stats, totals, existing, only, args.hard_cap, args.ratio)
+    if args.tokyo:
+        if only and only != ["tokyo"]:
+            print(f"--tokyo scrapes tokyo only; ignoring extra region args {only}")
+        svd = args.svd or datetime.date.today().strftime("%Y%m%d")
+        tokyo_template = TOKYO_LIST_TEMPLATE.replace("{svd}", svd)
+        print(f"--tokyo: filtered list, start page {args.start_page}, "
+              f"cheap-floor ¥{args.cheap_floor:,}, svd={svd}")
+        plans = plan_tokyo(
+            stats, totals, existing, args.hard_cap, args.ratio,
+            args.start_page, tokyo_template, args.cheap_floor,
+        )
+    else:
+        plans = plan_topup(stats, totals, existing, only, args.hard_cap, args.ratio)
     if not plans:
         print("\nNothing to top up.")
         return
@@ -292,6 +411,8 @@ async def amain(argv: list[str] | None = None) -> None:
                 plan["start_page"],
                 plan["target"],
                 plan["seen_urls"],
+                url_template=plan.get("url_template"),
+                cheap_floor=plan.get("cheap_floor", CHEAP_EATS_THRESHOLD_YEN),
             )
             all_kept.extend(kept)
             write_intermediate(all_kept, intermediate)

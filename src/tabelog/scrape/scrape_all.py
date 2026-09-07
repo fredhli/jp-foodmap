@@ -305,8 +305,16 @@ def _is_session_dead(exc: Exception) -> bool:
     ))
 
 
-async def scrape_list_page(session: Session, region: str, page_num: int) -> tuple[list[dict], int | None]:
-    url = BASE_TEMPLATE.format(region=region, page=page_num)
+async def scrape_list_page(
+    session: Session,
+    region: str,
+    page_num: int,
+    url_template: str = BASE_TEMPLATE,
+) -> tuple[list[dict], int | None]:
+    # url_template gets {region} and {page} filled in. Defaults to the plain
+    # rating-sorted list; scrape_topup's --tokyo path passes a template that
+    # carries Tabelog's own server-side price / category filters instead.
+    url = url_template.format(region=region, page=page_num)
     print(f"[list page {page_num}] GET {url}")
     last_err: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):

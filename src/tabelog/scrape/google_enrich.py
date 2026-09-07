@@ -649,6 +649,16 @@ def main() -> None:
     ap.add_argument("--region", nargs="+", metavar="SLUG",
                     help="only process these region slug(s), "
                          "e.g. --region osaka hyogo okayama tottori")
+    ap.add_argument("--tokyo", action="store_true",
+                    help="shorthand for --region tokyo: work through every "
+                         "Tokyo row that has no verdict yet before touching "
+                         "any other region (the 2026-09 top-up batch)")
+    ap.add_argument("--allow-ungeocoded", action="store_true",
+                    help="proceed even if some rows still lack GSI lat/lon. "
+                         "Off by default because the match score needs the "
+                         "GSI point for its distance term; without it most "
+                         "rows land in 'review' and the paid call is wasted. "
+                         "Run map.py first instead.")
     ap.add_argument("--limit", type=int, default=4800,
                     help="max NEW restaurants to process this run (monthly batch)")
     ap.add_argument("--qps", type=float, default=DEFAULT_QPS,
@@ -660,6 +670,8 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="show which rows would be processed and exit")
     args = ap.parse_args()
+    if args.tokyo and not args.region:
+        args.region = ["tokyo"]
 
     if args.rescore:
         rescore()
@@ -679,6 +691,17 @@ def main() -> None:
     print(f"corpus: {len(rows)} rows"
           + (f" (regions={','.join(args.region)})" if args.region else "")
           + f" | already done: {len(done)} | this run: {len(todo)} (limit {args.limit})")
+    # The GSI point is the distance term of the match score (see decide()):
+    # a row that map.py has not geocoded yet can only be accepted on a strong
+    # name match, so most of them come back 'review' and the call is spent
+    # for nothing. Freshly scraped rows (scrape_all / scrape_topup) always
+    # start without lat/lon — run map.py once before paying for them.
+    ungeocoded = [r for r in todo
+                  if not (r.get("lat") or "").strip() or not (r.get("lon") or "").strip()]
+    if ungeocoded:
+        print(f"  WARNING: {len(ungeocoded)} of {len(todo)} rows have no GSI lat/lon yet"
+              " (map.py has not geocoded them). e.g. "
+              + "; ".join((r.get("name") or "?") for r in ungeocoded[:3]))
     if args.dry_run:
         for r in todo[:20]:
             print("  would do:", r.get("name"), "|", r.get("address"))
@@ -688,6 +711,12 @@ def main() -> None:
     if not todo:
         print("nothing to do.")
         return
+    if ungeocoded and not args.allow_ungeocoded:
+        print("ERROR: refusing to spend API calls on ungeocoded rows. Run\n"
+              "    uv run python src/tabelog/scrape/map.py\n"
+              "first (fill-empty mode geocodes them and writes lat/lon back into "
+              "tabelog.csv), or pass --allow-ungeocoded to override.")
+        sys.exit(2)
 
     key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
     if not key:
