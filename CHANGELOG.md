@@ -13,6 +13,40 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-07
+
+UI release answering the 2.2.0 bug report
+(`audit_outputs/2.2.0_BUG_REPORT/`). Filtering moves into the left column,
+the restaurant card loses its half-open step, and the narrow layouts stop
+overflowing.
+
+### Changed
+
+- **W-1** — Cluster bubbles go back to blue (soft, high-transparency
+  `rgba(59,130,246,…)` with a `#1e3a8a` count). The neutral blue-grey read as
+  "unavailable / no price". Map and the 图例 swatch move together.
+- **W-2 / W-3 / W-7** — 筛选 is now the third tab in the left column, styled
+  exactly like 结果 and 收藏, on phone, mid and wide alike. The bottom sheet
+  and the top-bar popover no longer host the filter panel; the 筛选 FAB and
+  the top-bar 筛选 button both just switch to that tab.
+- **W-4** — The collapsed rail shows both numbers: 符合筛选 and 屏幕内.
+- **W-5** — Above 500 matches the card's ↑↓ stepper greys out
+  (`aria-disabled`, still clickable) and a tap explains that the filters need
+  narrowing first.
+- **W-6** — The left column can be collapsed in mid as well as wide.
+- **W-8** — The card's half-open "上滑查看详情" state is gone: it opens full
+  height, and a swipe / Escape / map tap closes it in one step. On a phone,
+  closing the card pans the map back to the restaurant that was open.
+- **W-9** — iOS width overflow in the phone drawer: the count and summary
+  rows follow the container width instead of a baked-in 319px.
+- **A-1** — Mid layout: the search pill flexes and the buttons beside it no
+  longer get pushed off; at ≥900px the brand name and full-size logo return.
+- **A-2** — `WB_BP_SPLIT` and `WB_BP_MID` are both 750px, so the split layout
+  is unreachable and a Fold inner screen at 60% width gets the phone design.
+- **Wording** — 命中 / 视野内 → 符合筛选 / 在屏幕范围内; the 聚合圆圈 legend
+  now says the cluster breaks apart as you zoom in; the 景点 layer row counts
+  the user's own landmarks beside the built-in ones.
+
 ## [2.2.0] - 2026-09-07
 
 Performance release. Nothing visible changed; the map should pan the way it

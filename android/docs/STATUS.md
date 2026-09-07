@@ -1,4 +1,4 @@
-# jpfoodmap Android APP 2.2.0 · 状态（STATUS）
+# jpfoodmap Android APP 2.3.0 · 状态（STATUS）
 
 每个任务完成后在下面追加自己的一段（**只追加，不改别人的段**）。T8 在集成时汇总成给主人的
 版本。格式：任务 key、状态、实际做了什么、偏离计划的地方、留给别人的东西、真机待验项。

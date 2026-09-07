@@ -25,8 +25,8 @@ android {
         // major*10000 + minor*100 + patch, so the code can be read back off the name and
         // is strictly increasing for as long as the version number is. 2.2.0 = 20200, and
         // it moves with the site's APP_VERSION (docs/STANDARDS.md §14.1/§14.8).
-        versionCode = 20200
-        versionName = "2.2.0"
+        versionCode = 20300
+        versionName = "2.3.0"
     }
 
     buildFeatures {

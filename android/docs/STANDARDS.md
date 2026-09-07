@@ -1,4 +1,4 @@
-# jpfoodmap Android APP 2.2.0 · 标准（STANDARDS）
+# jpfoodmap Android APP 2.3.0 · 标准（STANDARDS）
 
 > 给主人的 10 行版本：这份文件规定「APP 做成什么样才算合格」。每一条都带**验收方法**——
 > 要么是模拟器上能跑的命令，要么是真机上你自己按一下就能确认的动作。检查员按这里逐条打勾；
@@ -51,7 +51,7 @@
 | # | 规则 | 验收 |
 |---|---|---|
 | 2.1 | **CSS 宽度 = dp 宽度**：`useWideViewPort=true`、`loadWithOverviewMode=false`、尊重页面 `<meta viewport>`（`width=device-width, initial-scale=1, viewport-fit=cover`）。 | 诊断 JSON：cover `innerWidth=475`；inner 横 `932`、竖 `704`；split60 竖 `591`、横 `688`（`emu.sh rotate landscape`；窗口 689 dp，布局视口 688 CSS px——1808/2.625=688.76，两个数并存是对的）。`dpr=2.625`。 |
-| 2.2 | 三几何各自的页面布局由**网站断点**（480/700/1100 + 容器查询）决定；壳不注入任何布局 CSS。 | 三几何截图各一张（首页、打开一张餐厅卡、打开筛选面板），与同宽度 Chrome 截图目测一致。 |
+| 2.2 | 三几何各自的页面布局由**网站断点**（480/750/1100 + 容器查询；750 起 2.3.0）决定；壳不注入任何布局 CSS。`fold8inner60`（591/688 CSS px）自 2.3.0 起落在 phone 档，筛选并入左栏。 | 三几何截图各一张（首页、打开一张餐厅卡、打开筛选面板），与同宽度 Chrome 截图目测一致。 |
 | 2.3 | **多窗口**：`resizeableActivity=true`、不锁方向、`configChanges` 覆盖 `orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|fontScale|locale|layoutDirection`；分屏拖动过程中页面持续重排，不重载。 | fold8inner60 AVD：`emu.sh rotate landscape` ↔ `portrait` 各一次，诊断 `pageLoads` 不变、`bootId` 不变、`activityCreates=1`。 |
 | 2.4 | **字号**：`textZoom = 系统 fontScale × 100`（「跟随系统」，默认），或固定 90/95/100/115/130（设置页）。WebView 默认**不**跟随系统字号，壳必须乘进去。 | `adb shell settings put system font_scale 1.3` → 诊断 `textZoom=130`；设置页选 100 → `textZoom=100`；恢复 `font_scale 1.0`。 |
 | 2.5 | **键盘**：WebView Chromium ≥144 自己收缩 visual viewport（`imeMode=WEBVIEW`）；旧版走壳的原生 padding。 | 诊断 `imeMode=WEBVIEW`（模拟器 WebView 145、真机 151）；搜索框获焦时截图，输入框在键盘之上。 |
@@ -186,7 +186,7 @@
 
 | # | 规则 | 验收 |
 |---|---|---|
-| 14.1 | `versionName = "2.2.0"`，`versionCode = 20200`（= major×10000 + minor×100 + patch；与网站 `APP_VERSION` 同步更新；2.0.0 = 20000）。 | `aapt2 dump badging` |
+| 14.1 | `versionName = "2.3.0"`，`versionCode = 20300`（= major×10000 + minor×100 + patch；与网站 `APP_VERSION` 同步更新；2.0.0 = 20000）。 | `aapt2 dump badging` |
 | 14.2 | `applicationId = com.fredhli.jpfoodmap`（debug 加 `.debug`）；**永久身份**，不改。 | badging |
 | 14.3 | 签名：release 用 `~/.android/debug.keystore`（alias `androiddebugkey`，storepass `android`），与 dashboard 同一证书（升级路径 + assetlinks 都钉在它上；备份责任在主人，见 `dashboard/deploy/SIGNING-KEY.md`）。 | `apksigner verify --print-certs android/apk/jpfoodmap.apk` SHA-256 = `78:9F:E3:5F:02:40:43:2A:CF:C7:E1:71:50:1B:94:1C:29:B9:91:55:D3:58:CF:33:9C:78:AE:C2:10:16:85:D1` |
 | 14.4 | 构建：`android/build.sh`（rsync → `$HOME/.cache/jpfoodmap-android` → `./gradlew assembleRelease`，R8 `-dontobfuscate` + shrinkResources → 原子拷回 `android/apk/jpfoodmap.apk` + `BUILD-INFO.txt`）。Gradle **从不**在 `/mnt/d` 运行。 | `find android -name build -o -name .gradle` 为空；`BUILD-INFO.txt` 有 built/published/size/sha256。 |

@@ -186,7 +186,8 @@ _CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 # translatable UI copy — strip them or every one of them is reported as a
 # missing EN/JA translation.
 _COUNT_TPL_LITERAL_RE = re.compile(
-    r"var (?:COUNT_TPL|FAV_TPL|FOOT_TPL|FOOT_BTN_TPL)\s*=\s*[^;]+;"
+    r"var (?:COUNT_TPL|FAV_TPL|FOOT_TPL|FOOT_BTN_TPL|LANDMARK_TPL|NAVCAP_TPL)"
+    r"\s*=\s*[^;]+;"
 )
 
 
@@ -2149,8 +2150,10 @@ def build_filter_panel_html(
      updateFabAria() writes an aria-label that carries the count. -->
 <button id="ff-fab" type="button" title="筛选">
   <span class="ff-fab-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
-  <!-- M-022: 命中 = full-corpus match count, 视野内 = what is on screen. -->
-  <span class="ff-fab-count"><span class="ff-fab-lbl">命中</span><b class="ff-count">–</b><span class="ff-fab-dot">·</span><span class="ff-fab-lbl ff-fab-lbl2">视野内</span><span class="ff-inview">–</span></span>
+  <!-- M-022: 符合筛选 = full-corpus match count, 在屏幕范围内 = what is on
+       screen. 2.3.0 wording: the old two-character labels read as
+       jargon. -->
+  <span class="ff-fab-count"><span class="ff-fab-lbl">符合筛选</span><b class="ff-count">–</b><span class="ff-fab-dot">·</span><span class="ff-fab-lbl ff-fab-lbl2">在屏幕范围内</span><span class="ff-inview">–</span></span>
 </button>
 <div id="ff-backdrop"></div>
 <div id="ff-sheet" role="dialog" aria-modal="true" aria-hidden="true"
@@ -2171,7 +2174,7 @@ def build_filter_panel_html(
            ones setCountText() writes, so nothing else needs rewiring; the
            denominator (.ff-total) stays outside, since C1 makes it the
            *region* total and it is not part of the sentence. -->
-      <span id="ff-head-counts">命中 <b class="ff-count">–</b> · 视野内 <span class="ff-inview">–</span></span>&nbsp;/&nbsp;<span class="ff-total">–</span>
+      <span id="ff-head-counts">符合筛选 <b class="ff-count">–</b> · 在屏幕范围内 <span class="ff-inview">–</span></span>&nbsp;/&nbsp;<span class="ff-total">–</span>
     </span>
     <!-- H2 / M-074: the panel used to be closable only by the grip swipe,
          the backdrop, Esc, or the FAB it hid. -->
@@ -2363,7 +2366,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 # DATA_SCRAPED_AT is when the Tabelog corpus was last pulled. It is a
 # hand-written constant on purpose: data/tabelog/tabelog.csv has no
 # scraped_at column yet (the build log says "no scraped_at timestamps yet"),
@@ -2876,7 +2879,10 @@ MAP_FAB_HTML = """
               aria-pressed="true" title="景点锚点">
         <span class="map-fab-ic">🗾</span>
         <span class="lp-txt"><span class="map-fab-label">景点</span>
-          <span class="lp-sub"><span id="lp-n-builtin"></span> 个内置地标</span></span>
+          <!-- Wording (2.3.0): filled by updateLandmarkCount() from
+               LANDMARK_TPL — ja puts both numbers after their labels, so
+               this cannot be static text with a number span inside it. -->
+          <span class="lp-sub" id="lp-n-builtin"></span></span>
         <span class="lp-sw" aria-hidden="true"></span>
       </button>
       <button id="fab-bookmarks" class="map-fab active" type="button"
@@ -2976,11 +2982,14 @@ SEARCH_BOX_HTML = """
      the bottom-left corner is #ff-fab's, and the old ⭐ pill down there was
      invisible enough that the owner never found it. 44px hit area inside a
      44px capsule, so nothing about the capsule's height changes.
-     Keyed off the media query, not a body class: below 520px wbModeFor()
+     Keyed off the media query, not a body class: below WB_BP_MID wbModeFor()
      always answers 'phone', and a class would flash the ≡ on a desktop for
-     the one frame before wbApplyMode() runs. */
+     the one frame before wbApplyMode() runs. A-2 (2.3.0): that threshold
+     moved 520 -> 750 when split mode was retired, so this query moves with
+     it — 519 would have left the Fold's inner screen (591 / 616) on the
+     phone layout with no way into the drawer at all. */
   #ss-drawer-btn { display: none; }
-  @media (max-width: 519px) {
+  @media (max-width: 749px) {
     #ss-icon { display: none; }
     #ss-drawer-btn {
       display: inline-flex; align-items: center; justify-content: center;
@@ -3593,20 +3602,22 @@ ONBOARD_HTML = """
      MarkerCluster.Default.css paints small / medium / large green, yellow
      and orange — a third colour scale on top of the price halos (green→red)
      and the filter chips, saying "many restaurants" in exactly the hue that
-     everywhere else on this page means "expensive". One neutral blue-grey
-     for all three sizes; the number inside already says how many. The
+     everywhere else on this page means "expensive". W-1 (2.3.0): the
+     neutral blue-grey that replaced them read as "unavailable / no price",
+     so all three sizes are one soft, high-transparency blue instead; the
+     number inside already says how many. The
      selectors carry an extra class (0,2,0) so they outrank the vendor
      sheet's (0,1,0) — no !important needed, and none is used. */
   .leaflet-pane .marker-cluster-small,
   .leaflet-pane .marker-cluster-medium,
   .leaflet-pane .marker-cluster-large {
-    background-color: rgba(91, 119, 153, 0.11);
+    background-color: rgba(59, 130, 246, 0.10);
   }
   .leaflet-pane .marker-cluster-small div,
   .leaflet-pane .marker-cluster-medium div,
   .leaflet-pane .marker-cluster-large div {
-    background-color: rgba(91, 119, 153, 0.28);
-    color: #172033;
+    background-color: rgba(59, 130, 246, 0.22);
+    color: #1e3a8a;
     font-weight: 700;
   }
 
@@ -3650,6 +3661,19 @@ ONBOARD_HTML = """
   @media (max-width: 480px) {
     #intro-bar { right: calc(var(--chrome-inset) + 44px); }
     #intro-bar .ib-txt { flex-basis: 120px; }
+  }
+  /* A-2 (2.3.0): the phone layout reaches 749px now. Above 480px #ss-box is
+     a CENTRED clamp() box rather than the full-bleed one the rule above
+     assumes, so a symmetric inset lands the bar 100+px to the right of the
+     capsule on a 591 / 616px Fold screen. Mirror #ss-box's own width formula
+     and take the same 44px avatar column off the right edge. */
+  @media (min-width: 481px) and (max-width: 749px) {
+    #intro-bar {
+      --ss-w: min(calc(100vw - 2 * var(--chrome-inset)),
+                  clamp(380px, 64vw, 560px));
+      left: calc(50% - var(--ss-w) / 2);
+      right: calc(50% - var(--ss-w) / 2 + 44px);
+    }
   }
   #intro-bar .ib-act {
     flex: 0 0 auto;
@@ -3728,12 +3752,12 @@ ONBOARD_HTML = """
   }
   .ob-cluster {
     width: 34px; height: 34px; border-radius: 50%;
-    background: rgba(91, 119, 153, 0.11);
+    background: rgba(59, 130, 246, 0.10);
     display: inline-flex; align-items: center; justify-content: center;
   }
   .ob-cluster b {
     width: 26px; height: 26px; border-radius: 50%;
-    background: rgba(91, 119, 153, 0.28); color: #172033;
+    background: rgba(59, 130, 246, 0.22); color: #1e3a8a;
     display: inline-flex; align-items: center; justify-content: center;
     font-size: 12px; font-weight: 700;
   }
@@ -3907,7 +3931,10 @@ ONBOARD_HTML = """
     <h4>聚合圆圈</h4>
     <div class="ob-rows">
       <span class="ob-cluster" aria-hidden="true"><b lang="en">24</b></span>
-      <span>圆里的数字是这一片符合当前筛选条件的餐厅数量</span>
+      <!-- W-1 (2.3.0): the second clause is its own CJK run on its own
+           line — a full-width ，between them is not part of a run and would
+           survive untranslated into the EN page (same reason as 弃用 below). -->
+      <span>圆里的数字是这一片符合当前筛选条件的餐厅数量<br><span class="ob-sub">放大地图聚合就会散开</span></span>
     </div>
   </div>
   <div class="ob-sec">
@@ -4114,18 +4141,30 @@ PHONE_DRAWER_HTML = """
   #wb-fav-close:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
   /* The × overlaps the tab row, so give the head some room for it. */
   body.wb-fav-open #wb-left-head { padding-top: 4px; }
-  /* W-6: 结果 / 收藏 / 筛选 read as three tabs in the drawer. The third one
-     is the same .wb-filter-btn every other mode uses (one handler, one
-     count) — only its skin changes, and only inside the drawer. */
-  body.wb-fav-open #wb-left-head .wb-filter-btn {
-    margin-left: 0;
-    /* min-height stays .wb-top-btn's 36px — one pixel off .wb-tab's 35, so
-       the three sit on the same baseline. */
-    padding: 8px; gap: 4px;
-    border: none; background: none; border-radius: 6px;
-    font: 700 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #6b7280;
+  /* W-2 (2.3.0): 结果 / 收藏 / 筛选 are three real .wb-tab buttons now, in
+     every mode — the drawer's third tab used to be a re-skinned
+     .wb-top-btn, which is exactly why iOS rendered it at a different size
+     and weight. No per-mode skin left to apply here.
+     W-9: the drawer is min(86vw,380px) wide, so nothing inside it may carry
+     a fixed width; the head is allowed to wrap rather than overflow. */
+  body.wb-fav-open #wb-left-head { max-width: 100%; box-sizing: border-box; }
+  body.wb-fav-open .wb-tabs { flex-wrap: wrap; }
+  /* W-9 (2.3.0): iOS measured the two count sentences at a fixed ~319px
+     whatever the column was actually doing, and that width is what pushed
+     the 收藏 tab's tool row past the drawer's right edge. Nothing inside the
+     column is allowed to size itself: every one of these boxes takes the
+     container's width and wraps rather than overflowing it. Injected from
+     PHONE_DRAWER_HTML, which is added last, so it outranks the identical
+     specificity in WORKBENCH_HTML / FAV_TAB_HTML. */
+  #wb-left { max-width: 100vw; }
+  #wb-left-head, #wb-left .wb-counts, #wb-left #fv-head,
+  #wb-left .fv-sum, #wb-left .fv-tools, #wb-left #ff-sheet-content {
+    width: auto; max-width: 100%; box-sizing: border-box;
   }
+  #wb-left .wb-counts, #wb-left .fv-sum { overflow-wrap: anywhere; }
+  /* Same reason, the buttons: a 4-character label must be allowed to shrink
+     its row rather than force one 319px-wide line. */
+  #wb-left .fv-tools > * { max-width: 100%; }
 </style>
 <div id="wb-fav-backdrop"></div>
 """
@@ -5137,10 +5176,15 @@ MOBILE_UX_ASSETS = """
   .rst-prev::after, .rst-next::after {
     content: ''; position: absolute; inset: -8px; }
   .rst-prev:disabled, .rst-next:disabled { opacity: 0.4; cursor: default; }
+  /* W-5: over 500 matches the stepper is greyed but still clickable — the
+     click is what fires the "narrow your filters" hint. */
+  .rst-prev[aria-disabled="true"],
+  .rst-next[aria-disabled="true"] { opacity: 0.4; }
+  .rst-nav-capped .rst-nav-pos { opacity: 0.55; }
   .rst-prev:active, .rst-next:active { background: #f3f4f6; }
   @media (hover: hover) and (pointer: fine) {
-    .rst-prev:not(:disabled):hover,
-    .rst-next:not(:disabled):hover { background: #f3f4f6; }
+    .rst-prev:not(:disabled):not([aria-disabled="true"]):hover,
+    .rst-next:not(:disabled):not([aria-disabled="true"]):hover { background: #f3f4f6; }
   }
   /* D1: subtitle line — cuisine bucket · nearest station · walking minutes.
      Everything a "is this even the right kind of place" glance needs, on
@@ -5927,10 +5971,19 @@ WORKBENCH_HTML = """
   }
   #wb-brand img.emoji-img { width: 18px; height: 18px; }
   body.wb-mid #wb-brand .wb-brand-t { display: none; }
-  /* W-9: the search slot is the only flex:1 child, so every chip added to
-     the bar comes out of its width. 120px is a floor, not a size — below it
-     the input stops being usable and the bar should wrap the chips instead. */
-  #wb-top-search { flex: 1 1 auto; min-width: 120px; display: flex; }
+  /* A-1 (2.3.0): the Fold's inner screen runs mid at 932px and has room for
+     the wordmark; only the genuinely narrow mid widths drop it. */
+  @media (min-width: 900px) {
+    body.wb-mid #wb-brand .wb-brand-t { display: inline; }
+  }
+  /* A-1 (2.3.0): `flex: 1 1 auto` takes its basis from the CONTENT, and
+     #ss-box's content (a 560px-max capsule plus the ≡ and the clear button)
+     is wider than the slack in a 932px bar — so the search capsule grew past
+     its share and pushed 📍/筛选/🌐/同步 off the right edge. `1 1 0` makes
+     the slot take only what is left over, and min-width:0 lets it shrink
+     below the input's intrinsic width instead of overflowing. Every other
+     child is flex:0 0 auto (they all carry flex-shrink:0 already). */
+  #wb-top-search { flex: 1 1 0; min-width: 0; display: flex; }
   /* A2: the search box is the SAME element as the floating one —
      wbApplyMode() appendChild()s it into the slot, so every listener, the
      dropdown and the observers on #ss-list keep working untouched. */
@@ -6067,6 +6120,11 @@ WORKBENCH_HTML = """
   body.wb-wide.wb-left-collapsed #wb-left {
     width: 344px; transform: translateX(-100%); pointer-events: none;
   }
+  /* W-6 (2.3.0): the collapse button is no longer wide-only, so mid needs
+     the same rule keyed off the user's class instead of .wb-detail-open. */
+  body.wb-mid.wb-left-collapsed #wb-left {
+    width: 320px; transform: translateX(-100%); pointer-events: none;
+  }
   body.wb-split #wb-left {
     display: flex;
     left: 0; right: 0; bottom: 0; height: var(--wb-bottom);
@@ -6100,7 +6158,10 @@ WORKBENCH_HTML = """
     background: none; color: #9ca3af; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  body.wb-wide #wb-left-collapse { display: inline-flex; }
+  /* W-6 (2.3.0): mid too. Below 750px there is no column to collapse. */
+  body.wb-mid #wb-left-collapse, body.wb-wide #wb-left-collapse {
+    display: inline-flex;
+  }
   @media (hover: hover) and (pointer: fine) {
     #wb-left-collapse:hover { background: #f3f4f6; color: #374151; }
   }
@@ -6129,6 +6190,7 @@ WORKBENCH_HTML = """
 
   /* ---------- icon rail: mid with a card open, wide when collapsed ------- */
   body.wb-mid.wb-detail-open #wb-rail,
+  body.wb-mid.wb-left-collapsed #wb-rail,
   body.wb-wide.wb-left-collapsed #wb-rail {
     display: flex;
     position: fixed; top: var(--wb-top); left: 0; bottom: 0; width: 58px;
@@ -6155,6 +6217,12 @@ WORKBENCH_HTML = """
   .wb-rail-n b { display: block; font-size: 14px; color: #2563eb;
                  font-variant-numeric: tabular-nums; }
   .wb-rail-n span { font-size: 11px; color: #9ca3af; }
+  /* W-4 (2.3.0): the second number. Grey rather than blue — "how many of
+     the matches are on screen right now" is context, not the headline. */
+  .wb-rail-m { text-align: center; line-height: 1.15; padding: 0 0 2px; }
+  .wb-rail-m b { display: block; font-size: 13px; color: #6b7280;
+                 font-weight: 700; font-variant-numeric: tabular-nums; }
+  .wb-rail-m span { font-size: 11px; color: #9ca3af; }
 
   /* ---------- detail column ---------- */
   #wb-detail {
@@ -6227,6 +6295,28 @@ WORKBENCH_HTML = """
   #wb-filter-pop.no-anim { transition: none !important; }
   #wb-filter-pop > #ff-sheet-content { flex: 1 1 auto; min-height: 0;
                                        padding-top: 10px; }
+
+  /* ---------- W-7 (2.3.0): the filter panel as the third tab ---------- */
+  /* One host, every mode. #wb-fav / the three result-list slots and this one
+     are mutually exclusive; favApplyTab() flips the classes. */
+  #wb-filter-host { display: none; }
+  #wb-filter-host.on {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+  }
+  /* The column is 320-380px wide, not a 640px popover: trim the sheet's
+     16px gutters so the genre rows keep their two columns, and let the
+     sticky head sit right under the tab row. */
+  #wb-filter-host > #ff-sheet-content {
+    flex: 1 1 auto; min-height: 0; padding: 6px 12px 16px;
+  }
+  /* The count badge on the 筛选 tab. Same treatment .wb-tab-n gets on 收藏
+     so the three tabs read as one set. */
+  .wb-tab .wb-filter-n { margin-left: 4px; font-weight: 700; }
+  /* The filter panel carries the very same sentence in its own sticky head
+     (#ff-head-counts), so showing .wb-counts as well stacks two identical
+     lines. favApplyTab() sets the class; the node itself stays in the DOM
+     because setCountText() / renderCountSentence() still write to it. */
+  #wb-left-head.wb-head-filter .wb-counts { display: none; }
 
   /* ---------- offsets for fixed chrome this block does not own ---------- */
   /* The bottom sheets are the phone/split presentation; on mid/wide the same
@@ -6341,11 +6431,16 @@ WORKBENCH_HTML = """
            favSyncTab() and therefore needs no translation. -->
       <button id="wb-tab-fav" class="wb-tab" type="button"
               role="tab" aria-selected="false" aria-controls="wb-fav">收藏<b class="wb-tab-n"></b></button>
-      <button class="wb-top-btn wb-filter-btn" type="button">
-        <span>筛选</span><b class="wb-filter-n"></b>
-      </button>
-      <!-- W-3: wide-only. Collapses the column to #wb-rail, which keeps the
-           match count on screen and offers the ☰ that brings it back. -->
+      <!-- W-7 (2.3.0): 筛选 is the THIRD tab, identical in every mode — same
+           font, size and underline as 结果 / 收藏. The panel body is the very
+           same #ff-sheet-content node, relocated into #wb-filter-host by
+           wbRelocate(); #ff-sheet and #wb-filter-pop keep their shells (so
+           every selector that scopes to them still parses) but are never
+           opened again. -->
+      <button id="wb-tab-filter" class="wb-tab" type="button"
+              role="tab" aria-selected="false" aria-controls="wb-filter-host">筛选<b class="wb-filter-n"></b></button>
+      <!-- W-6 (2.3.0): mid AND wide. Collapses the column to #wb-rail, which
+           keeps both counts on screen and offers the ☰ that brings it back. -->
       <button id="wb-left-collapse" type="button"
               title="收起列表" aria-label="收起列表">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg>
@@ -6353,7 +6448,7 @@ WORKBENCH_HTML = """
     </div>
     <!-- M-022's two-segment reading, third instance. setCountText() writes
          every .ff-count / .ff-inview on the page, so this needs no wiring. -->
-    <div class="wb-counts">命中 <b class="ff-count">–</b> · 视野内 <span class="ff-inview">–</span></div>
+    <div class="wb-counts">符合筛选 <b class="ff-count">–</b> · 在屏幕范围内 <span class="ff-inview">–</span></div>
   </div>
   <div id="wb-list-tools"></div>
   <div id="wb-list"></div>
@@ -6365,6 +6460,11 @@ WORKBENCH_HTML = """
        belt-and-braces pass was removed — it re-walked every result-list
        window for nothing. -->
   <div id="wb-fav" role="tabpanel" aria-labelledby="wb-tab-fav"></div>
+  <!-- W-7 (2.3.0): the third tab's panel. Empty here — wbRelocate() moves
+       #ff-sheet-content in on the first wbApplyMode() and never moves it
+       out again, so every listener, every id lookup and the
+       startDynamicObservers() MutationObserver survive untouched. -->
+  <div id="wb-filter-host" role="tabpanel" aria-labelledby="wb-tab-filter"></div>
 </aside>
 <div id="wb-split-handle" role="separator" aria-orientation="horizontal"
      tabindex="0" aria-label="调整面板高度"></div>
@@ -6373,7 +6473,13 @@ WORKBENCH_HTML = """
           title="还原列表" aria-label="还原列表">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
   </button>
-  <div class="wb-rail-n"><b class="ff-count">–</b><span>命中</span></div>
+  <!-- W-4 (2.3.0): two numbers, not one — the collapsed rail now says the
+       same thing the phone pill does. Both <b>/<span> pairs are written by
+       setCountText(), which paints every .ff-count / .ff-inview on the page,
+       so neither needs wiring; renderCountSentence() only ever touches
+       .wb-counts / #ff-head-counts, so the short labels survive here. -->
+  <div class="wb-rail-n"><b class="ff-count">–</b><span>符合筛选</span></div>
+  <div class="wb-rail-m"><b class="ff-inview">–</b><span>屏幕内</span></div>
   <!-- W-3b: the 🔍 and 筛选 buttons that used to live here were copies of
        controls the top bar shows at the same time — #wb-top never moves when
        the rail appears, so the search capsule and the "筛选 N" chip are both
@@ -7781,6 +7887,25 @@ FILTER_JS_TEMPLATE = r"""
     'en':    'Show only these {n}',
     'ja':    'この {n} 軒だけ表示'
   };
+  // W-5 (2.3.0): the card's ↑↓ stepper is capped. The number is a literal
+  // in the sentence, and a bare "500" between two CJK runs would split the
+  // string into three separately-translated fragments — hence a template.
+  var NAVCAP_TPL = {
+    'zh-CN': '筛选范围过大，缩小筛选条件到小于 {n} 家餐厅之内才能使用本功能',
+    'zh-TW': '篩選範圍過大，縮小篩選條件到小於 {n} 家餐廳之內才能使用本功能',
+    'en':    'Too many matches — narrow the filters to under {n} restaurants to step through them',
+    'ja':    '該当が多すぎます。{n} 軒未満に絞り込むと前後の店に移動できます'
+  };
+  // Wording (2.3.0): the landmarks layer row. Same reason as the four
+  // above — ja
+  // trails both numbers behind their labels, so the sentence cannot be
+  // assembled from a static CJK run plus a number span.
+  var LANDMARK_TPL = {
+    'zh-CN': '{n} 个内置地标 + {x} 个用户收藏的地标',
+    'zh-TW': '{n} 個內建地標 + {x} 個使用者收藏的地標',
+    'en':    '{n} built-in landmarks + {x} of your own',
+    'ja':    '内蔵の名所 {n} + 自分で追加 {x}'
+  };
   // H11: "已同步 14:07:33" used to format the clock with the *browser's*
   // locale, so a zh-CN browser reading the page in ja saw a Chinese
   // timestamp glued to a Japanese label (and vice versa). The page's own
@@ -8664,16 +8789,11 @@ FILTER_JS_TEMPLATE = r"""
         if (ssIn && document.activeElement === ssIn) return;
         if (!uiStack.length) return;
         var top = uiStack[uiStack.length - 1];
-        // Keep the card's existing two-step: full card -> peek -> closed.
-        var bsEl = document.getElementById('bs-sheet');
-        if (top === 'sheet' && wbIsPhoneLike() && bsActive
-            && bsEl && !bsEl.classList.contains('bs-peek')) {
-          bsSetPeek(true);
-        } else {
-          var closer = uiClosers[top];
-          if (!closer) return;
-          try { closer(); } catch (_) {}
-        }
+        // W-8 (2.3.0): the card no longer has a peek step, so Escape goes
+        // straight to the registered closer on every layout.
+        var closer = uiClosers[top];
+        if (!closer) return;
+        try { closer(); } catch (_) {}
         e.preventDefault();
         e.stopImmediatePropagation();
         return;
@@ -9192,6 +9312,8 @@ FILTER_JS_TEMPLATE = r"""
       });
       rebuildHiddenIds();
       renderFavoritesBuiltin();
+      // Wording (2.3.0): the layers popover's user-landmark tail.
+      try { updateLandmarkCount(); } catch (_) {}
     }
     // Merges the on-disk bookmarks into memory (no write). Returns true when
     // memory changed. Shared by saveBookmarks and the cross-tab reconcile.
@@ -10338,14 +10460,36 @@ FILTER_JS_TEMPLATE = r"""
       if (posEl) posEl.textContent = navPosText(i + 1, list.length);
       var prev = nav.querySelector('.rst-prev');
       var next = nav.querySelector('.rst-next');
-      if (prev) {
-        prev.disabled = i === 0;
-        prev.addEventListener('click', function() { bsNav(-1); });
+      // W-5 (2.3.0): stepping one-by-one through 7,000 restaurants is not a
+      // workflow, it is a symptom of not having filtered. Above NAV_CAP the
+      // two arrows go grey and explain themselves instead of walking the
+      // user off a cliff. aria-disabled rather than .disabled: the button
+      // must still receive the click that fires the hint.
+      var capped = lastMatchTotal > NAV_CAP;
+      nav.classList.toggle('rst-nav-capped', capped);
+      function wireStep(btn, dir, atEnd) {
+        if (!btn) return;
+        if (capped) {
+          btn.disabled = false;
+          btn.setAttribute('aria-disabled', 'true');
+          btn.addEventListener('click', navCapHint);
+          return;
+        }
+        btn.removeAttribute('aria-disabled');
+        btn.disabled = atEnd;
+        btn.addEventListener('click', function() { bsNav(dir); });
       }
-      if (next) {
-        next.disabled = i === list.length - 1;
-        next.addEventListener('click', function() { bsNav(1); });
-      }
+      wireStep(prev, -1, i === 0);
+      wireStep(next,  1, i === list.length - 1);
+    }
+    // W-5: one toast, not one per impatient tap.
+    var NAV_CAP = 500;
+    var navCapHintAt = 0;
+    function navCapHint() {
+      var now = Date.now();
+      if (now - navCapHintAt < 3000) return;
+      navCapHintAt = now;
+      showToast(l10nTpl(NAVCAP_TPL, {n: NAV_CAP}), {ms: 4000});
     }
     // Cross-task handle: the global keyboard dispatcher binds J / K to this.
     window.__bsNav = bsNav;
@@ -10609,6 +10753,33 @@ FILTER_JS_TEMPLATE = r"""
     wireFab('fab-bookmarks',   bookmarksLayer,
             'tabelog.showBookmarks',   true);
 
+    // Wording (2.3.0): "219 built-in landmarks + 3 of your own". The first
+    // is the baked-in landmark table (so it can never drift from what the
+    // 景点 layer draws); the second is the user's own attraction-category
+    // pins, which is what userAttractionsLayer renders. Written through
+    // l10nTpl because ja reorders the two numbers, and re-run from
+    // rebuildBookmarkLayers() so adding a landmark updates the row.
+    // It also runs once on DOMContentLoaded: this script is inline and
+    // executes while the document is still parsing, i.e. *before* the
+    // one-shot localizeTree(document.body), which would otherwise re-walk
+    // the sentence we just localized.
+    function updateLandmarkCount() {
+      var lpN = document.getElementById('lp-n-builtin');
+      if (!lpN) return;
+      var builtin = 0, own = 0;
+      try { builtin = EMBEDDED_FAVORITES_BUILTIN.length; } catch (_) {}
+      try {
+        for (var i = 0; i < bookmarks.length; i++) {
+          if (bookmarks[i] && bookmarks[i].category === 'attraction') own++;
+        }
+      } catch (_) {}
+      lpN.textContent = l10nTpl(LANDMARK_TPL, {n: builtin, x: own});
+    }
+    updateLandmarkCount();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', updateLandmarkCount);
+    }
+
     // ===== A11: the 图层 popover shell ===================================
     // The shell only. The four toggles inside #layers-pop are the same
     // buttons wired above — nothing here touches their handlers, ids or
@@ -10624,13 +10795,8 @@ FILTER_JS_TEMPLATE = r"""
       var lpAttrCb = document.getElementById('lp-attr-all');
       var lpRelease = null;
 
-      // "219 个内置地标" — the count comes from the baked-in landmark table
-      // so it can never drift from what the 景点 layer actually draws.
-      var lpN = document.getElementById('lp-n-builtin');
-      if (lpN) {
-        try { lpN.textContent = String(EMBEDDED_FAVORITES_BUILTIN.length); }
-        catch (_) {}
-      }
+      // The landmark counts — see updateLandmarkCount().
+      updateLandmarkCount();
 
       // Badge = how many layers are lit. The attractions FAB reports
       // aria-pressed="true" in BOTH '1' and '2', which is what we want —
@@ -13922,12 +14088,18 @@ FILTER_JS_TEMPLATE = r"""
     // M-188: the grip disclosure button announces which state the card is
     // in, so every place that flips .bs-peek goes through here rather than
     // touching the class directly. Peek = collapsed = aria-expanded false.
-    function bsSetPeek(on) {
-      // M-027: peek is a bottom-sheet affordance. In the column layouts the
-      // card lives in #wb-detail, which is always fully expanded.
-      if (typeof wbDetailMode === 'function' && wbDetailMode()) return;
-      bsSheet.classList.toggle('bs-peek', !!on);
-      if (bsGrip) bsGrip.setAttribute('aria-expanded', on ? 'false' : 'true');
+    // W-8 (2.3.0): the half-open peek state is gone. The card opens at full
+    // height on every layout and a downward swipe / Escape / map tap closes
+    // it outright — the intermediate "上滑查看详情" step was one more gesture
+    // between the user and the information they asked for, and on a phone it
+    // covered the marker anyway. The function is kept (rather than ripping
+    // out its two dozen call sites) as the single place that guarantees the
+    // class is off, so every `bsSetPeek(true)` degrades to a no-op instead of
+    // re-introducing the state. The .bs-peek CSS block is left in place; with
+    // the class never applied it is inert.
+    function bsSetPeek(_on) {
+      bsSheet.classList.remove('bs-peek');
+      if (bsGrip) bsGrip.setAttribute('aria-expanded', 'true');
     }
 
     // Per-field translate buttons in the detail card. Uses the unofficial
@@ -14323,6 +14495,17 @@ FILTER_JS_TEMPLATE = r"""
       uiPush('sheet');                  // M-015
     }
     function closeSheet() {
+      // W-8 (2.3.0): on a phone the card covers most of the map, so by the
+      // time it closes the user has usually lost track of which pin they
+      // were reading about — and the sheet-offset logic may have nudged the
+      // map to keep the marker above the card. Re-centre on the restaurant
+      // that was open. mid/wide keep the map where it is: the card sits in
+      // the left column there and never occluded the marker.
+      var reCentre = (typeof wbIsPhoneLike === 'function' && wbIsPhoneLike()
+                      && bsActive
+                      && typeof bsActive.lat === 'number'
+                      && typeof bsActive.lon === 'number')
+                   ? [bsActive.lat, bsActive.lon] : null;
       // M-027: give the left column its width back before anything else, so
       // the rail → list swap and the card slide-out run in the same frame.
       if (document.body.classList.contains('wb-detail-open')) {
@@ -14370,6 +14553,11 @@ FILTER_JS_TEMPLATE = r"""
       bsClearTimer = setTimeout(function() {
         if (!bsActive) bsContent.innerHTML = '';
       }, 300);
+      // W-8: after the FABs/offsets above have settled, put the restaurant
+      // back in the middle of the now-uncovered map.
+      if (reCentre) {
+        try { map.panTo(reCentre, {animate: true}); } catch (_) {}
+      }
     }
     // Close the bottom sheet when the card's × is tapped — mirrors the
     // search box's clear control and the bs-grip swipe-to-dismiss. Delegated
@@ -14395,12 +14583,9 @@ FILTER_JS_TEMPLATE = r"""
     // map.on('click') below.
     bsBackdrop.addEventListener('click', closeSheet);
     document.addEventListener('keydown', function(e){
-      // Same staged dismiss as the swipe-down gesture: Full → Peek → Closed.
+      // W-8: one stage everywhere — Escape closes the card.
       if (e.key !== 'Escape' || !bsActive) return;
-      // M-027: one stage in the column layouts — there is no peek to fall to.
-      if (wbDetailMode()) { closeSheet(); return; }
-      if (bsSheet.classList.contains('bs-peek')) closeSheet();
-      else bsSetPeek(true);
+      closeSheet();
     });
 
     // Grip drag handler. Downward swipe always dismisses the sheet (80px or
@@ -14439,11 +14624,8 @@ FILTER_JS_TEMPLATE = r"""
       var downward = (dy > 80 || (dy > 30 && dt < 200));
       var upward   = (dy < -20 || (dy < -5 && dt < 250));
       if (downward) {
-        // Two-stage dismiss, Google-Maps-style. First swipe collapses to
-        // peek and keeps the restaurant selected (marker stays highlighted,
-        // map stays pannable); second swipe deselects + closes.
-        if (peek) closeSheet();
-        else bsSetPeek(true);
+        // W-8: one-stage dismiss — there is no peek to fall to any more.
+        closeSheet();
       } else if (peek && upward) {
         expandSheet();
       } else if (peek && Math.abs(dy) < 5 && dt < 250) {
@@ -14476,8 +14658,7 @@ FILTER_JS_TEMPLATE = r"""
     // it the button would swallow nothing but would double-fire on tap.
     bsGrip.addEventListener('click', function(e) {
       if (e.detail !== 0) return;      // 0 == Enter/Space, not a real click
-      if (bsSheet.classList.contains('bs-peek')) expandSheet();
-      else bsSetPeek(true);
+      closeSheet();                    // W-8: the grip is dismiss-only now
     });
 
     // Whole-peek-card tap to expand. Clicks on the grip have already been
@@ -14491,15 +14672,12 @@ FILTER_JS_TEMPLATE = r"""
       expandSheet();
     });
 
-    // Tap on the map area:
-    //   - in Full state → demote to Peek (restaurant stays selected, marker
-    //     stays highlighted, just like Google Maps);
-    //   - in Peek state → no-op (user explicitly swipes down on the grip
-    //     to actually deselect).
+    // Tap on the map area closes the card. W-8: it used to demote Full →
+    // Peek; with peek gone there is nothing between "open" and "closed", and
+    // a tap that did nothing at all would be worse than a tap that dismisses.
     map.on('click', function(){
       if (!bsActive) return;
-      if (bsSheet.classList.contains('bs-peek')) return;
-      bsSetPeek(true);
+      closeSheet();
     });
 
     // ===== Viewport-driven marker construction =====
@@ -15381,7 +15559,10 @@ FILTER_JS_TEMPLATE = r"""
         // E1 / M-031: additive field, no new localStorage key. Anything that
         // is not exactly 'fav' (missing, unknown, a future value) leaves the
         // default 'results' in place — see the guard next to wbSetTab().
-        if (o.tab === 'fav' || o.tab === 'results') wbTabPref = o.tab;
+        // W-7 (2.3.0): 'filter' joins the allowed set, additively.
+        if (o.tab === 'fav' || o.tab === 'results' || o.tab === 'filter') {
+          wbTabPref = o.tab;
+        }
         // W-3: same additive pattern, same key. Only a literal true collapses
         // the wide-mode left column; anything else (missing, 1, 'yes', an
         // object from a future build) leaves it expanded.
@@ -15394,7 +15575,8 @@ FILTER_JS_TEMPLATE = r"""
       try {
         localStorage.setItem(WB_LIST_KEY,
           JSON.stringify({sort: wbList.sort, select: wbList.select,
-                          tab: (wbTabPref === 'fav') ? 'fav' : 'results',
+                          tab: (wbTabPref === 'fav' || wbTabPref === 'filter')
+                                 ? wbTabPref : 'results',
                           leftCollapsed:
                             document.body.classList.contains('wb-left-collapsed')}));
       } catch (_) {}
@@ -16048,7 +16230,7 @@ FILTER_JS_TEMPLATE = r"""
     // A `= 'results'` here would clobber that; the guard below normalises
     // anything that is not exactly 'fav' (missing key, unknown value).
     var wbTabPref;
-    if (wbTabPref !== 'fav') wbTabPref = 'results';
+    if (wbTabPref !== 'fav' && wbTabPref !== 'filter') wbTabPref = 'results';
 
     function favT(s) { return localizeText(s); }
     function favCount() { return (state && state.fav) ? state.fav.size : 0; }
@@ -16593,53 +16775,75 @@ FILTER_JS_TEMPLATE = r"""
     }
 
     // ---- tab switching ---------------------------------------------------
+    // W-7 (2.3.0): three tabs. `filter` joins as an additive value of the
+    // very same tabelog.listView.tab field — no new storage key, and the
+    // loader still falls back to 'results' on anything it does not know.
+    var WB_TABS = [
+      {tab: 'results', btn: 'wb-tab-results'},
+      {tab: 'fav',     btn: 'wb-tab-fav'},
+      {tab: 'filter',  btn: 'wb-tab-filter'}
+    ];
     function favApplyTab() {
-      var onFav = (wbTabPref === 'fav');
-      var tR = document.getElementById('wb-tab-results');
-      var tF = document.getElementById('wb-tab-fav');
-      if (tR) {
-        tR.classList.toggle('on', !onFav);
-        tR.setAttribute('aria-selected', onFav ? 'false' : 'true');
-      }
-      if (tF) {
-        tF.classList.toggle('on', onFav);
-        tF.setAttribute('aria-selected', onFav ? 'true' : 'false');
+      var cur    = wbTabPref;
+      var onFav  = (cur === 'fav');
+      var onFilt = (cur === 'filter');
+      var onRes  = !onFav && !onFilt;
+      for (var t = 0; t < WB_TABS.length; t++) {
+        var b = document.getElementById(WB_TABS[t].btn);
+        if (!b) continue;
+        var sel = (WB_TABS[t].tab === cur) || (WB_TABS[t].tab === 'results' && onRes);
+        b.classList.toggle('on', sel);
+        b.setAttribute('aria-selected', sel ? 'true' : 'false');
       }
       var ids = ['wb-list-tools', 'wb-list', 'wb-list-foot'];
       for (var i = 0; i < ids.length; i++) {
         var el = document.getElementById(ids[i]);
-        if (el) el.hidden = onFav;
+        if (el) el.hidden = !onRes;
       }
       var panel = document.getElementById('wb-fav');
       if (panel) panel.classList.toggle('on', onFav);
+      var fhost = document.getElementById('wb-filter-host');
+      if (fhost) fhost.classList.toggle('on', onFilt);
+      var fhead = document.getElementById('wb-left-head');
+      if (fhead) fhead.classList.toggle('wb-head-filter', onFilt);
       favCloseMenu();
       if (onFav) favRender();
-      else wbListRender(true);       // the window was measured while hidden
+      else if (onRes) wbListRender(true);   // the window was measured hidden
       favSyncTab();
     }
+    function wbNormTab(tab) {
+      return (tab === 'fav' || tab === 'filter') ? tab : 'results';
+    }
     function wbSetTab(tab) {
-      wbTabPref = (tab === 'fav') ? 'fav' : 'results';
+      wbTabPref = wbNormTab(tab);
       wbSaveListView();              // rides in tabelog.listView, no new key
       favApplyTab();
     }
     window.__wbSetTab = wbSetTab;
     (function() {
-      var tR = document.getElementById('wb-tab-results');
-      var tF = document.getElementById('wb-tab-fav');
-      if (tR) tR.addEventListener('click', function() { wbSetTab('results'); });
-      if (tF) tF.addEventListener('click', function() { wbSetTab('fav'); });
-      // Roving arrow keys inside the tablist — the two buttons are their own
-      // tab stops, so this is a convenience, not the only way through.
+      var btns = [];
+      for (var t = 0; t < WB_TABS.length; t++) {
+        (function(spec) {
+          var b = document.getElementById(spec.btn);
+          if (!b) return;
+          btns.push(b);
+          b.addEventListener('click', function() { wbSetTab(spec.tab); });
+          b.addEventListener('keydown', onTabKey);
+        })(WB_TABS[t]);
+      }
+      // Roving arrow keys inside the tablist — every button is its own tab
+      // stop, so this is a convenience, not the only way through.
       function onTabKey(ev) {
         if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
         ev.preventDefault();
-        var next = (ev.key === 'ArrowRight') ? tF : tR;
-        if (!next) return;
-        wbSetTab(next === tF ? 'fav' : 'results');
+        var i = btns.indexOf(ev.currentTarget);
+        if (i < 0) return;
+        var j = (i + (ev.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length;
+        var next = btns[j];
+        wbSetTab(WB_TABS[WB_TABS.map(function(s) { return s.btn; })
+                                .indexOf(next.id)].tab);
         try { next.focus(); } catch (_) {}
       }
-      if (tR) tR.addEventListener('keydown', onTabKey);
-      if (tF) tF.addEventListener('keydown', onTabKey);
     })();
 
     // ---- scaffolding + wiring --------------------------------------------
@@ -17061,41 +17265,40 @@ FILTER_JS_TEMPLATE = r"""
     // has to stay reachable while filters change, so there we only restore
     // focus on close.
     var ffTrapRelease = null;
+    // W-7 (2.3.0): there is no filter overlay any more. "Open the filters"
+    // means "show the left column's third tab" in every mode — on a phone
+    // that is the drawer, on mid/wide the resident column (expanded first if
+    // the user had collapsed it). No pushState of its own: the drawer's
+    // uiRegister('favdrawer') is the only back-button owner on a phone, and
+    // on mid/wide nothing is overlaid at all.
     function openFilterUI(opts) {
       opts = opts || {};
-      // W-6: F1 closed the phone drawer here — it was a bottom sheet and
-      // held the same slot. It is a left drawer now, so the filter sheet
-      // opens ON TOP of it: the drawer drops under both scrims (CSS:
-      // body.wb-fav-under), goes inert with the rest of the background, and
-      // uiPush('filter') lands above uiPush('favdrawer') so one back press
-      // closes the filter and lands back on the list.
-      if (typeof favDrawerOpen === 'function' && favDrawerOpen()) {
-        document.body.classList.add('wb-fav-under');
-      }
       if (wbIsPhoneLike()) {
-        if (bsActive) closeSheet();      // restaurant detail yields to filter
-        ffSheet.classList.add('ff-open');
-        ffBackdrop.classList.add('ff-open');
-        ffSheet.setAttribute('aria-hidden', 'false');
-        ffFab.hidden = true;
-        // aria-modal="true" was already on #ff-sheet but nothing enforced
-        // it: Tab walked straight out into the map behind the scrim.
-        if (ffTrapRelease) { try { ffTrapRelease(); } catch (_) {} }
-        ffTrapRelease = trapFocus(ffSheet, opts.focus, opts.anchor || ffFab);
-      } else if (wbFilterPop) {
-        wbFilterAnchor = opts.anchor
-          || document.querySelector('#wb-top .wb-filter-btn')
-          || document.querySelector('.wb-filter-btn');
-        wbFilterPop.hidden = false;
-        wbFilterPop.classList.add('open');
-        wbFilterPop.setAttribute('aria-hidden', 'false');
-        wbPositionFilterPop();
-        if (ffTrapRelease) { try { ffTrapRelease(); } catch (_) {} }
-        ffTrapRelease = focusInto(wbFilterPop, opts.focus, wbFilterAnchor);
+        if (typeof favDrawerOpen === 'function' && !favDrawerOpen()) {
+          openFavDrawer();               // pushes 'favdrawer' for the back key
+        }
+      } else {
+        // mid hides the column behind an open card; wide keeps it resident.
+        if (wbCur === 'mid' && wbDetailOpen()) closeSheet();
+        if (wbLeftCollapsed()) {
+          document.body.classList.remove('wb-left-collapsed');
+          wbSaveListView();
+          wbSyncVars();
+          wbSyncRailLabel();
+        }
       }
-      uiPush('filter');                  // M-015
+      wbSetTab('filter');
+      if (opts.focus) {
+        try {
+          var f = document.querySelector(opts.focus);
+          if (f && f.focus) f.focus();
+        } catch (_) {}
+      }
     }
     function closeFilterUI() {
+      // The three legacy shells never open now, but keep clearing them: a
+      // service-worker-cached page from before 2.3.0 can still have added
+      // .ff-open before this build's JS took over the same DOM.
       ffSheet.classList.remove('ff-open');
       ffBackdrop.classList.remove('ff-open');
       ffSheet.setAttribute('aria-hidden', 'true');
@@ -17110,17 +17313,34 @@ FILTER_JS_TEMPLATE = r"""
         ffTrapRelease = null;
         try { r(); } catch (_) {}
       }
-      // W-6: whatever the sheet was covering comes back to the top. Harmless
-      // when the phone drawer was never open — the class is simply absent.
       document.body.classList.remove('wb-fav-under');
-      uiDrop('filter');                  // M-015
+      // W-7: "close" is now "leave the filter tab". On a phone the tab lives
+      // inside the drawer and the user pressed × / Escape on the whole thing,
+      // so the drawer goes; on mid/wide the column stays and falls back to
+      // the result list.
+      if (wbTabPref === 'filter') {
+        if (wbIsPhoneLike() && typeof favDrawerOpen === 'function'
+            && favDrawerOpen()) {
+          closeFavDrawer();
+        } else {
+          wbSetTab('results');
+        }
+      }
+      uiDrop('filter');                  // M-015: no-op unless something old
     }
     function openFilterSheet()  { openFilterUI(); }
     function closeFilterSheet() { closeFilterUI(); }
     uiRegister('filter', closeFilterSheet);   // M-015
+    // W-7 (2.3.0): "is the filter panel on screen right now". The tab being
+    // selected is not enough — on a phone the whole column is a closed
+    // drawer, and on mid/wide it can be collapsed to the rail.
     function ffIsOpen() {
-      return ffSheet.classList.contains('ff-open')
-          || !!(wbFilterPop && wbFilterPop.classList.contains('open'));
+      if (wbTabPref !== 'filter') return false;
+      if (wbIsPhoneLike()) {
+        return typeof favDrawerOpen === 'function' && favDrawerOpen();
+      }
+      // Only mid parks the column off-canvas for an open card; wide keeps it.
+      return !wbLeftCollapsed() && !(wbCur === 'mid' && wbDetailOpen());
     }
 
     ffFab.addEventListener('click', openFilterSheet);
@@ -17205,7 +17425,13 @@ FILTER_JS_TEMPLATE = r"""
     // left the map 372px, while the same window one pixel narrower ran mid
     // and gave it 779px. 1280 is the narrowest width where wide is not a
     // downgrade; 1100-1279 now runs mid, which auto-collapses.
-    var WB_BP_SPLIT = 520, WB_BP_MID = 700, WB_BP_WIDE = 1280;
+    // A-2 (2.3.0): split is dead. The Fold's 60%-width inner screen (591px)
+    // ran it, and the permanent bottom panel ate half of an already narrow
+    // window for a list the user had not asked for. Both thresholds are 750
+    // now, which makes wbModeFor()'s split branch unreachable — the code is
+    // kept because #wb-left's split rules and the drag handle are still in
+    // the cascade and deleting them is a separate, riskier change.
+    var WB_BP_SPLIT = 750, WB_BP_MID = 750, WB_BP_WIDE = 1280;
     var wbCur = '';                  // '' until the first wbApplyMode()
     var wbSplitPct = 45;             // split-mode panel height, % of viewport
     var wbTopEl      = document.getElementById('wb-top');
@@ -17244,7 +17470,9 @@ FILTER_JS_TEMPLATE = r"""
     function wbSyncRailLabel() {
       var el = document.getElementById('wb-rail-back');
       if (!el) return;
-      var s = (wbCur === 'wide') ? '展开列表' : '还原列表';
+      // W-6 (2.3.0): the reason the rail is up decides the wording, not the
+      // mode — mid can now be collapsed by the user as well as by a card.
+      var s = wbLeftCollapsed() ? '展开列表' : '还原列表';
       try { s = localizeText(s); } catch (_) {}
       el.title = s;
       el.setAttribute('aria-label', s);
@@ -17258,8 +17486,12 @@ FILTER_JS_TEMPLATE = r"""
     // (the first and only call is 'phone') nothing is touched at all.
     function wbRelocate() {
       var col = wbDetailMode();
+      // W-7 (2.3.0): one host in every mode. The filter panel is the third
+      // tab of #wb-left, so #ff-sheet-content lands in #wb-filter-host on the
+      // very first wbApplyMode() and never moves again — the bottom sheet and
+      // the anchored popover are no longer content hosts.
       wbMove(document.getElementById('ff-sheet-content'),
-             col ? wbFilterPop : ffSheet);
+             document.getElementById('wb-filter-host') || (col ? wbFilterPop : ffSheet));
       wbMove(bsContent, col ? wbDetailBody : bsSheet);
       wbMove(document.getElementById('ss-box'),
              col ? wbTopSearch : document.body);
@@ -17321,7 +17553,9 @@ FILTER_JS_TEMPLATE = r"""
         right = wbDetailOpen()    ? 384 : 0;
       } else if (wbCur === 'mid') {
         top = 48;
-        left  = wbDetailOpen() ? 58 : 320;
+        // W-6 (2.3.0): mid collapses for two reasons now — a card opened, or
+        // the user pressed the same ‹ wide has always had.
+        left  = (wbDetailOpen() || wbLeftCollapsed()) ? 58 : 320;
         right = wbDetailOpen() ? 340 : 0;
       } else if (wbCur === 'split') {
         bottom = Math.round(window.innerHeight * wbSplitPct / 100);
@@ -17380,7 +17614,9 @@ FILTER_JS_TEMPLATE = r"""
           document.dispatchEvent(new CustomEvent('wb:mode', {detail: {mode: m}}));
         } catch (_) {}
       }
-      if (ffIsOpen() && !wbIsPhoneLike()) wbPositionFilterPop();
+      // W-7 (2.3.0): the anchored popover is retired — the filter panel is a
+      // tab of #wb-left and moves with the column, so a mode change has
+      // nothing left to reposition.
     }
     var wbRaf = 0;
     function wbSchedule() {
@@ -17471,7 +17707,10 @@ FILTER_JS_TEMPLATE = r"""
     var wbRailBack = document.getElementById('wb-rail-back');
     if (wbRailBack) {
       wbRailBack.addEventListener('click', function() {
-        if (wbCur === 'wide') {
+        // W-6 (2.3.0): a user-collapsed column expands, whatever the mode.
+        // Only mid's automatic "a card is open" collapse falls through to
+        // closeSheet(), which is the shipped behaviour.
+        if (wbLeftCollapsed()) {
           document.body.classList.remove('wb-left-collapsed');
           wbSaveListView();
           wbSyncVars();       // -> map inset -> invalidateSize, both scheduled
@@ -17486,7 +17725,8 @@ FILTER_JS_TEMPLATE = r"""
     var wbLeftCollapseBtn = document.getElementById('wb-left-collapse');
     if (wbLeftCollapseBtn) {
       wbLeftCollapseBtn.addEventListener('click', function() {
-        if (wbCur !== 'wide') return;      // the button is display:none anyway
+        // W-6 (2.3.0): mid and wide. Below 750px the button is display:none.
+        if (wbCur !== 'wide' && wbCur !== 'mid') return;
         document.body.classList.add('wb-left-collapsed');
         wbSaveListView();
         wbSyncVars();
@@ -17637,7 +17877,9 @@ FILTER_JS_TEMPLATE = r"""
         var raw = localStorage.getItem(WB_LIST_KEY);
         if (!raw) return null;
         var o = JSON.parse(raw);
-        if (o && (o.tab === 'fav' || o.tab === 'results')) return o.tab;
+        if (o && (o.tab === 'fav' || o.tab === 'results' || o.tab === 'filter')) {
+          return o.tab;
+        }
       } catch (_) {}
       return null;
     }

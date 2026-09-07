@@ -1045,5 +1045,8 @@
   "选择语言": "Choose language",
   "言語": "Language",
   "简体中文": "Simplified Chinese",
-  "繁體中文": "Traditional Chinese"
+  "繁體中文": "Traditional Chinese",
+  "符合筛选": "Match",
+  "在屏幕范围内": "On screen",
+  "放大地图聚合就会散开": "Zoom in and the cluster breaks apart"
 }

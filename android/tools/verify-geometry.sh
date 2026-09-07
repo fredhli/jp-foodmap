@@ -101,11 +101,13 @@ one_orientation() {   # one_orientation <orient> <expected width>
     # From a clean page: the filter FAB is deliberately hidden while a card is up (M-071),
     # so the frame the card step just left behind has nothing to tap.
     # TWO ENTRANCES, ONE ACCEPTANCE (measured 2026-09-06 by gate/emulator). The FAB is the
-    # phone layout's filter entrance only. From the mid/split layout up (591 CSS px and
-    # wider) the page sets `#ff-fab{display:none}` and the entrance is the 筛选 pill in the
-    # result column header — an element with CLASS wb-filter-btn, no id. Trying only #ff-fab
-    # made this frame a permanent SKIP on four of the five windows, i.e. no filter evidence
-    # on exactly the geometries the Fold is bought for.
+    # phone layout's filter entrance only. From the mid/split layout up (750 CSS px and
+    # wider, since 2.3.0 — fold8inner60's 591/688 now falls in phone layout too) the page
+    # sets `#ff-fab{display:none}` and the entrance is the 筛选 pill in the result column
+    # header — an element with CLASS wb-filter-btn, no id. Trying only #ff-fab made this
+    # frame a permanent SKIP on four of the five windows, i.e. no filter evidence on exactly
+    # the geometries the Fold is bought for. The `||` fallback below keeps both entrances
+    # covered regardless of which tier a given AVD width lands in.
     if [ "$(card_open)" = "true" ]; then cold_start >/dev/null; wait_page 30; fi
     # AND get the first-visit language chooser out of the way (2.2.0, android-back). On a
     # freshly installed APK that modal's scrim is over the FAB — which still measures a real

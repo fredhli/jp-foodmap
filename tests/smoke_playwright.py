@@ -14,12 +14,14 @@ Ten things, on each of the six viewports the site is actually used at:
   filter    changing one filter changes the visible count
   account   the avatar menu opens and scrolls
   lang      (W-9) first visit below 700px asks which language, once
-  fav-drawer  (W-6) below 520px the ≡ in the search capsule opens the
-              results / 收藏 / 筛选 drawer
+  fav-drawer  (W-6 / W-7) below 750px the ≡ in the search capsule opens the
+              结果 / 收藏 / 筛选 drawer, and 筛选 is a TAB of it — no bottom
+              sheet, no second scrim
   chrome    (W-7 / W-10) the bottom FABs line up with #ff-fab and the intro
               bar lines up with the search input
-  workbench (W-1/2/3) mid + wide: the rail, the auto-collapsing detail
-            column, and the wide-mode left-column collapse
+  workbench (W-1/2/3) mid + wide: the rail with both counts, the
+            auto-collapsing detail column, and the left-column collapse
+            (mid AND wide as of 2.3.0)
 
 A console error that is not on the offline allowlist (Google Identity's 403,
 the third-party hosts this run blocks) fails the viewport. Serves docs/ over
@@ -46,15 +48,24 @@ from lib_browser import (  # noqa: E402
     wait_ready,
 )
 
-# Fold 8 outer / Fold 8 inner portrait / iPhone 15 / desktop. The two Fold
-# sizes are the ones the site is used at on the road; desktop is where trips
-# get planned.
+# Fold 8 outer / Fold 8 inner portrait / Fold 8 inner at 60% / iPhone 15 /
+# desktop. The Fold sizes are the ones the site is used at on the road;
+# desktop is where trips get planned.
+#
+# A-2 (2.3.0): WB_BP_SPLIT and WB_BP_MID are both 750 now, so the old
+# 520-699 "split" mode (a permanent bottom panel over the map) is
+# unreachable. Everything below 750px — the Fold's inner screen in portrait
+# (616), the same screen at 60% width (591), the cover screen (416) and every
+# phone — is the phone layout with the ≡ drawer.
 VIEWPORTS = {
     "fold-outer": {"width": 416, "height": 657, "mobile": True},
     "fold-inner": {"width": 616, "height": 816, "mobile": True},
-    # M-027: the fourth layout mode (top bar + left column + icon rail) only
-    # exists between 700 and 1279px, and the Fold's inner screen in landscape
-    # is the device that lives there.
+    # A-2: the Fold's inner screen in a 60%-width split window. Was 'split';
+    # is phone from 2.3.0 on. Kept as its own row because it is the narrowest
+    # window the multi-window shell can hand the page and still be usable.
+    "fold-inner-60": {"width": 591, "height": 689, "mobile": True},
+    # M-027: the mid layout (top bar + left column + icon rail) exists between
+    # 750 and 1279px, and the Fold's inner screen in landscape lives there.
     "fold-inner-landscape": {"width": 816, "height": 616, "mobile": True},
     "iphone": {"width": 393, "height": 852, "mobile": True},
     # W-2: the wide threshold moved 1100 -> 1280, so a 1000px window that used
@@ -76,10 +87,11 @@ def eq(actual, expected, what: str) -> None:
 
 
 def open_filter_panel(page) -> None:
-    """M-027: two hosts for the same #ff-sheet-content. Below 700px it is the
-    bottom sheet behind #ff-fab; at 700px and up it is the non-modal popover
-    behind the top bar's 筛选 button. Assert on the content being laid out
-    (offsetParent) rather than on either host's class."""
+    """W-7 (2.3.0): one host in every mode — #ff-sheet-content lives in
+    #wb-filter-host, the left column's third tab. Below 750px the entry point
+    is #ff-fab (which opens the drawer on that tab); at 750px and up it is the
+    top bar's 筛选 button. Assert on the content being laid out
+    (offsetParent) rather than on any host's class."""
     if page.eval_on_selector(
             "#ff-sheet-content", "el => el.offsetParent !== null"):
         return
@@ -372,11 +384,12 @@ def check_lang(page, name):
 
 
 def check_fav_drawer(page, name):
-    """W-6: below 520px the ≡ at the left end of the search capsule opens
-    #wb-left as a LEFT drawer with three tabs (结果 / 收藏 / 筛选); at 520px
-    and up the same element is the column / split panel and the ≡ is gone.
-    The filter sheet opens ON TOP of the drawer (it used to replace it), so
-    one back / Escape closes the filter and lands back on the list."""
+    """W-6 / W-7: below 750px the ≡ at the left end of the search capsule
+    opens #wb-left as a LEFT drawer with three tabs (结果 / 收藏 / 筛选); at
+    750px and up the same element is the resident column and the ≡ is gone.
+    2.3.0: 筛选 is one of those three tabs — the bottom sheet is retired, so
+    #ff-sheet-content lives in #wb-filter-host and #ff-sheet never opens. One
+    Escape closes the whole drawer."""
     # Earlier checks (save, filter) leave a .sync-toast on screen for a few
     # seconds; let it expire before hit-testing rather than racing it.
     try:
@@ -384,6 +397,12 @@ def check_fav_drawer(page, name):
             "() => !document.querySelector('.sync-toast')", timeout=8000)
     except Exception:
         pass
+    # W-7 (2.3.0): check_filter's open_filter_panel() now opens this very
+    # drawer on a phone (the filter panel is its third tab), so start from a
+    # known-closed state instead of hit-testing the ≡ through the open panel.
+    page.evaluate("() => { if (window.__wbFavDrawer && window.__wbFavDrawer.isOpen())"
+                  "  window.__wbFavDrawer.close(); }")
+    page.wait_for_timeout(350)
     st = page.evaluate("""() => {
       const f = document.getElementById('ss-drawer-btn');
       if (!f) return {missing: true};
@@ -420,8 +439,7 @@ def check_fav_drawer(page, name):
       const r = l.getBoundingClientRect();
       const s = document.getElementById('wb-sort');
       const dist = s ? s.querySelector('option[value="distance"]') : null;
-      const tabs = Array.from(document.querySelectorAll(
-        '#wb-left-head .wb-tab, #wb-left-head .wb-filter-btn'))
+      const tabs = Array.from(document.querySelectorAll('#wb-left-head .wb-tab'))
         .filter(e => e.offsetParent !== null);
       return {left: Math.round(r.left), top: Math.round(r.top),
               height: Math.round(r.height), width: Math.round(r.width),
@@ -429,7 +447,8 @@ def check_fav_drawer(page, name):
               tabs: tabs.length,
               on: (document.querySelector('.wb-tab.on') || {}).id,
               distHidden: dist ? dist.hidden : null,
-              // M3 red line: the phone hosts must not have moved.
+              // W-7: the filter panel is the third tab's body now; the other
+              // two phone hosts must still not have moved.
               ff: document.getElementById('ff-sheet-content').parentElement.id,
               bs: document.getElementById('bs-content').parentElement.id,
               ss: document.getElementById('ss-box').parentElement === document.body};
@@ -439,38 +458,41 @@ def check_fav_drawer(page, name):
     if d["width"] > 380 or d["width"] > d["vw"]:
         raise AssertionError(f"drawer geometry wrong: {d}")
     # W-6: 结果 / 收藏 / 筛选.
-    if d["tabs"] != 3 or d["on"] not in ("wb-tab-results", "wb-tab-fav"):
+    if d["tabs"] != 3 or d["on"] not in ("wb-tab-results", "wb-tab-fav",
+                                         "wb-tab-filter"):
         raise AssertionError(f"drawer tabs wrong: {d}")
     if d["distHidden"] is False:
         raise AssertionError("distance sort offered without the user ever locating")
-    if d["ff"] != "ff-sheet" or d["bs"] != "bs-sheet" or not d["ss"]:
-        raise AssertionError(f"M3 phone hosts moved: {d}")
+    if d["ff"] != "wb-filter-host" or d["bs"] != "bs-sheet" or not d["ss"]:
+        raise AssertionError(f"phone hosts moved: {d}")
 
-    # W-6: the filter opens on top and the drawer stays underneath.
-    page.evaluate("() => { const b = Array.from("
-                  "document.querySelectorAll('#wb-left-head .wb-filter-btn'))"
-                  "  .find(e => e.offsetParent !== null); if (b) b.click(); }")
+    # W-7: 筛选 is a tab of the drawer, not a sheet over it. The panel becomes
+    # visible in place, #ff-sheet stays shut and no second scrim appears.
+    page.evaluate("() => document.getElementById('wb-tab-filter').click()")
     page.wait_for_timeout(400)
     ex = page.evaluate(
         "() => ({drawer: document.body.classList.contains('wb-fav-open'),"
         "        under: document.body.classList.contains('wb-fav-under'),"
-        "        inert: document.getElementById('wb-left')"
-        "                 .hasAttribute('data-ff-inert'),"
-        "        filter: document.getElementById('ff-sheet')"
-        "                  .classList.contains('ff-open')})")
-    if not (ex["drawer"] and ex["under"] and ex["filter"] and ex["inert"]):
-        raise AssertionError(f"the filter sheet did not stack on the drawer: {ex}")
-    # First Escape closes the filter and lands back on the list...
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(350)
+        "        sheet: document.getElementById('ff-sheet')"
+        "                 .classList.contains('ff-open'),"
+        "        panel: document.getElementById('ff-sheet-content')"
+        "                 .offsetParent !== null,"
+        "        listHidden: document.getElementById('wb-list').hidden,"
+        "        on: (document.querySelector('.wb-tab.on') || {}).id})")
+    if not (ex["drawer"] and ex["panel"] and ex["listHidden"]) \
+            or ex["sheet"] or ex["under"] or ex["on"] != "wb-tab-filter":
+        raise AssertionError(f"筛选 did not become the drawer's third tab: {ex}")
+    # Back to the result list, in place.
+    page.evaluate("() => document.getElementById('wb-tab-results').click()")
+    page.wait_for_timeout(300)
     mid = page.evaluate(
         "() => ({drawer: document.body.classList.contains('wb-fav-open'),"
-        "        under: document.body.classList.contains('wb-fav-under'),"
-        "        filter: document.getElementById('ff-sheet')"
-        "                  .classList.contains('ff-open')})")
-    if not mid["drawer"] or mid["filter"] or mid["under"]:
-        raise AssertionError(f"closing the filter did not land back on the drawer: {mid}")
-    # ...the second closes the drawer itself.
+        "        panel: document.getElementById('ff-sheet-content')"
+        "                 .offsetParent !== null,"
+        "        on: (document.querySelector('.wb-tab.on') || {}).id})")
+    if not mid["drawer"] or mid["panel"] or mid["on"] != "wb-tab-results":
+        raise AssertionError(f"leaving the 筛选 tab did not restore the list: {mid}")
+    # Escape closes the drawer itself.
     page.keyboard.press("Escape")
     page.wait_for_timeout(350)
     end = page.evaluate(
@@ -523,8 +545,9 @@ def check_workbench(page, name):
     """W-1 / W-2 / W-3: the mid + wide column layout.
 
     W-2  the detail column costs the map nothing until a restaurant is picked
-    W-3  the rail is the hamburger plus the match count, nothing else; wide
-         can collapse the left column onto that rail and get it back
+    W-3  the rail is the hamburger plus BOTH counts (W-4: 符合筛选 N and
+         屏幕内 M), nothing else; mid and wide can both collapse the left
+         column onto that rail and get it back (W-6)
     W-1  the card inside the detail column has real top padding (there is no
          #bs-grip up there to stand in for it)
     """
@@ -540,6 +563,12 @@ def check_workbench(page, name):
         "                  '#wb-rail .wb-filter-btn').length})")
     if extra["search"] or extra["filter"]:
         raise AssertionError(f"#wb-rail still carries duplicate controls: {extra}")
+    # W-4: two numbers on the rail, not one.
+    nums = page.evaluate(
+        "() => ({n: document.querySelectorAll('#wb-rail .ff-count').length,"
+        "        m: document.querySelectorAll('#wb-rail .ff-inview').length})")
+    if nums["n"] != 1 or nums["m"] != 1:
+        raise AssertionError(f"#wb-rail does not carry both counts: {nums}")
 
     # W-2: nothing selected -> the detail column is off-canvas and --wb-right
     # is 0, so the map owns that space.
@@ -604,9 +633,9 @@ def check_workbench(page, name):
         "  if (b) b.click(); }")
     page.wait_for_timeout(400)
 
-    # W-3a: wide only -- collapse the left column onto the rail and back.
-    if mode != "wide":
-        return f"{mode}: rail trimmed, detail column pays only when open"
+    # W-6 (2.3.0): mid AND wide -- collapse the left column onto the rail
+    # and back. The expanded width is the mode's own column width.
+    full = "344px" if mode == "wide" else "320px"
     page.evaluate("() => document.getElementById('wb-left-collapse').click()")
     page.wait_for_timeout(400)
     coll = page.evaluate("""() => {
@@ -631,9 +660,9 @@ def check_workbench(page, name):
         "        rail: getComputedStyle(document.getElementById('wb-rail')).display,"
         "        saved: JSON.parse(localStorage.getItem('tabelog.listView') || '{}')"
         "                 .leftCollapsed})")
-    if back["left"] != "344px" or back["rail"] != "none" or back["saved"] is not False:
+    if back["left"] != full or back["rail"] != "none" or back["saved"] is not False:
         raise AssertionError(f"the rail's hamburger did not restore the column: {back}")
-    return "wide: detail auto-collapses, left column collapses to the rail"
+    return f"{mode}: detail auto-collapses, left column collapses to the rail"
 
 
 MAP_HANDLE_JS = (

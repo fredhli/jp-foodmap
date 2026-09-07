@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 `versionCode` = major×10000 + minor×100 + patch, so it can be derived from the name and
 always increases.
 
+## [2.3.0] - 2026-09-07 · `versionCode 20300`
+
+Ships with the 2.3.0 site. Page 2.3.0 moves the Fold inner-screen split-window breakpoint
+(<750 CSS px) into phone layout, folding filters into the left column; no shell-side code
+changed.
+
 ## [2.2.0] - 2026-09-07 · `versionCode 20200`
 
 Ships with the 2.2.0 site. One entry, and it is about a bug report that turned out to be a
