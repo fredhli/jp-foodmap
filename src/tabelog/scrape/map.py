@@ -4414,16 +4414,27 @@ PHONE_DRAWER_HTML = """
      kept. M-3.2-06 took #ux-detail-back into the card's head row and
      replaced #ux-detail-actions with #bs-foot — both styled next to the
      sheet they belong to, not here. ---- */
-  #ux-filter-done { display: none; flex: 0 0 auto; padding: 10px 14px;
-    border-top: 1px solid #e5e7eb; background: #fff; }
+  /* M-3.2-07 (SPEC B.3 / C5): the filter tab's sticky footer is one 40px
+     CTA in a 56px band. The two 12px grey lines above it explained that the
+     result set is not the map viewport — a sentence the counts row at the
+     top of the same column already carries, printed here in the one place
+     the user is about to leave. .glass-thin comes from the utilities layer,
+     which outranks this one, so the 1px separator is drawn as a
+     pseudo-element rather than as a border the utility would overwrite. */
+  #ux-filter-done { display: none; position: relative; flex: 0 0 auto;
+    padding: 8px 12px; }
+  #ux-filter-done::before { content: ''; position: absolute; left: 0; right: 0;
+    top: 0; height: 1px; background: var(--border-1); }
   #ux-filter-done.on { display: block; }
-  #ux-filter-done p, #ux-saved-scope { margin: 0 0 6px; color: #6b7280;
-    font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-  #ux-filter-results { width: 100%; min-height: 44px; border: 0; border-radius: 8px;
-    background: #2563eb; color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.4; cursor: pointer; }
-  #ux-saved-scope { display: none; }
+  #ux-filter-results { width: 100%; min-height: 40px; border: 0;
+    border-radius: var(--r-md); background: var(--accent); color: #fff;
+    font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.2;
+    cursor: pointer; }
+  /* SPEC C6: the Saved tab states its own count in #fv-sum (FAV_TPL), so
+     the header's find-a-restaurant counts step aside. The second sentence
+     that used to live here (#ux-saved-scope) said the same thing again,
+     with a Chinese comma that leaked into EN and JA. */
   #wb-left-head.ux-head-fav .wb-counts { display: none; }
-  #wb-left-head.ux-head-fav #ux-saved-scope { display: block; margin: 8px 0 0; }
   #sync-stack > .sync-toast, #sync-stack > #sync-hint { pointer-events: none; }
   #sync-stack > .sync-toast .sync-btn, #sync-hint .sync-btn { pointer-events: auto; }
   #bs-content { min-height: 0; }
@@ -6863,7 +6874,6 @@ WORKBENCH_HTML = """
     <!-- M-022's two-segment reading, third instance. setCountText() writes
          every .ff-count / .ff-inview on the page, so this needs no wiring. -->
     <div class="wb-counts">符合筛选 <b class="ff-count">–</b> · 在屏幕范围内 <span class="ff-inview">–</span></div>
-    <p id="ux-saved-scope">列表为我的收藏，地图仍为当前找店结果</p>
   </div>
   <div id="wb-list-tools"></div>
   <div id="wb-list"></div>
@@ -6880,8 +6890,7 @@ WORKBENCH_HTML = """
        out again, so every listener, every id lookup and the
        startDynamicObservers() MutationObserver survive untouched. -->
   <div id="wb-filter-host" role="tabpanel" aria-labelledby="wb-tab-filter"></div>
-  <div id="ux-filter-done">
-    <p>结果包含所选地区内全部匹配餐厅，地图移动不改变筛选范围</p>
+  <div id="ux-filter-done" class="glass-thin">
     <button id="ux-filter-results" type="button">查看结果</button>
   </div>
 </aside>
@@ -7153,9 +7162,23 @@ FAV_TAB_HTML = """
   }
   .fv-sum { margin-bottom: 6px; font-size: 12px; color: #6b7280; }
   .fv-sum b { color: #2563eb; font-variant-numeric: tabular-nums; }
-  .fv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  /* M-3.2-07 (SPEC B.3; the tool row wrapped to two lines at 402): one row
+     at every phone width. The grouping select is the only elastic member;
+     new-list and copy-as-text give up their labels for a glyph and a title,
+     and Select — the one control the user reaches for repeatedly — keeps
+     its word and never wraps. */
+  .fv-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+  .fv-tools .wb-tool-btn { white-space: nowrap; }
+  .fv-tools .fv-tool-ic {
+    flex: 0 0 auto; width: 32px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 15px; line-height: 1;
+  }
+  @media (pointer: coarse) { .fv-tools .fv-tool-ic { width: 44px; } }
+  .fv-tools .fv-tool-ic svg { display: block; }
+  #fv-select { margin-left: auto; }
   #fv-group {
-    flex: 0 1 auto; min-width: 0; max-width: 60%;
+    flex: 1 1 auto; min-width: 0; max-width: 60%;
     min-height: 32px; padding: 0 6px; box-sizing: border-box;
     border: 1px solid #d1d5db; border-radius: 6px;
     background: #fff; color: #374151;
@@ -8296,11 +8319,13 @@ FILTER_JS_TEMPLATE = r"""
     'en':    '{n} restaurants match your filters · {m} on screen',
     'ja':    '条件に合う店 {n} 軒 · 画面内 {m} 軒'
   };
+  // M-3.2-07 (SPEC C6 / F): one line, and it is the Saved tab's whole
+  // header — #ux-saved-scope used to repeat it underneath in 12px grey.
   var FAV_TPL = {
-    'zh-CN': '你的收藏夹共 {n} 家餐厅 · 不受筛选影响',
-    'zh-TW': '你的收藏夾共 {n} 家餐廳 · 不受篩選影響',
-    'en':    'Your Saved list holds {n} restaurants · unaffected by filters',
-    'ja':    'お気に入りは {n} 軒 · 絞り込みの影響なし'
+    'zh-CN': '收藏 {n} 家 · 不受筛选影响',
+    'zh-TW': '收藏 {n} 家 · 不受篩選影響',
+    'en':    'Saved: {n} · not affected by filters',
+    'ja':    'お気に入り {n} 件 · 絞り込みの影響なし'
   };
   var FOOT_TPL = {
     'zh-CN': '其中 {n} 家有 Tabelog 网订入口',
@@ -17975,10 +18000,18 @@ FILTER_JS_TEMPLATE = r"""
               '<option value="city">' + escAttr(favT('按城市')) + '</option>' +
               '<option value="list">' + escAttr(favT('按子收藏夹')) + '</option>' +
             '</select>' +
-            '<button id="fv-new" class="wb-tool-btn" type="button">＋ ' +
-              escAttr(favT('新建子收藏夹')) + '</button>' +
-            '<button id="fv-copy" class="wb-tool-btn" type="button">' +
-              escAttr(favT('复制清单文本')) + '</button>' +
+            '<button id="fv-new" class="wb-tool-btn fv-tool-ic" type="button"' +
+              ' title="' + escAttr(favT('新建子收藏夹')) + '"' +
+              ' aria-label="' + escAttr(favT('新建子收藏夹')) + '">＋</button>' +
+            '<button id="fv-copy" class="wb-tool-btn fv-tool-ic" type="button"' +
+              ' title="' + escAttr(favT('复制清单文本')) + '"' +
+              ' aria-label="' + escAttr(favT('复制清单文本')) + '">' +
+              '<svg viewBox="0 0 24 24" width="14" height="14" fill="none"' +
+              ' stroke="currentColor" stroke-width="2" stroke-linecap="round"' +
+              ' stroke-linejoin="round" aria-hidden="true">' +
+              '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
+              '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' +
+              '</svg></button>' +
             '<button id="fv-select" class="wb-tool-btn" type="button"' +
               ' aria-pressed="false">' + escAttr(favT('选择')) + '</button>' +
           '</div>' +
