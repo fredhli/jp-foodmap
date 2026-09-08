@@ -3050,8 +3050,12 @@ MAP_FAB_HTML = """
       <button id="fab-bookmarks" class="map-fab active" type="button"
               aria-pressed="true" title="我的书签标记">
         <span class="map-fab-ic">⭐</span>
+        <!-- M-3.2-09 (SPEC C7 / F): the subtitle was one CJK run glued to a
+             second with a full-width comma, so EN and JA shipped "…on the
+             map，saved restaurants are unchanged" and overflowed the 188px
+             slot at every width. One existing run, one short sentence. -->
         <span class="lp-txt"><span class="map-fab-label">书签标记</span>
-          <span class="lp-sub">地图上的地点标记，不影响餐厅收藏</span></span>
+          <span class="lp-sub">地图上的地点标记</span></span>
         <span class="lp-sw" aria-hidden="true"></span>
       </button>
       <label class="lp-check">
@@ -4191,9 +4195,14 @@ ONBOARD_HTML = """
     <dl class="ob-kv">
       <dt>数据来源</dt>
       <dd lang="en">Tabelog</dd>
-      <dt>历史采集基线</dt>
+      <!-- M-3.2-09 (SPEC C12 / DT D12): "历史采集基线" and "最近局部补采"
+           are the build pipeline's own words. The two dates mean "the corpus
+           was collected around here" and "this is the newest row-level
+           stamp"; 数据基线 / 最近更新 say that, and the ob-note below still
+           spells out that a partial top-up is not a full refresh. -->
+      <dt>数据基线</dt>
       <dd lang="en">__DATA_SCRAPED_AT__</dd>
-      <dt>最近局部补采</dt>
+      <dt>最近更新</dt>
       <dd id="about-latest-scrape">__LATEST_SCRAPE__</dd>
       <dt>坐标</dt>
       <dd lang="en">GSI + Google Maps</dd>
@@ -6347,10 +6356,19 @@ WORKBENCH_HTML = """
   #wb-filter-pop[hidden] { display: none; }
 
   /* The map is folium's own #map_<hash> (id selector, position:relative,
-     100%/100%), so insetting it needs !important. */
-  body.wb-split .folium-map,
-  body.wb-mid   .folium-map,
-  body.wb-wide  .folium-map {
+     100%/100%), so insetting it needs !important.
+     M-3.2-09 (SPEC C9 / DT §7.1): `top` is 0, not --wb-top. #wb-top is a
+     translucent frosted bar now, and a frosted bar over the page canvas is
+     just a white bar — the blur needs the map underneath it to have anything
+     to sample. So the map runs edge to edge behind the bar and the bar
+     floats on it, which is also what every current map product does.
+     What this costs, and why it is acceptable: a marker inside the top
+     48/56px band is drawn but not clickable (it was not drawn at all
+     before, so nothing became less reachable), and map.getBounds() — the
+     source of the 屏幕内 number — now includes that band, i.e. ~6% of the
+     height at 900px. The left and right columns are opaque and still inset
+     the map, so the visible map is unchanged everywhere else. */
+  body.wb-split .folium-map {
     position: absolute !important;
     top: var(--wb-top) !important;
     left: var(--wb-left) !important;
@@ -6360,6 +6378,24 @@ WORKBENCH_HTML = """
     height: auto !important;
     transition: left 0.18s ease-out, right 0.18s ease-out;
   }
+  body.wb-mid   .folium-map,
+  body.wb-wide  .folium-map {
+    position: absolute !important;
+    top: 0 !important;
+    left: var(--wb-left) !important;
+    right: var(--wb-right) !important;
+    bottom: var(--wb-bottom) !important;
+    width: auto !important;
+    height: auto !important;
+    transition: left 0.18s ease-out, right 0.18s ease-out;
+  }
+  /* Leaflet's own top corners are empty on this page (zoomControl is off and
+     .leaflet-control-locate is display:none — the FAB stack replaced both),
+     but a control added later must not land under the bar. */
+  body.wb-mid .leaflet-top .leaflet-control,
+  body.wb-wide .leaflet-top .leaflet-control {
+    margin-top: calc(var(--wb-top) + 10px);
+  }
   .folium-map.no-anim { transition: none !important; }
   @media (prefers-reduced-motion: reduce) {
     body.wb-split .folium-map, body.wb-mid .folium-map,
@@ -6367,20 +6403,60 @@ WORKBENCH_HTML = """
   }
 
   /* ---------- top bar (mid / wide) ---------- */
+  /* M-3.2-09 (SPEC C9 / D.1): --glass-reg, but painted by a pseudo-element
+     rather than by the .glass-reg utility on the header itself.
+     WHY, and do not "simplify" this back: backdrop-filter makes the element
+     a containing block for its position:fixed descendants. wbRelocate()
+     re-parents #ss-box (and with it #ss-list, the search dropdown) into
+     #wb-top on mid / wide, and #ss-list.open is `position:fixed; top:
+     var(--wb-top); bottom:0`. With the filter on the header, `bottom:0`
+     resolved against the 48px bar instead of the viewport and the dropdown
+     collapsed to a 320x1 strip — measured in BOTH chromium and webkit; the
+     webkit tests/ux/review_regressions 932 case caught it.
+     The pseudo carries the filter, so the header itself stays an ordinary
+     containing block. z-index:-1 keeps it behind the bar's controls inside
+     the header's own stacking context (z-index:var(--z-bar) makes one). */
   #wb-top {
     position: fixed; top: 0; left: 0; right: 0;
     height: var(--wb-top);
     z-index: var(--z-bar);   /* over the sheets, under #bm-backdrop */
     box-sizing: border-box;
-    background: #fff;
-    border-bottom: 1px solid #e5e7eb;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    background: transparent;
     align-items: center; gap: 10px;
     /* A-1: eat the status-bar inset as padding so the bar's content sits
        below the clock while the white background still paints edge to edge.
        Both terms are 0 in a normal browser => `padding: 0 12px` as before. */
     padding: max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)) 12px 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #wb-top::before {
+    content: ''; position: absolute; inset: 0; z-index: -1;
+    background: var(--glass-tint-reg);
+    -webkit-backdrop-filter: var(--glass-blur-reg);
+    backdrop-filter: var(--glass-blur-reg);
+    border-bottom: 0.5px solid var(--glass-hairline);
+    box-shadow: var(--el-2), var(--glass-inner-hi);
+  }
+  /* The three glass disciplines (SPEC D.1), spelled out here because the
+     .glass-reg utility that normally carries them cannot be used (see
+     above): no blur => opaque white, reduced transparency => opaque white,
+     and no blur for the duration of a pan. On a 44px control 84% white with
+     the blur off is fine; across a 1440px bar the tiles sliding underneath
+     read straight through the text, so the gate goes fully opaque. */
+  @supports not ((backdrop-filter: blur(1px))
+                 or (-webkit-backdrop-filter: blur(1px))) {
+    #wb-top::before { background: var(--glass-fallback); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    #wb-top::before {
+      background: var(--glass-fallback);
+      -webkit-backdrop-filter: none; backdrop-filter: none;
+      border-bottom-color: var(--border-1);
+    }
+  }
+  body.map-moving #wb-top::before {
+    background: var(--glass-fallback);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
   }
   body.wb-mid #wb-top, body.wb-wide #wb-top { display: flex; }
   #wb-brand {
@@ -6472,30 +6548,14 @@ WORKBENCH_HTML = """
   @media (hover: hover) and (pointer: fine) {
     #wb-lang-pop button:hover { background: #f3f4f6; }
   }
-  #wb-sync {
-    flex-shrink: 0;
-    display: inline-flex; align-items: center; gap: 6px;
-    min-height: 32px; padding: 0 10px;
-    border: 1px solid #e5e7eb; border-radius: 999px;
-    background: #f9fafb; color: #6b7280;
-    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    cursor: pointer; max-width: 190px;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #wb-sync .wb-sync-t { overflow: hidden; text-overflow: ellipsis;
-                        white-space: nowrap; }
-  /* G4: colour is driven by data-kind, mirrored from setStatus(). */
-  #wb-sync::before {
-    content: ''; flex-shrink: 0;
-    width: 7px; height: 7px; border-radius: 50%; background: #9ca3af;
-  }
-  #wb-sync[data-kind="ok"]   { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
-  #wb-sync[data-kind="ok"]::before   { background: #16a34a; }
-  #wb-sync[data-kind="err"]  { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
-  #wb-sync[data-kind="err"]::before  { background: #dc2626; }
-  #wb-sync[data-kind="busy"] { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
-  #wb-sync[data-kind="busy"]::before { background: #2563eb; }
-  body.wb-mid #wb-sync .wb-sync-t { display: none; }
+  /* M-3.2-09 (SPEC C8 / DT §4.2 / §7.8): the sync chip is gone. At 1000 and
+     932 it had already shrunk to a bare 29px dot with no readable text — the
+     information it was supposed to carry was the first thing the layout threw
+     away — and it duplicated a signal the page shows twice more: the avatar
+     badge (#ss-avatar-dot, red = local only, blue = push in flight) and, for
+     an actual failure, #sync-banner. Its click target was the account menu,
+     which the avatar 8px to its right already opens. The status TEXT still
+     lives where it always did, in #ff-sync-status inside that menu. */
   /* Account slot: #ss-avatar / #ss-avatar-dot / #ss-menu move in here, and
      both the dot and the menu are position:absolute, so this slot has to be
      the containing block exactly the way #ss-top was. */
@@ -6584,8 +6644,23 @@ WORKBENCH_HTML = """
   @media (hover: hover) and (pointer: fine) {
     #wb-left-collapse:hover { background: #f3f4f6; color: #374151; }
   }
-  .wb-counts { margin-top: 5px; font-size: 12px; color: #6b7280; }
-  .wb-counts b { color: #2563eb; font-variant-numeric: tabular-nums; }
+  .wb-counts { margin-top: 5px; font-size: 12px; color: var(--fg-3);
+               display: flex; align-items: center; gap: 8px;
+               justify-content: space-between; min-width: 0; }
+  .wb-counts b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .wb-counts-k { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
+  /* SPEC C10: 13px, pill, sitting against the map-facing edge of the column.
+     Grey, not blue — it is map state, not the headline. */
+  .wb-inview-pill {
+    flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 4px;
+    padding: 1px 9px; box-sizing: border-box;
+    border: 1px solid var(--border-1); border-radius: var(--r-pill);
+    background: var(--bg-subtle); color: var(--fg-3);
+    font-size: 11.5px; line-height: 1.6; white-space: nowrap;
+  }
+  .wb-inview-pill .ff-inview { color: var(--fg-2); font-weight: 700;
+                               font-variant-numeric: tabular-nums; }
   /* Slots owned by the result-list task — created empty here on purpose. */
   #wb-list-tools { flex-shrink: 0; }
   #wb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -6676,8 +6751,29 @@ WORKBENCH_HTML = """
     body.wb-mid #wb-detail, body.wb-wide #wb-detail { transition: none; }
   }
   #wb-detail-head { flex-shrink: 0; }
+  /* SPEC C3: this is what makes #bs-foot the column's sticky footer. The
+     body is a flex column, #bs-content is its only flexible child and owns
+     the scrollbar, and #bs-foot is flex:0 0 auto — so the action row stays
+     on the column's bottom edge while the card scrolls behind it. No
+     position:sticky, no second scroll container. */
   #wb-detail-body { flex: 1 1 auto; min-height: 0;
                     display: flex; flex-direction: column; }
+  /* Four controls in 340px (mid) / 384px (wide): the star + its label, the
+     Google Maps button, Tabelog and the overflow menu. Measured with the
+     label on, the Directions word overflowed that button in all four
+     languages at every desktop width, so in the column it is the Google
+     Maps mark alone and the anchor carries title + aria-label.
+     (No CJK in this comment on purpose: _scan_cjk_runs() reads the built
+     page, so a Chinese or Japanese word inside a CSS comment becomes an
+     untranslated "UI string" in the i18n gate.) */
+  body.wb-mid #bs-foot .rst-gmaps span,
+  body.wb-wide #bs-foot .rst-gmaps span { display: none; }
+  body.wb-mid #bs-foot .rst-gmaps,
+  body.wb-wide #bs-foot .rst-gmaps {
+    flex: 0 0 auto; width: 44px; padding: 0;
+  }
+  body.wb-mid #bs-foot .rst-gmaps img,
+  body.wb-wide #bs-foot .rst-gmaps img { width: 19px; height: 19px; }
   .wb-empty { margin: 0; padding: 28px 20px; text-align: center;
               font-size: 13px; line-height: 1.6; color: #9ca3af; }
   body.wb-detail-open .wb-empty { display: none; }
@@ -6842,7 +6938,6 @@ WORKBENCH_HTML = """
     </button>
     <div id="wb-lang-pop" role="menu" hidden></div>
   </div>
-  <button id="wb-sync" type="button" data-kind=""><span class="wb-sync-t">同步</span></button>
   <div id="wb-top-acct"></div>
 </header>
 <aside id="wb-left" aria-label="结果">
@@ -6872,8 +6967,15 @@ WORKBENCH_HTML = """
       </button>
     </div>
     <!-- M-022's two-segment reading, third instance. setCountText() writes
-         every .ff-count / .ff-inview on the page, so this needs no wiring. -->
-    <div class="wb-counts">符合筛选 <b class="ff-count">–</b> · 在屏幕范围内 <span class="ff-inview">–</span></div>
+         every .ff-count / .ff-inview on the page, so this needs no wiring.
+         M-3.2-09 (SPEC C10 / DT §7.3): the two numbers answer two different
+         questions — "how long is this list" and "what is the map showing
+         right now" — and writing them as one sentence made the second read
+         as a footnote to the first. The list length stays as text at the
+         left; the map's number becomes a pill on the column's right edge,
+         the edge that touches the map. renderCountSentence() rewrites this
+         node per language; the markup here is only the first paint. -->
+    <div class="wb-counts"><span class="wb-counts-k">符合筛选 <b class="ff-count">–</b></span><span class="wb-inview-pill">屏幕内 <span class="ff-inview">–</span></span></div>
   </div>
   <div id="wb-list-tools"></div>
   <div id="wb-list"></div>
@@ -6921,6 +7023,39 @@ WORKBENCH_HTML = """
 </section>
 <div id="wb-filter-pop" role="dialog" aria-labelledby="ff-sheet-title"
      aria-hidden="true" hidden></div>
+"""
+
+
+# M-3.2-09: the only block that ships in the `overrides` cascade layer.
+#
+# Everything else on the page is in `components`, and the two glass utilities
+# (.glass-thin / .glass-reg) are in `utilities`, which wins — that is the
+# whole point of the utility, but it also means a component that wears the
+# class cannot get its own border or shadow back with an id selector, however
+# specific. These three rules are exactly the cases where the utility's
+# generic edge is wrong for the surface, plus one performance-gate colour.
+# Keep this list short: an override here is invisible from the rule it beats.
+DESKTOP_POLISH_CSS = """
+<style>
+  /* SPEC C3. #bs-foot is the card's action row in every layout: pinned to
+     the bottom of #bs-sheet on a phone, and — because #wb-detail-body is a
+     flex column whose only flexible child is the scrolling #bs-content — the
+     sticky footer of the detail column on mid / wide. Either way it is lit
+     from below, so the separator belongs on its top edge and the shadow
+     points up; the utility's all-round hairline and downward --el-2 are for
+     a control floating free on the map, which this is not. */
+  #bs-foot {
+    border: 0; border-top: 1px solid var(--border-1);
+    box-shadow: 0 -4px 12px rgba(16, 24, 40, 0.06), var(--glass-inner-hi);
+  }
+  /* Inside the detail column there is no map behind the footer — the column
+     is opaque white — so the blur has nothing to sample and only costs a
+     compositing layer per repaint. */
+  body.wb-mid #bs-foot, body.wb-wide #bs-foot {
+    background: var(--bg-elev);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+</style>
 """
 
 
@@ -8370,11 +8505,14 @@ FILTER_JS_TEMPLATE = r"""
   // above — ja
   // trails both numbers behind their labels, so the sentence cannot be
   // assembled from a static CJK run plus a number span.
+  // M-3.2-09 (SPEC C7): #lp-n-builtin overflowed its 188px slot in EN at
+  // every desktop width (2 px in 2.3.0, more once the count reached three
+  // digits). Two words and two numbers.
   var LANDMARK_TPL = {
-    'zh-CN': '{n} 个内置地标 + {x} 个用户收藏的地标',
-    'zh-TW': '{n} 個內建地標 + {x} 個使用者收藏的地標',
-    'en':    '{n} built-in landmarks + {x} of your own',
-    'ja':    '内蔵の名所 {n} + 自分で追加 {x}'
+    'zh-CN': '内置 {n} · 自建 {x}',
+    'zh-TW': '內建 {n} · 自建 {x}',
+    'en':    '{n} built-in · {x} yours',
+    'ja':    '内蔵 {n} · 自分 {x}'
   };
   // H11: "已同步 14:07:33" used to format the clock with the *browser's*
   // locale, so a zh-CN browser reading the page in ja saw a Chinese
@@ -10673,6 +10811,12 @@ FILTER_JS_TEMPLATE = r"""
         + '</div>'
         + (subParts.length
             ? '<div class="rst-sub">' + subParts.join('') + '</div>' : '')
+        // M-3.2-09 (SPEC C4 / DT §7.4): the photo strip used to sit eighth,
+        // below the policy table, the hours and the address — on a 340px mid
+        // column that put it two screens down, so the one thing that decides
+        // "do I want to eat here" was never on the first screen. It is now
+        // the row right under the identity line, above the numbers.
+        + photoHtml
         // §5.3: the three numbers a plan turns on, above everything else.
         + '<div class="rst-decision">'
           + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '晚', dinner)
@@ -10699,7 +10843,6 @@ FILTER_JS_TEMPLATE = r"""
         + '</div>'
         + gcalNote
         + approxNote
-        + photoHtml
         // E11 / M-031: the sub-collection chips. Left empty here and filled
         // by bindCardExtras → flPaintCardLists, so a chip tap (or a change
         // made from another surface) repaints this one row instead of the
@@ -13193,15 +13336,6 @@ FILTER_JS_TEMPLATE = r"""
       statusEl.style.color = kind === 'err' ? '#dc2626'
                            : kind === 'ok'  ? '#16a34a'
                            : kind === 'busy'? '#2563eb' : '#6b7280';
-      // G4 / M-027: mirror onto the top-bar chip. data-kind drives the dot
-      // colour in CSS; the resting label is the generic 同步 so the chip is
-      // never a blank pill.
-      var wbChip = document.getElementById('wb-sync');
-      if (wbChip) {
-        var wbChipT = wbChip.querySelector('.wb-sync-t') || wbChip;
-        wbChipT.textContent = localizeText(text || '同步');
-        wbChip.dataset.kind = kind || '';
-      }
     }
     storageBlockedHook = function() {
       storageBlockedSeen = true;
@@ -15092,8 +15226,13 @@ FILTER_JS_TEMPLATE = r"""
           '<button type="button" class="ff-fav-btn bs-foot-btn'
         +   (nearby ? '' : ' bs-primary') + '" data-url="' + url + '">'
         +   '<span class="ff-fav-label"></span></button>'
+        // M-3.2-09: the label is hidden by CSS in the two column modes (the
+        // 340/384px detail column has no room for four text controls), so
+        // the accessible name has to be on the anchor, not only in the span.
         + '<a class="rst-gmaps bs-foot-btn' + (nearby ? ' bs-primary' : '')
-        +   '" href="' + escAttr(mapsUrl) + '" target="_blank" rel="noopener">'
+        +   '" href="' + escAttr(mapsUrl) + '" target="_blank" rel="noopener"'
+        +   ' title="' + escAttr(localizeText('导航')) + '"'
+        +   ' aria-label="' + escAttr(localizeText('导航')) + '">'
         +   '<img src="img/google-maps-v2.png" alt="" width="17" height="17" '
         +   'loading="lazy"><span>' + escAttr(localizeText('导航')) + '</span></a>'
         + '<a class="rst-tabelog bs-foot-lnk" href="' + url
@@ -15895,6 +16034,17 @@ FILTER_JS_TEMPLATE = r"""
     // Now the HTML is only rewritten when a host has no sentence yet (first
     // paint) or the language changed under it.
     var lastSentLang = null;
+    // M-3.2-09 (SPEC C10): the left column's head splits the sentence in
+    // two. Both words already exist as translated runs (#wb-rail says them),
+    // so this costs no i18n key, and both numbers keep their .ff-count /
+    // .ff-inview classes — setCountText(), updateEmptyState()'s is-zero pass
+    // and updateFabAria() all keep finding them exactly where they were.
+    function countPairHtml(n, m) {
+      return '<span class="wb-counts-k">' + localizeText('符合筛选')
+           + ' <b class="ff-count">' + n + '</b></span>'
+           + '<span class="wb-inview-pill">' + localizeText('屏幕内')
+           + ' <span class="ff-inview">' + m + '</span></span>';
+    }
     function renderCountSentence() {
       var nodes = document.querySelectorAll('.wb-counts, #ff-head-counts');
       var relang = (lastSentLang !== activeLang);
@@ -15902,7 +16052,9 @@ FILTER_JS_TEMPLATE = r"""
         var host = nodes[i];
         if (relang || !host.querySelector('.ff-count') ||
             !host.querySelector('.ff-inview')) {
-          host.innerHTML = countSentenceHtml(lastCountN, lastCountM);
+          host.innerHTML = host.classList.contains('wb-counts')
+            ? countPairHtml(lastCountN, lastCountM)
+            : countSentenceHtml(lastCountN, lastCountM);
           // The .ff-count nodes inside this host were just replaced.
           zeroClassNodes = null;
           zeroClassApplied = null;
@@ -16616,6 +16768,15 @@ FILTER_JS_TEMPLATE = r"""
       hot:    ['wb-badge-hot',    '热门']
     };
     var WB_HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+    // M-3.2-09 (SPEC C11): the compact price for a result row. Keyed by the
+    // same PRICE_BUCKETS keys; any key missing here falls back to the long
+    // localized label, so adding a bucket in map_data.py can only make a row
+    // longer, never blank.
+    var WB_BUCKET_SHORT = {
+      'lt1k':  '<\u00a51k',      '1to3k':   '\u00a51k\u20133k',
+      '3to5k': '\u00a53k\u20135k', '5to10k':  '\u00a55k\u201310k',
+      '10to20k': '\u00a510k\u201320k', 'ge20k': '\u00a520k+'
+    };
     var WB_BUCKET_RANK = {}, WB_BUCKET_LABEL = {};
     for (var wbBi = 0; wbBi < PRICE_BUCKETS.length; wbBi++) {
       WB_BUCKET_RANK[PRICE_BUCKETS[wbBi][0]] = wbBi;
@@ -16820,15 +16981,27 @@ FILTER_JS_TEMPLATE = r"""
       var label = WB_BUCKET_LABEL[d.bucket] || '';
       var price = '';
       if (label) {
-        price = (d.bucket === 'na') ? wbT(label) : (label + ' ' + wbT('上限'));
+        // M-3.2-09 (SPEC C11): the row gets the SHORT form. The long label
+        // ("¥10,000 – 20,000" + the word 上限 / max / 上限) is 18 characters
+        // in a 320px mid column and was the first of the three l2 segments
+        // to be cut off (ux-desktop table_E). WB_BUCKET_SHORT is digits and
+        // Latin only, so it needs no i18n entry and reads the same in all
+        // four languages; 价格 NA keeps the localized word it always had.
+        price = WB_BUCKET_SHORT[d.bucket] || wbT(label);
       }
       var l2 = '';
       if (price) l2 += '<span class="wb-row-pr">' + escAttr(price) + '</span>';
-      if (wbList.sort === 'distance' && typeof d._wbD === 'number' && isFinite(d._wbD)) {
-        l2 += '<span class="wb-row-sep" aria-hidden="true">·</span><span class="ux-distance">'
+      // M-3.2-09 (SPEC C11): distance REPLACES the station rather than
+      // standing next to it. Both at once made three segments where two fit,
+      // and in the nearby flow the metres are the reason the row is where it
+      // is — the station name is the thing that can go.
+      var showD = (wbList.sort === 'distance' &&
+                   typeof d._wbD === 'number' && isFinite(d._wbD));
+      if (showD) {
+        if (l2) l2 += '<span class="wb-row-sep" aria-hidden="true">·</span>';
+        l2 += '<span class="ux-distance">'
           + (d._wbD < 1000 ? Math.round(d._wbD) + ' m' : (d._wbD / 1000).toFixed(1) + ' km') + '</span>';
-      }
-      if (d.st) {
+      } else if (d.st) {
         if (l2) l2 += '<span class="wb-row-sep" aria-hidden="true">·</span>';
         l2 += '<span lang="ja">' + escAttr(d.st) + '</span>';
       }
@@ -17529,8 +17702,10 @@ FILTER_JS_TEMPLATE = r"""
              '<span class="wb-row-nm" lang="ja">' + escAttr(d.name || '') + '</span>' +
              '<span class="wb-row-rt">★' +
              (d.rating == null ? '–' : d.rating) + '</span>';
+        // M-3.2-09 (SPEC C11): same short price the result rows now use —
+        // the two lists sit in the same 320px column and must not disagree.
         var lbl = WB_BUCKET_LABEL[d.bucket] || '';
-        var price = lbl ? ((d.bucket === 'na') ? favT(lbl) : (lbl + ' ' + favT('上限'))) : '';
+        var price = lbl ? (WB_BUCKET_SHORT[d.bucket] || favT(lbl)) : '';
         l2 = price ? '<span class="wb-row-pr">' + escAttr(price) + '</span>' : '';
         if (d.city) {
           if (l2) l2 += '<span class="wb-row-sep" aria-hidden="true">·</span>';
@@ -18995,13 +19170,6 @@ FILTER_JS_TEMPLATE = r"""
         }
       });
     })();
-    var wbSyncChip = document.getElementById('wb-sync');
-    if (wbSyncChip) {
-      wbSyncChip.addEventListener('click', function(e) {
-        e.stopPropagation();
-        openAvatarMenu();
-      });
-    }
 
     // Cross-task handles. Callers must `typeof`-guard: these only exist once
     // this block has run.
@@ -22160,6 +22328,10 @@ def main(argv: list[str] | None = None) -> None:
     # M-027: after panel_html so the `body.wb-*` offset rules outrank the
     # #ff-sheet / #ff-fab / #bs-sheet blocks they reposition.
     m.get_root().html.add_child(folium.Element(css_layer(WORKBENCH_HTML)))
+    # M-3.2-09: `overrides` is the last layer, so this is the one block that
+    # can take a property back from a .glass-* utility. See its docstring.
+    m.get_root().html.add_child(
+        folium.Element(css_layer(DESKTOP_POLISH_CSS, "overrides")))
     # M-027 / B1: result-list styling, right after the shell it fills.
     m.get_root().html.add_child(folium.Element(css_layer(RESULT_LIST_HTML)))
     # M-031 / E1-E2-E8-E9: the collections tab, after the .wb-row rules it reuses.
