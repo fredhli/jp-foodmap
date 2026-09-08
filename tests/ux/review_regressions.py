@@ -142,17 +142,17 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         check(planned=={'region':25,'sort':'price','center':[original['lat'],original['lng']],'zoom':11},'planning context does not match original view')
         for sort in ['rating','price','distance']:
             page.locator('#wb-sort').select_option(sort);page.wait_for_timeout(150)
-            note=page.locator('#ux-context-note').inner_text()
+            note=page.locator('#ux-context-note').text_content()
             save(page,f'{args.browser}-{w}-nearby-{sort}')
             check(('直线距离排序' in note)==(sort=='distance'),'nearby sort copy disagrees')
             if sort!='distance':check(('评分' if sort=='rating' else '价位') in note,'current sort absent from copy')
         page.locator('#wb-sort').select_option('rating');page.reload();lib_browser.wait_ready(page)
         check(page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned,'planning coordinates changed on reload')
         if w<750:tab('results')
-        check('直线距离排序' not in page.locator('#ux-context-note').inner_text(),'reload falsely claims distance sorting')
+        check('直线距离排序' not in page.locator('#ux-context-note').text_content(),'reload falsely claims distance sorting')
         save(page,f'{args.browser}-{w}-nearby-reload-rating')
+        if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02/04: the chip row sits under the open drawer
         check(page.locator('#ux-restore-plan').is_visible(),'return plan action lost')
-        if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02: #ux-context sits under the open drawer
         page.locator('#ux-restore-plan').click();page.wait_for_timeout(300)
         center=page.evaluate(MAP+'.getCenter()')
         check(page.locator('#ff-region').input_value()=='25' and page.locator('#wb-sort').input_value()=='price','planning region/sort lost')

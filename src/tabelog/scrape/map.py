@@ -186,7 +186,7 @@ _CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 # translatable UI copy — strip them or every one of them is reported as a
 # missing EN/JA translation.
 _COUNT_TPL_LITERAL_RE = re.compile(
-    r"var (?:COUNT_TPL|FAV_TPL|FOOT_TPL|FOOT_BTN_TPL|LANDMARK_TPL|NAVCAP_TPL)"
+    r"var (?:COUNT_TPL|FAV_TPL|FOOT_TPL|FOOT_BTN_TPL|LANDMARK_TPL|NAVCAP_TPL|BACKTO_TPL)"
     r"\s*=\s*[^;]+;"
 )
 
@@ -3125,6 +3125,66 @@ SEARCH_BOX_HTML = """
      capsule is gone — the drawer's entry is the segmented pill (#wb-seg),
      so the search icon is back at every width and the input gets its 2.3.0
      width again. */
+  /* M-3.2-04: the chip row under the capsule (SPEC B.2). One row, never
+     wraps: region chip (opens the filter tab focused on #ff-region — F2,
+     no new region popover), the nearby chip (pressed while nearby mode is
+     on) and the "back to <region>" chip (uxRestorePlanning, F3). It lives
+     INSIDE #ss-box so it is inert / hidden with the capsule, lines up with
+     the capsule's left edge for free, and is hidden while the dropdown is
+     out or the capsule has focus (the dropdown owns that band). It replaces
+     3.1.x's #ux-context card and the two header buttons that squeezed the
+     input to 201px on a 402px phone. */
+  #ss-chips {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 8px; min-width: 0;
+    /* Chips never shrink or wrap; a long prefecture name in EN / JA scrolls
+       the row sideways instead (scrollbar hidden, like every chip row). */
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px 0; margin-top: 2px;   /* room for the 44px hit areas */
+  }
+  #ss-chips::-webkit-scrollbar { display: none; }
+  /* Nearby mode: the region chip steps aside (SPEC B.2 table — the row is
+     the pressed nearby chip plus the way back to the planned region; the
+     region is always all-regions then, which the back chip already says). */
+  body.ux-nearby #ux-region { display: none; }
+  #ss-box.ss-open #ss-chips, #ss-top:focus-within + #ss-chips,
+  body.ux-map-popup #ss-chips { display: none; }
+  .ss-chip {
+    position: relative;   /* anchor for the 44px hit area */
+    display: inline-flex; align-items: center; gap: 5px;
+    flex: 0 0 auto; min-width: 0;
+    height: 32px; padding: 0 12px; margin: 0;
+    border-radius: var(--r-pill);
+    font: 500 13px/1 var(--font-ui); color: var(--fg-2);
+    white-space: nowrap; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background var(--dur-1) var(--ease-std), color var(--dur-1) var(--ease-std);
+  }
+  .ss-chip::after { content: ''; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
+  .ss-chip[hidden] { display: none; }
+  .ss-chip .ss-chip-t { overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
+  .ss-chip .ss-chip-caret { font-size: 11px; color: var(--fg-3); }
+  .ss-chip img.emoji-img { width: 14px; height: 14px; }
+  /* Pressed = nearby mode. This chip never wears .glass-thin (the utility
+     layer would win the background), so it is the one opaque chip. */
+  .ss-chip.on { background: var(--accent); color: #fff; border: 0.5px solid var(--accent); box-shadow: var(--el-1); }
+  .ss-chip.on .ss-chip-caret { color: rgba(255,255,255,.8); }
+  .ss-chip:disabled { color: var(--fg-3); cursor: wait; }
+  .ss-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (hover: hover) and (pointer: fine) {   /* M-160 */
+    .ss-chip.glass-thin:hover { color: var(--accent-strong); }
+  }
+  /* mid / wide: the capsule sits in #wb-top and the top bar already has its
+     own region button, so the region chip is redundant there; the row
+     floats under the bar at the map column's left edge for the nearby /
+     back-to-plan chips (the desktop fallback SPEC M-3.2-05 relies on). */
+  body.wb-mid #ss-chips, body.wb-wide #ss-chips {
+    position: fixed; margin: 0;
+    top: calc(var(--wb-top) + 8px); left: calc(var(--wb-left) + 12px);
+    z-index: calc(var(--z-float) + 1);
+  }
+  body.wb-mid #ux-region, body.wb-wide #ux-region { display: none; }
   #ss-input {
     flex: 1; min-width: 0;
     padding: 12px 6px 12px 8px;   /* F2 / M-078: 44px pill */
@@ -3568,6 +3628,21 @@ SEARCH_BOX_HTML = """
       </button>
     </div>
   </div>
+  <!-- M-3.2-04: the chip row (CSS above). Ids are the 3.1.x ones so the
+       F2 / F3 handlers and the tests keep addressing them; the sr-only note
+       is the aria-live channel for the nearby copy (M-3.2-05 retires it). -->
+  <div id="ss-chips" role="group" aria-label="找店范围">
+    <button id="ux-region" class="ss-chip glass-thin" type="button">
+      <span aria-hidden="true">📍</span><span class="ss-chip-t">全部地区</span><span class="ss-chip-caret" aria-hidden="true">▾</span>
+    </button>
+    <button id="ux-nearby" class="ss-chip glass-thin" type="button" aria-pressed="false">
+      <span aria-hidden="true">◎</span><span class="ss-chip-t">找附近</span>
+    </button>
+    <button id="ux-restore-plan" class="ss-chip glass-thin" type="button" hidden>
+      <span aria-hidden="true">←</span><span class="ss-chip-t"></span>
+    </button>
+    <span id="ux-context-note" class="sr-only" role="status"></span>
+  </div>
   <!-- Two sub-containers so the async Nominatim response only rewrites its
        own section — the local restaurant rows (and the list's scroll
        position) survive untouched. -->
@@ -3750,7 +3825,8 @@ ONBOARD_HTML = """
      an open search dropdown always covers it. */
   #intro-bar {
     position: fixed;
-    top: calc(var(--chrome-top) + 52px);
+    /* M-3.2-04: capsule 46 + 2 + chip row 44 (32 + 6px hit padding) + 8. */
+    top: calc(var(--chrome-top) + 100px);
     /* W-10: the same inset #ss-box uses, so the two stack edge-to-edge
        instead of 12 vs 8. */
     left: var(--chrome-inset); right: var(--chrome-inset);
@@ -3770,7 +3846,10 @@ ONBOARD_HTML = """
   /* On mid / wide the search box has been re-parented into #wb-top, so the
      bar hangs off the top bar and spans only the map column. */
   body.wb-mid #intro-bar, body.wb-wide #intro-bar {
-    top: calc(var(--wb-top) + 8px);
+    /* M-3.2-04: under the chip row, which floats at --wb-top + 8 on these
+       layouts — 3.1.x parked #ux-context at exactly this spot and the two
+       overprinted each other on first open (DT D1/D2). */
+    top: calc(var(--wb-top) + 56px);
     left: calc(var(--wb-left) + 12px);
     right: calc(var(--wb-right) + 12px);
   }
@@ -4310,25 +4389,7 @@ PHONE_DRAWER_HTML = """
      below are the ones M-3.2-04 (#ux-context), M-3.2-06 (#ux-detail-back /
      #ux-detail-actions) and M-3.2-07 (#ux-filter-done / #ux-saved-scope)
      replace; the behaviour they front is kept. ---- */
-  :root { --ux-context-h: 0px; }
-  #ux-context {
-    position: fixed; z-index: calc(var(--z-float) + 1);
-    top: calc(var(--wb-top) + 8px); left: calc(var(--wb-left) + 12px);
-    right: calc(var(--wb-right) + 12px); width: fit-content; max-width: calc(100vw - 24px);
-    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
-    padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 10px;
-    background: #fff; color: #374151; box-shadow: 0 2px 8px #0001;
-    font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    box-sizing: border-box;
-  }
-  #ux-context button { min-height: 36px; border: 0; border-radius: 6px;
-    padding: 4px 8px; background: #eff6ff; color: #1d4ed8; cursor: pointer;
-    font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
-  #ux-context button:focus-visible,
   #ux-detail-back:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
-  #ux-context button[hidden], #ux-context-note:empty { display: none; }
-  #ux-context-note { flex-basis: 100%; font-size: 12px; color: #6b7280; }
-  #ux-region { max-width: 16em; overflow-wrap: anywhere; }
   #ux-filter-done { display: none; flex: 0 0 auto; padding: 10px 14px;
     border-top: 1px solid #e5e7eb; background: #fff; }
   #ux-filter-done.on { display: block; }
@@ -4356,31 +4417,6 @@ PHONE_DRAWER_HTML = """
   #bs-content { min-height: 0; }
   .rst-reservation-note { font-size: 12px; line-height: 1.5; color: #6b7280; margin: 8px 0; }
   @media (max-width: 749px) {
-    #ss-box { left: max(var(--chrome-inset), env(safe-area-inset-left));
-      right: max(var(--chrome-inset), env(safe-area-inset-right)); width: auto; transform: none; }
-    #ss-top { gap: 6px; }
-    #ss-top > #ux-region, #ss-top > #ux-nearby {
-      flex: 0 0 auto; width: clamp(64px, 16vw, 80px); min-height: 44px;
-      box-sizing: border-box; padding: 5px 7px; border: 1px solid #dbe7f5;
-      border-radius: 14px; background: #eff6ff; color: #1d4ed8;
-      box-shadow: 0 2px 6px #1e3a5f12; font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      text-align: center; overflow-wrap: anywhere; cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    }
-    #ss-top > #ux-region { width: auto; min-width: clamp(64px, 16vw, 80px);
-      max-width: min(112px, 28vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #ss-top > #ux-region:active, #ss-top > #ux-nearby:active { background: #dbeafe; }
-    #ss-top > #ux-region:focus-visible, #ss-top > #ux-nearby:focus-visible {
-      outline: 2px solid #2563eb; outline-offset: 2px; }
-    #ss-top > #ux-nearby:disabled { color: #64748b; cursor: wait; }
-    #ux-context.ux-context-idle { display: none; }
-    #ux-context { top: calc(64px + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
-      left: max(12px,env(safe-area-inset-left)); right: max(12px,env(safe-area-inset-right)); width: auto; }
-    #ux-context button { min-height: 40px; }
-    #intro-bar { top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))) !important;
-      left: max(var(--chrome-inset), env(safe-area-inset-left));
-      right: calc(max(var(--chrome-inset), env(safe-area-inset-right)) + 42px); }
-    body.ux-map-popup #ux-context { visibility: hidden; }
     /* M-3.2-02: the search capsule sits under the drawer (inert on a phone,
        covered on medium) and its white pill would otherwise ghost through
        the glass head — and its avatar would peek out past the drawer's
@@ -4400,16 +4436,10 @@ PHONE_DRAWER_HTML = """
     body.ux-detail-open #sync-hint { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #ux-context *, #ux-detail-actions * { transition: none !important; }
+    #ux-detail-actions * { transition: none !important; }
   }
 </style>
 <div id="wb-fav-backdrop"></div>
-<div id="ux-context" aria-label="找店范围">
-  <button id="ux-region" type="button">选地区</button>
-  <button id="ux-nearby" type="button">找附近</button>
-  <button id="ux-restore-plan" type="button" hidden>返回原地区规划</button>
-  <span id="ux-context-note" role="status"></span>
-</div>
 """
 
 
@@ -8145,6 +8175,14 @@ FILTER_JS_TEMPLATE = r"""
       return vals[k] == null ? '' : String(vals[k]);
     });
   }
+  // M-3.2-04: "back to <region>" for the chip row. A template, not a
+  // prefix key, because Japanese puts the region first and the verb last.
+  var BACKTO_TPL = {
+    'zh-CN': '回到{r}',
+    'zh-TW': '回到{r}',
+    'en':    'Back to {r}',
+    'ja':    '{r}に戻る'
+  };
   var COUNT_TPL = {
     'zh-CN': '筛选后 {n} 家餐厅符合标准 · 其中屏幕内 {m} 家',
     'zh-TW': '篩選後 {n} 家餐廳符合標準 · 其中螢幕內 {m} 家',
@@ -8989,7 +9027,7 @@ FILTER_JS_TEMPLATE = r"""
     // aria-hidden fallback keeps older engines announcing the right thing.
     // W-6: the phone drawer's ≡ entry used to need its own line here as
     // #wb-fav-fab; it now lives inside #ss-box, which is already on the list.
-    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack', '#ux-context',
+    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack',
                      '#wb-left', '#wb-top', '#wb-rail', '#wb-detail'];
     function setBackgroundInert(on, exclude) {
       for (var i = 0; i < INERT_SEL.length; i++) {
@@ -11722,7 +11760,10 @@ FILTER_JS_TEMPLATE = r"""
       'ss-input': {
         'zh-CN': '搜索餐厅 / 景点 / 地址 ...',
         'zh-TW': '搜尋餐廳 / 景點 / 地址 ...',
-        'en':    'Search restaurants / landmarks / address ...',   // M-106
+        // M-3.2-04: the 402px capsule gives the input 312px; the old
+        // "Search restaurants / landmarks / address ..." (299px at 16px)
+        // clipped at "landmarks". Commas, no trailing dots.
+        'en':    'Search restaurants, landmarks, addresses',   // M-106
         'ja':    'レストラン / 名所 / 住所を検索 ...'
       },
       'bm-name': {
@@ -12953,8 +12994,8 @@ FILTER_JS_TEMPLATE = r"""
     // 'searching' state so the × button hides once the user is back on the
     // map. (Text, if any, is kept so they can refine on re-focus.)
     document.addEventListener('click', function(e) {
-      // Area and nearby still dismiss search after moving into the header.
-      if (ssBox.contains(e.target) && !e.target.closest('#ux-region, #ux-nearby')) return;
+      // M-3.2-04: a chip tap under the capsule closes the dropdown too.
+      if (ssBox.contains(e.target) && !e.target.closest('#ss-chips')) return;
       ssCloseDropdown();
       ssWrap.classList.remove('searching');
     });
@@ -18727,20 +18768,6 @@ FILTER_JS_TEMPLATE = r"""
     var uxPlanning = null, uxRequestedPlan = null;
     var uxNearbyActive = false, uxNearbyPending = false, uxLocationNote = '';
     var uxNearbyTimer = null;
-    function uxPlaceHeaderButtons() {
-      var phone = wbIsPhoneLike();
-      var region = document.getElementById('ux-region');
-      var near = document.getElementById('ux-nearby');
-      var target = document.getElementById(phone ? 'ss-top' : 'ux-context');
-      var anchor = document.getElementById(phone ? 'ss-avatar' : 'ux-restore-plan');
-      if (region.parentNode !== target) {
-        var focused = document.activeElement;
-        target.insertBefore(region, anchor);
-        target.insertBefore(near, anchor);
-        if (focused === region || focused === near) focused.focus({preventScroll: true});
-      }
-      uxPaintContext();
-    }
     function uxSyncNav() {
       var current = favDrawerOpen() ? wbTabPref : 'map';
       document.querySelectorAll('[data-ux-tab]').forEach(function(button) {
@@ -18758,26 +18785,45 @@ FILTER_JS_TEMPLATE = r"""
       }
       wbSetTab(tab);
     }
+    // M-3.2-04: the chip row state machine (SPEC B.2).
+    //   idle              [pin <region or all-regions> caret] [nearby]
+    //   locating          ... [locating...] (disabled)
+    //   nearby            [pin ...] [nearby - by distance] (pressed) [back to <plan region>]
+    // The region chip always opens the filter tab focused on #ff-region
+    // (F2); the back chip is uxRestorePlanning (F3). The sr-only note keeps
+    // the 3.1.x nearby copy as an aria-live channel until M-3.2-05 swaps it
+    // for toasts. On mid / wide the region chip is display:none (the top
+    // bar has its own) and the row floats under the bar.
     function uxPaintContext() {
-      var phone = wbIsPhoneLike();
       var region = document.getElementById('ux-region');
-      var note = document.getElementById('ux-context-note');
-      var restore = document.getElementById('ux-restore-plan');
       var near = document.getElementById('ux-nearby');
+      var restore = document.getElementById('ux-restore-plan');
+      var note = document.getElementById('ux-context-note');
+      function txt(el, t) { var n = el && el.querySelector('.ss-chip-t'); if (n && n.textContent !== t) n.textContent = t; }
       if (region) {
         var selectedRegion = filterState && filterState.region != null ? prefName(filterState.region) : '';
-        var regionAction = phone && activeLang === 'en' ? 'Region' : localizeText('选地区');
-        var regionLabel = regionAction + ' · ' + (selectedRegion || localizeText('全部地区'));
-        region.textContent = phone ? (selectedRegion || regionAction) : regionLabel;
-        region.setAttribute('aria-label', regionLabel);
-        region.title = regionLabel;
+        var regionLabel = selectedRegion || localizeText('全部地区');
+        txt(region, regionLabel);
+        var regionAria = localizeText('选地区') + ' · ' + regionLabel;
+        region.setAttribute('aria-label', regionAria);
+        region.title = regionAria;
       }
-      if (restore) restore.hidden = !uxPlanning;
+      var nearbyOn = !!uxNearbyActive && !uxNearbyPending;
       if (near) {
         near.disabled = !!uxNearbyPending;
-        near.textContent = uxNearbyPending ? localizeText('正在定位…')
-          : phone && activeLang === 'en' ? 'Nearby' : localizeText('找附近');
+        near.classList.toggle('on', nearbyOn);
+        near.classList.toggle('glass-thin', !nearbyOn);
+        near.setAttribute('aria-pressed', nearbyOn ? 'true' : 'false');
+        txt(near, uxNearbyPending ? localizeText('正在定位') + '…'
+          : nearbyOn ? localizeText('附近') + ' · ' + (wbList.sort === 'distance' ? localizeText('按距离') : wbSortLabel(wbList.sort))
+          : localizeText('找附近'));
       }
+      if (restore) {
+        restore.hidden = !uxPlanning;
+        if (uxPlanning) txt(restore, l10nTpl(BACKTO_TPL, {r: uxPlanning.region == null
+          ? localizeText('全部地区') : prefName(uxPlanning.region)}));
+      }
+      document.body.classList.toggle('ux-nearby', nearbyOn);
       if (note) {
         note.textContent = uxLocationNote ? localizeText(uxLocationNote)
           : !uxNearbyActive ? ''
@@ -18787,7 +18833,6 @@ FILTER_JS_TEMPLATE = r"""
           : localizeText('全部地区') + ' · ' + localizeText('排序') + '：' + wbSortLabel(wbList.sort);
         if (uxNearbyActive && wbUserLoc && wbUserLoc.ts) note.textContent += ' · '
           + localizeText('定位时间') + ' ' + new Date(wbUserLoc.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-        document.getElementById('ux-context').classList.toggle('ux-context-idle', !uxPlanning && !note.textContent);
       }
     }
     function uxLocationFailed() {
@@ -18827,7 +18872,8 @@ FILTER_JS_TEMPLATE = r"""
       wbList.sort = previous.sort;
       if (wbEls && wbEls.sort) wbEls.sort.value = previous.sort;
       apply(); wbScheduleSort(); wbSaveListView();
-      uxShowTab('results');
+      // M-3.2-04: the drawer is not forced open — the chip is a map-level
+      // control and the user is looking at the map.
       map.setView(previous.center, previous.zoom, {animate: false});
       uxPaintContext();
     }
@@ -18865,9 +18911,6 @@ FILTER_JS_TEMPLATE = r"""
     document.getElementById('ux-nearby').addEventListener('click', uxFindNearby);
     document.getElementById('ux-restore-plan').addEventListener('click', uxRestorePlanning);
     document.getElementById('ux-filter-results').addEventListener('click', function() { uxShowTab('results'); });
-    if (window.ResizeObserver) new ResizeObserver(function(entries) {
-      document.documentElement.style.setProperty('--ux-context-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
-    }).observe(document.getElementById('ux-context'));
     if (window.ResizeObserver) {
       new ResizeObserver(function(entries) {
         var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
@@ -18877,8 +18920,8 @@ FILTER_JS_TEMPLATE = r"""
         document.documentElement.style.setProperty('--ux-actions-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
       }).observe(uxDetailActions);
     }
-    // The avatar has reached its new parent before this event fires.
-    document.addEventListener('wb:mode', uxPlaceHeaderButtons);
+    // Repaint on a layout change: the region chip hides on mid / wide.
+    document.addEventListener('wb:mode', uxPaintContext);
     uxPaintContext();
 
     // ---- distance sort (F1): map centre until the user locates -----------

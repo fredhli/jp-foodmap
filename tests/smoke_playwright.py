@@ -538,39 +538,34 @@ def check_phone_nav(page, name):
 
 
 def check_chrome(page, name):
-    """The map controls clear the phone nav; intro aligns to the header actions."""
+    """The intro bar lines up with the search input and clears the chip row."""
     g = page.evaluate("""() => {
       const R = s => { const e = document.querySelector(s);
-        if (!e) return null;
-        if (getComputedStyle(e).display === 'none') return null;
+        if (!e || !e.getClientRects().length) return null;
         const r = e.getBoundingClientRect();
-        return {r: r.right, b: r.bottom, w: r.width}; };
-      const N=s=>{const e=document.querySelector(s);if(!e||getComputedStyle(e).display==='none')return null;
-        const r=e.getBoundingClientRect();return {t:r.top,b:r.bottom};};
-      return {nav:null, stack: N('.map-fab-stack'),
-              intro: R('#intro-bar'), input: R('#ss-input-wrap'), nearby: R('#ux-nearby'),
+        return {l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width}; };
+      return {stack: R('.map-fab-stack'), chips: R('#ss-chips'), region: R('#ux-region'),
+              intro: R('#intro-bar'), input: R('#ss-input-wrap'),
               phone: !/wb-(split|mid|wide)/.test(document.body.className)};
     }""")
     out = []
-    if g["phone"] and g["nav"] and g["stack"]:
-        clearance = g["nav"]["t"] - g["stack"]["b"]
-        if clearance < -1:
-            raise AssertionError(
-                f"map controls overlap the phone navigation by {-clearance:.0f}px: {g}")
-        out.append(f"map controls clear phone navigation by {clearance:.0f}px")
+    if g["phone"]:
+        if not g["chips"] or not g["region"]:
+            raise AssertionError("phone header is missing its chip row / region chip")
+        if abs(g["chips"]["l"] - g["input"]["l"]) > 4:
+            raise AssertionError(f"chip row is not aligned with the search capsule: {g}")
+        out.append("chip row aligned with the capsule")
     if g["phone"] and g["intro"] and g["input"]:
-        if not g["nearby"]:
-            raise AssertionError("phone header is missing its nearby control")
-        right_delta = abs(g["intro"]["r"] - g["nearby"]["r"])
-        left_delta = abs((g["intro"]["r"] - g["intro"]["w"])
-                         - (g["input"]["r"] - g["input"]["w"]))
-        if max(left_delta, right_delta) > 4:
+        left_delta = abs(g["intro"]["l"] - g["input"]["l"])
+        if left_delta > 4:
             raise AssertionError(
-                f"intro bar is misaligned with search and nearby controls "
-                f"(left {left_delta:.0f}px, right {right_delta:.0f}px): {g}")
-        out.append(f"intro aligns with header actions (left {left_delta:.0f}px, right {right_delta:.0f}px)")
-    return "; ".join(out) or "workbench mode — phone chrome is hidden"
-
+                f"intro bar is misaligned with the search capsule (left {left_delta:.0f}px): {g}")
+        if g["chips"] and g["intro"]["t"] < g["chips"]["b"] - 1:
+            raise AssertionError(f"intro bar overlaps the chip row: {g}")
+        out.append("intro bar aligned with the capsule, below the chip row")
+    if not g["phone"] and g["intro"] and g["chips"] and g["intro"]["t"] < g["chips"]["b"] - 1:
+        raise AssertionError(f"intro bar overlaps the chip row on the workbench: {g}")
+    return "; ".join(out) or "no intro bar / phone chrome on this viewport"
 
 def check_workbench(page, name):
     """W-1 / W-2 / W-3: the mid + wide column layout.

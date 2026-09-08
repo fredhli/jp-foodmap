@@ -122,6 +122,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 assert page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned, 'planning coordinates changed on reload'
                 page.locator('#ux-restore-plan').click()
                 page.wait_for_timeout(300)
+                if w<750: tab('results')   # M-3.2-04: restoring no longer opens the drawer; #wb-sort is built with it
                 assert page.locator('#ff-region').input_value()=='25'
                 assert page.locator('#wb-sort').input_value()=='price'
                 center=page.evaluate(MAP+'.getCenter()')

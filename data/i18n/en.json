@@ -1120,5 +1120,7 @@
   "立即重试": "Retry now",
   "云端数据已回退": "Cloud data rolled back",
   "已合并本地改动": "local changes merged",
-  "已跳过无法识别的条目": "Skipped unreadable entries"
+  "已跳过无法识别的条目": "Skipped unreadable entries",
+  "附近": "Nearby",
+  "按距离": "by distance"
 }
