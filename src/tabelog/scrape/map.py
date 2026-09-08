@@ -4302,18 +4302,27 @@ PHONE_DRAWER_HTML = """
 <style>
   /* ---------- F1 / W-6: the drawer ---------- */
   /* Its own scrim, deliberately NOT #ff-backdrop: that one is the filter
-     sheet's and carries .ff-open, which closeFilterUI() clears. */
+     sheet's and carries .ff-open, which closeFilterUI() clears.
+     M-3.2-02: --scrim-light (.18, was .35) so the strip of map a 402px phone
+     keeps beside the drawer still reads as map, not as a dark band. */
   #wb-fav-backdrop {
     position: fixed; inset: 0; z-index: calc(var(--z-sheet) - 1);
-    background: rgba(0,0,0,0.35);
+    background: var(--scrim-light);
     opacity: 0; pointer-events: none;
-    transition: opacity 0.22s ease-out;
+    transition: opacity var(--dur-3) var(--ease-std);
   }
   #wb-fav-backdrop.on { opacity: 1; pointer-events: auto; }
+  /* M-3.2-02: on the medium band (560-749px, i.e. a Fold 60% split at 591)
+     the 211px of map beside the 380px drawer is meant to be USED — no scrim,
+     no inert (openFavDrawer skips trapFocus there), FABs stay put. */
+  body.wb-medium #wb-fav-backdrop.on { opacity: 0; pointer-events: none; }
   /* W-6: slides in from the LEFT (F1 had it rise from the bottom, which put
      it in the same slot as the restaurant card and the filter sheet and made
      "list + filter at the same time" impossible). Full height, capped at
-     380px so the map stays visible beside it on a 475px cover screen. */
+     380px so the map stays visible beside it on a 475px cover screen.
+     3.1.x turned this into a full-page panel under a bottom tab bar and set
+     the map to visibility:hidden; M-3.2-02 brings the 2.3.0 overlay back
+     with the token radius / shadow / easing. */
   body.wb-fav-open #wb-left {
     display: flex;
     position: fixed; left: 0; top: 0; bottom: 0; right: auto;
@@ -4325,11 +4334,16 @@ PHONE_DRAWER_HTML = """
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     border-top: none;
-    border-right: 1px solid #e5e7eb;
-    border-radius: 0 12px 12px 0;
-    box-shadow: 6px 0 18px rgba(0,0,0,0.12);
-    animation: wb-fav-slide 0.22s ease-out;
+    border-right: 1px solid var(--border-1);
+    border-radius: 0 var(--r-lg) var(--r-lg) 0;
+    box-shadow: var(--el-3);
+    /* The head wears .glass-reg (openFavDrawer toggles the class), so the
+       map must be visible through the drawer's own box: the box is clear
+       and every panel below the head paints its own white. */
+    background: transparent;
+    animation: wb-fav-slide var(--dur-3) var(--ease-out);
   }
+  body.wb-fav-open #wb-left > :not(#wb-left-head):not(#wb-fav-grip) { background: #fff; }
   @keyframes wb-fav-slide {
     from { transform: translateX(-100%); }
     to   { transform: translateX(0); }
@@ -4346,54 +4360,51 @@ PHONE_DRAWER_HTML = """
      inert for the duration anyway (INERT_SEL). */
   body.wb-fav-under #wb-left      { z-index: calc(var(--z-float) + 3); }
   body.wb-fav-under #wb-fav-backdrop { z-index: calc(var(--z-float) + 2); }
-  /* The scrim covers the whole viewport, so the FABs behind it are dimmed
-     and unclickable either way — hide them outright rather than leave two
-     ghost buttons showing through. Same move openFilterUI() makes with
-     #ff-fab. */
-  body.wb-fav-open .map-fab-stack,
+  /* Under the full-viewport scrim the FABs are dimmed and unclickable
+     anyway — hide them outright rather than leave ghost buttons showing
+     through. Medium keeps them: its map is live. The bottom-left pill sits
+     under the drawer at every phone width, so it goes in both. */
+  body.wb-fav-open:not(.wb-medium) .map-fab-stack { display: none !important; }
   body.wb-fav-open #ff-fab { display: none !important; }
 
-  /* Grip + × header. #wb-fav-grip is created by the JS and prepended into
-     #wb-left, so it exists in every mode and is shown only in the drawer. */
+  /* The close button. #wb-fav-grip is created by the JS and prepended into
+     #wb-left, so it exists in every mode; it is only the anchor for the
+     button now — the grab bar it carried was a bottom-sheet leftover with no
+     meaning on a side drawer, and its 44px row is folded into the tab row
+     (SPEC B.3: tabs, count line and the close button are one head). */
   #wb-fav-grip { display: none; }
-  /* 44px tall so the × below can be a full 44px target without reaching
-     down into #wb-left-head and landing on top of the 筛选 tab. */
-  body.wb-fav-open #wb-fav-grip {
-    display: flex; align-items: center; justify-content: center;
-    position: relative; flex-shrink: 0;
-    height: 44px;
-    touch-action: none;
-  }
-  #wb-fav-grip .wbf-bar {
-    width: 44px; height: 4px; border-radius: 999px; background: #d1d5db;
-  }
+  body.wb-fav-open #wb-fav-grip { display: block; height: 0; flex-shrink: 0; }
+  #wb-fav-grip .wbf-bar { display: none; }
   #wb-fav-close {
-    position: absolute; right: 6px; top: 0;
+    position: absolute; right: 4px; top: calc(env(safe-area-inset-top) + 6px);
+    z-index: 1;
     width: 44px; height: 44px;
     display: inline-flex; align-items: center; justify-content: center;
     border: none; background: none; cursor: pointer;
-    color: #6b7280; font-size: 22px; line-height: 1;
-    border-radius: 8px;
+    color: var(--fg-3); font-size: 22px; line-height: 1;
+    border-radius: var(--r-sm);
     -webkit-tap-highlight-color: transparent;
   }
-  #wb-fav-close:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
-  /* The × overlaps the tab row, so give the head some room for it. */
-  body.wb-fav-open #wb-left-head { padding-top: 4px; }
-  /* W-2 (2.3.0): 结果 / 收藏 / 筛选 are three real .wb-tab buttons now, in
-     every mode — the drawer's third tab used to be a re-skinned
-     .wb-top-btn, which is exactly why iOS rendered it at a different size
-     and weight. No per-mode skin left to apply here.
-     W-9: the drawer is min(86vw,380px) wide, so nothing inside it may carry
-     a fixed width; the head is allowed to wrap rather than overflow. */
-  body.wb-fav-open #wb-left-head { max-width: 100%; box-sizing: border-box; }
+  #wb-fav-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* Drawer head: a 44px tab row plus the count line, with room on the right
+     for the close button. W-2 (2.3.0): the three tabs are the same .wb-tab
+     buttons in every mode, so there is no per-mode skin to apply — only the
+     phone-sized targets. W-9: nothing inside the drawer may carry a fixed
+     width; the head is allowed to wrap rather than overflow. */
+  body.wb-fav-open #wb-left-head {
+    max-width: 100%; box-sizing: border-box;
+    padding: 6px 52px 6px 8px;
+    border-radius: 0 var(--r-lg) 0 0;
+  }
   body.wb-fav-open .wb-tabs { flex-wrap: wrap; }
+  body.wb-fav-open .wb-tab { min-height: 44px; font-size: 15px; }
   /* W-9 (2.3.0): iOS measured the two count sentences at a fixed ~319px
      whatever the column was actually doing, and that width is what pushed
-     the 收藏 tab's tool row past the drawer's right edge. Nothing inside the
-     column is allowed to size itself: every one of these boxes takes the
-     container's width and wraps rather than overflowing it. Injected from
-     PHONE_DRAWER_HTML, which is added last, so it outranks the identical
-     specificity in WORKBENCH_HTML / FAV_TAB_HTML. */
+     the collections tab's tool row past the drawer's right edge. Nothing
+     inside the column is allowed to size itself: every one of these boxes
+     takes the container's width and wraps rather than overflowing it.
+     Injected from PHONE_DRAWER_HTML, which is added last, so it outranks the
+     identical specificity in WORKBENCH_HTML / FAV_TAB_HTML. */
   #wb-left { max-width: 100vw; }
   #wb-left-head, #wb-left .wb-counts, #wb-left #fv-head,
   #wb-left .fv-sum, #wb-left .fv-tools, #wb-left #ff-sheet-content {
@@ -4403,9 +4414,12 @@ PHONE_DRAWER_HTML = """
   /* Same reason, the buttons: a 4-character label must be allowed to shrink
      its row rather than force one 319px-wide line. */
   #wb-left .fv-tools > * { max-width: 100%; }
-  /* Primary tasks share the existing panels and their state. */
-  :root { --phone-nav-h: 0px; --ux-context-h: 0px; }
-  #phone-nav { display: none; }
+
+  /* ---- 3.1.x journeys that stay (SPEC A: F2 / F4 / F7). The UI shells
+     below are the ones M-3.2-04 (#ux-context), M-3.2-06 (#ux-detail-back /
+     #ux-detail-actions) and M-3.2-07 (#ux-filter-done / #ux-saved-scope)
+     replace; the behaviour they front is kept. ---- */
+  :root { --ux-context-h: 0px; }
   #ux-context {
     position: fixed; z-index: calc(var(--z-float) + 1);
     top: calc(var(--wb-top) + 8px); left: calc(var(--wb-left) + 12px);
@@ -4419,7 +4433,7 @@ PHONE_DRAWER_HTML = """
   #ux-context button { min-height: 36px; border: 0; border-radius: 6px;
     padding: 4px 8px; background: #eff6ff; color: #1d4ed8; cursor: pointer;
     font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
-  #ux-context button:focus-visible, #phone-nav button:focus-visible,
+  #ux-context button:focus-visible,
   #ux-detail-back:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
   #ux-context button[hidden], #ux-context-note:empty { display: none; }
   #ux-context-note { flex-basis: 100%; font-size: 12px; color: #6b7280; }
@@ -4451,7 +4465,6 @@ PHONE_DRAWER_HTML = """
   #bs-content { min-height: 0; }
   .rst-reservation-note { font-size: 12px; line-height: 1.5; color: #6b7280; margin: 8px 0; }
   @media (max-width: 749px) {
-    :root { --phone-nav-h: var(--phone-nav-measured, calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px)))); }
     #ss-box { left: max(var(--chrome-inset), env(safe-area-inset-left));
       right: max(var(--chrome-inset), env(safe-area-inset-right)); width: auto; transform: none; }
     #ss-top { gap: 6px; }
@@ -4470,47 +4483,33 @@ PHONE_DRAWER_HTML = """
       outline: 2px solid #2563eb; outline-offset: 2px; }
     #ss-top > #ux-nearby:disabled { color: #64748b; cursor: wait; }
     #ux-context.ux-context-idle { display: none; }
-    #phone-nav { position: fixed; z-index: var(--z-bar); inset: auto 0 0;
-      display: grid; grid-template-columns: repeat(4,minmax(0,1fr));
-      min-height: calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px))); box-sizing: border-box;
-      padding: 4px max(6px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));
-      border-top: 1px solid #d1d5db; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    #phone-nav button { min-height: 48px; padding: 6px 2px; border: 0;
-      background: transparent; color: #6b7280; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
-      cursor: pointer; border-radius: 8px; overflow-wrap: anywhere; }
-    #phone-nav button[aria-current="page"] { color: #1d4ed8; background: #eff6ff; }
-    #ss-drawer-btn, #ff-fab { display: none !important; }
     #ux-context { top: calc(64px + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
       left: max(12px,env(safe-area-inset-left)); right: max(12px,env(safe-area-inset-right)); width: auto; }
     #ux-context button { min-height: 40px; }
     #intro-bar { top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))) !important;
       left: max(var(--chrome-inset), env(safe-area-inset-left));
       right: calc(max(var(--chrome-inset), env(safe-area-inset-right)) + 42px); }
-    body.wb-fav-open #wb-left { left: 0; right: 0; top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
-      bottom: var(--phone-nav-h); width: 100%; max-width: 100%; border-radius: 0; border: 0;
-      padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); box-shadow: none; animation: none; }
-    body.wb-fav-open #wb-fav-grip, body.wb-fav-open #wb-fav-backdrop { display: none; }
-    body.wb-fav-open #wb-left-head .wb-tabs { display: none; }
-    body.wb-fav-open .folium-map, body.wb-fav-open #intro-bar { visibility: hidden; }
     body.ux-map-popup #ux-context { visibility: hidden; }
-    #bs-sheet { bottom: var(--phone-nav-h); padding-bottom: 0;
-      max-height: calc(100dvh - var(--phone-nav-h) - 76px - max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))); }
+    /* M-3.2-02: the search capsule sits under the drawer (inert on a phone,
+       covered on medium) and its white pill would otherwise ghost through
+       the glass head — and its avatar would peek out past the drawer's
+       right edge over the scrim. Gone for as long as the drawer is up. */
+    body.wb-fav-open #ss-box { visibility: hidden; }
+    /* U10 (kept): a closed card must not catch taps meant for the map. */
     #bs-sheet:not(.bs-open) { visibility: hidden; }
-    .map-fab-stack { margin-bottom: var(--phone-nav-h); }
-    .leaflet-control-attribution { margin-bottom: calc(var(--phone-nav-h) + var(--attr-h, 0px)) !important; }
-    #sync-stack { bottom: calc(var(--phone-nav-h) + 10px); }
-    body.ux-detail-open #sync-stack { bottom: calc(var(--phone-nav-h) + var(--ux-actions-h, 66px) + 8px); }
-    body.wb-fav-open.ux-filter-open #sync-stack { bottom: calc(var(--phone-nav-h) + var(--ux-filter-done-h, 100px) + 8px); }
-    #ss-list.open { max-height: calc(100dvh - var(--phone-nav-h) - 76px); }
-    body.ux-keyboard #phone-nav { display: none; }
-    body.ux-keyboard { --phone-nav-h: 0px; }
+  }
+  /* M-3.2-02: the sign-in hint is a resident banner at --z-toast, so with
+     the drawer up it sat across the drawer's own footer (the filter CTA).
+     It is not urgent — it waits until the drawer is closed. Toasts, which
+     are transient and carry an Undo, still show over the drawer. */
+  @media (max-width: 749px) {
+    body.wb-fav-open #sync-hint { display: none; }
   }
   @media (max-width: 749px) and (max-height: 500px) {
-    body.wb-fav-open.ux-filter-open #sync-hint,
     body.ux-detail-open #sync-hint { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #phone-nav *, #ux-context *, #ux-detail-actions * { transition: none !important; }
+    #ux-context *, #ux-detail-actions * { transition: none !important; }
   }
 </style>
 <div id="wb-fav-backdrop"></div>
@@ -4520,12 +4519,6 @@ PHONE_DRAWER_HTML = """
   <button id="ux-restore-plan" type="button" hidden>返回原地区规划</button>
   <span id="ux-context-note" role="status"></span>
 </div>
-<nav id="phone-nav" aria-label="主要导航">
-  <button type="button" data-ux-tab="map" aria-current="page">地图</button>
-  <button type="button" data-ux-tab="results">结果</button>
-  <button type="button" data-ux-tab="fav">收藏</button>
-  <button type="button" data-ux-tab="filter">筛选</button>
-</nav>
 """
 
 
@@ -9103,7 +9096,7 @@ FILTER_JS_TEMPLATE = r"""
     // aria-hidden fallback keeps older engines announcing the right thing.
     // W-6: the phone drawer's ≡ entry used to need its own line here as
     // #wb-fav-fab; it now lives inside #ss-box, which is already on the list.
-    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack', '#phone-nav', '#ux-context',
+    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack', '#ux-context',
                      '#wb-left', '#wb-top', '#wb-rail', '#wb-detail'];
     function setBackgroundInert(on, exclude) {
       for (var i = 0; i < INERT_SEL.length; i++) {
@@ -11532,7 +11525,6 @@ FILTER_JS_TEMPLATE = r"""
     function uxSyncViewport() {
       var vv = window.visualViewport;
       var keyboard = !!(vv && vv.height < window.innerHeight - 150);
-      document.body.classList.toggle('ux-keyboard', keyboard);
       ['fl', 'imp'].forEach(function(prefix) {
         var el = document.getElementById(prefix + '-modal');
         if (!el) return;
@@ -15264,8 +15256,7 @@ FILTER_JS_TEMPLATE = r"""
       var attrH = h;
       if (!fabStackEl) fabStackEl = document.querySelector('.map-fab-stack');
       if (h && fabStackEl) {
-        var navHeight = wbIsPhoneLike() ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-nav-measured')) || 56 : 0;
-        var maxLift = window.innerHeight - fabStackEl.offsetHeight - navHeight - 26;
+        var maxLift = window.innerHeight - fabStackEl.offsetHeight - 26;
         if (maxLift < 0) maxLift = 0;
         if (h > maxLift) h = maxLift;
       }
@@ -18851,7 +18842,7 @@ FILTER_JS_TEMPLATE = r"""
     }
     function uxSyncNav() {
       var current = favDrawerOpen() ? wbTabPref : 'map';
-      document.querySelectorAll('#phone-nav [data-ux-tab]').forEach(function(button) {
+      document.querySelectorAll('[data-ux-tab]').forEach(function(button) {
         if (button.getAttribute('data-ux-tab') === current) button.setAttribute('aria-current', 'page');
         else button.removeAttribute('aria-current');
       });
@@ -18960,7 +18951,7 @@ FILTER_JS_TEMPLATE = r"""
         }
       }
     } catch (_) {}
-    document.querySelectorAll('#phone-nav [data-ux-tab]').forEach(function(button) {
+    document.querySelectorAll('[data-ux-tab]').forEach(function(button) {
       button.addEventListener('click', function() { uxShowTab(button.getAttribute('data-ux-tab')); });
     });
     document.getElementById('ux-region').addEventListener('click', function() { openFilterUI({focus: '#ff-region'}); });
@@ -18975,10 +18966,6 @@ FILTER_JS_TEMPLATE = r"""
         var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
         if (height > 0) document.documentElement.style.setProperty('--ux-filter-done-h', height + 'px');
       }).observe(document.getElementById('ux-filter-done'));
-      new ResizeObserver(function(entries) {
-        var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
-        if (height > 0) document.documentElement.style.setProperty('--phone-nav-measured', height + 'px');
-      }).observe(document.getElementById('phone-nav'));
       new ResizeObserver(function(entries) {
         document.documentElement.style.setProperty('--ux-actions-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
       }).observe(uxDetailActions);
@@ -19095,9 +19082,19 @@ FILTER_JS_TEMPLATE = r"""
           a0.blur();
         }
       } catch (_) {}
-      // These are application pages; the bottom navigation and search stay usable.
-      wbLeftEl.removeAttribute('aria-modal');
-      wbFavTrapRelease = focusInto(wbLeftEl, null, document.querySelector('#phone-nav [aria-current="page"]'));
+      // M-3.2-02: the 2.3.0 layering is back. Below 560px the drawer is a
+      // true modal — scrim over the map, background inert, Tab trapped
+      // (trapFocus). On the medium band (560–749: a Fold 60% split at 591)
+      // the map beside the 380px drawer stays live, so no inert and no trap;
+      // only the focus hand-back is kept (focusInto).
+      var wbHead = document.getElementById('wb-left-head');
+      if (wbHead) wbHead.classList.add('glass-reg');
+      if (wbCur === 'phone') {
+        wbFavTrapRelease = trapFocus(wbLeftEl, null, wbFavFab);
+      } else {
+        wbLeftEl.removeAttribute('aria-modal');
+        wbFavTrapRelease = focusInto(wbLeftEl, null, wbFavFab);
+      }
       uxSyncNav();
     }
     // `silent` is set only when the caller is already inside a wb:mode
@@ -19109,6 +19106,8 @@ FILTER_JS_TEMPLATE = r"""
       document.body.classList.remove('wb-fav-open');
       if (wbFavBackdrop) wbFavBackdrop.classList.remove('on');
       if (wbFavFab) wbFavFab.setAttribute('aria-expanded', 'false');
+      var wbHeadC = document.getElementById('wb-left-head');
+      if (wbHeadC) wbHeadC.classList.remove('glass-reg');
       if (wbLeftEl) {
         wbLeftEl.removeAttribute('role');
         wbLeftEl.removeAttribute('aria-modal');

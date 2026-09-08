@@ -186,3 +186,22 @@ def total_count(page) -> int:
 def shown_count(page) -> int:
     txt = page.eval_on_selector(".ff-count", "el => el.textContent")
     return int("".join(ch for ch in txt if ch.isdigit()) or 0)
+
+
+# M-3.2-02: the phone (<750px) navigation entry, in one place so the suites
+# follow the page. 3.1.x had a fixed bottom bar with four [data-ux-tab]
+# buttons; 3.2.0 is back to the 2.3.0 overlay drawer — M-3.2-02 opens it from
+# the hamburger in the search capsule, M-3.2-03 from the segmented pill.
+# 'map' means "close whatever is open and show the map".
+def phone_tab(page, name: str) -> None:
+    if name == "map":
+        if page.locator("#bs-sheet.bs-open").count():
+            page.locator("#bs-content .rst-close").first.click()
+            page.wait_for_timeout(150)
+        if page.locator("body.wb-fav-open").count():
+            page.locator("#wb-fav-close").click()
+        return
+    if not page.locator("body.wb-fav-open").count():
+        page.locator("#ss-drawer-btn").click()
+        page.wait_for_timeout(150)
+    page.locator("#wb-tab-" + name).click()

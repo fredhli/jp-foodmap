@@ -14,11 +14,10 @@ Twelve things, on each of the viewports the site is actually used at:
   filter    changing one filter changes the visible count
   account   the avatar menu opens and scrolls
   lang      (W-9) first visit below 700px asks which language, once
-  phone-nav (3.1) below 750px the visible Map / Results / Saved / Filters
-              navigation reaches each real panel, restores focus after a
-              detail, and keeps the filter content in one host
-  chrome    (W-10 / 3.1) the map controls clear the phone navigation and the
-              intro bar lines up with the search input
+  phone-nav (3.2 / M-3.2-02) below 750px the visible drawer entry reaches
+              each real panel, restores focus after a detail, keeps the
+              filter content in one host, and the drawer leaves map beside it
+  chrome    (W-10) the intro bar lines up with the search input
   workbench (W-1/2/3) mid + wide: the rail with both counts, the
             auto-collapsing detail column, and the left-column collapse
             (mid AND wide as of 2.3.0)
@@ -40,6 +39,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tests"))
 
 from lib_browser import (  # noqa: E402
+    phone_tab,
     boot,
     install_guards,
     serve_docs,
@@ -84,6 +84,10 @@ VIEWPORTS = {
 # should match it without touching Nominatim.
 SEARCH_TERM = "寿司"
 
+# M-3.2-02: what a phone user taps to reach the drawer. One selector per
+# visible entry; every one must be a reachable 44px target.
+PHONE_ENTRY = ["#ss-drawer-btn"]
+
 
 def eq(actual, expected, what: str) -> None:
     if actual != expected:
@@ -97,13 +101,13 @@ def open_filter_panel(page) -> None:
         return
     phone = page.evaluate("() => !/wb-(mid|wide)/.test(document.body.className)")
     if phone:
-        entry = page.locator('#phone-nav [data-ux-tab="filter"]')
+        phone_tab(page, "filter")
     else:
         entry = page.locator('.wb-filter-btn:visible').first
-    if entry.count() != 1:
-        raise AssertionError("no unique visible way to open the filter panel")
-    entry.click(trial=True)
-    entry.click()
+        if entry.count() != 1:
+            raise AssertionError("no unique visible way to open the filter panel")
+        entry.click(trial=True)
+        entry.click()
     page.wait_for_function(
         "() => { const c = document.getElementById('ff-sheet-content');"
         "  return c && c.offsetParent !== null; }",
@@ -444,48 +448,55 @@ def check_lang(page, name):
 
 
 def check_phone_nav(page, name):
-    """3.1: exercise the visible four-destination phone navigation.
+    """3.2 (M-3.2-02): the 2.3.0 overlay drawer is back under a visible entry.
 
-    The old hamburger and filter FAB remain as compatibility hooks, but they
-    are deliberately hidden. This check clicks the controls a user sees and
-    verifies their destination, the one filter host, detail return and focus.
+    3.1.x docked a four-button bar to the bottom and turned the drawer into a
+    full page over a hidden map; both are gone. This check clicks the entry
+    a user sees (PHONE_ENTRY), verifies each destination, the one filter
+    host, detail return and focus — and that the map stays painted beside
+    the open drawer.
     """
     phone = page.evaluate("() => !/wb-(mid|wide)/.test(document.body.className)")
     if not phone:
-        shown = page.evaluate("""() => ['#phone-nav','#ss-drawer-btn','#ff-fab']
-          .filter(s => { const e=document.querySelector(s); return e && getComputedStyle(e).display!=='none'; })""")
+        shown = page.evaluate("""() => ['#phone-nav'].concat(%s)
+          .filter(s => { const e=document.querySelector(s); return e && getComputedStyle(e).display!=='none'; })""" % json.dumps(PHONE_ENTRY))
         if shown:
             raise AssertionError(f"phone-only navigation leaked into workbench: {shown}")
-        return "phone navigation and legacy entries hidden in workbench"
+        return "phone entries hidden in workbench"
 
-    state = page.evaluate("""() => {
-      const nav=document.getElementById('phone-nav'), nr=nav.getBoundingClientRect();
-      const buttons=[...nav.querySelectorAll('[data-ux-tab]')];
-      return {count:buttons.length, bottom:Math.round(nr.bottom), vh:innerHeight,
-        old:[getComputedStyle(document.getElementById('ss-drawer-btn')).display,
-             getComputedStyle(document.getElementById('ff-fab')).display],
-        buttons:buttons.map(b=>{const r=b.getBoundingClientRect(),t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-          return {tab:b.dataset.uxTab,w:r.width,h:r.height,inView:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,
-                  hit:t===b||b.contains(t)};})};
-    }""")
-    if state["count"] != 4 or [b["tab"] for b in state["buttons"]] != [
-            "map", "results", "fav", "filter"]:
-        raise AssertionError(f"phone navigation destinations changed: {state}")
-    if state["old"] != ["none", "none"]:
-        raise AssertionError(f"legacy phone entries compete with 3.1 navigation: {state}")
-    if abs(state["bottom"] - state["vh"]) > 1:
-        raise AssertionError(f"phone navigation is not docked to the viewport: {state}")
-    if any(b["h"] < 44 or not b["inView"] or not b["hit"] for b in state["buttons"]):
-        raise AssertionError(f"a phone navigation destination is unreachable: {state}")
+    # A previous check may have left the drawer up (check_filter opens the
+    # filter tab and never closes it); the entry is under the drawer then.
+    phone_tab(page, "map")
+    page.wait_for_timeout(300)
+    state = page.evaluate("""(sels) => {
+      const gone = !document.getElementById('phone-nav');
+      const entries = sels.map(s => { const e=document.querySelector(s); if(!e) return null;
+        const r=e.getBoundingClientRect(), t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+        return {sel:s,w:r.width,h:r.height,inView:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,
+                hit:t===e||e.contains(t)}; });
+      return {gone, entries};
+    }""", PHONE_ENTRY)
+    if not state["gone"]:
+        raise AssertionError("the 3.1 bottom bar is still in the DOM")
+    if any(e is None or e["h"] < 44 or e["w"] < 44 or not e["inView"] or not e["hit"] for e in state["entries"]):
+        raise AssertionError(f"a phone entry is unreachable: {state}")
 
     def go(tab):
-        button = page.locator(f'#phone-nav [data-ux-tab="{tab}"]')
-        button.click(trial=True)
-        button.click()
-        page.wait_for_timeout(250)
-        current = page.get_attribute(f'#phone-nav [data-ux-tab="{tab}"]', 'aria-current')
-        if current != "page":
-            raise AssertionError(f"{tab} did not become the current destination")
+        phone_tab(page, tab)
+        page.wait_for_timeout(300)
+        if tab == "map":
+            return
+        sel = page.get_attribute(f'#wb-tab-{tab}', 'aria-selected')
+        if sel != "true":
+            raise AssertionError(f"{tab} did not become the current tab")
+        drawer = page.evaluate("""() => { const l=document.getElementById('wb-left').getBoundingClientRect();
+          const m=document.querySelector('.folium-map'); const cs=getComputedStyle(m);
+          return {open:document.body.classList.contains('wb-fav-open'), w:l.width, vw:innerWidth,
+                  mapPainted: cs.visibility!=='hidden' && cs.display!=='none'}; }""")
+        if not drawer["open"] or not drawer["mapPainted"]:
+            raise AssertionError(f"drawer state wrong for {tab}: {drawer}")
+        if drawer["w"] > min(0.86 * drawer["vw"], 380) + 1:
+            raise AssertionError(f"drawer is wider than min(86vw,380px): {drawer}")
 
     go("results")
     if not page.locator("#wb-list").is_visible():
@@ -494,16 +505,14 @@ def check_phone_nav(page, name):
     filtered = page.evaluate("""() => ({panel:document.getElementById('ff-sheet-content').offsetParent!==null,
       host:document.getElementById('ff-sheet-content').parentElement.id,
       done:document.getElementById('ux-filter-done').offsetParent!==null,
-      sheet:document.getElementById('ff-sheet').classList.contains('ff-open'),
-      backdropDisplay:getComputedStyle(document.getElementById('wb-fav-backdrop')).display,
-      backdropPointer:getComputedStyle(document.getElementById('wb-fav-backdrop')).pointerEvents})""")
+      sheet:document.getElementById('ff-sheet').classList.contains('ff-open')})""")
     if not filtered["panel"] or filtered["host"] != "wb-filter-host" or not filtered["done"]:
         raise AssertionError(f"Filters did not expose the single complete panel: {filtered}")
-    if filtered["sheet"] or filtered["backdropDisplay"] != "none":
+    if filtered["sheet"]:
         raise AssertionError(f"Filters opened a competing modal layer: {filtered}")
     go("fav")
-    if not page.locator("#wb-fav").is_visible() or not page.locator("#ux-saved-scope").is_visible():
-        raise AssertionError("Saved did not expose its list and scope")
+    if not page.locator("#wb-fav").is_visible():
+        raise AssertionError("Saved did not expose its list")
 
     # A real result click must provide a return action, and that action must
     # restore the source row as the keyboard focus target.
@@ -516,15 +525,15 @@ def check_phone_nav(page, name):
     page.locator("#ux-detail-back").click(trial=True)
     page.locator("#ux-detail-back").click()
     page.wait_for_timeout(350)
-    returned = page.evaluate("""() => ({tab:document.querySelector('#phone-nav [aria-current="page"]')?.dataset.uxTab,
+    returned = page.evaluate("""() => ({tab:document.querySelector('.wb-tab[aria-selected="true"]')?.id,
+      drawer:document.body.classList.contains('wb-fav-open'),
       focus:document.activeElement?.id,list:document.getElementById('wb-list').offsetParent!==null})""")
-    if returned != {"tab": "results", "focus": ref, "list": True}:
+    if returned != {"tab": "wb-tab-results", "drawer": True, "focus": ref, "list": True}:
         raise AssertionError(f"detail return lost its source or keyboard focus: {returned}")
     go("map")
-    focused = page.evaluate("() => document.activeElement?.dataset.uxTab")
-    if focused != "map" or page.evaluate("() => document.body.classList.contains('wb-fav-open')"):
-        raise AssertionError(f"Map did not close the page panel or retain focus: {focused!r}")
-    return "4 reachable destinations, one filter host, detail source/focus restored"
+    if page.evaluate("() => document.body.classList.contains('wb-fav-open')"):
+        raise AssertionError("closing the drawer left it open")
+    return "drawer entry reachable, 3 tabs, one filter host, detail source/focus restored, map painted"
 
 
 def check_chrome(page, name):
@@ -537,7 +546,7 @@ def check_chrome(page, name):
         return {r: r.right, b: r.bottom, w: r.width}; };
       const N=s=>{const e=document.querySelector(s);if(!e||getComputedStyle(e).display==='none')return null;
         const r=e.getBoundingClientRect();return {t:r.top,b:r.bottom};};
-      return {nav:N('#phone-nav'), stack: N('.map-fab-stack'),
+      return {nav:null, stack: N('.map-fab-stack'),
               intro: R('#intro-bar'), input: R('#ss-input-wrap'), nearby: R('#ux-nearby'),
               phone: !/wb-(split|mid|wide)/.test(document.body.className)};
     }""")
@@ -706,7 +715,7 @@ def check_goto_zoom(page, name):
     page.wait_for_timeout(300)
     # Phone-likes keep the list behind the Results destination.
     if not page.evaluate("() => !!document.querySelector('.wb-row')"):
-        page.locator('#phone-nav [data-ux-tab="results"]').click()
+        phone_tab(page, 'results')
         page.wait_for_timeout(500)
     if not page.evaluate("() => !!document.querySelector('.wb-row')"):
         raise AssertionError("no result row to click")

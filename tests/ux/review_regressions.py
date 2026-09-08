@@ -105,7 +105,8 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         page.on('dialog',lambda d:d.accept())
         lib_browser.boot(page,base)
         def tab(name):
-            page.locator('[data-ux-tab="'+name+'"]' if w<750 else '#wb-tab-'+name).click()
+            if w<750: lib_browser.phone_tab(page,name)
+            else: page.locator('#wb-tab-'+name).click()
         for kind in ['pin','sight']:
             tab('fav');page.locator('#fv-group').select_option('list')
             page.locator('.fv-row[data-fav-ref="bm-ux-'+kind+'"]').click()
@@ -113,11 +114,12 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
             save(page,f'{args.browser}-{w}-saved-{kind}',center=page.evaluate(MAP+'.getCenter()'))
             check(page.locator('.folium-map').is_visible(),'saved place leaves map hidden')
             check(page.evaluate(MAP+'.getBounds().contains([35.6812,139.7671])'),'saved place is outside the visible map bounds')
-            if w<750 and args.baseline: page.locator('[data-ux-tab="map"]').click()
+            if w<750 and args.baseline: lib_browser.phone_tab(page,'map')
             tab('fav')
             check(page.locator('#fv-group').input_value()=='list','collection view changed')
             check(page.locator('.fv-row[data-fav-ref="bm-ux-'+kind+'"]').count()==1,'collection member disappeared')
         tab('results');page.wait_for_timeout(200)
+        if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02: the search capsule is under the open drawer
         page.locator('#ss-input').fill('UX Tokyo Station')
         page.wait_for_selector('#ss-api .ss-row:not(.ss-empty)')
         page.locator('#ss-api .ss-row:not(.ss-empty)').click()
@@ -125,7 +127,7 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         save(page,f'{args.browser}-{w}-place-search',center=page.evaluate(MAP+'.getCenter()'))
         check(page.locator('.folium-map').is_visible(),'place search leaves map hidden')
         check(page.evaluate(MAP+'.getBounds().contains([35.6812,139.7671])'),'searched place is outside the visible map bounds')
-        if w<750 and args.baseline: page.locator('[data-ux-tab="map"]').click()
+        if w<750 and args.baseline: lib_browser.phone_tab(page,'map')
         page.locator('#ss-add-bm').click()
         page.locator('#bm-name').fill('UX searched place')
         page.locator('#bm-modal .bm-save').click()
@@ -134,6 +136,7 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         page.locator('#wb-sort').select_option('price');page.wait_for_timeout(400)
         page.evaluate(MAP+'.setView([35.01,135.77],11,{animate:false})')
         original=page.evaluate(MAP+'.getCenter()')
+        if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02: the nearby entry is under the open drawer
         page.locator('#ux-nearby').click();page.wait_for_function("document.getElementById('wb-sort').value==='distance'")
         planned=page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")
         check(planned=={'region':25,'sort':'price','center':[original['lat'],original['lng']],'zoom':11},'planning context does not match original view')
@@ -149,6 +152,7 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         check('直线距离排序' not in page.locator('#ux-context-note').inner_text(),'reload falsely claims distance sorting')
         save(page,f'{args.browser}-{w}-nearby-reload-rating')
         check(page.locator('#ux-restore-plan').is_visible(),'return plan action lost')
+        if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02: #ux-context sits under the open drawer
         page.locator('#ux-restore-plan').click();page.wait_for_timeout(300)
         center=page.evaluate(MAP+'.getCenter()')
         check(page.locator('#ff-region').input_value()=='25' and page.locator('#wb-sort').input_value()=='price','planning region/sort lost')
@@ -168,7 +172,7 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         save(page,f'{args.browser}-{w}-filter-hint')
         page.locator('#ux-filter-results').click()
         if w in [393,1440]:
-            if w<750:page.locator('[data-ux-tab="map"]').click()
+            if w<750:lib_browser.phone_tab(page,'map')
             for action in ['.ff-fav-btn','.rst-gmaps','back']:
                 open_search(page)
                 selector='#ux-detail-back' if action=='back' else '#ux-detail-actions '+action

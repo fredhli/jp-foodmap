@@ -25,7 +25,7 @@ with lib_browser.serve_docs(8977) as base,sync_playwright() as p:
     page.route('https://**/*',lambda r:r.abort())
     page.add_init_script("localStorage.setItem('tabelog.lang','zh-CN');localStorage.setItem('tabelog.seenIntro','1')")
     lib_browser.boot(page,base)
-    page.locator('[data-ux-tab="results"]').click()
+    lib_browser.phone_tab(page,'results')
     page.locator('#wb-list .wb-row').first.click()
     page.wait_for_selector('#bs-sheet.bs-open')
     page.locator('#ux-detail-back').focus()
@@ -48,7 +48,7 @@ with lib_browser.serve_docs(8977) as base,sync_playwright() as p:
     page.keyboard.press('Escape')
     page.wait_for_timeout(200)
     assert page.locator('#wb-list').is_visible(), 'Escape failed to return to the source'
-    page.locator('[data-ux-tab="fav"]').click()
+    lib_browser.phone_tab(page,'fav')
     page.locator('#fv-new').click()
     page.locator('#fl-name').fill('Offset viewport test')
     page.evaluate("""()=>{Object.defineProperty(visualViewport,'height',{configurable:true,value:220});

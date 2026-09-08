@@ -121,7 +121,8 @@ with lib_browser.serve_docs(8988 if args.browser=='chromium' else 8989) as base,
         def verify(condition,label):
             if not args.baseline:assert condition,(name,label,state)
         def tab(kind):
-            page.locator('[data-ux-tab="'+kind+'"]' if state['width']<750 else '#wb-tab-'+kind).click()
+            if state['width']<750: lib_browser.phone_tab(page,kind)
+            else: page.locator('#wb-tab-'+kind).click()
         def open_row(kind='results'):
             tab(kind)
             page.locator('.fv-row[data-fav-kind="rst"]' if kind=='fav' else '#wb-list .wb-row .wb-row-nm').first.click()

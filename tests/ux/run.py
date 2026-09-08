@@ -66,7 +66,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
             record(page,prefix+'-home')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), 'page overflows'
             def tab(name):
-                if w<750: page.locator('[data-ux-tab="'+name+'"]').click()
+                if w<750: lib_browser.phone_tab(page,name)
                 else: page.locator('#wb-tab-'+name).click()
             tab('filter')
             page.locator('#ff-region').select_option('25')
@@ -106,6 +106,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 page.evaluate(MAP+'.setView([35.01,135.77],11,{animate:false})')
                 page.wait_for_timeout(200)
                 before=page.evaluate(MAP+'.getCenter()')
+                if w<750: tab('map')   # M-3.2-02: the nearby entry is under the open drawer
                 page.locator('#ux-nearby').click()
                 page.wait_for_function("document.getElementById('wb-sort').value==='distance'")
                 assert page.locator('#ff-region').input_value()==''
@@ -130,6 +131,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 assert error_px<=1, (center,before,error_px)
                 record(page,prefix+'-restored',{'planningContext':planned,'restoredCenter':center,'projectDistancePx':error_px})
                 page.evaluate('window.uxDeny=true')
+                if w<750: tab('map')   # uxRestorePlanning re-opened the drawer
                 page.locator('#ux-nearby').click()
                 page.wait_for_function("document.getElementById('ux-context-note').textContent.includes('未能取得位置')")
                 assert page.locator('#ff-region').input_value()=='25'
@@ -145,9 +147,9 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 assert page.locator('#fl-modal').bounding_box()['y']>=0
                 page.locator('#fl-modal .fl-save').click()
                 page.evaluate("delete visualViewport.height;visualViewport.dispatchEvent(new Event('resize'));document.getElementById('test-keyboard').remove()")
-                if w<750: page.locator('[data-ux-tab="map"]').click()
+                if w<750: tab('map')
             if w in (667,852):
-                if w<750: page.locator('[data-ux-tab="map"]').click()
+                if w<750: tab('map')
                 payload={'favorites':['https://tabelog.com/tokyo/A1301/A130103/13015251/']}
                 page.locator('#ssm-import-file').set_input_files({'name':'ux.json','mimeType':'application/json','buffer':json.dumps(payload).encode()})
                 page.wait_for_selector('#imp-modal.imp-open')

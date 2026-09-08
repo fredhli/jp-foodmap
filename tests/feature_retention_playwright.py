@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Advanced filters: reach them from the 3.1 control, inspect the full
         # choices, then toggle and restore a persisted non-demo filter.
-        page.locator('[data-ux-tab="filter"]').click()
+        lib_browser.phone_tab(page, 'filter')
         page.wait_for_selector("#ff-sheet-content:visible")
         filter_shape = page.evaluate("""() => ({
           regions:document.querySelectorAll('#ff-region option').length,
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Result sorting and batch mode: enter through Results, select a real
         # row, prove actions enable, then cancel. Save one row for Saved tests.
-        page.locator('[data-ux-tab="results"]').click()
+        lib_browser.phone_tab(page, 'results')
         page.wait_for_selector("#wb-list .wb-row")
         sort_values = page.locator("#wb-sort option").evaluate_all("els => els.map(e=>e.value)")
         if not {"rating", "price", "award", "name", "distance"}.issubset(set(sort_values)):
@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         records.append({"case": "sorting-and-result-batch", "pass": True, "sorts": sort_values})
 
         # Exercise list CRUD and multi-list membership through the actual UI.
-        page.locator('[data-ux-tab="fav"]').click()
+        lib_browser.phone_tab(page, 'fav')
         page.wait_for_selector("#fv-body .wb-row")
         def stored_bookmarks():
             return page.evaluate("JSON.parse(localStorage.getItem('tabelog.bookmarks') || '[]')")
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Layer access: open the real layer menu, verify all four scopes, then
         # toggle and restore Attractions so the run leaves no changed state.
-        page.locator('[data-ux-tab="map"]').click()
+        lib_browser.phone_tab(page, 'map')
         assert_hit(page.locator("#fab-layers"), "layer menu")
         page.locator("#fab-layers").click()
         layer_ids = ("fab-transit-long", "fab-transit-city", "fab-attractions", "fab-bookmarks")
@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Secondary restaurant routes: open from Results, scroll the detail
         # body to its actions, and hit-test sharing and Tabelog navigation.
-        page.locator('[data-ux-tab="results"]').click()
+        lib_browser.phone_tab(page, 'results')
         page.locator("#wb-list .wb-row").first.click()
         page.wait_for_selector("#bs-sheet.bs-open")
         page.locator("#bs-content").evaluate("e => e.scrollTop = e.scrollHeight")
@@ -265,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Account/data routes: actually open the account panel and hit-test
         # backup/import/privacy controls without triggering a download or API.
-        page.locator('[data-ux-tab="map"]').click()
+        lib_browser.phone_tab(page, 'map')
         page.locator("#ss-avatar").click()
         page.wait_for_selector("#ss-menu.open")
         for selector, label in (
