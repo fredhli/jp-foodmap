@@ -1122,5 +1122,9 @@
   "已合并本地改动": "local changes merged",
   "已跳过无法识别的条目": "Skipped unreadable entries",
   "附近": "Nearby",
-  "按距离": "by distance"
+  "按距离": "by distance",
+  "已切到全部地区": "All areas",
+  "按距离排序": "sorted by distance",
+  "地图只覆盖日本": "This map covers Japan only",
+  "无法取得位置": "Couldn't get your location"
 }

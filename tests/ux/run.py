@@ -107,12 +107,13 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 page.wait_for_timeout(200)
                 before=page.evaluate(MAP+'.getCenter()')
                 if w<750: tab('map')   # M-3.2-02: the nearby entry is under the open drawer
-                page.locator('#ux-nearby').click()
+                page.locator('#fab-locate').click()
                 page.wait_for_function("document.getElementById('wb-sort').value==='distance'")
                 assert page.locator('#ff-region').input_value()==''
                 planned=page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")
                 assert planned=={'region':25,'sort':'price','center':[before['lat'],before['lng']],'zoom':11}, planned
                 page.wait_for_timeout(300)
+                if w<750: tab('results')   # M-3.2-05: locating no longer opens the drawer on a phone (E3: results is the next tap)
                 assert page.locator('.ux-distance').count()>0
                 record(page,prefix+'-nearby')
                 page.reload()
@@ -133,8 +134,8 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 record(page,prefix+'-restored',{'planningContext':planned,'restoredCenter':center,'projectDistancePx':error_px})
                 page.evaluate('window.uxDeny=true')
                 if w<750: tab('map')   # uxRestorePlanning re-opened the drawer
-                page.locator('#ux-nearby').click()
-                page.wait_for_function("document.getElementById('ux-context-note').textContent.includes('未能取得位置')")
+                page.locator('#fab-locate').click()
+                page.wait_for_function("[...document.querySelectorAll('.sync-toast-msg')].some(e=>e.textContent.includes('无法取得位置'))")
                 assert page.locator('#ff-region').input_value()=='25'
                 assert page.locator('#wb-sort').input_value()=='price'
                 record(page,prefix+'-denied')

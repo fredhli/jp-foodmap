@@ -2747,6 +2747,23 @@ MAP_FAB_HTML = """
      is added/removed by locateactivate/locatedeactivate map events. */
   .map-fab.map-fab-circle.locating { background: #2563eb; color: #fff;
                                      border-color: #2563eb; }
+  /* M-3.2-05: the locate FAB is the "find nearby" entry (SPEC B.5). While
+     a fix is pending (.pending, toggled by uxPaintContext for up to 18s) a
+     ring breathes out of it; the plugin's own .locating stays the resting
+     "following you" blue. Compositor-only (transform / opacity). */
+  .map-fab.map-fab-circle { position: relative; }
+  .map-fab.map-fab-circle.pending::after {
+    content: ''; position: absolute; inset: -2px; border-radius: 50%;
+    border: 2px solid var(--accent); pointer-events: none;
+    animation: fab-locate-pulse 1.4s var(--ease-std) infinite;
+  }
+  @keyframes fab-locate-pulse {
+    0%   { transform: scale(1);   opacity: .8; }
+    100% { transform: scale(1.7); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .map-fab.map-fab-circle.pending::after { animation: none; opacity: .6; }
+  }
   /* Tighten on narrow screens — drop the label, keep just the icon. */
   @media (max-width: 559px) {
     /* F2 / M-078: square 44px targets instead of a 37x35 icon pill. */
@@ -3150,6 +3167,12 @@ SEARCH_BOX_HTML = """
   body.ux-nearby #ux-region { display: none; }
   #ss-box.ss-open #ss-chips, #ss-top:focus-within + #ss-chips,
   body.ux-map-popup #ss-chips { display: none; }
+  /* SPEC B.2: with a restaurant card up on a phone only the capsule (now
+     showing the name) stays; the chips would sit on the sliver of map the
+     card leaves. On mid / wide the card is a column, the row stays. */
+  @media (max-width: 749px) {
+    body.ux-detail-open #ss-chips { display: none; }
+  }
   .ss-chip {
     position: relative;   /* anchor for the 44px hit area */
     display: inline-flex; align-items: center; gap: 5px;
@@ -3629,19 +3652,18 @@ SEARCH_BOX_HTML = """
     </div>
   </div>
   <!-- M-3.2-04: the chip row (CSS above). Ids are the 3.1.x ones so the
-       F2 / F3 handlers and the tests keep addressing them; the sr-only note
-       is the aria-live channel for the nearby copy (M-3.2-05 retires it). -->
+       F2 / F3 handlers and the tests keep addressing them. The nearby chip
+       is the pressed STATE only (M-3.2-05); the entry is #fab-locate. -->
   <div id="ss-chips" role="group" aria-label="找店范围">
     <button id="ux-region" class="ss-chip glass-thin" type="button">
       <span aria-hidden="true">📍</span><span class="ss-chip-t">全部地区</span><span class="ss-chip-caret" aria-hidden="true">▾</span>
     </button>
-    <button id="ux-nearby" class="ss-chip glass-thin" type="button" aria-pressed="false">
+    <button id="ux-nearby" class="ss-chip on" type="button" aria-pressed="true" hidden>
       <span aria-hidden="true">◎</span><span class="ss-chip-t">找附近</span>
     </button>
     <button id="ux-restore-plan" class="ss-chip glass-thin" type="button" hidden>
       <span aria-hidden="true">←</span><span class="ss-chip-t"></span>
     </button>
-    <span id="ux-context-note" class="sr-only" role="status"></span>
   </div>
   <!-- Two sub-containers so the async Nominatim response only rewrites its
        own section — the local restaurant rows (and the list's scroll
@@ -9338,8 +9360,12 @@ FILTER_JS_TEMPLATE = r"""
         locateFab.style.display = '';
         locateFab.removeAttribute('aria-hidden');
         locateFab.addEventListener('click', function() {
-          // _active is the plugin's "currently tracking" flag. Toggle so a
-          // second tap turns it off, matching Google Maps' behavior.
+          // M-3.2-05: the FAB is "find nearby" (SPEC B.5): one tap locates,
+          // switches to all regions + distance sort, and offers Undo in a
+          // toast. uxFindNearby lives in the filter script and publishes
+          // itself; the plain start/stop toggle is only the fallback for a
+          // page where that script has not run.
+          if (typeof window.__uxFindNearby === 'function') { window.__uxFindNearby(); return; }
           if (locateCtl._active) locateCtl.stop(); else locateCtl.start();
         });
         // Paint the FAB blue while the plugin is tracking. The plugin emits
@@ -18073,7 +18099,6 @@ FILTER_JS_TEMPLATE = r"""
     if (regionSel) {
       regionSel.addEventListener('change', function() {
         uxNearbyActive = false;
-        uxLocationNote = '';
         apply();
         uxPaintContext();
         wbSaveListView();
@@ -18766,7 +18791,7 @@ FILTER_JS_TEMPLATE = r"""
     var wbFavTrapRelease = null;
     var wbUserLoc = null;       // {lat, lng} once #fab-locate produced a fix
     var uxPlanning = null, uxRequestedPlan = null;
-    var uxNearbyActive = false, uxNearbyPending = false, uxLocationNote = '';
+    var uxNearbyActive = false, uxNearbyPending = false;
     var uxNearbyTimer = null;
     function uxSyncNav() {
       var current = favDrawerOpen() ? wbTabPref : 'map';
@@ -18798,7 +18823,6 @@ FILTER_JS_TEMPLATE = r"""
       var region = document.getElementById('ux-region');
       var near = document.getElementById('ux-nearby');
       var restore = document.getElementById('ux-restore-plan');
-      var note = document.getElementById('ux-context-note');
       function txt(el, t) { var n = el && el.querySelector('.ss-chip-t'); if (n && n.textContent !== t) n.textContent = t; }
       if (region) {
         var selectedRegion = filterState && filterState.region != null ? prefName(filterState.region) : '';
@@ -18810,47 +18834,52 @@ FILTER_JS_TEMPLATE = r"""
       }
       var nearbyOn = !!uxNearbyActive && !uxNearbyPending;
       if (near) {
-        near.disabled = !!uxNearbyPending;
-        near.classList.toggle('on', nearbyOn);
-        near.classList.toggle('glass-thin', !nearbyOn);
+        // M-3.2-05: the chip is the pressed STATE of nearby mode (tap =
+        // re-locate); the entry is the locate FAB. Hidden otherwise.
+        near.hidden = !nearbyOn;
         near.setAttribute('aria-pressed', nearbyOn ? 'true' : 'false');
-        txt(near, uxNearbyPending ? localizeText('正在定位') + '…'
-          : nearbyOn ? localizeText('附近') + ' · ' + (wbList.sort === 'distance' ? localizeText('按距离') : wbSortLabel(wbList.sort))
-          : localizeText('找附近'));
+        if (nearbyOn) txt(near, localizeText('附近') + ' · '
+          + (wbList.sort === 'distance' ? localizeText('按距离') : wbSortLabel(wbList.sort)));
       }
+      if (locateFab) locateFab.classList.toggle('pending', !!uxNearbyPending);
       if (restore) {
         restore.hidden = !uxPlanning;
         if (uxPlanning) txt(restore, l10nTpl(BACKTO_TPL, {r: uxPlanning.region == null
           ? localizeText('全部地区') : prefName(uxPlanning.region)}));
       }
       document.body.classList.toggle('ux-nearby', nearbyOn);
-      if (note) {
-        note.textContent = uxLocationNote ? localizeText(uxLocationNote)
-          : !uxNearbyActive ? ''
-          : wbList.sort === 'distance' ? localizeText(wbUserLoc && wbUserLoc.fromCache
-            ? '按上次定位的直线距离排序，可重试找附近更新位置'
-            : '全部地区按直线距离排序，不限半径；保留其他筛选条件')
-          : localizeText('全部地区') + ' · ' + localizeText('排序') + '：' + wbSortLabel(wbList.sort);
-        if (uxNearbyActive && wbUserLoc && wbUserLoc.ts) note.textContent += ' · '
-          + localizeText('定位时间') + ' ' + new Date(wbUserLoc.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-      }
     }
-    function uxLocationFailed() {
+    // M-3.2-05 (SPEC B.5 / E3'): a failed fix is one toast with the way out;
+    // region, sort and map are untouched. Also the plugin's onLocationError.
+    function uxLocationFailed(text) {
       clearTimeout(uxNearbyTimer);
+      var wasPending = uxNearbyPending;
       uxNearbyPending = false; uxRequestedPlan = null;
-      uxLocationNote = '未能取得位置，原地区与筛选已保留。可选地区或重试找附近';
       uxPaintContext();
-      showToast(localizeText(uxLocationNote), {ms: 6000, actionLabel: localizeText('选地区'),
+      if (!wasPending && text == null) return;   // a stray plugin error while idle
+      showToast(localizeText(text || '无法取得位置'), {ms: 6000, actionLabel: localizeText('选地区'),
         onAction: function() { openFilterUI({focus: '#ff-region'}); }});
     }
+    // Same box scripts/verify_build.py asserts every published row is in.
+    var JAPAN_BBOX = {latMin: 20.0, latMax: 46.2, lonMin: 122.5, lonMax: 154.5};
+    function uxInJapan(ll) {
+      return !!ll && ll.lat >= JAPAN_BBOX.latMin && ll.lat <= JAPAN_BBOX.latMax
+                  && ll.lng >= JAPAN_BBOX.lonMin && ll.lng <= JAPAN_BBOX.lonMax;
+    }
+    // M-3.2-05: the locate FAB's job (SPEC B.5). No confirm() — the switch
+    // to all regions + distance sort is announced by a 6s toast whose Undo
+    // is uxRestorePlanning, and the chip row shows the way back for as
+    // long as the planning context exists. In nearby mode a second tap only
+    // re-locates and re-centres, silently.
     function uxFindNearby() {
       if (uxNearbyPending) return;
-      if (!window.confirm(localizeText('将按当前位置查找，切换为全部地区并按直线距离排序；保留其他筛选条件，可随时返回原地区规划。'))) return;
-      if (!locateCtl && !attachLocate()) { uxLocationFailed(); return; }
+      if (!locateCtl && !attachLocate()) { uxLocationFailed('无法取得位置'); return; }
       map.stop();
-      uxRequestedPlan = uxPlanning || {region: filterState.region, sort: wbList.sort,
-        center: [map.getCenter().lat, map.getCenter().lng], zoom: map.getZoom()};
-      uxNearbyPending = true; uxLocationNote = '';
+      if (!uxNearbyActive) {
+        uxRequestedPlan = uxPlanning || {region: filterState.region, sort: wbList.sort,
+          center: [map.getCenter().lat, map.getCenter().lng], zoom: map.getZoom()};
+      }
+      uxNearbyPending = true;
       uxPaintContext();
       clearTimeout(uxNearbyTimer);
       uxNearbyTimer = setTimeout(function() {
@@ -18861,10 +18890,11 @@ FILTER_JS_TEMPLATE = r"""
       locateCtl.stop();
       locateCtl.start();
     }
+    window.__uxFindNearby = uxFindNearby;
     function uxRestorePlanning() {
       if (!uxPlanning) return;
       var previous = uxPlanning;
-      uxPlanning = null; uxNearbyActive = false; uxNearbyPending = false; uxLocationNote = '';
+      uxPlanning = null; uxNearbyActive = false; uxNearbyPending = false;
       clearTimeout(uxNearbyTimer);
       if (locateCtl) locateCtl.stop();
       map.stop();
@@ -18944,22 +18974,40 @@ FILTER_JS_TEMPLATE = r"""
     try {
       map.on('locationfound', function(e) {
         if (!e || !e.latlng) return;
+        // M-3.2-05 (SPEC B.5.4): a fix outside Japan never switches the
+        // scope — the corpus has nothing near it. The plugin has already
+        // started flying there; stop it and put the map back.
+        if (uxNearbyPending && !uxInJapan(e.latlng)) {
+          var plan = uxRequestedPlan;
+          try { locateCtl.stop(); } catch (_) {}
+          map.stop();
+          if (plan && plan.center) map.setView(plan.center, plan.zoom, {animate: false});
+          uxLocationFailed('地图只覆盖日本');
+          return;
+        }
         wbUserLoc = {lat: e.latlng.lat, lng: e.latlng.lng, ts: Date.now()};
-        uxLocationNote = '';
         if (uxNearbyPending) {
           clearTimeout(uxNearbyTimer);
           uxNearbyPending = false;
+          var wasNearby = uxNearbyActive;
           uxNearbyActive = true;
-          uxPlanning = uxRequestedPlan;
-          uxRequestedPlan = null;
-          uxLocationNote = '';
-          regionSel.value = '';
-          wbList.sort = 'distance';
-          if (wbEls && wbEls.sort) wbEls.sort.value = 'distance';
-          apply();
-          uxShowTab('results');
-          wbSaveListView();
-          uxPaintContext();
+          if (!wasNearby) {
+            uxPlanning = uxRequestedPlan;
+            uxRequestedPlan = null;
+            regionSel.value = '';
+            wbList.sort = 'distance';
+            if (wbEls && wbEls.sort) wbEls.sort.value = 'distance';
+            apply();
+            // The list is resident on mid / wide, so land on it; on a phone
+            // the map stays (E3: the pill's results segment is the next tap).
+            if (!wbIsPhoneLike()) uxShowTab('results');
+            wbSaveListView();
+            uxPaintContext();
+            showToast(localizeText('已切到全部地区') + ' · ' + localizeText('按距离排序'),
+              {ms: 6000, actionLabel: localizeText('撤销'), onAction: uxRestorePlanning});
+          } else {
+            uxPaintContext();
+          }
         }
         wbSyncDistanceOpt();
         if (wbList.sort === 'distance') wbScheduleSort();

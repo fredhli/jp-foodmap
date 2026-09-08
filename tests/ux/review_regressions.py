@@ -26,7 +26,7 @@ def save(page,name,**extra):
       width:innerWidth,height:innerHeight,drawer:document.body.classList.contains('wb-fav-open'),
       mapVisible:getComputedStyle(document.querySelector('.folium-map')).visibility,
       active:{id:a.id,cls:a.className,tag:a.tagName,left:r.left,right:r.right,top:r.top,bottom:r.bottom},
-      sort:document.getElementById('wb-sort')?.value,note:document.getElementById('ux-context-note').textContent,
+      sort:document.getElementById('wb-sort')?.value,note:document.getElementById('ux-nearby')?.textContent??'',
       region:document.getElementById('ff-region').value}}""")
     records.append({'name':name,**data,**extra})
     page.screenshot(path=str(args.output/(name+'.png')))
@@ -137,24 +137,28 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         page.evaluate(MAP+'.setView([35.01,135.77],11,{animate:false})')
         original=page.evaluate(MAP+'.getCenter()')
         if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02: the nearby entry is under the open drawer
-        page.locator('#ux-nearby').click();page.wait_for_function("document.getElementById('wb-sort').value==='distance'")
+        page.locator('#fab-locate').click();page.wait_for_function("document.getElementById('wb-sort').value==='distance'")
+        check(page.locator('.sync-toast .sync-btn').filter(has_text='撤销').count()==1,'nearby switch has no undo toast')
         planned=page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")
         check(planned=={'region':25,'sort':'price','center':[original['lat'],original['lng']],'zoom':11},'planning context does not match original view')
         for sort in ['rating','price','distance']:
+            if w<750: tab('results')   # M-3.2-05: locating leaves the map up; the sort control lives in the drawer
             page.locator('#wb-sort').select_option(sort);page.wait_for_timeout(150)
-            note=page.locator('#ux-context-note').text_content()
+            if w<750: lib_browser.phone_tab(page,'map')   # and the chip row is under the drawer
+            note=page.locator('#ux-nearby').text_content()
             save(page,f'{args.browser}-{w}-nearby-{sort}')
-            check(('直线距离排序' in note)==(sort=='distance'),'nearby sort copy disagrees')
+            check(page.locator('#ux-nearby').is_visible() and page.locator('#ux-nearby').get_attribute('aria-pressed')=='true','nearby chip not pressed')
+            check(('按距离' in note)==(sort=='distance'),'nearby sort copy disagrees')
             if sort!='distance':check(('评分' if sort=='rating' else '价位') in note,'current sort absent from copy')
+        if w<750: tab('results')
         page.locator('#wb-sort').select_option('rating');page.reload();lib_browser.wait_ready(page)
         check(page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned,'planning coordinates changed on reload')
-        if w<750:tab('results')
-        check('直线距离排序' not in page.locator('#ux-context-note').text_content(),'reload falsely claims distance sorting')
+        check('按距离' not in page.locator('#ux-nearby').text_content(),'reload falsely claims distance sorting')
         save(page,f'{args.browser}-{w}-nearby-reload-rating')
-        if w<750: lib_browser.phone_tab(page,'map')   # M-3.2-02/04: the chip row sits under the open drawer
         check(page.locator('#ux-restore-plan').is_visible(),'return plan action lost')
         page.locator('#ux-restore-plan').click();page.wait_for_timeout(300)
         center=page.evaluate(MAP+'.getCenter()')
+        if w<750: tab('results')   # M-3.2-04: restoring does not open the drawer; #wb-sort is built with it
         check(page.locator('#ff-region').input_value()=='25' and page.locator('#wb-sort').input_value()=='price','planning region/sort lost')
         check(page.evaluate(MAP+'.getZoom()')==11,'planning zoom lost')
         error_px=page.evaluate('c=>'+MAP+'.project('+MAP+'.getCenter(),11).distanceTo('+MAP+'.project(c,11))',original)
