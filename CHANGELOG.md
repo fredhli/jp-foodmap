@@ -13,6 +13,17 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-09-08
+
+### Changed
+
+- On phone layouts in the website and Android app, area selection and nearby
+  search are separate rounded buttons between the search field and avatar.
+  Their previous row is hidden when no nearby context or planning-return
+  message is needed. Desktop layout and existing actions are retained.
+- Phone buttons show the selected region name without an action prefix;
+  English uses the compact labels Region and Nearby before selection.
+
 ## [3.1.0] - 2026-09-08
 
 Website and Android release. Existing features and data are retained; no

@@ -528,7 +528,7 @@ def check_phone_nav(page, name):
 
 
 def check_chrome(page, name):
-    """The map controls clear the 3.1 phone nav; intro aligns to search."""
+    """The map controls clear the phone nav; intro aligns to the header actions."""
     g = page.evaluate("""() => {
       const R = s => { const e = document.querySelector(s);
         if (!e) return null;
@@ -538,7 +538,7 @@ def check_chrome(page, name):
       const N=s=>{const e=document.querySelector(s);if(!e||getComputedStyle(e).display==='none')return null;
         const r=e.getBoundingClientRect();return {t:r.top,b:r.bottom};};
       return {nav:N('#phone-nav'), stack: N('.map-fab-stack'),
-              intro: R('#intro-bar'), input: R('#ss-input-wrap'),
+              intro: R('#intro-bar'), input: R('#ss-input-wrap'), nearby: R('#ux-nearby'),
               phone: !/wb-(split|mid|wide)/.test(document.body.className)};
     }""")
     out = []
@@ -549,12 +549,16 @@ def check_chrome(page, name):
                 f"map controls overlap the phone navigation by {-clearance:.0f}px: {g}")
         out.append(f"map controls clear phone navigation by {clearance:.0f}px")
     if g["phone"] and g["intro"] and g["input"]:
-        d = abs(g["intro"]["r"] - g["input"]["r"])
-        if d > 4:
+        if not g["nearby"]:
+            raise AssertionError("phone header is missing its nearby control")
+        right_delta = abs(g["intro"]["r"] - g["nearby"]["r"])
+        left_delta = abs((g["intro"]["r"] - g["intro"]["w"])
+                         - (g["input"]["r"] - g["input"]["w"]))
+        if max(left_delta, right_delta) > 4:
             raise AssertionError(
-                f"#intro-bar's right edge is {d:.0f}px off the search "
-                f"capsule's: {g}")
-        out.append(f"intro bar right edge within {d:.0f}px of the capsule's")
+                f"intro bar is misaligned with search and nearby controls "
+                f"(left {left_delta:.0f}px, right {right_delta:.0f}px): {g}")
+        out.append(f"intro aligns with header actions (left {left_delta:.0f}px, right {right_delta:.0f}px)")
     return "; ".join(out) or "workbench mode — phone chrome is hidden"
 
 

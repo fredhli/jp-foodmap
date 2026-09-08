@@ -9,7 +9,7 @@ Per-user Saved restaurants, the Hidden list, pins and lists sync through a
 small Cloudflare Worker (`worker/`) behind Google Sign-In. Visitors who skip
 sign-in keep their state purely in `localStorage`.
 
-**Version: 3.1.0.** See [CHANGELOG.md](CHANGELOG.md) for what changed, and
+**Version: 3.1.1.** See [CHANGELOG.md](CHANGELOG.md) for what changed, and
 [CLAUDE.md](CLAUDE.md) for the architecture notes, the storage-key contract
 and the backwards-compatibility red lines.
 
@@ -38,7 +38,7 @@ controls stay separate so a nearby search can return to the planned area.
 `android/` holds a Kotlin WebView shell around this site, shipped as a
 sideloaded APK (`android/apk/jpfoodmap.apk`, carried to the phone by
 Dropbox — the APK is gitignored, the `BUILD-INFO.txt` stamp beside it is
-not). It is version-locked to the site: **3.1.0**, `versionCode 30100`,
+not). It is version-locked to the site: **3.1.1**, `versionCode 30101`,
 `minSdk 31`, `targetSdk 36`, built for one device (Galaxy Z Fold 8).
 
 What the shell adds over the PWA: the page survives a fold/unfold without

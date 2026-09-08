@@ -1,11 +1,11 @@
 jpfoodmap.apk
-  version   3.1.0 (versionCode 30100)
-  built     2026-09-08 08:58:35  (local time on the build box)
-  published 2026-09-08 12:32:21
+  version   3.1.1 (versionCode 30101)
+  built     2026-09-08 12:57:31  (local time on the build box)
+  published 2026-09-08 13:27:15
   variant   release (R8-minified, debug-signed)
   size      1.7MiB
-  sha256    7f77598801c8034c20513098a4a37c119da20958f1515813552ddd9583cc2fbe
-  from      /tmp/jpfm310-release-final/app/build/outputs/apk/release/app-release.apk
+  sha256    26be77b806358a6dd3a351b673a0fee7e09a595f02d2fecc630d70a26f786ae1
+  from      /tmp/jpfm311-release-final/app/build/outputs/apk/release/app-release.apk
 
 Debug-signed, sideload only. Install: open this file in the Dropbox app on the phone
 (proj_2026 > tabelog > android > apk), allow "install unknown apps" for Dropbox once,

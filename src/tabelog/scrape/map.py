@@ -2366,7 +2366,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.1.1"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -4214,6 +4214,24 @@ PHONE_DRAWER_HTML = """
   .rst-reservation-note { font-size: 12px; line-height: 1.5; color: #6b7280; margin: 8px 0; }
   @media (max-width: 749px) {
     :root { --phone-nav-h: var(--phone-nav-measured, calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px)))); }
+    #ss-box { left: max(var(--chrome-inset), env(safe-area-inset-left));
+      right: max(var(--chrome-inset), env(safe-area-inset-right)); width: auto; transform: none; }
+    #ss-top { gap: 6px; }
+    #ss-top > #ux-region, #ss-top > #ux-nearby {
+      flex: 0 0 auto; width: clamp(64px, 16vw, 80px); min-height: 44px;
+      box-sizing: border-box; padding: 5px 7px; border: 1px solid #dbe7f5;
+      border-radius: 14px; background: #eff6ff; color: #1d4ed8;
+      box-shadow: 0 2px 6px #1e3a5f12; font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      text-align: center; overflow-wrap: anywhere; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #ss-top > #ux-region { width: auto; min-width: clamp(64px, 16vw, 80px);
+      max-width: min(112px, 28vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #ss-top > #ux-region:active, #ss-top > #ux-nearby:active { background: #dbeafe; }
+    #ss-top > #ux-region:focus-visible, #ss-top > #ux-nearby:focus-visible {
+      outline: 2px solid #2563eb; outline-offset: 2px; }
+    #ss-top > #ux-nearby:disabled { color: #64748b; cursor: wait; }
+    #ux-context.ux-context-idle { display: none; }
     #phone-nav { position: fixed; z-index: 10005; inset: auto 0 0;
       display: grid; grid-template-columns: repeat(4,minmax(0,1fr));
       min-height: calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px))); box-sizing: border-box;
@@ -4227,7 +4245,9 @@ PHONE_DRAWER_HTML = """
     #ux-context { top: calc(64px + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
       left: max(12px,env(safe-area-inset-left)); right: max(12px,env(safe-area-inset-right)); width: auto; }
     #ux-context button { min-height: 40px; }
-    #intro-bar { top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))) !important; }
+    #intro-bar { top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))) !important;
+      left: max(var(--chrome-inset), env(safe-area-inset-left));
+      right: calc(max(var(--chrome-inset), env(safe-area-inset-right)) + 42px); }
     body.wb-fav-open #wb-left { left: 0; right: 0; top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
       bottom: var(--phone-nav-h); width: 100%; max-width: 100%; border-radius: 0; border: 0;
       padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); box-shadow: none; animation: none; }
@@ -12758,7 +12778,8 @@ FILTER_JS_TEMPLATE = r"""
     // 'searching' state so the × button hides once the user is back on the
     // map. (Text, if any, is kept so they can refine on re-focus.)
     document.addEventListener('click', function(e) {
-      if (ssBox.contains(e.target)) return;
+      // Area and nearby still dismiss search after moving into the header.
+      if (ssBox.contains(e.target) && !e.target.closest('#ux-region, #ux-nearby')) return;
       ssCloseDropdown();
       ssWrap.classList.remove('searching');
     });
@@ -18376,6 +18397,20 @@ FILTER_JS_TEMPLATE = r"""
     var uxPlanning = null, uxRequestedPlan = null;
     var uxNearbyActive = false, uxNearbyPending = false, uxLocationNote = '';
     var uxNearbyTimer = null;
+    function uxPlaceHeaderButtons() {
+      var phone = wbIsPhoneLike();
+      var region = document.getElementById('ux-region');
+      var near = document.getElementById('ux-nearby');
+      var target = document.getElementById(phone ? 'ss-top' : 'ux-context');
+      var anchor = document.getElementById(phone ? 'ss-avatar' : 'ux-restore-plan');
+      if (region.parentNode !== target) {
+        var focused = document.activeElement;
+        target.insertBefore(region, anchor);
+        target.insertBefore(near, anchor);
+        if (focused === region || focused === near) focused.focus({preventScroll: true});
+      }
+      uxPaintContext();
+    }
     function uxSyncNav() {
       var current = favDrawerOpen() ? wbTabPref : 'map';
       document.querySelectorAll('#phone-nav [data-ux-tab]').forEach(function(button) {
@@ -18394,16 +18429,24 @@ FILTER_JS_TEMPLATE = r"""
       wbSetTab(tab);
     }
     function uxPaintContext() {
+      var phone = wbIsPhoneLike();
       var region = document.getElementById('ux-region');
       var note = document.getElementById('ux-context-note');
       var restore = document.getElementById('ux-restore-plan');
       var near = document.getElementById('ux-nearby');
-      if (region) region.textContent = localizeText('选地区') + ' · '
-        + (filterState && filterState.region != null ? prefName(filterState.region) : localizeText('全部地区'));
+      if (region) {
+        var selectedRegion = filterState && filterState.region != null ? prefName(filterState.region) : '';
+        var regionAction = phone && activeLang === 'en' ? 'Region' : localizeText('选地区');
+        var regionLabel = regionAction + ' · ' + (selectedRegion || localizeText('全部地区'));
+        region.textContent = phone ? (selectedRegion || regionAction) : regionLabel;
+        region.setAttribute('aria-label', regionLabel);
+        region.title = regionLabel;
+      }
       if (restore) restore.hidden = !uxPlanning;
       if (near) {
         near.disabled = !!uxNearbyPending;
-        near.textContent = localizeText(uxNearbyPending ? '正在定位…' : '找附近');
+        near.textContent = uxNearbyPending ? localizeText('正在定位…')
+          : phone && activeLang === 'en' ? 'Nearby' : localizeText('找附近');
       }
       if (note) {
         note.textContent = uxLocationNote ? localizeText(uxLocationNote)
@@ -18414,6 +18457,7 @@ FILTER_JS_TEMPLATE = r"""
           : localizeText('全部地区') + ' · ' + localizeText('排序') + '：' + wbSortLabel(wbList.sort);
         if (uxNearbyActive && wbUserLoc && wbUserLoc.ts) note.textContent += ' · '
           + localizeText('定位时间') + ' ' + new Date(wbUserLoc.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        document.getElementById('ux-context').classList.toggle('ux-context-idle', !uxPlanning && !note.textContent);
       }
     }
     function uxLocationFailed() {
@@ -18501,6 +18545,8 @@ FILTER_JS_TEMPLATE = r"""
         document.documentElement.style.setProperty('--ux-actions-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
       }).observe(uxDetailActions);
     }
+    // The avatar has reached its new parent before this event fires.
+    document.addEventListener('wb:mode', uxPlaceHeaderButtons);
     uxPaintContext();
 
     // ---- distance sort (F1): map centre until the user locates -----------
