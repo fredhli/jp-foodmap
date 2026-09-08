@@ -61,8 +61,8 @@ def eq(actual, expected, what: str) -> None:
 def open_filter_panel(page) -> None:
     """The filter panel's inputs are in the DOM from boot but only laid out
     once a host is open. M-027 gave it two hosts: the bottom sheet behind
-    #ff-fab (<700px) and the non-modal popover behind the top bar's 筛选
-    button (>=700px). Wait on #ff-sheet-content being laid out, which is
+    #wb-seg's filter segment (<750px, M-3.2-03) and the top bar's 筛选
+    button (>=750px). Wait on #ff-sheet-content being laid out, which is
     true in either."""
     if page.eval_on_selector(
             "#ff-sheet-content", "el => el.offsetParent !== null"):
@@ -71,7 +71,7 @@ def open_filter_panel(page) -> None:
         "() => { const b = Array.from(document.querySelectorAll('.wb-filter-btn'))"
         "         .find(e => e.offsetParent !== null);"
         "  if (b) { b.click(); return true; }"
-        "  const f = document.getElementById('ff-fab');"
+        "  const f = document.querySelector('#wb-seg [data-ux-tab=\"filter\"]');"
         "  if (f) { f.click(); return true; }"
         "  return false; }"
     )

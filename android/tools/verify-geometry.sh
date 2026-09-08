@@ -115,7 +115,7 @@ one_orientation() {   # one_orientation <orient> <expected width>
     # This was FAIL on foldcover natural and fold8inner60 landscape against the pending build
     # AND against the live one; it is device state, not a product defect.
     dismiss_first_run
-    if tap_element '#ff-fab' || tap_element '.wb-filter-btn'; then
+    if tap_element '#wb-seg [data-ux-tab="filter"]' || tap_element '.wb-filter-btn'; then
         # POLL, and re-tap once. The mid/wide pill sits in the page's top bar, a few CSS px
         # under the status bar, and a tap there is occasionally eaten by the system window
         # instead of the page — measured: the same coordinate opens the popover by hand.
@@ -128,14 +128,14 @@ one_orientation() {   # one_orientation <orient> <expected width>
                 sleep 1
             done
             [ "$fo" = "true" ] && break
-            [ "$try" = 1 ] && { tap_element '#ff-fab' || tap_element '.wb-filter-btn' || true; }
+            [ "$try" = 1 ] && { tap_element '#wb-seg [data-ux-tab="filter"]' || tap_element '.wb-filter-btn' || true; }
         done
         expect "$orient filter panel open" "$fo" "true"
         shot "$tag-filter" >/dev/null
         adbs shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
         sleep 1
     else
-        skip "$orient filter frame (could not reach #ff-fab or .wb-filter-btn — no probe?)"
+        skip "$orient filter frame (could not reach #wb-seg or .wb-filter-btn — no probe?)"
     fi
 }
 

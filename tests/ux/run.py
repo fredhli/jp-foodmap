@@ -167,7 +167,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
             context.close()
             continue
         if w==393:
-            page.locator('#ff-fab').evaluate('(e)=>e.click()')
+            page.locator('#wb-seg [data-ux-tab="filter"]').evaluate('(e)=>e.click()')
             page.locator('#ff-region').select_option('25')
             page.locator('#wb-tab-results').click()
             page.evaluate(MAP+".fire('locationfound',{latlng:L.latLng(35.6812,139.7671),accuracy:10})")

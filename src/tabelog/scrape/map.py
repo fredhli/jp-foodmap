@@ -1740,68 +1740,53 @@ def build_filter_panel_html(
     position: sticky; top: 0; z-index: 1;
     background: #fff;
   }}
-  /* Bottom-left FAB that opens the sheet. Matches the right-side .map-fab
-     style but stands alone — labelled with the live filter count so the
-     "how many results match" feedback survives the collapse to a sheet. */
-  #ff-fab {{
+  /* M-3.2-03: the bottom-left segmented pill — the phone's entry into the
+     drawer. It replaces #ff-fab (a hamburger + two counts that read as a
+     second layer toggle) and 3.1.x's fixed bottom bar. Three segments:
+     results with the live match count, saved, filters with the number of
+     active conditions. Tapping a segment opens the drawer on that tab;
+     tapping the current segment again closes it. It wears .glass-thin (the
+     control layer over the map), sits exactly where #ff-fab sat, and is
+     hidden by the same rules: under an open card (hidden attribute), under
+     the drawer, and on the column layouts. */
+  #wb-seg {{
     position: fixed;
     bottom: calc(18px + env(safe-area-inset-bottom)); left: 14px;
     z-index: var(--z-float);
-    background: #fff; color: #374151;
-    border: 1px solid #d1d5db;
-    border-radius: 999px;
-    padding: 12px 18px;
-    font-size: 15px; font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-    display: inline-flex; align-items: center; gap: 10px;
+    box-sizing: border-box;
+    display: inline-flex; align-items: stretch;
+    border-radius: var(--r-pill);
+    overflow: hidden;
+    /* Never run into the FAB column on the right: its live width is
+       published as --fab-w by syncSheetOffset(). */
+    max-width: calc(100vw - 14px - 14px - env(safe-area-inset-right) - var(--fab-w, 44px) - 8px);
+    font-family: var(--font-ui);
     user-select: none;
-    transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    line-height: 1;
+    color: var(--fg-2);
   }}
-  /* M-160: every decorative :hover on this page is gated on a real pointer.
-     A touch tap leaves the hover state stuck on the button until the next
-     tap elsewhere, which on the FABs is indistinguishable from the blue
-     .active "layer is on" state. :active stays outside the gate (touch
-     needs press feedback) and so does :focus-visible. Keeping the rules
-     rather than deleting them is deliberate: a Fold in DeX, or any tablet
-     with a mouse, reports (hover: hover) and gets the affordance back. */
-  @media (hover: hover) and (pointer: fine) {{
-    #ff-fab:hover {{ background: #f9fafb;
-                     box-shadow: 0 4px 10px rgba(0,0,0,0.18); }}
+  #wb-seg[hidden] {{ display: none; }}
+  #wb-seg button {{
+    border: 0; margin: 0; background: transparent; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 11px; min-width: 0; min-height: 44px;
+    font: 600 15px/1 var(--font-ui); color: inherit;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    transition: background var(--dur-1) var(--ease-std), color var(--dur-1) var(--ease-std);
   }}
-  #ff-fab[hidden] {{ display: none; }}
-  #ff-fab .ff-fab-ic {{ display: inline-flex; align-items: center; }}
-  #ff-fab .ff-fab-ic svg {{ display: block; }}
-  #ff-fab .ff-fab-count {{ font-variant-numeric: tabular-nums; }}
-  #ff-fab .ff-fab-count b {{ color: #2563eb; }}
-  /* M-022: the pill used to read "46 / 9807" where 46 was viewport-cropped
-     and 9807 was the whole corpus — two different questions joined by a
-     slash, which is why the same filter showed 46/46/14/13/0 depending only
-     on where the map happened to sit. Two labelled segments now: 命中 = the
-     full-dataset match count (viewport-independent), 视野内 = what is
-     actually on screen. The labels shrink away below 420px so the pill
-     never collides with the right-hand FAB stack. */
-  #ff-fab .ff-fab-lbl {{
-    font-size: 10px; font-weight: 600; color: #9ca3af;
-    margin-right: 3px; letter-spacing: 0.02em;
+  #wb-seg button + button {{ border-left: 1px solid var(--border-1); }}
+  #wb-seg button[aria-current="page"] {{ background: var(--accent-soft); color: var(--accent); }}
+  #wb-seg button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -3px; border-radius: var(--r-pill); }}
+  #wb-seg .ws-n {{
+    font-family: var(--font-num); font-variant-numeric: tabular-nums;
+    font-weight: 700; color: var(--accent);
   }}
-  #ff-fab .ff-fab-lbl.ff-fab-lbl2 {{ margin-left: 9px; }}
-  #ff-fab .ff-fab-dot {{ display: none; color: #d1d5db; margin: 0 5px; }}
-  #ff-fab .ff-inview {{ color: #6b7280; font-weight: 600; }}
-  #ff-fab.needs-sync .ff-fab-lbl, #ff-fab.needs-sync .ff-inview,
-  #ff-fab.needs-sync-pending .ff-fab-lbl,
-  #ff-fab.needs-sync-pending .ff-inview {{ color: #fff; opacity: 0.85; }}
-  /* 2.1.0 / W-10: 420px split the three phone widths this site is actually
-     used at (393 / 430 / 475) down the middle — the same pill read
-     "命中 N · 视野内 M" on a Fold cover screen and "N · M" on an iPhone 15
-     Pro. 360px puts all three on the labelled side and keeps the bare-number
-     fallback for the genuinely narrow case (a Fold split-screen column). */
-  @media (max-width: 360px) {{
-    #ff-fab .ff-fab-lbl {{ display: none; }}
-    #ff-fab .ff-fab-dot {{ display: inline; }}
-  }}
+  #wb-seg .ws-n:empty {{ display: none; }}
+  #wb-seg button[aria-current="page"] .ws-n {{ color: var(--accent-strong); }}
+  /* 402px with EN copy ("Results 8.1k · Saved · Filters 2") has to stay
+     under 260px so the pill and the FAB column never meet: the count is
+     shortened to 8.1k by wsPaintCount() below 420px (JS only — 420 is not
+     one of the page's CSS breakpoints, check_breakpoints would object). */
   /* M-022: "已启用" chips under the sheet title. Only the hide-foreign one
      for now — it is the single filter that is on by default and silently
      removes ~1/6 of the corpus. */
@@ -1816,65 +1801,6 @@ def build_filter_panel_html(
   .ff-chip b {{ font-variant-numeric: tabular-nums; }}
   /* display:inline-flex beats the UA [hidden] rule — spell it out. */
   .ff-chip[hidden] {{ display: none; }}
-  /* Unsynced-changes alerts. Two flavours so the colour matches the
-     user's actual situation:
-       .needs-sync         — red. Not signed in, so edits live only in
-                              this browser. Urgent.
-       .needs-sync-pending — blue. Signed in; the push just hasn't landed
-                              yet (or last attempt failed, but the status
-                              text covers that channel). Informational. */
-  /* The "breathing" is an ::after overlay in the light shade fading over a
-     static solid base — animating opacity alone stays on the compositor,
-     unlike the old background/box-shadow keyframes which repainted the
-     button on the main thread every frame for as long as the state lasted
-     (signed-out-with-edits pulses for the whole session — that was a
-     measurable battery cost on phones). Visual result is identical:
-     overlay at 1 shows the light shade, at 0 the solid base. */
-  @keyframes ff-fab-breathe {{
-    0%, 100% {{ opacity: 1; }}
-    50%      {{ opacity: 0; }}
-  }}
-  #ff-fab.needs-sync {{
-    color: #fff; border-color: #dc2626; background: #dc2626;
-    box-shadow: 0 3px 10px rgba(220,38,38,0.45);
-  }}
-  #ff-fab.needs-sync-pending {{
-    color: #fff; border-color: #2563eb; background: #2563eb;
-    box-shadow: 0 3px 10px rgba(37,99,235,0.45);
-  }}
-  /* M-057: the pulse used to be `infinite`, so a signed-out user with
-     unsynced edits kept the compositor drawing for the whole session (the
-     dirty flag is persisted, so it survived reloads too). Six blinks are
-     plenty to catch the eye; the overlay then rests at opacity 0, i.e. the
-     solid red/blue base — still unmistakable, and burning nothing. Base
-     opacity 0 (not 1) is what makes the resting state the solid colour and
-     keeps the white label legible; the animation itself starts at 1. */
-  #ff-fab.needs-sync::after, #ff-fab.needs-sync-pending::after {{
-    content: ''; position: absolute; inset: 0;
-    border-radius: inherit; pointer-events: none;
-    opacity: 0;
-    animation: ff-fab-breathe 1.4s ease-in-out 6;
-  }}
-  #ff-fab.needs-sync::after {{ background: #fee2e2; }}
-  #ff-fab.needs-sync-pending::after {{ background: #dbeafe; }}
-  /* Keep the label above the overlay (matches the old white-on-color look
-     through the whole cycle). */
-  #ff-fab.needs-sync > *, #ff-fab.needs-sync-pending > * {{
-    position: relative; z-index: 1;
-  }}
-  /* M-160: pointer-gated — on a touch device the pulse would stay paused
-     after a tap, which is exactly the state the animation is warning about. */
-  @media (hover: hover) and (pointer: fine) {{
-    #ff-fab.needs-sync:hover::after, #ff-fab.needs-sync-pending:hover::after {{
-      animation-play-state: paused; opacity: 0;
-    }}
-    #ff-fab.needs-sync:hover {{ background: #dc2626; }}
-    #ff-fab.needs-sync-pending:hover {{ background: #2563eb; }}
-  }}
-  #ff-fab.needs-sync .ff-fab-count b {{ color: #fff; }}
-  #ff-fab.needs-sync .ff-fab-count {{ color: #fff; }}
-  #ff-fab.needs-sync-pending .ff-fab-count b {{ color: #fff; }}
-  #ff-fab.needs-sync-pending .ff-fab-count {{ color: #fff; }}
   /* Small "?" badge next to bold subtitles inside the filter sheet.
      Inline-flex centers the glyph; cursor:help advertises that nothing
      destructive is going to happen on click. */
@@ -2145,16 +2071,15 @@ def build_filter_panel_html(
   }}
   #ff-foreign-show:focus-visible {{ outline: 2px solid #2563eb; outline-offset: 2px; }}
 </style>
-<!-- M-089: no static aria-label — it wins over the element's own content,
-     so the visible "1234 / 9807" count was invisible to screen readers.
-     updateFabAria() writes an aria-label that carries the count. -->
-<button id="ff-fab" type="button" title="筛选">
-  <span class="ff-fab-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
-  <!-- M-022: 符合筛选 = full-corpus match count, 在屏幕范围内 = what is on
-       screen. 2.3.0 wording: the old two-character labels read as
-       jargon. -->
-  <span class="ff-fab-count"><span class="ff-fab-lbl">符合筛选</span><b class="ff-count">–</b><span class="ff-fab-dot">·</span><span class="ff-fab-lbl ff-fab-lbl2">在屏幕范围内</span><span class="ff-inview">–</span></span>
-</button>
+<!-- M-3.2-03: the segmented pill. data-ux-tab is the same attribute the
+     3.1.x bottom bar carried, so uxSyncNav() / uxShowTab() and the tests'
+     phone_tab() helper address it unchanged. The count nodes are written by
+     wsPaintCount() (results) and the .wb-filter-n badge loop (filters). -->
+<div id="wb-seg" class="glass-thin" role="group" aria-label="收藏与结果">
+  <button type="button" data-ux-tab="results" aria-controls="wb-left" aria-expanded="false"><span class="ws-l">结果</span><b class="ws-n ws-count"></b></button>
+  <button type="button" data-ux-tab="fav" aria-controls="wb-left" aria-expanded="false"><span class="ws-l">收藏</span></button>
+  <button type="button" data-ux-tab="filter" aria-controls="wb-left" aria-expanded="false"><span class="ws-l">筛选</span><b class="ws-n wb-filter-n"></b></button>
+</div>
 <div id="ff-backdrop"></div>
 <div id="ff-sheet" role="dialog" aria-modal="true" aria-hidden="true"
      aria-labelledby="ff-sheet-title">
@@ -2540,7 +2465,7 @@ DESIGN_TOKENS_CSS = """
     --z-map-chrome: 9000;   /* attribution, scale, locate control */
     --z-column: 9200;       /* #wb-left / #wb-detail / the split handle */
     --z-rail: 9250;         /* #wb-rail */
-    --z-float: 9300;        /* FAB stack, #ff-fab, #intro-bar, #ss-box */
+    --z-float: 9300;        /* FAB stack, #wb-seg, #intro-bar, #ss-box */
     --z-sheet: 9500;        /* bottom sheets + the phone drawer, scrim at -1 */
     --z-bar: 9550;          /* #wb-top, #wb-filter-pop */
     --z-popover: 9600;      /* layers / language / account / help popovers */
@@ -3196,35 +3121,10 @@ SEARCH_BOX_HTML = """
     padding-left: 14px; color: #6b7280; font-size: 14px;
     line-height: 1; user-select: none;
   }
-  /* W-6 (2.1.0): the phone entry into the results / 收藏 / 筛选 drawer. It
-     replaces the decorative 🔍 at the left end of the capsule rather than
-     floating somewhere new — the band under the capsule is #intro-bar's and
-     the bottom-left corner is #ff-fab's, and the old ⭐ pill down there was
-     invisible enough that the owner never found it. 44px hit area inside a
-     44px capsule, so nothing about the capsule's height changes.
-     Keyed off the media query, not a body class: below WB_BP_MID wbModeFor()
-     always answers 'phone', and a class would flash the ≡ on a desktop for
-     the one frame before wbApplyMode() runs. A-2 (2.3.0): that threshold
-     moved 520 -> 750 when split mode was retired, so this query moves with
-     it — 519 would have left the Fold's inner screen (591 / 616) on the
-     phone layout with no way into the drawer at all. */
-  #ss-drawer-btn { display: none; }
-  @media (max-width: 749px) {
-    #ss-icon { display: none; }
-    #ss-drawer-btn {
-      display: inline-flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      width: 44px; height: 44px; padding: 0;
-      border: none; background: none; cursor: pointer;
-      color: #4b5563;
-      border-radius: 999px;
-      -webkit-tap-highlight-color: transparent;
-    }
-    #ss-drawer-btn:active { background: #f3f4f6; }
-    #ss-drawer-btn:focus-visible { outline: 2px solid #2563eb;
-                                   outline-offset: -2px; }
-    #ss-drawer-btn svg { display: block; }
-  }
+  /* M-3.2-03: the hamburger that W-6 (2.1.0) put at the left end of the
+     capsule is gone — the drawer's entry is the segmented pill (#wb-seg),
+     so the search icon is back at every width and the input gets its 2.3.0
+     width again. */
   #ss-input {
     flex: 1; min-width: 0;
     padding: 12px 6px 12px 8px;   /* F2 / M-078: 44px pill */
@@ -3560,15 +3460,6 @@ SEARCH_BOX_HTML = """
 <div id="ss-box">
   <div id="ss-top">
     <div id="ss-input-wrap">
-      <!-- W-6: phone-only drawer entry (CSS above swaps it for #ss-icon
-           below 520px). aria-label / title are localized through ATTR_L10N. -->
-      <button id="ss-drawer-btn" type="button" aria-haspopup="dialog"
-              aria-expanded="false" aria-controls="wb-left"
-              aria-label="收藏与结果" title="收藏与结果">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
-             stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
-             aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-      </button>
       <span id="ss-icon">🔍</span>
       <input id="ss-input" type="text" autocomplete="off"
              role="combobox" aria-expanded="false" aria-controls="ss-list"
@@ -4365,7 +4256,7 @@ PHONE_DRAWER_HTML = """
      through. Medium keeps them: its map is live. The bottom-left pill sits
      under the drawer at every phone width, so it goes in both. */
   body.wb-fav-open:not(.wb-medium) .map-fab-stack { display: none !important; }
-  body.wb-fav-open #ff-fab { display: none !important; }
+  body.wb-fav-open #wb-seg { display: none !important; }
 
   /* The close button. #wb-fav-grip is created by the JS and prepended into
      #wb-left, so it exists in every mode; it is only the anchor for the
@@ -5218,7 +5109,7 @@ MOBILE_UX_ASSETS = """
      state — otherwise a tap on a touch screen has no feedback at all.
      .wb-row.is-active / .is-checked are declared later with the same
      specificity, so a selected row keeps its blue tint while pressed. */
-  .map-fab:active, #ff-fab:active, .wb-row:active { background: #f3f4f6; }
+  .map-fab:active, #wb-seg button:active, .wb-row:active { background: #f3f4f6; }
   /* #layers-pop re-hosts .map-fab at ID specificity, which outranks the
      line above — the rows inside the 图层 popover need their own. Its
      resting background is already #f3f4f6-adjacent, so press one shade
@@ -5249,7 +5140,6 @@ MOBILE_UX_ASSETS = """
        .mk-pulse-ring          — resting state is the static blue halo (the
                                  keyframes only scale/fade it), so the
                                  selected marker is still findable.
-       #ff-fab.needs-sync      — resting state is the solid red/blue pill.
        #ss-spinner             — progress feedback for an in-flight search,
                                  not decoration. A stopped rotation reads as
                                  a broken widget, so it becomes an explicit
@@ -5915,8 +5805,8 @@ MOBILE_UX_ASSETS = """
 #   #sync-sr       the polite live region every non-visual announcement
 #                  funnels through (M-089).
 #
-# The FAB's own needs-sync animation is NOT here — it lives with #ff-fab in
-# build_filter_panel_html() and is deliberately left alone.
+# M-3.2-03: the old #ff-fab needs-sync pulse is gone with the pill; the
+# unsynced state is the avatar badge only (red signed-out, blue pending).
 SYNC_UI_HTML = """
 <style>
   /* These nodes set an explicit `display`, which outranks the UA's
@@ -6060,6 +5950,12 @@ SYNC_UI_HTML = """
     position: absolute; top: -1px; right: -1px;
     width: 10px; height: 10px; border-radius: 50%;
     background: #dc2626; border: 2px solid #fff;
+    /* M-3.2-03: this badge is now the ONLY unsynced-changes signal. Red =
+       signed out, edits live only in this browser; blue = signed in, the
+       push just has not landed yet (the old #ff-fab pulse said the same). */
+  }
+  #ss-avatar-dot.is-pending {
+    background: #2563eb;
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     pointer-events: none;
   }
@@ -6703,7 +6599,7 @@ WORKBENCH_HTML = """
   body.wb-mid #ff-sheet, body.wb-wide #ff-sheet,
   body.wb-mid #ff-backdrop, body.wb-wide #ff-backdrop { display: none !important; }
   /* A5: the split panel head carries its own 筛选 button, so the FAB goes. */
-  body.wb-split #ff-fab, body.wb-mid #ff-fab, body.wb-wide #ff-fab {
+  body.wb-split #wb-seg, body.wb-mid #wb-seg, body.wb-wide #wb-seg {
     display: none !important;
   }
   /* max(), not a sum: in split mode an open card already covers the panel,
@@ -6762,8 +6658,8 @@ WORKBENCH_HTML = """
   /* @layer-exempt-start */
   .leaflet-control-attribution { padding-bottom: env(safe-area-inset-bottom); }
   /* @layer-exempt-end */
-  /* M-159: the scale bar has to clear #ff-fab (18px + 44px tall + slack);
-     on the workbench modes #ff-fab is gone, so it drops back down. */
+  /* M-159: the scale bar has to clear #wb-seg (18px + 44px tall + slack);
+     on the workbench modes the pill is gone, so it drops back down. */
   .leaflet-control-scale { margin-bottom: 78px !important; }
   body.wb-split .leaflet-control-scale, body.wb-mid .leaflet-control-scale,
   body.wb-wide .leaflet-control-scale { margin-bottom: 12px !important; }
@@ -8374,7 +8270,6 @@ FILTER_JS_TEMPLATE = r"""
   // Selector-keyed (not id-keyed) because several of these are classes with
   // more than one instance on the page.
   var ATTR_L10N = [
-    ['#ff-fab',                        'title',      '筛选'],
     ['.ff-help-trigger[aria-label]',   'aria-label', '说明'],
     // A11: the stack is zoom + locate + 图层 now; the four layer toggles
     // moved into #layers-pop, which carries its own label.
@@ -8410,8 +8305,6 @@ FILTER_JS_TEMPLATE = r"""
     // W-6: the phone drawer's ≡ entry, at the left end of the search
     // capsule. openFavDrawer() re-labels #wb-left to 收藏与结果 while the
     // drawer is up and puts 结果 back on close.
-    ['#ss-drawer-btn',                 'aria-label', '收藏与结果'],
-    ['#ss-drawer-btn',                 'title',      '收藏与结果'],
     ['#wb-fav-close',                  'aria-label', '关闭'],
     ['.bm-close',                      'aria-label', '关闭'],
     ['.bm-kind-seg',                   'aria-label', '类型'],
@@ -13288,11 +13181,9 @@ FILTER_JS_TEMPLATE = r"""
       deferSync(response);
     }
 
-    // Flash the filter FAB when there are local changes that haven't
-    // landed on the server. Colour depends on whether the user is signed in:
-    //   not signed in → red pulse (urgent — edits live only in this browser)
-    //   signed in     → blue pulse (just informational — push will arrive)
-    var fabEl = document.getElementById('ff-fab');
+    // M-3.2-03: the unsynced-changes signal is the avatar badge alone
+    // (renderSyncUi paints it; .is-pending turns it blue when signed in).
+    // The old #ff-fab red / blue pulse went with the pill.
     var retryRowEl = document.getElementById('ssm-retry-sync');
     function updateNeedsSyncIndicator() {
       var signedIn = !!configured();
@@ -13303,17 +13194,6 @@ FILTER_JS_TEMPLATE = r"""
       // holding back — waiting on the cloud, or sitting on a write whose
       // outcome it does not know yet.
       if (retryRowEl) retryRowEl.hidden = !(signedIn && (waitingForCloud || !!pendingWrite));
-      if (!fabEl) return;
-      fabEl.classList.toggle('needs-sync',         d && !signedIn);
-      fabEl.classList.toggle('needs-sync-pending', d &&  signedIn);
-      // M-033: this used to read "点击登录以跨设备同步" — but clicking opens
-      // the filter sheet, and a title= is unreachable on touch anyway. The
-      // call to action moved to #sync-hint; the tooltip now describes what
-      // the button actually is.
-      fabEl.title = localizeText('筛选') + (d
-        ? l10nParen(localizeText(signedIn ? '改动待同步到云端'
-                                          : '仅存于本地浏览器'))
-        : '');
       updateFabAria();
     }
 
@@ -13629,10 +13509,13 @@ FILTER_JS_TEMPLATE = r"""
     // 命中 (full-corpus matches) and 视野内 (what is on screen) — instead of
     // "<viewport-cropped> / <corpus size>", two different questions joined
     // by a slash.
+    // M-3.2-03: the pill's results segment shows one shortened number; the
+    // accessible name carries the whole two-count sentence.
+    var fabEl = document.querySelector('#wb-seg [data-ux-tab="results"]');
     function updateFabAria() {
       if (!fabEl) return;
-      var cnt = fabEl.querySelector('.ff-count');
-      var inv = fabEl.querySelector('.ff-inview');
+      var cnt = document.querySelector('.wb-counts .ff-count');
+      var inv = document.querySelector('.wb-counts .ff-inview');
       var shown = cnt ? cnt.textContent : '';
       var inview = inv ? inv.textContent : '';
       // W-12b ①: the pill shows two words, the accessible name gets the
@@ -13657,6 +13540,8 @@ FILTER_JS_TEMPLATE = r"""
       if (syncStatus.dirty) requestPersistOnce();
       if (avatarDotEl) {
         avatarDotEl.hidden = !(syncStatus.dirty || syncStatus.kind === 'err');
+        avatarDotEl.classList.toggle('is-pending',
+          syncStatus.dirty && syncStatus.signedIn && syncStatus.kind !== 'err');
       }
       lastDirtySeen = syncStatus.dirty;
     }
@@ -15367,7 +15252,7 @@ FILTER_JS_TEMPLATE = r"""
       }
       // Hide the filter FAB so the bottom-left corner stays clean while
       // the restaurant card occupies the bottom slot.
-      var ffbtn = document.getElementById('ff-fab');
+      var ffbtn = document.getElementById('wb-seg');
       if (ffbtn) ffbtn.hidden = true;
       function paint(html) {
         // Guard: user may have closed the sheet or opened another one while
@@ -15471,7 +15356,7 @@ FILTER_JS_TEMPLATE = r"""
           ssWrap.classList.remove('has-text');
         }
       }
-      var ffbtn = document.getElementById('ff-fab');
+      var ffbtn = document.getElementById('wb-seg');
       if (ffbtn) ffbtn.hidden = false;
       // M-014: nothing to pan into view any more.
       clearTimeout(bsPanTimer);
@@ -15734,8 +15619,20 @@ FILTER_JS_TEMPLATE = r"""
       lastSentLang = activeLang;
       updateFabAria();
     }
+    // M-3.2-03: the pill's results count. Below 420px "8069" becomes "8.1k"
+    // so the EN pill ("Results 8.1k · Saved · Filters 2") stays clear of the
+    // FAB column on a 402px iPhone; wbApplyMode() repaints it on resize.
+    var wsCountEl = document.querySelector('#wb-seg .ws-count');
+    function wsPaintCount() {
+      if (!wsCountEl) return;
+      var n = Number(lastCountN), t;
+      if (!isFinite(n)) t = '';
+      else if (window.innerWidth < 420 && n >= 1000) t = (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+      else t = String(n);
+      if (wsCountEl.textContent !== t) wsCountEl.textContent = t;
+    }
     function setCountText(cls, n) {
-      if (cls === 'ff-count')  lastCountN = n;
+      if (cls === 'ff-count') { lastCountN = n; wsPaintCount(); }
       if (cls === 'ff-inview') lastCountM = n;
       var nodes = document.querySelectorAll('.' + cls);
       var s = String(n);
@@ -18204,7 +18101,7 @@ FILTER_JS_TEMPLATE = r"""
     var ffSheet    = document.getElementById('ff-sheet');
     var ffBackdrop = document.getElementById('ff-backdrop');
     var ffGrip     = document.getElementById('ff-grip');
-    var ffFab      = document.getElementById('ff-fab');
+    var ffFab      = document.getElementById('wb-seg');   // M-3.2-03: the pill
 
     // M-027: two hosts for the SAME #ff-sheet-content element — the bottom
     // sheet (phone / split) and the anchored non-modal popover (mid / wide).
@@ -18256,7 +18153,7 @@ FILTER_JS_TEMPLATE = r"""
       ffSheet.classList.remove('ff-open');
       ffBackdrop.classList.remove('ff-open');
       ffSheet.setAttribute('aria-hidden', 'true');
-      ffFab.hidden = false;
+      if (ffFab) ffFab.hidden = false;
       if (wbFilterPop) {
         wbFilterPop.classList.remove('open');
         wbFilterPop.hidden = true;
@@ -18300,7 +18197,6 @@ FILTER_JS_TEMPLATE = r"""
       return !wbLeftCollapsed() && !(wbCur === 'mid' && wbDetailOpen());
     }
 
-    ffFab.addEventListener('click', openFilterSheet);
     ffBackdrop.addEventListener('click', closeFilterSheet);
     // H2 / M-074: the explicit × in the panel header. Lives inside
     // #ff-sheet-content, so it travels with the content between the two
@@ -18586,6 +18482,7 @@ FILTER_JS_TEMPLATE = r"""
       // No CSS reads .wb-medium yet; M-3.2-04 hangs the centred search
       // capsule and the chip row off it.
       cl.toggle('wb-medium', m === 'medium');
+      if (typeof wsPaintCount === 'function') wsPaintCount();   // M-3.2-03: 8069 <-> 8.1k
       if (changed) {
         // A9: bsActive is untouched and #bs-content moves as a live node, so
         // the open card survives the rotation without a repaint; #wb-list is
@@ -18818,7 +18715,11 @@ FILTER_JS_TEMPLATE = r"""
     // untouched and #ff-sheet-content / #bs-content / #ss-box stay in their
     // phone hosts (the M-027 structural invariant).
     // W-6: same variable, new element — the ≡ inside #ss-input-wrap.
-    var wbFavFab      = document.getElementById('ss-drawer-btn');
+    // M-3.2-03: the pill's three segments are the drawer's openers; the
+    // results one doubles as the focus hand-back target when nothing better
+    // is known (a programmatic open from a toast, a keyboard shortcut).
+    var wbSegBtns     = Array.prototype.slice.call(document.querySelectorAll('#wb-seg [data-ux-tab]'));
+    var wbFavFab      = wbSegBtns[0] || null;
     var wbFavBackdrop = document.getElementById('wb-fav-backdrop');
     var wbFavGrip     = null;
     var wbFavTrapRelease = null;
@@ -18951,8 +18852,14 @@ FILTER_JS_TEMPLATE = r"""
         }
       }
     } catch (_) {}
+    // M-3.2-03: the segmented pill. A segment opens the drawer on its tab;
+    // the current segment, tapped again while the drawer is up, closes it.
     document.querySelectorAll('[data-ux-tab]').forEach(function(button) {
-      button.addEventListener('click', function() { uxShowTab(button.getAttribute('data-ux-tab')); });
+      button.addEventListener('click', function() {
+        var tab = button.getAttribute('data-ux-tab');
+        if (tab !== 'map' && favDrawerOpen() && wbTabPref === tab) { closeFavDrawer(); return; }
+        uxShowTab(tab);
+      });
     });
     document.getElementById('ux-region').addEventListener('click', function() { openFilterUI({focus: '#ff-region'}); });
     document.getElementById('ux-nearby').addEventListener('click', uxFindNearby);
@@ -19058,7 +18965,7 @@ FILTER_JS_TEMPLATE = r"""
       wbFavEnsureGrip();
       document.body.classList.add('wb-fav-open');
       if (wbFavBackdrop) wbFavBackdrop.classList.add('on');
-      if (wbFavFab) wbFavFab.setAttribute('aria-expanded', 'true');
+      wbSegBtns.forEach(function(b) { b.setAttribute('aria-expanded', 'true'); });
       wbLeftEl.setAttribute('role', 'dialog');
       wbLeftEl.setAttribute('aria-modal', 'true');
       wbLeftEl.setAttribute('aria-label', localizeText('收藏与结果'));
@@ -19105,7 +19012,7 @@ FILTER_JS_TEMPLATE = r"""
       // inside #ss-box — inert for as long as `wb-fav-open` is on <body>.
       document.body.classList.remove('wb-fav-open');
       if (wbFavBackdrop) wbFavBackdrop.classList.remove('on');
-      if (wbFavFab) wbFavFab.setAttribute('aria-expanded', 'false');
+      wbSegBtns.forEach(function(b) { b.setAttribute('aria-expanded', 'false'); });
       var wbHeadC = document.getElementById('wb-left-head');
       if (wbHeadC) wbHeadC.classList.remove('glass-reg');
       if (wbLeftEl) {
@@ -19146,7 +19053,6 @@ FILTER_JS_TEMPLATE = r"""
     window.__wbFavDrawer = {open: openFavDrawer, close: closeFavDrawer,
                             isOpen: favDrawerOpen};
 
-    if (wbFavFab) wbFavFab.addEventListener('click', openFavDrawer);
     if (wbFavBackdrop) {
       wbFavBackdrop.addEventListener('click', function() { closeFavDrawer(); });
     }

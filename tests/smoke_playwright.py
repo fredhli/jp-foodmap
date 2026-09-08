@@ -86,7 +86,8 @@ SEARCH_TERM = "寿司"
 
 # M-3.2-02: what a phone user taps to reach the drawer. One selector per
 # visible entry; every one must be a reachable 44px target.
-PHONE_ENTRY = ["#ss-drawer-btn"]
+PHONE_ENTRY = ['#wb-seg [data-ux-tab="results"]', '#wb-seg [data-ux-tab="fav"]',
+               '#wb-seg [data-ux-tab="filter"]']
 
 
 def eq(actual, expected, what: str) -> None:
@@ -458,8 +459,8 @@ def check_phone_nav(page, name):
     """
     phone = page.evaluate("() => !/wb-(mid|wide)/.test(document.body.className)")
     if not phone:
-        shown = page.evaluate("""() => ['#phone-nav'].concat(%s)
-          .filter(s => { const e=document.querySelector(s); return e && getComputedStyle(e).display!=='none'; })""" % json.dumps(PHONE_ENTRY))
+        shown = page.evaluate("""() => ['#phone-nav', '#ss-drawer-btn', '#wb-seg'].concat(%s)
+          .filter(s => { const e=document.querySelector(s); return e && e.getClientRects().length > 0; })""" % json.dumps(PHONE_ENTRY))
         if shown:
             raise AssertionError(f"phone-only navigation leaked into workbench: {shown}")
         return "phone entries hidden in workbench"

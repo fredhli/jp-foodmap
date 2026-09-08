@@ -190,8 +190,9 @@ def shown_count(page) -> int:
 
 # M-3.2-02: the phone (<750px) navigation entry, in one place so the suites
 # follow the page. 3.1.x had a fixed bottom bar with four [data-ux-tab]
-# buttons; 3.2.0 is back to the 2.3.0 overlay drawer — M-3.2-02 opens it from
-# the hamburger in the search capsule, M-3.2-03 from the segmented pill.
+# buttons; 3.2.0 is back to the 2.3.0 overlay drawer, opened from the
+# bottom-left segmented pill (#wb-seg, M-3.2-03), whose segments carry the
+# same data-ux-tab attribute.
 # 'map' means "close whatever is open and show the map".
 def phone_tab(page, name: str) -> None:
     if name == "map":
@@ -201,7 +202,13 @@ def phone_tab(page, name: str) -> None:
         if page.locator("body.wb-fav-open").count():
             page.locator("#wb-fav-close").click()
         return
-    if not page.locator("body.wb-fav-open").count():
-        page.locator("#ss-drawer-btn").click()
+    # M-3.2-03: one tap on the pill segment opens the drawer on that tab.
+    # With the drawer already up the pill is under it, and the tab row in
+    # the drawer head is what a user reaches; a card hides the pill too.
+    if page.locator("body.wb-fav-open").count():
+        page.locator("#wb-tab-" + name).click()
+        return
+    if page.locator("#bs-sheet.bs-open").count():
+        page.locator("#bs-content .rst-close").first.click()
         page.wait_for_timeout(150)
-    page.locator("#wb-tab-" + name).click()
+    page.locator('#wb-seg [data-ux-tab="' + name + '"]').click()
