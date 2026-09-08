@@ -81,7 +81,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "3.1.1"
+EXPECTED_APP_VERSION = "3.1.2"
 
 # map.py is the single source of both build-time facts the About sheet states.
 # Parsed as text rather than imported: importing map.py runs the whole render
@@ -103,16 +103,24 @@ def _read_map_py_stamps() -> tuple[str | None, str | None]:
 
 # CLAUDE.md "Backwards compatibility": these key names are load-bearing for
 # every deployed browser. The page must still mention every one of them.
+#
+# BE-E (3.1.2): the list used to carry "tabelog.showTransit", a key that has
+# not existed since the transit toggle was split in two. The check matched on
+# a bare substring, so it passed on "tabelog.showTransitLong" and was a
+# permanently-green assertion. Both real keys are listed now, matching is on
+# the quoted literal, and tabelog.pendingWrite (added in 3.1.0) is covered.
 REQUIRED_LOCALSTORAGE_KEYS = [
     "omakase_state_cache_v2",
     "tabelog.auth",
     "tabelog.bookmarks",
     "tabelog.filterState",
     "tabelog.syncBase",
+    "tabelog.pendingWrite",
     "tabelog.lang",
     "tabelog.mapView",
     "tabelog.showAttractions",
-    "tabelog.showTransit",
+    "tabelog.showTransitLong",
+    "tabelog.showTransitCity",
     "tabelog.showBookmarks",
 ]
 
@@ -529,7 +537,12 @@ def check_localstorage_keys() -> None:
         fail("storage-keys", f"{MAP_HTML} does not exist — run map.py first")
         return
     html = MAP_HTML.read_text(encoding="utf-8")
-    missing = [k for k in REQUIRED_LOCALSTORAGE_KEYS if k not in html]
+    # Exact string literal, not a substring: "tabelog.showTransit" is a prefix
+    # of two real keys and matched forever after the key itself was gone.
+    missing = [
+        k for k in REQUIRED_LOCALSTORAGE_KEYS
+        if f"'{k}'" not in html and f'"{k}"' not in html
+    ]
     if missing:
         fail(
             "storage-keys",

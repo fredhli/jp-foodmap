@@ -2366,7 +2366,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.1.1"
+APP_VERSION = "3.1.2"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -3446,6 +3446,12 @@ SEARCH_BOX_HTML = """
       <div class="ssm-divider"></div>
       <!-- M-089: role=status so sync state changes are announced. -->
       <div id="ff-sync-status" role="status">本地模式</div>
+      <!-- BE-B: the manual escape valve for a stuck upload. Hidden unless the
+           engine is actually waiting on the cloud or holding an uncertain
+           write; updateNeedsSyncIndicator() owns the visibility. -->
+      <button class="ssm-row" id="ssm-retry-sync" type="button" hidden>
+        <span aria-hidden="true">↻</span><span>立即重试</span>
+      </button>
     </div>
   </div>
   <!-- Two sub-containers so the async Nominatim response only rewrites its
@@ -4731,6 +4737,7 @@ BOOKMARKS_MODAL_HTML = """
   #imp-modal .imp-opt input:disabled { cursor: default; }
   #imp-modal .imp-opt input:disabled ~ .imp-opt-label,
   #imp-modal .imp-opt input:disabled ~ .imp-opt-count { color: #9ca3af; }
+  #imp-modal .imp-note  { color: #b45309; font-size: 12px; margin-top: 6px; }
   #imp-modal .imp-error { color: #b91c1c; font-size: 12px; min-height: 14px; margin-top: 4px; }
   #imp-modal .imp-foot {
     display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
@@ -4771,6 +4778,9 @@ BOOKMARKS_MODAL_HTML = """
       <span class="imp-opt-label">书签 / 景点</span>
       <span class="imp-opt-count" id="imp-bm-n">—</span>
     </label>
+    <!-- BE-C: entries the file carried that could not be read. Shown before
+         the user confirms, so "3 家餐厅" is never silently short. -->
+    <div class="imp-note" id="imp-note" aria-live="polite"></div>
     <div class="imp-error" id="imp-error" aria-live="polite"></div>
   </div>
   <div class="imp-foot">
@@ -12901,7 +12911,12 @@ FILTER_JS_TEMPLATE = r"""
       if (!disk && local && pendingWriteDurable) clearSyncWait();
       if (disk && local && disk.w === local.w && disk.sub === local.sub) {
         disk.reads = Math.max(disk.reads || 0, local.reads || 0);
-        disk.retryReady = !!local.retryReady && disk.attempts < 2;
+        // BE-A: readback bookkeeping is in-memory only (an old tab must not
+        // write its counters over another tab's). baseReads is how many
+        // consecutive GETs came back as *exactly* the base we built on —
+        // the evidence that the PUT never reached KV.
+        disk.baseReads = Math.max(disk.baseReads || 0, local.baseReads || 0);
+        disk.manual = !!disk.manual || !!local.manual;
         disk.observed = local.observed;
         disk.observedReads = local.observedReads;
       }
@@ -12963,6 +12978,38 @@ FILTER_JS_TEMPLATE = r"""
     function olderRemote(remote) {
       return syncBase.sub === currentSub() && Number.isFinite(remote.v) && remote.v < syncBase.v;
     }
+    // BE-D (P1-2): "the server went backwards" is normally a stale KV read,
+    // and refusing to rebase onto it is right. But a restored backup really
+    // is a rollback, and the 3.1.x code had only the brake and no pedal: the
+    // device stayed waitingForCloud forever and never pushed again. Three
+    // consecutive reads of the SAME older blob spanning >=2 min are taken as
+    // real; the caller then unions instead of merging, so a rollback can
+    // resurrect a deletion but can never drop an entry.
+    var olderSeen = '', olderReads = 0, olderSince = 0;
+    function acceptOlderRemote(remote) {
+      var obs = JSON.stringify([remote.v, typeof remote.w === 'string' ? remote.w : '',
+                                contentKey(remote)]);
+      if (obs !== olderSeen) { olderSeen = obs; olderReads = 0; olderSince = Date.now(); }
+      olderReads++;
+      return olderReads >= 3 && Date.now() - olderSince >= 120000;
+    }
+    function clearOlderRemote() { olderSeen = ''; olderReads = 0; olderSince = 0; }
+    // BE-A (P0-1): how long an uncertain write must keep reading back as its
+    // own base before we declare it lost. Bounded exponential: a device whose
+    // PUTs keep failing slows down, but it NEVER stops — the 3.1.x hard cap of
+    // two attempts is what wedged sync permanently.
+    var UNCERTAIN_DWELL_MS = [75000, 150000, 300000];
+    var uncertainStreak = 0;
+    function uncertainDwell() {
+      return UNCERTAIN_DWELL_MS[Math.min(uncertainStreak, UNCERTAIN_DWELL_MS.length - 1)];
+    }
+    // BE-A: the body of the write we just declared lost. The declaration can
+    // still be wrong — a stale KV read can hold the old version past the dwell
+    // window — and then the replacement push 409s. Handing this to the merge as
+    // its `sent` keeps applyPostSendEdits protecting everything the user edited
+    // after that write, which is what the 3.1.x same-body replay protected.
+    // Cleared as soon as any write is confirmed.
+    var lostSentBody = '';
     function waitForCloud(response) {
       waitingForCloud = true;
       setStatus('等待云端状态更新，改动保留在本地', 'err');
@@ -12974,11 +13021,16 @@ FILTER_JS_TEMPLATE = r"""
     //   not signed in → red pulse (urgent — edits live only in this browser)
     //   signed in     → blue pulse (just informational — push will arrive)
     var fabEl = document.getElementById('ff-fab');
+    var retryRowEl = document.getElementById('ssm-retry-sync');
     function updateNeedsSyncIndicator() {
       var signedIn = !!configured();
       var d = !!dirty;
       syncStatus.dirty = d; syncStatus.signedIn = signedIn;
       renderSyncUi();   // M-033/M-034: banners + toast + avatar badge
+      // BE-B: show the manual retry only while the engine is actually
+      // holding back — waiting on the cloud, or sitting on a write whose
+      // outcome it does not know yet.
+      if (retryRowEl) retryRowEl.hidden = !(signedIn && (waitingForCloud || !!pendingWrite));
       if (!fabEl) return;
       fabEl.classList.toggle('needs-sync',         d && !signedIn);
       fabEl.classList.toggle('needs-sync-pending', d &&  signedIn);
@@ -13715,6 +13767,7 @@ FILTER_JS_TEMPLATE = r"""
           // that uploaded the previous person's favorites into this one).
           if (localStateSub() && localStateSub() !== sub) {
             storePendingWrite(null);
+            lostSentBody = ''; clearOlderRemote(); uncertainStreak = 0;
             adoptRemoteWholesale(remote);
             clearSyncWait();
             setStatus('已切换账号，已改用云端数据', 'ok');
@@ -13723,7 +13776,29 @@ FILTER_JS_TEMPLATE = r"""
           adoptDiskSyncBase();
           var remoteV = typeof remote.v === 'number' ? remote.v : 0;
           var remoteW = typeof remote.w === 'string' ? remote.w : '';
-          if (olderRemote(remote)) { waitForCloud(); return; }
+          if (olderRemote(remote)) {
+            // BE-D: hold out for the newer value first; only a stable, repeated
+            // older blob is treated as a genuine server-side rollback.
+            if (!acceptOlderRemote(remote)) { waitForCloud(); return; }
+            clearOlderRemote();
+            // Union (empty ancestor): a rollback may resurrect a deletion,
+            // it must never drop anything this device still holds. The
+            // uncertain write, if any, is folded in by the same union.
+            if (pendingWrite) storePendingWrite(null, pendingWrite.w);
+            pre = {fav: new Set(state.fav), black: new Set(state.black),
+                   bm: JSON.stringify(bookmarks)};
+            mergeRemoteIntoLocal(remote, emptySyncBase(sub));
+            syncBase = snapshotRemote(remote);
+            saveSyncBase(syncBase);
+            clearSyncWait();
+            dirty = !contentMatchesBase();
+            if (saveCache(state, dirty)) refreshAllMarkers();
+            pre = null;
+            setStatus('云端数据已回退，已合并本地改动', 'err');
+            afterPullSettled();
+            return;
+          }
+          clearOlderRemote();
           if (pendingWrite) {
             var pending = pendingWrite;
             if (remoteW === pending.w && contentKey(remote) === contentKey(pending.body)) {
@@ -13751,7 +13826,8 @@ FILTER_JS_TEMPLATE = r"""
               var observation = JSON.stringify([remoteV, remoteW, contentKey(remote)]);
               pending.observedReads = pending.observed === observation ? (pending.observedReads || 0) + 1 : 1;
               pending.observed = observation;
-              if (pending.observedReads >= 2 && Date.now() - pending.startedAt >= 20000) {
+              if (pending.manual ||
+                  (pending.observedReads >= 2 && Date.now() - pending.startedAt >= 20000)) {
                 var ancestor = concurrentBase && prevSyncBase && prevSyncBase.sub === sub &&
                   prevSyncBase.v === remoteV - 1 ? prevSyncBase : emptySyncBase(sub);
                 mergeRemoteIntoLocal(remote, ancestor, JSON.parse(pending.body));
@@ -13761,16 +13837,35 @@ FILTER_JS_TEMPLATE = r"""
                 afterPullSettled(); return;
               }
             } else { pending.observed = ''; pending.observedReads = 0; }
-            // Retry at most once, with exactly the same write id and body, after
-            // several reads of the original base across the KV visibility window.
-            pending.retryReady = !!(navigator.locks && navigator.locks.request) &&
-              pending.attempts < 2 && pending.reads >= 3 &&
-              Date.now() - pending.startedAt >= 75000 && remote.v === pending.base.v &&
-              remoteW === pending.base.w && contentKey(remote) === contentKey(pending.base);
-            // Readback observations stay in memory; an old tab must not write
-            // its old attempts count over another tab's claimed retry.
-            if (pending.retryReady) { clearSyncWait(); push(); }
-            else waitForCloud();
+            // BE-A (P0-1): the server still shows exactly the base this write
+            // was built on — same v, same write id, same content. Count those
+            // reads; three of them spanning the dwell window mean the PUT
+            // never reached KV, which is a *determination*, not a guess.
+            //
+            // 3.1.x used this same condition to resend the identical body,
+            // gated on navigator.locks and a hard cap of two attempts — so a
+            // browser without Web Locks wedged on the first uncertain write
+            // and every other browser wedged on the second. Now the proven-
+            // lost record is simply discarded and the current state goes up
+            // under a fresh write id: replaying an old body can duplicate a
+            // write that did land, dropping a record proven not to have
+            // landed cannot lose anything. If the determination is somehow
+            // wrong, the re-push 409s and merges as usual.
+            var atBase = remote.v === pending.base.v && remoteW === pending.base.w &&
+              contentKey(remote) === contentKey(pending.base);
+            pending.baseReads = atBase ? (pending.baseReads || 0) + 1 : 0;
+            if (atBase && (pending.manual ||
+                (pending.baseReads >= 3 && Date.now() - pending.startedAt >= uncertainDwell()))) {
+              uncertainStreak = Math.min(uncertainStreak + 1, UNCERTAIN_DWELL_MS.length);
+              lostSentBody = pending.body;
+              storePendingWrite(null, pending.w);
+              clearSyncWait();
+              dirty = !contentMatchesBase();
+              saveCache(state, dirty);
+              afterPullSettled();
+              return;
+            }
+            waitForCloud();
             return;
           }
           clearSyncWait();
@@ -13973,7 +14068,11 @@ FILTER_JS_TEMPLATE = r"""
       refreshPendingWrite();
       if (localStateSub() && localStateSub() !== sub) { pull(true); return; }
       if (Date.now() < retryAt || navigator.onLine === false || waitingForCloud) return;
-      if (pendingWrite && !pendingWrite.retryReady) { pull(true); return; }
+      // BE-A: an uncertain write is resolved by pull() (readback), never by
+      // resending the same body from here. pull() either confirms it landed,
+      // merges a newer remote, or — after uncertainDwell() — declares it lost
+      // and clears the record so the next push builds a fresh body.
+      if (pendingWrite) { pull(true); return; }
       // M-041: the base belongs to another account → this device still
       // holds that account's data. Don't upload it; pull() swaps in the
       // cloud copy of the account that is signed in now.
@@ -14026,7 +14125,7 @@ FILTER_JS_TEMPLATE = r"""
       setStatus('保存中…', 'busy');
       var attempt = pendingWrite || {sub: sub, w: w, body: body,
         base: JSON.parse(JSON.stringify(baseBeforePush)), startedAt: Date.now(), reads: 0, attempts: 0};
-      attempt.attempts++; attempt.retryReady = false;
+      attempt.attempts++; attempt.baseReads = 0; attempt.manual = false;
       storePendingWrite(attempt);
       fetchAuthed(API, {
         method: 'PUT',
@@ -14075,14 +14174,25 @@ FILTER_JS_TEMPLATE = r"""
             }
             return r.json().then(function(theirs) {
               if (!theirs || typeof theirs !== 'object' || Array.isArray(theirs)) theirs = {};
-              if (olderRemote(theirs)) { waitForCloud(); return; }
+              // BE-D: same rule as pull() — refuse a lower version until the
+              // same one has come back three times over two minutes, then
+              // accept it as a real rollback and union onto it.
+              var rolledBack = false;
+              if (olderRemote(theirs)) {
+                if (!acceptOlderRemote(theirs)) { waitForCloud(); return; }
+                clearOlderRemote(); rolledBack = true;
+              } else clearOlderRemote();
               // A conflicting blob with no version means the server state
               // was wiped or never written (a real mass-delete from another
               // device would carry v). Merging against our old base would
               // read that as "everything deleted" and drop local data —
               // instead void the base so the merge unions and re-uploads.
-              var base = (typeof theirs.v !== 'number') ? emptySyncBase(sub) : syncBase;
-              mergeRemoteIntoLocal(theirs, base, JSON.parse(body));
+              var base = (rolledBack || typeof theirs.v !== 'number')
+                ? emptySyncBase(sub) : syncBase;
+              // BE-A: prefer the body of a write we recently declared lost — see
+              // lostSentBody. Falls back to the body just sent, which is the
+              // current state and therefore a no-op for applyPostSendEdits.
+              mergeRemoteIntoLocal(theirs, base, JSON.parse(lostSentBody || body));
               syncBase = snapshotRemote(theirs);
               saveSyncBase(syncBase);
               saveCache(state, true);   // still dirty until the re-push lands
@@ -14125,6 +14235,8 @@ FILTER_JS_TEMPLATE = r"""
             };
             saveSyncBase(syncBase);
             storePendingWrite(null, w); clearSyncWait(); rejectedContent = '';
+            // BE-A: a write that definitely landed resets the backoff.
+            uncertainStreak = 0; lostSentBody = ''; clearOlderRemote();
             dirty = (stateGen !== genAtPush) || !contentMatchesBase();
             if (saveCache(state, dirty)) refreshAllMarkers();
             if (!dirty) {
@@ -14205,6 +14317,24 @@ FILTER_JS_TEMPLATE = r"""
                     headers: headers, body: body}).catch(function() {});
       } catch (_) {}
     }
+    // BE-B: the user's manual escape valve. Everything above recovers on its
+    // own eventually; this is for the person staring at "等待云端状态更新" who
+    // wants it to happen now. It drops the backoff, and — when an uncertain
+    // write is what is holding things up — marks it for immediate resolution
+    // on the next readback instead of waiting out uncertainDwell().
+    function retrySyncNow() {
+      if (!configured()) return;
+      clearSyncWait();
+      clearOlderRemote();
+      uncertainStreak = 0;
+      refreshPendingWrite();
+      if (pendingWrite) { pendingWrite.manual = true; pull(true); return; }
+      push();
+    }
+    if (retryRowEl) retryRowEl.addEventListener('click', function() {
+      retrySyncNow();
+      updateNeedsSyncIndicator();
+    });
     // True when startSync's initial pull/push ran with a live session —
     // tryRestoreSession's success path checks it so a signed-in boot does
     // one state GET, not two. When auth was stale at startSync time (exp
@@ -19232,8 +19362,10 @@ FILTER_JS_TEMPLATE = r"""
       } catch (_) { return ''; }
     }
     var BACKUP_MAX_BYTES = 2 * 1024 * 1024;
-    function validImportBookmark(b) {
-      if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.id !== 'string' || !b.id) return false;
+    // Field-level validation of one bookmark. The id is checked by the caller
+    // (coerceImportBookmark), which may have generated one first.
+    function validImportBookmarkFields(b) {
+      if (typeof b.id !== 'string' || !b.id) return false;
       var strings = ['name', 'name_src', 'name_sc', 'name_tc', 'name_jp', 'name_en',
         'emoji', 'category', 'kind', 'list', 'ref', 'url', 'detail_url', 'note', 'address'];
       if (strings.some(function(k) { return b[k] != null && typeof b[k] !== 'string'; })) return false;
@@ -19249,9 +19381,34 @@ FILTER_JS_TEMPLATE = r"""
       }
       return Number.isFinite(b.lat) && Number.isFinite(b.lon);
     }
+    // BE-C (P1-1): one bookmark at a time. Returns the entry to import — a
+    // copy, possibly with a generated id — or null to skip just this one.
+    // Pre-2.0 exports really do contain id-less pins (applyPostSendEdits
+    // carries a merge rule for exactly those), and 3.1.x rejected the whole
+    // backup over one of them. An id-less entry that still proves it is a
+    // real place gets a synthetic `bm-` id instead of being thrown away.
+    function coerceImportBookmark(b) {
+      if (!b || typeof b !== 'object' || Array.isArray(b)) return null;
+      if (b.id != null && typeof b.id !== 'string') return null;
+      var entry = b;
+      if (typeof entry.id !== 'string' || !entry.id) {
+        if (!(Number.isFinite(entry.lat) && Math.abs(entry.lat) <= 90 &&
+              Number.isFinite(entry.lon) && Math.abs(entry.lon) <= 180)) return null;
+        if (entry.category === 'hidden' || entry.category === 'meta') return null;
+        entry = Object.assign({}, entry, {id: 'bm-' + Date.now().toString(36) +
+          '-' + Math.random().toString(36).slice(2, 8)});
+      }
+      return validImportBookmarkFields(entry) ? entry : null;
+    }
     // Normalize an arbitrary parsed file into {favorites:[url], blacklist:[url],
-    // bookmarks:[obj]}. Tolerates a bare array (treated as favorites) and the
-    // legacy {fav, black} cache shape. Returns null if nothing usable.
+    // bookmarks:[obj], skipped:n}. Tolerates a bare array (treated as favorites)
+    // and the legacy {fav, black} cache shape.
+    //
+    // BE-C: null means the FILE is unusable — not an object, over 2 MiB, none
+    // of the five known keys present, or one of them is not an array. A single
+    // unusable entry inside an otherwise fine file is skipped and counted, not
+    // grounds for rejecting the user's whole backup (3.1.x did the latter, so
+    // one stale URL cost you every favorite in the file).
     function normalizeImport(parsed) {
       try {
         if (!parsed || typeof parsed !== 'object') return null;
@@ -19263,13 +19420,26 @@ FILTER_JS_TEMPLATE = r"""
         var favSrc = parsed.favorites || parsed.fav || [];
         var blackSrc = parsed.blacklist || parsed.black || [];
         var bmSrc = parsed.bookmarks || [];
-        var fav = favSrc.map(pickUrl), black = blackSrc.map(pickUrl);
-        if (fav.some(function(u) { return !u.trim(); }) || black.some(function(u) { return !u.trim(); }) ||
-            !bmSrc.every(validImportBookmark)) return null;
+        var skipped = 0;
+        function urlList(src) {
+          var out = [];
+          src.forEach(function(x) {
+            var u = pickUrl(x);
+            if (u && u.trim()) out.push(u); else skipped++;
+          });
+          return out;
+        }
+        var fav = urlList(favSrc), black = urlList(blackSrc);
         var norm = JSON.parse(JSON.stringify(parsed));
         norm.favorites = fav; norm.blacklist = black;
-        norm.bookmarks = JSON.parse(JSON.stringify(bmSrc));
-        norm.bookmarks.forEach(sanitizeBookmarkEmoji);
+        norm.bookmarks = [];
+        JSON.parse(JSON.stringify(bmSrc)).forEach(function(b) {
+          var entry = coerceImportBookmark(b);
+          if (!entry) { skipped++; return; }
+          sanitizeBookmarkEmoji(entry);
+          norm.bookmarks.push(entry);
+        });
+        norm.skipped = skipped;
         return norm;
       } catch (_) { return null; }
     }
@@ -19281,6 +19451,7 @@ FILTER_JS_TEMPLATE = r"""
     var impBlackCb  = document.getElementById('imp-black');
     var impBmCb     = document.getElementById('imp-bm');
     var impError    = document.getElementById('imp-error');
+    var impNote     = document.getElementById('imp-note');
     var pendingImport = null;
 
     function setImpRow(cb, countEl, text, available) {
@@ -19307,6 +19478,12 @@ FILTER_JS_TEMPLATE = r"""
       setImpRow(impBmCb,    document.getElementById('imp-bm-n'),
                 attrN + ' 个景点 · ' + pinN + ' 个书签', norm.bookmarks.length > 0);
       impError.textContent = '';
+      // BE-C: say so when the file carried entries this build could not read.
+      var skipped = Number.isFinite(norm.skipped) ? norm.skipped : 0;
+      if (impNote) {
+        impNote.textContent = skipped
+          ? localizeText('已跳过无法识别的条目：') + skipped : '';
+      }
       pendingImport = norm;
       impBackdrop.classList.add('imp-open');
       impModal.classList.add('imp-open');
@@ -19322,6 +19499,7 @@ FILTER_JS_TEMPLATE = r"""
       impBackdrop.classList.remove('imp-open');
       impModal.classList.remove('imp-open');
       impModal.setAttribute('aria-hidden', 'true');
+      if (impNote) impNote.textContent = '';
       pendingImport = null;
       if (impTrapRelease) {
         var r = impTrapRelease;
@@ -19395,6 +19573,9 @@ FILTER_JS_TEMPLATE = r"""
       }
       var report = [];
       var changed = false;
+      // BE-C: entries dropped while the file was normalized (unreadable URL,
+      // bookmark that could not be repaired). Counted once, at the source.
+      var fileSkipped = Number.isFinite(pendingImport.skipped) ? pendingImport.skipped : 0;
       var norm = normalizeImport(pendingImport);
       if (!norm) throw new Error('Invalid backup');
       var nextFav = new Set(state.fav), nextBlack = new Set(state.black);
@@ -19448,6 +19629,7 @@ FILTER_JS_TEMPLATE = r"""
           changed = true;
         }
       }
+      if (fileSkipped) report.push('已跳过 ' + fileSkipped);
 
       var before = {fav: state.fav, black: state.black, bm: bookmarks.slice()};
       try {

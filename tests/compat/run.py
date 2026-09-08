@@ -410,6 +410,49 @@ def t08_export_legacy(page, base):
        "re-importing the object export adds nothing and loses nothing")
 
 
+@case("09_export_idless_pin.json")
+def t09_export_idless_pin(page, base):
+    """BE-C: a backup with an id-less legacy pin and one unreadable URL still
+    imports everything readable, and says how much it skipped."""
+    import tempfile
+
+    blob = json.loads((FIXTURES / "09_export_idless_pin.json").read_text(
+        encoding="utf-8"))["exportFile"]
+    tmp = Path(tempfile.mkdtemp()) / "favorites.json"
+    tmp.write_text(json.dumps(blob, ensure_ascii=False), encoding="utf-8")
+
+    page.set_input_files("#ssm-import-file", str(tmp))
+    # 3.1.1 rejected this file outright: no modal, just "文件格式无法识别".
+    page.wait_for_selector("#imp-modal.imp-open", timeout=15000)
+
+    eq(page.eval_on_selector("#imp-fav-n", "el => el.textContent").strip(),
+       "2 家餐厅", "the two readable favorites are counted, the bad URL is not")
+    eq(page.eval_on_selector("#imp-bm-n", "el => el.textContent").strip(),
+       "0 个景点 · 1 个书签", "the id-less pin survives, the bad-coordinate one does not")
+    note = page.eval_on_selector("#imp-note", "el => el.textContent")
+    if "2" not in note:
+        raise AssertionError(f"skipped count not reported to the user: {note!r}")
+
+    page.eval_on_selector("#imp-modal .imp-confirm", "el => el.click()")
+    page.wait_for_selector("#imp-modal.imp-open", state="hidden", timeout=15000)
+
+    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
+    eq(int("".join(c for c in fav_txt if c.isdigit()) or 0), 2,
+       "the readable favorites imported")
+    cache = json.loads(page.evaluate(
+        "() => localStorage.getItem('omakase_state_cache_v2')"))
+    if any("not-a-url" in u for u in (cache.get("fav") or [])):
+        raise AssertionError("an unparseable URL reached state.fav")
+
+    bms = json.loads(page.evaluate("() => localStorage.getItem('tabelog.bookmarks')"))
+    legacy = [b for b in bms if b.get("name") == "无 id 的旧书签"]
+    eq(len(legacy), 1, "the id-less legacy pin imported")
+    if not str(legacy[0].get("id", "")).startswith("bm-"):
+        raise AssertionError(f"no generated bm- id: {legacy[0]!r}")
+    if any(b.get("id") == "bm-broken" for b in bms):
+        raise AssertionError("the bad-coordinate pin should have been skipped")
+
+
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str]) -> int:

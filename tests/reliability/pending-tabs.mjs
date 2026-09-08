@@ -25,6 +25,10 @@ export async function runPendingCases({browser,html,docs,rows}) {
       if(url.endsWith('/me')||url.endsWith('/session'))return {body:JSON.stringify({sub:server.auth,email:server.auth+'@example.invalid',exp:Date.now()+86400000})};
       if(method==='GET')return server.getHang?{hang:true}:{body:JSON.stringify(server.remote)};
       if(server.mode==='hang')return {hang:true};
+      // R5: the PUT dies the way an offline / DNS / blocked request does —
+      // fetch rejects. The GET above still answers, which is exactly the
+      // combination that wedged 3.1.1 (P0-1).
+      if(server.mode==='neterr')return {neterr:true};
       if(server.mode==='conflictOnce'){
         server.mode='ok';server.remote=server.conflictRemote;
         return {status:409,body:JSON.stringify(server.remote)};
@@ -44,7 +48,9 @@ export async function runPendingCases({browser,html,docs,rows}) {
       const f=fetch.bind(window);window.fetch=(url,opts={})=>{
         if(typeof url!=='string'||!url.startsWith('https://api.jpfoodmap.com/api'))return f(url,opts);
         return __pendingFetch({url,method:opts.method,body:opts.body,tab:window.name,at:Date.now()})
-          .then(r=>r.hang?new Promise(()=>{}):new Response(r.body,{status:r.status||200}));
+          .then(r=>r.hang?new Promise(()=>{})
+                :r.neterr?Promise.reject(new TypeError('Failed to fetch'))
+                :new Response(r.body,{status:r.status||200}));
       };
     },{initial,local:options.local});
     async function open(name) {
@@ -114,21 +120,27 @@ export async function runPendingCases({browser,html,docs,rows}) {
     await tick(p,5600);await tick(p,16100);await tick(p,5600);
     assert.deepEqual(new Set((await snap(p)).fav),new Set([A,B,C]));assert.equal((await snap(p)).dirty,false);
   });
-  await test('R3 three stale tabs share one retry budget and cannot revive cleared pending',async c=>{
+  // BE-F: this case used to end with __reliability.resetWait() — the harness
+  // calling clearSyncWait() by hand. The page never calls it on this path, so
+  // what the case actually proved was "the test can unstick the engine", not
+  // "the engine unsticks itself". No probe now: the tabs must converge on
+  // their own, and the recovery upload must carry a NEW write id (3.1.2
+  // discards a write proven lost instead of replaying its body).
+  await test('R3 stale tabs recover without help and cannot revive cleared pending',async c=>{
     const a=await c.open('a');c.server.mode='hang';
     await a.evaluate(B=>{__reliability.toggleFav(B);__reliability.push();},B);await settle(a);
     const b=await c.open('b'),d=await c.open('c');await tick(a,15100);
     for(const ms of [5600,16100,61100])await tick(a,ms);
-    assert.equal(puts(c).length,2);assert.equal(JSON.parse((await snap(a)).diskPending).attempts,2);
-    for(const ms of [5600,16100,61100])await Promise.all([tick(b,ms),tick(d,ms)]);
-    assert.equal(puts(c).length,2);assert.ok(puts(c).every(r=>r.body===puts(c)[0].body));
-    c.server.remote={...JSON.parse(puts(c)[0].body),v:6};delete c.server.remote.baseV;c.server.mode='ok';
-    await tick(a,15100);await a.evaluate(()=>{__reliability.resetWait();__reliability.pull(true);});await settle(a);
-    assert.equal((await snap(a)).diskPending,null);
-    for(const p of [b,d]){await p.evaluate(()=>{__reliability.resetWait();__reliability.pull(true);});await settle(p);assert.equal((await snap(p)).pending,null);}
-    assert.equal(puts(c).length,2);assert.equal((await snap(d)).diskPending,null);
+    assert.ok(puts(c).length>=2,'the lost write was never replaced');
+    assert.notEqual(JSON.parse(puts(c)[1].body).w,JSON.parse(puts(c)[0].body).w);
+    assert.equal(JSON.parse((await snap(a)).diskPending).attempts,1);
+    c.server.remote={...JSON.parse(puts(c).at(-1).body),v:6};delete c.server.remote.baseV;c.server.mode='ok';
+    for(const p of [a,b,d]){await tick(p,61100);await settle(p);}
+    for(const p of [a,b,d])assert.equal((await snap(p)).diskPending,null);
+    const settled=puts(c).length;
     await d.evaluate(D=>{__reliability.toggleFav(D);__reliability.push();},D);await settle(d);
-    assert.equal(puts(c).length,3);assert.notEqual(JSON.parse(puts(c)[2].body).w,JSON.parse(puts(c)[0].body).w);
+    assert.equal(puts(c).length,settled+1);
+    assert.notEqual(JSON.parse(puts(c).at(-1).body).w,JSON.parse(puts(c)[0].body).w);
     assert.deepEqual(new Set((await snap(d)).fav),new Set([A,B,D]));assert.equal((await snap(d)).dirty,false);
   });
   await test('R3 closed initiating tab hands pending recovery to another tab',async c=>{
@@ -136,17 +148,28 @@ export async function runPendingCases({browser,html,docs,rows}) {
     await a.evaluate(B=>{__reliability.toggleFav(B);__reliability.push();},B);await settle(a);
     const b=await c.open('successor');await a.close();c.server.mode='ok';
     for(const ms of [5600,16100,61100])await tick(b,ms);
-    assert.equal(puts(c).length,2);assert.equal(puts(c)[0].body,puts(c)[1].body);
+    assert.equal(puts(c).length,2);
+    assert.notEqual(JSON.parse(puts(c)[1].body).w,JSON.parse(puts(c)[0].body).w);
+    assert.deepEqual(new Set(JSON.parse(puts(c)[1].body).favorites),new Set([A,B]));
     assert.equal((await snap(b)).dirty,false);assert.equal((await snap(b)).diskPending,null);
   });
-  await test('R4 non-URL batches are atomic; HTTP URLs and reference metadata remain compatible',async c=>{
+  // BE-C: a non-URL entry is dropped and counted, never imported and never a
+  // reason to refuse the rest of the file. The security property is unchanged:
+  // nothing that is not an http(s) URL ever reaches state.fav.
+  await test('R4 non-URL entries are skipped and counted; HTTP URLs and reference metadata remain compatible',async c=>{
     const p=await c.open('import-url');const before=await snap(p);
     for(const url of ['javascript:alert(1)','not-a-url','data:text/plain,hi','file:///tmp/x','/relative','https://','https://example.invalid/a b']){
-      const data={favorites:[B,url],blacklist:[],bookmarks:[{id:'bm-sibling',lat:35,lon:139,name:'Sibling'}]};
-      assert.equal(await p.evaluate(d=>__reliability.normalizeImport(d),data),null);
-      await p.evaluate(d=>{__reliability.openImportModal(d);__reliability.doImport();},data);
+      const data={favorites:[url],blacklist:[],bookmarks:[]};
+      const n=await p.evaluate(d=>__reliability.normalizeImport(d),data);
+      assert.deepEqual(n.favorites,[]);assert.equal(n.skipped,1);
+      await p.evaluate(d=>{__reliability.openImportModal(__reliability.normalizeImport(d));__reliability.doImport();},data);
       assert.deepEqual((await snap(p)).fav,before.fav);assert.equal((await snap(p)).cache,before.cache);assert.equal((await snap(p)).bms,before.bms);
     }
+    // The good half of a mixed file still imports.
+    const mixed={favorites:[B,'javascript:alert(1)'],blacklist:[],bookmarks:[{id:'bm-sibling',lat:35,lon:139,name:'Sibling'}]};
+    const mixedNorm=await p.evaluate(d=>__reliability.normalizeImport(d),mixed);
+    assert.deepEqual(mixedNorm.favorites,[B]);assert.equal(mixedNorm.skipped,1);
+    assert.equal(mixedNorm.bookmarks.length,1);
     const unknown='https://example.invalid/retired-place?x=1';
     const data={fav:['  '+B+'  ',{url:'http://example.invalid/old'},{detail_url:unknown}],black:[{url:' HTTPS://example.invalid/hidden '}],
       bookmarks:[{id:'bm-ref',lat:35,lon:139,name:'Pin',future:{keep:true}},
@@ -159,6 +182,31 @@ export async function runPendingCases({browser,html,docs,rows}) {
     await p.evaluate(n=>{__reliability.openImportModal(n);__reliability.doImport();},normalized);
     const s=await snap(p);assert.ok(s.fav.includes(unknown)&&s.fav.includes(B));assert.equal(s.bookmarks.find(b=>b.id==='bm-ref').future.keep,true);
     assert.ok((await p.evaluate(()=>__reliability.favoriteRefs())).includes(unknown));
+  });
+  // R5 (BE-F / P0-1) — the one combination the suite never had: the server
+  // never moves AND every PUT dies with a network error. In 3.1.1 the retry
+  // budget (attempts < 2, and navigator.locks required at all) ran out and
+  // this device never sent another PUT for the rest of its life — across
+  // reloads, across sign-outs. Transcribed from
+  // audit_outputs/3.2.0-plan/backend/repro/wedge.mjs, verdict inverted.
+  await test('R5 a frozen server plus failing PUTs never wedges the device',async c=>{
+    const p=await c.open('wedge');c.server.mode='neterr';
+    await p.evaluate(B=>{__reliability.toggleFav(B);__reliability.push();},B);await settle(p);
+    assert.equal(puts(c).length,1);
+    // Twenty minutes of polling with the network still broken.
+    for(let i=0;i<20;i++){await tick(p,61100);await p.evaluate(()=>__reliability.pull(true));await settle(p);}
+    const whileBroken=puts(c).length;
+    assert.ok(whileBroken>1,'the device stopped sending entirely: '+whileBroken+' PUT(s)');
+    assert.ok(whileBroken<12,'unbounded retries: '+whileBroken+' PUT(s) in 20 minutes');
+    // Network returns and the user makes a fresh edit.
+    c.server.mode='ok';
+    await p.evaluate(C=>{__reliability.toggleFav(C);__reliability.push();},C);await settle(p);
+    for(const ms of [5600,16100,61100,61100]){await tick(p,ms);await p.evaluate(()=>__reliability.pull(true));await settle(p);}
+    const s=await snap(p);
+    assert.ok(puts(c).length>whileBroken,'no PUT left the device after recovery');
+    assert.deepEqual(new Set(s.fav),new Set([A,B,C]));
+    assert.equal(s.dirty,false);assert.equal(s.diskPending,null);
+    assert.deepEqual(new Set(c.server.remote.favorites),new Set([A,B,C]));
   });
   for(const newerDisk of [false,true])await test('R2 final post-pending added favorite deletion preserves remote addition'+(newerDisk?' with newer disk base':''),async c=>{
     const p=await c.open('cancel-new-favorite');c.server.mode='hang';
@@ -217,7 +265,11 @@ export async function runPendingCases({browser,html,docs,rows}) {
       const expectedBookmarks=version==='matched'?local:local.concat(remoteAdded);
       assert.deepEqual(keyed(s.bookmarks),keyed(expectedBookmarks));
       assert.equal(s.dirty,false);assert.equal(s.diskPending,null);assert.equal(puts(c).length,version==='retry-conflict'?3:2);
-      if(version==='retry-conflict')assert.equal(puts(c)[0].body,puts(c)[1].body);
+      // BE-A: the replacement for a write proven lost is the CURRENT state
+      // under a fresh id, never a replay of the old body — but the old body
+      // is still handed to the 409 merge (lostSentBody), which is why the
+      // post-send deltas asserted above survive either way.
+      if(version==='retry-conflict')assert.notEqual(JSON.parse(puts(c)[1].body).w,JSON.parse(puts(c)[0].body).w);
       const recovered=JSON.parse(puts(c).at(-1).body);assert.notEqual(recovered.w,first.w);
       assert.deepEqual(new Set(recovered.favorites),expectedSet);assert.deepEqual(new Set(recovered.blacklist),expectedSet);
       assert.deepEqual(keyed(recovered.bookmarks),keyed(expectedBookmarks));

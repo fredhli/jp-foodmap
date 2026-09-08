@@ -163,7 +163,14 @@ node tests/reliability/kv-eventual.mjs
 `browser.mjs --built` injects hangs, partial bodies, status failures and
 lost responses into the generated page while blocking real services. It
 locates Playwright through the project Python environment when there is no
-standalone Node package. `resource-deadlines.mjs` checks that popup and
+standalone Node package. It also runs the multi-tab `pending-tabs.mjs` cases
+(R1-R5) at the end. Two rules those cases exist to keep honest, both from
+the 3.1.2 hotfix: recovery must never be produced by a probe the page itself
+would not call (R3 used to end with `__reliability.resetWait()`, so it proved
+the harness could unstick the engine, not that the engine unsticks itself),
+and R5 pins the one combination that wedged 3.1.1 — a server that never moves
+plus PUTs that keep failing — by asserting a new edit still uploads twenty
+minutes of virtual time later. `resource-deadlines.mjs` checks that popup and
 transit downloads time out, release their in-flight state and can retry.
 `kv-eventual.mjs` preserves the executable demonstration that Cloudflare KV
 can serve a stale cross-region read and therefore cannot provide CAS.

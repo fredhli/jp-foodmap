@@ -13,6 +13,75 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-09-08
+
+Website-only sync hotfix. The Android shell stays at `versionName 3.1.1` /
+`versionCode 30101` — it loads the live page, so this ships to it without a
+new APK. Findings and repro in
+`audit_outputs/3.2.0-plan/backend/REPORT.md` (§3 P0-1, §4 P1-1/P1-2/P1-3,
+§5 P2-1); the P0 repro is `audit_outputs/3.2.0-plan/backend/repro/wedge.mjs`.
+
+### Fixed
+
+- **Sync could stop for good on one device after two failed PUTs (P0-1).**
+  `tabelog.pendingWrite` records a write whose outcome is unknown, and
+  `push()` refuses to send anything while such a record exists. Clearing it
+  required `retryReady`, which demanded `navigator.locks` **and**
+  `attempts < 2`. So a browser with no Web Locks (Safari < 15.4, Firefox
+  < 96, any non-secure context) wedged on its first uncertain write, and
+  every other browser wedged on its second: the record persisted across
+  reloads and sign-outs, and this device never sent another PUT. Local data
+  was intact, but nothing reached the cloud — one uninstall or cleared
+  profile later it was gone. The fix gives the record a **determination**:
+  when the server returns exactly the base the write was built on (same `v`,
+  same write id, same content) on three consecutive reads spanning the dwell
+  window, the write never landed. The record is dropped and the *current*
+  state goes up under a fresh write id — replaying an old body can duplicate
+  a write that did land, discarding one proven not to have landed cannot
+  lose anything. If the determination is wrong anyway (a stale KV read held
+  the old version past the window), the replacement push 409s and the merge
+  still receives the original body, so post-send edits are preserved exactly
+  as the replay preserved them. `navigator.locks` is no longer required, and
+  the hard cap of two attempts became a bounded 75 s / 150 s / 300 s dwell —
+  slower under sustained failure, never stopped.
+- **Manual escape valve.** The settings sync row gained a 立即重试 /
+  Retry now / 今すぐ再試行 button, shown only while the engine is waiting on
+  the cloud or holding an uncertain write. It clears the backoff and
+  resolves the pending record on the next readback instead of waiting out
+  the dwell window.
+- **A rolled-back server left the device silent forever (P1-2).** Refusing
+  to rebase onto a lower version was correct, but there was no way out: one
+  restored KV backup (or a long run of stale cross-PoP reads) and the device
+  stayed on "等待云端状态更新" and never pushed again. The same older blob
+  seen three times across two minutes is now accepted as a real rollback and
+  merged as a union — it can resurrect a deletion, it can never drop
+  anything this device holds.
+- **Import rejected the whole backup over one bad entry (P1-1).** A file was
+  refused outright if any favorite URL failed to parse or any bookmark
+  failed validation — including id-less pins, which pre-2.0 exports really
+  contain. Only structural problems (not an object, over 2 MiB, none of the
+  five known keys, a known key that is not an array) refuse a file now; a
+  single unreadable entry is skipped and counted, the count is shown before
+  the user confirms and again in the result, and an id-less entry that
+  carries valid coordinates is given a generated `bm-` id instead of being
+  discarded.
+
+### Changed
+
+- `scripts/verify_build.py`'s localStorage key list gained
+  `tabelog.pendingWrite`, replaced the long-dead `tabelog.showTransit` with
+  the two keys that actually exist (`tabelog.showTransitLong` /
+  `tabelog.showTransitCity`), and now matches the quoted literal — the
+  substring match made the dead key a permanently-green assertion (P2-1).
+- `tests/reliability/pending-tabs.mjs` R3 no longer recovers by calling
+  `__reliability.resetWait()`, a probe the page never invokes on that path;
+  it asserts the page recovers on its own, and the probe is gone from
+  `browser.mjs`. New R5 covers the one combination the suite never had —
+  frozen server plus PUTs that keep failing — and asserts a new edit still
+  uploads 20 minutes later (P1-3). New cases cover the rollback exit and the
+  manual retry button; new compat fixture `09_export_idless_pin.json` covers
+  an id-less legacy pin plus an unreadable favorite URL.
+
 ## [3.1.1] - 2026-09-08
 
 ### Changed

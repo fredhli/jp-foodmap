@@ -1116,5 +1116,9 @@
   "未偵測到": "Not detected",
   "未検出": "Not detected",
   "網訂入口": "booking link",
-  "食": "食"
+  "食": "食",
+  "立即重试": "Retry now",
+  "云端数据已回退": "Cloud data rolled back",
+  "已合并本地改动": "local changes merged",
+  "已跳过无法识别的条目": "Skipped unreadable entries"
 }

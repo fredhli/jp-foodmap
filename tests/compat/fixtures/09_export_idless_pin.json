@@ -1,0 +1,29 @@
+{
+  "__note__": "BE-C / P1-1. A real pre-2.0 backup: a pin with NO `id` (the export that produced it predates ids — applyPostSendEdits still carries a merge rule for id-less bookmarks), plus one favorite whose URL is no longer parseable. 3.1.1 refused the WHOLE file over either of those, so a user restoring their own backup got 'file format not recognised' and nothing at all. 3.1.2 imports every entry it can read, gives the id-less pin a generated `bm-` id, and reports how many entries it had to skip. exportFile is not localStorage: the test writes it to a temp path and feeds it to #ssm-import-file the way a user would.",
+  "localStorage": {},
+  "exportFile": {
+    "schema": 1,
+    "app": "jpfoodmap",
+    "favorites": [
+      "https://tabelog.com/tottori/A3101/A310101/31000300/",
+      "not-a-url-any-more",
+      "https://tabelog.com/tottori/A3101/A310101/31004889/"
+    ],
+    "blacklist": [],
+    "bookmarks": [
+      {
+        "name": "无 id 的旧书签",
+        "emoji": "📍",
+        "lat": 35.6586,
+        "lon": 139.7454,
+        "category": "bookmark"
+      },
+      {
+        "id": "bm-broken",
+        "name": "坏坐标",
+        "lat": "not a number",
+        "lon": 139.7
+      }
+    ]
+  }
+}

@@ -43,7 +43,6 @@ const anchor='    function schedulePush() {';
 html=html.replace(anchor, `
 window.__reliability = {
  pull, push, toggleFav, normalizeImport, openImportModal, doImport, flushOnHide, loadPopups, downloadBackup, tryRestoreSession, reconcile,
- resetWait: clearSyncWait,
  favoriteRefs: function(){return favBuildGroups().flatMap(function(g){return g.items.map(function(i){return i.ref;});});},
  auth: function(kind){ window.__authResult='waiting';
    (kind==='me' ? tryMe : function(cb){exchangeForSession('fake-token',cb);})(function(ok){window.__authResult=ok;}); },
@@ -115,6 +114,22 @@ try {
     await p.evaluate(()=>{__net.remote={v:6,w:'new',favorites:[],blacklist:[],bookmarks:[]};});
     await p.clock.runFor(5600);await pause(p);s=await snap(p);assert.deepEqual(s.fav,[]);assert.equal(s.base.v,6);
   });
+  // BE-D (P1-2): a server that stays rolled back — a restored KV backup, not
+  // a stale read — is eventually accepted. 3.1.x only had the brake: the
+  // device stayed waitingForCloud forever and never pushed again. Acceptance
+  // unions (never merges against the old base), so a rollback can resurrect a
+  // deletion but can never drop anything this device holds.
+  await test('a persistent server rollback is accepted, unions, and resumes pushing',async p=>{
+    await p.evaluate(()=>{__net.remote={v:4,w:'old',favorites:[],blacklist:[],bookmarks:[]};__reliability.pull(true);});await pause(p);
+    let s=await snap(p);assert.deepEqual(s.fav,[A]);assert.ok(s.waitingForCloud);
+    assert.equal((await net(p)).filter(r=>r.method==='PUT').length,0);
+    for(let i=0;i<4;i++){await p.clock.runFor(61100);await p.evaluate(()=>__reliability.pull(true));await pause(p);}
+    s=await snap(p);
+    assert.equal(s.waitingForCloud,false);
+    assert.deepEqual(s.fav,[A]);assert.equal(s.dirty,false);
+    assert.equal((await net(p)).filter(r=>r.method==='PUT').length,1);
+    assert.deepEqual(await p.evaluate(()=>__net.remote.favorites),[A]);
+  });
   await test('lower 409 never rebases or deletes',async p=>{
     await p.evaluate(B=>{__net.mode='409';__net.remote={v:4,w:'old',favorites:[],blacklist:[],bookmarks:[]};__reliability.toggleFav(B);__reliability.push();},B);
     await pause(p);const s=await snap(p);assert.equal(s.base.v,5);assert.deepEqual(new Set(s.fav),new Set([A,B]));assert.ok(s.dirty);
@@ -127,13 +142,38 @@ try {
     await p.clock.runFor(5600);await pause(p);s=await snap(p);assert.equal(s.pending,null);assert.equal(s.dirty,false);assert.equal(s.base.v,6);
     assert.equal((await net(p)).filter(r=>r.method==='PUT').length,1);
   });
-  await test('unknown uncommitted PUT retries once with exact original body',async p=>{
+  // BE-A: 3.1.x replayed the identical body under the identical write id.
+  // 3.1.2 declares the write lost once the server has shown its own base back
+  // three times over the dwell window, and sends the CURRENT state under a
+  // fresh w — a replay can duplicate a write that did land, a fresh push
+  // cannot lose anything.
+  await test('uncommitted PUT proven lost is re-sent as a fresh write',async p=>{
     await p.evaluate(B=>{__net.mode='hang';__reliability.toggleFav(B);__reliability.push();},B);await pause(p);
     await p.clock.runFor(15100);await pause(p);
     await p.evaluate(()=>{__net.mode='ok';});
     for (const ms of [5600,16100,61100]) {await p.clock.runFor(ms);await pause(p);}
     const puts=(await net(p)).filter(r=>r.method==='PUT');
-    assert.equal(puts.length,2);assert.equal(puts[0].body,puts[1].body);assert.equal((await snap(p)).dirty,false);
+    assert.equal(puts.length,2);
+    assert.notEqual(JSON.parse(puts[1].body).w,JSON.parse(puts[0].body).w);
+    assert.deepEqual(new Set(JSON.parse(puts[1].body).favorites),new Set([A,B]));
+    assert.equal((await snap(p)).dirty,false);assert.equal((await snap(p)).pending,null);
+  });
+  // BE-B: the user-facing escape valve. Hidden while sync is healthy, shown
+  // once the engine is holding an uncertain write, and one click resolves it
+  // without waiting out the dwell window.
+  await test('manual retry appears only when stuck and unsticks the device',async p=>{
+    const btn='#ssm-retry-sync';
+    assert.equal(await p.evaluate(s=>document.querySelector(s).hidden,btn),true);
+    await p.evaluate(B=>{__net.mode='hang';__reliability.toggleFav(B);__reliability.push();},B);await pause(p);
+    await p.clock.runFor(15100);await pause(p);
+    assert.equal(await p.evaluate(s=>document.querySelector(s).hidden,btn),false);
+    await p.evaluate(()=>{__net.mode='ok';});
+    await p.evaluate(s=>document.querySelector(s).click(),btn);await pause(p);await pause(p);
+    const s=await snap(p);
+    assert.equal(s.pending,null);assert.equal(s.dirty,false);assert.equal(s.waitingForCloud,false);
+    assert.equal((await net(p)).filter(r=>r.method==='PUT').length,2);
+    assert.deepEqual(new Set(await p.evaluate(()=>__net.remote.favorites)),new Set([A,B]));
+    assert.equal(await p.evaluate(s=>document.querySelector(s).hidden,btn),true);
   });
   await test('GET body and auth body deadline release callbacks',async p=>{
     await p.evaluate(()=>{__net.getHang=true;__reliability.pull(true);__net.authHang=true;__reliability.auth('me');});await pause(p);
@@ -174,14 +214,25 @@ try {
     await p.evaluate(()=>{__reliability.bookmark({id:'bm-large',lat:35,lon:139,name:'字'.repeat(61000)});__reliability.push();});await pause(p);
     assert.equal((await net(p)).filter(r=>r.method==='PUT').length,1);assert.equal((await snap(p)).dirty,false);
   });
-  await test('invalid import never mutates state or localStorage; old and future fields survive',async p=>{
+  // BE-C: a structurally broken FILE is still refused whole; a single broken
+  // ENTRY inside a usable file is skipped and counted instead of costing the
+  // user everything else in the backup.
+  await test('import refuses broken files, skips broken entries; old and future fields survive',async p=>{
     const before=await snap(p);
-    const bad=[{favorites:[{url:{x:1}}]}, {bookmarks:[{id:'bad',lat:35,lon:139,name:{toString:5}}]},
-      {favorites:[B],bookmarks:[{id:'list:broken',category:'meta',kind:'member',list:{},ref:B}]}, {favorites:{}}];
-    for(const data of bad) assert.equal(await p.evaluate(d=>__reliability.normalizeImport(d),data),null);
-    const after=await snap(p);assert.deepEqual(after,before);
-    await p.evaluate(B=>{__reliability.openImportModal({favorites:[B],blacklist:[],bookmarks:[{id:'bad',lat:35,lon:139,name:{toString:5}}]});__reliability.doImport();},B);
+    for(const data of [{favorites:{}},{nothing:'known'},'not an object',42])
+      assert.equal(await p.evaluate(d=>__reliability.normalizeImport(d),data),null);
+    for(const [data,favN,skipped] of [[{favorites:[{url:{x:1}}]},0,1],
+        [{bookmarks:[{id:'bad',lat:35,lon:139,name:{toString:5}}]},0,1],
+        [{favorites:[B],bookmarks:[{id:'list:broken',category:'meta',kind:'member',list:{},ref:B}]},1,1]]) {
+      const n=await p.evaluate(d=>__reliability.normalizeImport(d),data);
+      assert.equal(n.favorites.length,favN);assert.equal(n.skipped,skipped);assert.deepEqual(n.bookmarks,[]);
+    }
     assert.deepEqual(await snap(p),before);
+    // The unreadable bookmark must not reach state even when the rest imports.
+    await p.evaluate(B=>{__reliability.openImportModal(__reliability.normalizeImport(
+      {favorites:[B],blacklist:[],bookmarks:[{id:'bad',lat:35,lon:139,name:{toString:5}}]}));__reliability.doImport();},B);
+    const partial=await snap(p);
+    assert.ok(partial.fav.includes(B));assert.deepEqual(partial.bookmarks,before.bookmarks);
     const payload={fav:[{detail_url:B}],black:[],bookmarks:[{id:'bm-old',lat:35,lon:139,name:'Old',future:{keep:true}},
       {id:'list:test',category:'meta',kind:'list',name:'Trip'},
       {id:'lm:test:ref',category:'meta',kind:'member',list:'list:test',ref:B},
