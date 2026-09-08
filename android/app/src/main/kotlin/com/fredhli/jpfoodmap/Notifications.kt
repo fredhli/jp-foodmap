@@ -89,7 +89,7 @@ object Notifications {
     }
 
     /**
-     * What the settings row should say, from the three facts that decide whether anything
+     * What the settings row should say, including the channel setting that decides whether anything
      * can actually reach the shade. They are genuinely three: the app's own switch, the
      * runtime grant, and the user's system-level switch for this app — and a person who
      * turned the app off in Android's settings while leaving our switch on is a real state
@@ -104,6 +104,9 @@ object Notifications {
 
         /** Granted, but notifications for this app are off in system settings. */
         BLOCKED,
+
+        /** This app is allowed, but its only channel is disabled. */
+        CHANNEL_OFF,
 
         /** Everything says yes. */
         ON,
@@ -264,7 +267,7 @@ object Notifications {
      * entry, returns normally, and shows nothing. No channel yet (or no manager) reads as
      * "nothing says otherwise" — [ensureChannel] runs before every post.
      */
-    private fun channelOn(context: Context): Boolean {
+    fun channelOn(context: Context): Boolean {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return true
         val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return true
         return channel.importance != NotificationManager.IMPORTANCE_NONE
@@ -290,7 +293,7 @@ object Notifications {
     }
 
     /**
-     * Which hint the settings row shows, from the three facts. Pure, so T5's screen never
+     * Which hint the settings row shows, from the four gates. Pure, so T5's screen never
      * has to re-derive the precedence — and the precedence matters: "the switch is off" is
      * the user's own answer and outranks a missing grant, and a missing grant outranks the
      * system-level block because asking for the grant is the action the row can offer.
@@ -303,10 +306,12 @@ object Notifications {
         switchOn: Boolean,
         hasPermission: Boolean,
         systemEnabled: Boolean,
+        channelEnabled: Boolean = true,
     ): Readiness = when {
         !switchOn -> Readiness.OFF
         !hasPermission -> Readiness.NEEDS_PERMISSION
         !systemEnabled -> Readiness.BLOCKED
+        !channelEnabled -> Readiness.CHANNEL_OFF
         else -> Readiness.ON
     }
 

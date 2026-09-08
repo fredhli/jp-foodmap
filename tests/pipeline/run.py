@@ -475,6 +475,27 @@ def t_policy_struct():
 # (i) M-030: holiday / station-distance slots reject Tabelog's placeholders
 # --------------------------------------------------------------------------
 @test
+def t_about_scrape_dates():
+    from tabelog.scrape import map as mapmod
+
+    rows = [
+        {}, {"scraped_at": ""}, {"scraped_at": None},
+        {"scraped_at": "not a timestamp"},
+        {"scraped_at": "2026-02-30T12:00:00Z"},
+        {"scraped_at": "2026-05-19T08:00:00Z"},
+        {"scraped_at": "2026-09-07T06:15:00Z"},
+    ]
+    eq(mapmod.latest_scrape_date(rows), "2026-09-07", "latest dated row wins")
+    eq(mapmod.latest_scrape_date(rows[:5]), None, "missing and invalid dates stay unknown")
+    dated = mapmod.build_about_html(rows)
+    eq("__LATEST_SCRAPE__" in dated, False, "date placeholder is filled")
+    eq("2026-05-19" in dated and "2026-09-07" in dated, True,
+       "historical baseline and partial update remain distinct")
+    eq("暂无逐条记录" in mapmod.build_about_html([]), True,
+       "no row timestamps does not imply a recent update")
+
+
+@test
 def t_holiday_slot():
     from tabelog.scrape import map as mapmod
 

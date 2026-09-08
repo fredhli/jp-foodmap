@@ -2302,7 +2302,7 @@ def build_filter_panel_html(
   </div>
   <div class="ff-other-row">
     <label>
-      <input type="checkbox" id="ff-only-fav"><span>只显示已收藏</span>
+      <input type="checkbox" id="ff-only-fav"><span>在找店结果中只看已收藏</span>
     </label>
     <span class="ff-sec-links">⭐ <b id="ff-fav-count">0</b></span>
   </div>
@@ -2366,12 +2366,9 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "2.3.0"
-# DATA_SCRAPED_AT is when the Tabelog corpus was last pulled. It is a
-# hand-written constant on purpose: data/tabelog/tabelog.csv has no
-# scraped_at column yet (the build log says "no scraped_at timestamps yet"),
-# so there is nothing to compute it from. Bump this after the next re-scrape,
-# or replace it with a quantile over scraped_at once that column exists.
+APP_VERSION = "3.1.0"
+# Historical corpus baseline. Newer partial scrapes have their own row timestamps;
+# neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
 
 # Page title, install metadata, and launcher icons. The browser tab keeps the
@@ -2886,10 +2883,10 @@ MAP_FAB_HTML = """
         <span class="lp-sw" aria-hidden="true"></span>
       </button>
       <button id="fab-bookmarks" class="map-fab active" type="button"
-              aria-pressed="true" title="我的收藏">
+              aria-pressed="true" title="我的书签标记">
         <span class="map-fab-ic">⭐</span>
-        <span class="lp-txt"><span class="map-fab-label">收藏</span>
-          <span class="lp-sub">我的收藏与书签</span></span>
+        <span class="lp-txt"><span class="map-fab-label">书签标记</span>
+          <span class="lp-sub">地图上的地点标记，不影响餐厅收藏</span></span>
         <span class="lp-sw" aria-hidden="true"></span>
       </button>
       <label class="lp-check">
@@ -3964,8 +3961,10 @@ ONBOARD_HTML = """
     <dl class="ob-kv">
       <dt>数据来源</dt>
       <dd lang="en">Tabelog</dd>
-      <dt>抓取于</dt>
+      <dt>历史采集基线</dt>
       <dd lang="en">__DATA_SCRAPED_AT__</dd>
+      <dt>最近局部补采</dt>
+      <dd id="about-latest-scrape">__LATEST_SCRAPE__</dd>
       <dt>坐标</dt>
       <dd lang="en">GSI + Google Maps</dd>
       <dt>地图底图</dt>
@@ -3981,6 +3980,7 @@ ONBOARD_HTML = """
     <p id="about-curation"></p>
   </div>
   <div class="ob-sec">
+    <p class="ob-note">部分餐厅暂无逐条采集日期；局部补采不代表全库更新</p>
     <p class="ob-note">营业状态与价格请以原站为准</p>
   </div>
   <div class="ob-sec">
@@ -4165,8 +4165,109 @@ PHONE_DRAWER_HTML = """
   /* Same reason, the buttons: a 4-character label must be allowed to shrink
      its row rather than force one 319px-wide line. */
   #wb-left .fv-tools > * { max-width: 100%; }
+  /* Primary tasks share the existing panels and their state. */
+  :root { --phone-nav-h: 0px; --ux-context-h: 0px; }
+  #phone-nav { display: none; }
+  #ux-context {
+    position: fixed; z-index: 9996;
+    top: calc(var(--wb-top) + 8px); left: calc(var(--wb-left) + 12px);
+    right: calc(var(--wb-right) + 12px); width: fit-content; max-width: calc(100vw - 24px);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+    padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 10px;
+    background: #fff; color: #374151; box-shadow: 0 2px 8px #0001;
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-sizing: border-box;
+  }
+  #ux-context button { min-height: 36px; border: 0; border-radius: 6px;
+    padding: 4px 8px; background: #eff6ff; color: #1d4ed8; cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
+  #ux-context button:focus-visible, #phone-nav button:focus-visible,
+  #ux-detail-back:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  #ux-context button[hidden], #ux-context-note:empty { display: none; }
+  #ux-context-note { flex-basis: 100%; font-size: 12px; color: #6b7280; }
+  #ux-region { max-width: 16em; overflow-wrap: anywhere; }
+  #ux-filter-done { display: none; flex: 0 0 auto; padding: 10px 14px;
+    border-top: 1px solid #e5e7eb; background: #fff; }
+  #ux-filter-done.on { display: block; }
+  #ux-filter-done p, #ux-saved-scope { margin: 0 0 6px; color: #6b7280;
+    font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+  #ux-filter-results { width: 100%; min-height: 44px; border: 0; border-radius: 8px;
+    background: #2563eb; color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.4; cursor: pointer; }
+  #ux-saved-scope { display: none; }
+  #wb-left-head.ux-head-fav .wb-counts { display: none; }
+  #wb-left-head.ux-head-fav #ux-saved-scope { display: block; margin: 8px 0 0; }
+  #ux-detail-back { flex: 0 0 auto; border: 0; border-bottom: 1px solid #e5e7eb;
+    min-height: 44px; padding: 8px 14px; background: #fff; color: #1d4ed8;
+    text-align: left; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
+  #ux-detail-actions { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 10px 14px; border-top: 1px solid #e5e7eb; background: #fff; }
+  #ux-detail-actions .rst-btn, #ux-detail-actions .rst-gmaps {
+    flex: 1; width: auto; min-width: 0; min-height: 44px; height: auto; margin: 0;
+    display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+    padding: 8px; box-sizing: border-box; border-radius: 8px; font-size: 14px;
+    line-height: 1.4; text-decoration: none;
+  }
+  #ux-detail-actions .rst-gmaps { background: #2563eb; color: #fff; }
+  #sync-stack > .sync-toast, #sync-stack > #sync-hint { pointer-events: none; }
+  #sync-stack > .sync-toast .sync-btn, #sync-hint .sync-btn { pointer-events: auto; }
+  #bs-content { min-height: 0; }
+  .rst-reservation-note { font-size: 12px; line-height: 1.5; color: #6b7280; margin: 8px 0; }
+  @media (max-width: 749px) {
+    :root { --phone-nav-h: var(--phone-nav-measured, calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px)))); }
+    #phone-nav { position: fixed; z-index: 10005; inset: auto 0 0;
+      display: grid; grid-template-columns: repeat(4,minmax(0,1fr));
+      min-height: calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px))); box-sizing: border-box;
+      padding: 4px max(6px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));
+      border-top: 1px solid #d1d5db; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    #phone-nav button { min-height: 48px; padding: 6px 2px; border: 0;
+      background: transparent; color: #6b7280; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
+      cursor: pointer; border-radius: 8px; overflow-wrap: anywhere; }
+    #phone-nav button[aria-current="page"] { color: #1d4ed8; background: #eff6ff; }
+    #ss-drawer-btn, #ff-fab { display: none !important; }
+    #ux-context { top: calc(64px + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
+      left: max(12px,env(safe-area-inset-left)); right: max(12px,env(safe-area-inset-right)); width: auto; }
+    #ux-context button { min-height: 40px; }
+    #intro-bar { top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))) !important; }
+    body.wb-fav-open #wb-left { left: 0; right: 0; top: calc(72px + var(--ux-context-h) + max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px)));
+      bottom: var(--phone-nav-h); width: 100%; max-width: 100%; border-radius: 0; border: 0;
+      padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); box-shadow: none; animation: none; }
+    body.wb-fav-open #wb-fav-grip, body.wb-fav-open #wb-fav-backdrop { display: none; }
+    body.wb-fav-open #wb-left-head .wb-tabs { display: none; }
+    body.wb-fav-open .folium-map, body.wb-fav-open #intro-bar { visibility: hidden; }
+    body.ux-map-popup #ux-context { visibility: hidden; }
+    #bs-sheet { bottom: var(--phone-nav-h); padding-bottom: 0;
+      max-height: calc(100dvh - var(--phone-nav-h) - 76px - max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px))); }
+    #bs-sheet:not(.bs-open) { visibility: hidden; }
+    .map-fab-stack { margin-bottom: var(--phone-nav-h); }
+    .leaflet-control-attribution { margin-bottom: calc(var(--phone-nav-h) + var(--attr-h, 0px)) !important; }
+    #sync-stack { bottom: calc(var(--phone-nav-h) + 10px); }
+    body.ux-detail-open #sync-stack { bottom: calc(var(--phone-nav-h) + var(--ux-actions-h, 66px) + 8px); }
+    body.wb-fav-open.ux-filter-open #sync-stack { bottom: calc(var(--phone-nav-h) + var(--ux-filter-done-h, 100px) + 8px); }
+    #ss-list.open { max-height: calc(100dvh - var(--phone-nav-h) - 76px); }
+    body.ux-keyboard #phone-nav { display: none; }
+    body.ux-keyboard { --phone-nav-h: 0px; }
+  }
+  @media (max-width: 749px) and (max-height: 500px) {
+    body.wb-fav-open.ux-filter-open #sync-hint,
+    body.ux-detail-open #sync-hint { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #phone-nav *, #ux-context *, #ux-detail-actions * { transition: none !important; }
+  }
 </style>
 <div id="wb-fav-backdrop"></div>
+<div id="ux-context" aria-label="找店范围">
+  <button id="ux-region" type="button">选地区</button>
+  <button id="ux-nearby" type="button">找附近</button>
+  <button id="ux-restore-plan" type="button" hidden>返回原地区规划</button>
+  <span id="ux-context-note" role="status"></span>
+</div>
+<nav id="phone-nav" aria-label="主要导航">
+  <button type="button" data-ux-tab="map" aria-current="page">地图</button>
+  <button type="button" data-ux-tab="results">结果</button>
+  <button type="button" data-ux-tab="fav">收藏</button>
+  <button type="button" data-ux-tab="filter">筛选</button>
+</nav>
 """
 
 
@@ -4581,17 +4682,18 @@ BOOKMARKS_MODAL_HTML = """
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     display: none;
   }
-  #imp-modal.imp-open { display: block; }
+  #imp-modal.imp-open { display: flex; flex-direction: column; max-height: calc(100dvh - 16px); }
   #imp-modal .imp-head {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 14px; border-bottom: 1px solid #f3f4f6;
+    padding: 12px 14px; border-bottom: 1px solid #f3f4f6; flex-shrink: 0;
   }
   #imp-modal .imp-title { font-weight: 600; font-size: 15px; color: #1f2937; }
   #imp-modal .imp-close {
     border: none; background: none; cursor: pointer;
     font-size: 20px; line-height: 1; color: #6b7280; padding: 0 4px;
   }
-  #imp-modal .imp-body { padding: 12px 14px; }
+  #imp-modal .imp-body { padding: 12px 14px; overflow-y: auto; min-height: 0;
+    flex: 1 1 auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   #imp-modal .imp-sub {
     margin: 0 0 10px; font-size: 12px; color: #6b7280; line-height: 1.5;
   }
@@ -4611,7 +4713,7 @@ BOOKMARKS_MODAL_HTML = """
   #imp-modal .imp-opt input:disabled ~ .imp-opt-count { color: #9ca3af; }
   #imp-modal .imp-error { color: #b91c1c; font-size: 12px; min-height: 14px; margin-top: 4px; }
   #imp-modal .imp-foot {
-    display: flex; justify-content: flex-end; gap: 8px;
+    display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
     padding: 10px 14px 14px; border-top: 1px solid #f3f4f6;
   }
   #imp-modal .imp-foot button {
@@ -5866,11 +5968,13 @@ BOTTOM_SHEET_HTML = """
   <!-- M-188: disclosure button, not a div — keyboard-reachable, and the
        peek hint below is real DOM so the i18n walker can translate it
        (M-157). aria-expanded is kept in sync by bsSetPeek(). -->
-  <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content">
+  <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content" inert>
     <span id="bs-grip-hint"><span class="bs-hint-swipe">上滑查看详情</span><span class="bs-hint-tap">点击查看详情</span></span>
   </button>
   <div id="bs-banner" hidden></div>
-  <div id="bs-content"></div>
+  <button id="ux-detail-back" type="button" inert>返回地图</button>
+  <div id="bs-content" inert></div>
+  <div id="ux-detail-actions" inert></div>
 </div>
 <!-- W-4: the photo viewer. A thumbnail used to be an <a target="_blank"> to
      a bare JPEG, which in the Android shell classified as Nav.EXTERNAL and
@@ -6449,6 +6553,7 @@ WORKBENCH_HTML = """
     <!-- M-022's two-segment reading, third instance. setCountText() writes
          every .ff-count / .ff-inview on the page, so this needs no wiring. -->
     <div class="wb-counts">符合筛选 <b class="ff-count">–</b> · 在屏幕范围内 <span class="ff-inview">–</span></div>
+    <p id="ux-saved-scope">列表为我的收藏，地图仍为当前找店结果</p>
   </div>
   <div id="wb-list-tools"></div>
   <div id="wb-list"></div>
@@ -6465,6 +6570,10 @@ WORKBENCH_HTML = """
        out again, so every listener, every id lookup and the
        startDynamicObservers() MutationObserver survive untouched. -->
   <div id="wb-filter-host" role="tabpanel" aria-labelledby="wb-tab-filter"></div>
+  <div id="ux-filter-done">
+    <p>结果包含所选地区内全部匹配餐厅，地图移动不改变筛选范围</p>
+    <button id="ux-filter-results" type="button">查看结果</button>
+  </div>
 </aside>
 <div id="wb-split-handle" role="separator" aria-orientation="horizontal"
      tabindex="0" aria-label="调整面板高度"></div>
@@ -7662,7 +7771,7 @@ FILTER_JS_TEMPLATE = r"""
   function loadPopups() {
     if (popupsMap) return Promise.resolve(popupsMap);
     if (popupsPromise) return popupsPromise;
-    popupsPromise = fetch(popupsUrlForLang(), {cache: 'force-cache'})
+    popupsPromise = fetchBounded(popupsUrlForLang(), {cache: 'force-cache'}, 20000)
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -7876,10 +7985,10 @@ FILTER_JS_TEMPLATE = r"""
     'ja':    'お気に入りは {n} 軒 · 絞り込みの影響なし'
   };
   var FOOT_TPL = {
-    'zh-CN': '其中 {n} 家能在 Tabelog 上订座',
-    'zh-TW': '其中 {n} 家能在 Tabelog 上訂位',
-    'en':    '{n} of them take online bookings on Tabelog',
-    'ja':    'うち {n} 軒は食べログでネット予約可'
+    'zh-CN': '其中 {n} 家有 Tabelog 网订入口',
+    'zh-TW': '其中 {n} 家有 Tabelog 網訂入口',
+    'en':    '{n} have a Tabelog booking link',
+    'ja':    'うち {n} 軒は食べログのネット予約リンクあり'
   };
   var FOOT_BTN_TPL = {
     'zh-CN': '只看这 {n} 家',
@@ -8001,7 +8110,7 @@ FILTER_JS_TEMPLATE = r"""
     ['#fab-transit-long',              'title',      '新干线 / JR 长途线路'],
     ['#fab-transit-city',              'title',      '地铁 / 私铁 / 城市轨道'],
     ['#fab-attractions',               'title',      '景点锚点'],
-    ['#fab-bookmarks',                 'title',      '我的收藏'],
+    ['#fab-bookmarks',                 'title',      '我的书签标记'],
     ['#ss-clear',                      'aria-label', '清空'],
     ['#ss-avatar',                     'aria-label', '账户'],
     // H6 / M-084 + M-159 + M-027 (workbench chrome).
@@ -8221,6 +8330,7 @@ FILTER_JS_TEMPLATE = r"""
         try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
         try { localStorage.removeItem('tabelog.bookmarks'); } catch (_) {}
         try { localStorage.removeItem(SYNC_BASE_KEY); } catch (_) {}
+        try { localStorage.removeItem('tabelog.pendingWrite'); } catch (_) {}
       }
     }
     function finish() {
@@ -8442,22 +8552,47 @@ FILTER_JS_TEMPLATE = r"""
         'Authorization': 'Bearer ' + a.id_token
       });
     }
-    return fetch(url, opts);
+    return fetchBounded(url, opts);
   }
+  // Buffer the response inside the deadline: headers alone do not finish a request.
+  // Keepalive deliberately uses the browser's lifetime, not this foreground timer.
+  function fetchBounded(url, opts, timeoutMs) {
+    opts = Object.assign({}, opts || {});
+    if (opts.keepalive) return fetch(url, opts);
+    var ctrl = new AbortController();
+    opts.signal = ctrl.signal;
+    var timer;
+    var request = Promise.resolve().then(function() { return fetch(url, opts); })
+      .then(function(r) {
+        return r.text().then(function(body) {
+          return {ok: r.ok, status: r.status, headers: r.headers,
+            text: function() { return Promise.resolve(body); },
+            json: function() { return Promise.resolve().then(function() { return JSON.parse(body); }); }};
+        });
+      });
+    var deadline = new Promise(function(_, reject) {
+      timer = setTimeout(function() {
+        var e = new Error('Request timed out'); e.name = 'TimeoutError';
+        reject(e); ctrl.abort();
+      }, timeoutMs || 15000);
+    });
+    return Promise.race([request, deadline]).finally(function() { clearTimeout(timer); });
+  }
+  function utf8Bytes(text) { return new TextEncoder().encode(text).length; }
   // Trade a Google id_token for a 90-day Worker session cookie. The Worker
   // verifies the id_token via Google tokeninfo and returns the signed-in
   // profile + server-side exp. cb(true, profile) on success.
   function exchangeForSession(idToken, cb) {
     cb = cb || function(){};
-    fetch(API_SESSION, {
+    fetchBounded(API_SESSION, {
       method: 'POST',
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({id_token: idToken})
     }).then(function(r) {
-      if (!r.ok) { cb(false); return; }
+      if (!r.ok) { cb(false, null, r.status >= 500 || r.status === 429 ? 'network' : 'auth'); return; }
       return r.json().then(function(p) { cb(true, p); });
-    }).catch(function() { cb(false); });
+    }).catch(function() { cb(false, null, 'network'); });
   }
   // Helper used by all "we just got a fresh server session" paths. Stores
   // the profile without an id_token — the cookie is the source of truth
@@ -8476,15 +8611,15 @@ FILTER_JS_TEMPLATE = r"""
   // localStorage is refreshed with the latest server exp.
   function tryMe(cb) {
     cb = cb || function(){};
-    fetch(API_ME, {credentials: 'include'})
+    fetchBounded(API_ME, {credentials: 'include'})
       .then(function(r) {
-        if (!r.ok) { cb(false); return; }
+        if (!r.ok) { cb(false, r.status >= 500 || r.status === 429 ? 'network' : 'auth'); return; }
         return r.json().then(function(p) {
           saveSessionProfile(p);
           cb(true);
         });
       })
-      .catch(function() { cb(false); });
+      .catch(function() { cb(false, 'network'); });
   }
 
   // Bounded dependency wait. The old unbounded 50ms poll meant that if an
@@ -8588,10 +8723,11 @@ FILTER_JS_TEMPLATE = r"""
     var uiSafetyTimer = 0;
     function uiFlushEat() {
       uiEatTimer = 0;
-      while (uiEatPending > 0) {
-        uiEatPending--;
+      var steps = uiEatPending;
+      uiEatPending = 0;
+      if (steps > 0) {
         uiSuppress++;
-        try { history.back(); } catch (_) { uiSuppress--; }
+        try { history.go(-steps); } catch (_) { uiSuppress--; }
       }
       // If a back() ever fails to produce a popstate, don't let the counter
       // swallow a genuine back press for the rest of the session.
@@ -8624,7 +8760,15 @@ FILTER_JS_TEMPLATE = r"""
       if (!uiEatTimer) uiEatTimer = setTimeout(uiFlushEat, 0);
     }
     window.addEventListener('popstate', function() {
-      if (uiSuppress > 0) { uiSuppress--; return; }
+      if (uiSuppress > 0) {
+        uiSuppress--;
+        // A quick close/reopen can reuse the entry below a dismissed source.
+        var current = uiStack[uiStack.length - 1];
+        if (current && (!history.state || history.state.tabelogUi !== current)) {
+          try { history.replaceState({tabelogUi: current}, ''); } catch (_) {}
+        }
+        return;
+      }
       var kind = uiStack.pop();
       if (!kind) return;     // nothing of ours is open — ordinary navigation
       var fn = uiClosers[kind];
@@ -8675,7 +8819,7 @@ FILTER_JS_TEMPLATE = r"""
     // aria-hidden fallback keeps older engines announcing the right thing.
     // W-6: the phone drawer's ≡ entry used to need its own line here as
     // #wb-fav-fab; it now lives inside #ss-box, which is already on the list.
-    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack',
+    var INERT_SEL = ['.folium-map', '#ss-box', '.map-fab-stack', '#phone-nav', '#ux-context',
                      '#wb-left', '#wb-top', '#wb-rail', '#wb-detail'];
     function setBackgroundInert(on, exclude) {
       for (var i = 0; i < INERT_SEL.length; i++) {
@@ -8773,8 +8917,10 @@ FILTER_JS_TEMPLATE = r"""
           || t.isContentEditable === true;
     }
     function kbCardBtn(sel) {
+      if (!bsActive) return false;
       var host = document.getElementById('bs-content');
       var b = host && host.querySelector(sel);
+      if (!b && uxDetailActions) b = uxDetailActions.querySelector(sel);
       if (b) { b.click(); return true; }
       return false;
     }
@@ -8951,7 +9097,8 @@ FILTER_JS_TEMPLATE = r"""
         showCompass: true,
         drawCircle: true,
         drawMarker: true,
-        locateOptions: {enableHighAccuracy: true, maximumAge: 600000, watch: false},
+        locateOptions: {enableHighAccuracy: true, maximumAge: 600000, watch: false, timeout: 15000},
+        onLocationError: function() { uxLocationFailed(); },
         strings: LOCATE_STRINGS
       }).addTo(map);
       if (locateFab) {
@@ -9815,8 +9962,8 @@ FILTER_JS_TEMPLATE = r"""
     // Pure zh-CN runs; the #bs-content localizer turns them into EN / JA /
     // zh-TW. Never a guess: null mode renders an em dash, not a default.
     function bookingText(mode) {
-      if (mode === 'net')   return '网上可订';
-      if (mode === 'phone') return '仅电话 / 到店';
+      if (mode === 'net')   return '有网上预约入口';
+      if (mode === 'phone') return '预约方式请查看原政策';
       if (mode === 'no')    return '不接受预订';
       return '—';
     }
@@ -9832,7 +9979,6 @@ FILTER_JS_TEMPLATE = r"""
              +  '<div class="rst-policy-v"' + (attr || '') + '>' + vHtml + '</div>';
       }
       var b = (pol && typeof pol.b === 'number') ? pol.b : null;
-      if (b === 0 && d && d.bookable) b = 1;   // flag beats blurb
       if (b !== null) {
         row('能否预订',
             b === 0 ? '不接受预订' : (b === 2 ? '需要预订' : '可预订'));
@@ -9840,13 +9986,13 @@ FILTER_JS_TEMPLATE = r"""
       // 100% coverage — derived from `bookable`, not from the blurb. Mixed
       // Latin+CJK, so it is hand-written per language exactly like chipText
       // (letting the run tokenizer at "Tabelog网上可订" produces nonsense).
-      var netTxt = d && d.bookable ? 'Tabelog 网上可订' : '仅电话 / 到店';
+      var netTxt = d && d.bookable ? '有 Tabelog 网订入口' : '未检测到 Tabelog 网订入口';
       if (lang === 'en') {
-        netTxt = d && d.bookable ? 'Bookable on Tabelog' : 'Phone / walk-in only';
+        netTxt = d && d.bookable ? 'Tabelog booking link found' : 'No Tabelog booking link detected';
       } else if (lang === 'ja') {
-        netTxt = d && d.bookable ? 'Tabelog でネット予約可' : '電話・来店のみ';
+        netTxt = d && d.bookable ? '食べログのネット予約リンクあり' : '食べログのネット予約リンク未検出';
       } else if (lang === 'zh-TW') {
-        netTxt = d && d.bookable ? 'Tabelog 網上可訂' : '僅電話 / 到店';
+        netTxt = d && d.bookable ? '有 Tabelog 網訂入口' : '未偵測到 Tabelog 網訂入口';
       }
       row('网上订位',
           '<span class="rst-chip' + (d && d.bookable ? '' : ' rst-chip-off')
@@ -10152,6 +10298,7 @@ FILTER_JS_TEMPLATE = r"""
             + bookingText(bookingMode(d, pol)) + '</div></div>'
         + '</div>'
         + '<div class="rst-sec">预约政策</div>'
+        + '<p class="rst-reservation-note">预约入口不代表实时余位，请到来源网站确认日期与人数</p>'
         + polTbl
         + rawPolicy
         + (holHtml
@@ -10193,6 +10340,17 @@ FILTER_JS_TEMPLATE = r"""
     // card open, short enough that a filter change is never stale on screen.
     var bsNavCache = null, bsNavCacheAt = 0;
     function bsNavList() {
+      if (uxDetailSource && uxDetailSource.tab === 'fav') {
+        var savedRows = [], savedSeen = {};
+        favBuildGroups().forEach(function(group) {
+          group.items.forEach(function(info) {
+            if (info.kind === 'rst' && !savedSeen[info.ref]) {
+              savedSeen[info.ref] = true; savedRows.push(info.d);
+            }
+          });
+        });
+        return savedRows;
+      }
       if (window.wbResultsSorted && window.wbResultsSorted.length) {
         return window.wbResultsSorted;
       }
@@ -10239,38 +10397,33 @@ FILTER_JS_TEMPLATE = r"""
       // state the card is in — stepping through results from a peek card
       // should not promote it to full height.
       gotoRestaurant(list[j],
-                     {peek: !!(bsSheet && bsSheet.classList.contains('bs-peek'))});
+                     {peek: !!(bsSheet && bsSheet.classList.contains('bs-peek')),
+                      source: uxDetailSource});
     }
-    // H2 / M-074: the card is an ad-hoc dialog. Give it an accessible name,
-    // and when it closes hand focus back to whatever opened it instead of
-    // dropping the caret on <body> (where the next Tab restarts at the top
-    // of the page). Only when focus was actually inside the card — a user
-    // who dismissed it by panning the map should not have focus yanked.
-    var bsOpener = null, bsFocusIn = false, bsWasOpen = false;
-    var bsA11yWired = false;
-    function wireCardA11y() {
-      if (bsA11yWired || !bsSheet || !bsContent) return;
-      bsA11yWired = true;
-      bsContent.addEventListener('focusin', function() { bsFocusIn = true; });
-      new MutationObserver(function() {
-        var open = bsSheet.classList.contains('bs-open');
-        if (bsWasOpen && !open) {
-          var ae = document.activeElement;
-          if (bsFocusIn && (!ae || ae === document.body
-                            || bsContent.contains(ae))) {
-            var back = (bsOpener && document.contains(bsOpener)) ? bsOpener : null;
-            if (!back) {
-              try { back = map.getContainer(); } catch (_) { back = null; }
-            }
-            if (!back) back = document.getElementById('ss-input');
-            if (back && back.focus) {
-              try { back.focus({preventScroll: true}); } catch (_) { back.focus(); }
-            }
-          }
-          bsFocusIn = false;
-        }
-        bsWasOpen = open;
-      }).observe(bsSheet, {attributes: true, attributeFilter: ['class']});
+    // The card and action dock move between hosts when the layout changes.
+    var bsOpener = null;
+    function bsOwnsFocus(el) {
+      return !!el && [bsSheet, bsContent, uxDetailBack, uxDetailActions].some(function(node) {
+        return node && node.contains(el);
+      });
+    }
+    function bsSetInteractive(open) {
+      [bsContent, uxDetailBack, uxDetailActions, bsGrip].forEach(function(node) {
+        if (node) node.inert = !open;
+      });
+    }
+    function bsRestoreFocus() {
+      var candidates = [bsOpener, map.getContainer(), document.getElementById('ss-input')];
+      for (var i = 0; i < candidates.length; i++) {
+        var back = candidates[i];
+        if (!back || !back.isConnected || bsOwnsFocus(back) || back.closest('[inert]')) continue;
+        var rect = back.getBoundingClientRect();
+        if (!rect.width || !rect.height || rect.right <= 0 || rect.bottom <= 0
+            || rect.left >= window.innerWidth || rect.top >= window.innerHeight
+            || getComputedStyle(back).visibility !== 'visible') continue;
+        try { back.focus({preventScroll: true}); } catch (_) { back.focus(); }
+        if (document.activeElement === back) return;
+      }
     }
     // Called from openSheet's paint() on every repaint of the card.
     // ---- E11 / M-031: sub-collection chips on the detail card ------------
@@ -10421,17 +10574,7 @@ FILTER_JS_TEMPLATE = r"""
       phOpenLb(b.getAttribute('data-big'), b);
     });
     function bindCardExtras(d) {
-      wireCardA11y();
       if (!d) return;
-      // A fresh open (rather than the second paint of one, or a ↑/↓ step)
-      // is exactly "the sheet was not open yet" — paint() runs before
-      // openSheet adds .bs-open.
-      if (bsSheet && !bsSheet.classList.contains('bs-open')) {
-        var ae = document.activeElement;
-        bsOpener = (ae && ae !== document.body && !bsContent.contains(ae))
-          ? ae : null;
-        bsFocusIn = false;
-      }
       if (bsSheet) bsSheet.setAttribute('aria-label', d.name || '');
       flPaintCardLists(d);          // E11 / M-031: sub-collection chip row
       // M-032: navigator.share must be reached synchronously from the
@@ -10452,7 +10595,7 @@ FILTER_JS_TEMPLATE = r"""
       // desktop-comparison bucket). J / K keep working on every layout:
       // bsNav() falls back to the filtered corpus.
       var wbm = (typeof window.__wbMode === 'function') ? window.__wbMode() : 'phone';
-      var list = (wbm === 'phone') ? null : window.wbResultsSorted;
+      var list = (wbm === 'phone') ? null : bsNavList();
       var i = list ? bsNavIndex(list, d) : -1;
       if (i < 0 || list.length < 2) { nav.hidden = true; return; }
       nav.hidden = false;
@@ -11076,6 +11219,30 @@ FILTER_JS_TEMPLATE = r"""
       window.visualViewport.addEventListener('resize', bmSyncViewport);
       window.visualViewport.addEventListener('scroll', bmSyncViewport);
     }
+    function uxSyncViewport() {
+      var vv = window.visualViewport;
+      var keyboard = !!(vv && vv.height < window.innerHeight - 150);
+      document.body.classList.toggle('ux-keyboard', keyboard);
+      ['fl', 'imp'].forEach(function(prefix) {
+        var el = document.getElementById(prefix + '-modal');
+        if (!el) return;
+        if (keyboard && el.classList.contains(prefix + '-open')) {
+          el.style.maxHeight = Math.max(80, vv.height - 16) + 'px';
+          el.style.top = (vv.offsetTop + 8) + 'px';
+          el.style.transform = 'translate(-50%, 0)';
+        } else {
+          el.style.maxHeight = ''; el.style.top = ''; el.style.transform = '';
+        }
+      });
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', uxSyncViewport);
+      window.visualViewport.addEventListener('scroll', uxSyncViewport);
+    }
+    ['fl-modal', 'imp-modal'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) new MutationObserver(uxSyncViewport).observe(el, {attributes: true, attributeFilter: ['class']});
+    });
     if (bmUsePlaceBtn) {
       bmUsePlaceBtn.addEventListener('click', function() {
         if (!bmPlaceName) return;
@@ -12128,6 +12295,7 @@ FILTER_JS_TEMPLATE = r"""
       if (!d || typeof d.lat !== 'number' || typeof d.lon !== 'number') return;
       opts = opts || {};
       var peek = !!opts.peek;
+      var source = opts.source || (opts.origin ? uxCaptureSource(opts.origin, d) : null);
 
       // The hit can be anywhere in Japan, possibly far outside the current
       // viewport — the grid-based recompute() only materializes markers
@@ -12152,7 +12320,7 @@ FILTER_JS_TEMPLATE = r"""
         // openSheet repaints the icon — by now the marker is individual
         // (not buried under a child-count badge), so the blue halo +
         // pulse-ring actually render.
-        openSheet(d, {peek: peek});
+        openSheet(d, {peek: peek, source: source});
       }
 
       // We *don't* use cluster.zoomToShowLayer here: its panTo-only branch
@@ -12248,6 +12416,7 @@ FILTER_JS_TEMPLATE = r"""
     }
     function ssGoto(it) {
       ssCloseDropdown();
+      uxShowTab('map');
       ssInput.value = it.name;
       ssWrap.classList.add('has-text');
       ssTitleMode = true;
@@ -12689,6 +12858,95 @@ FILTER_JS_TEMPLATE = r"""
     // flight just queues; the queued run re-snapshots state, so it always
     // uploads the latest. pushQueuedDepth carries the 409-retry depth.
     var pushInFlight = false, pushQueued = false, pushQueuedDepth = 0;
+    var PENDING_WRITE_KEY = 'tabelog.pendingWrite';
+    function readPendingWrite() {
+      try {
+        var p = JSON.parse(localStorage.getItem(PENDING_WRITE_KEY) || 'null');
+        if (!p || typeof p.body !== 'string' || p.body.length > 200000 || !p.base ||
+            typeof p.sub !== 'string' || typeof p.w !== 'string' || !p.w ||
+            !Number.isFinite(p.startedAt) || !Number.isFinite(p.attempts)) return null;
+        var b = JSON.parse(p.body);
+        if (b.w !== p.w || b.baseV !== p.base.v || !Array.isArray(b.favorites) ||
+            !Array.isArray(b.blacklist) || !Array.isArray(b.bookmarks)) return null;
+        return p;
+      } catch (_) { return null; }
+    }
+    var pendingWrite = readPendingWrite();
+    var pendingWriteDurable = !!pendingWrite;
+    var pushLockRequested = false;
+    function refreshPendingWrite() {
+      var disk = readPendingWrite(), local = pendingWrite;
+      if (!disk && local && !pendingWriteDurable) return local;
+      if (!disk && local && pendingWriteDurable) clearSyncWait();
+      if (disk && local && disk.w === local.w && disk.sub === local.sub) {
+        disk.reads = Math.max(disk.reads || 0, local.reads || 0);
+        disk.retryReady = !!local.retryReady && disk.attempts < 2;
+        disk.observed = local.observed;
+        disk.observedReads = local.observedReads;
+      }
+      pendingWrite = disk;
+      pendingWriteDurable = !!disk;
+      return disk;
+    }
+    function localStateSub() {
+      return syncBase.sub || (pendingWrite && pendingWrite.sub) || loadSyncBase().sub || '';
+    }
+    var rejectedContent = '', retryTimer = null, retryAt = 0, retryStep = 0;
+    var waitingForCloud = false;
+    function storePendingWrite(value, expectedWriteId) {
+      var old = pendingWrite;
+      pendingWrite = value;
+      pendingWriteDurable = false;
+      if (!value) {
+        var expected = expectedWriteId || (old && old.w);
+        var clear = function() {
+          var disk = readPendingWrite();
+          if (disk && disk.w !== expected) return;
+          try { localStorage.removeItem(PENDING_WRITE_KEY); } catch (_) {}
+        };
+        if (navigator.locks && navigator.locks.request) {
+          navigator.locks.request(PENDING_WRITE_KEY, clear).catch(function() {});
+        } else clear();
+        return;
+      }
+      try {
+        localStorage.setItem(PENDING_WRITE_KEY, JSON.stringify(value));
+        pendingWriteDurable = true;
+      } catch (_) {}
+    }
+    function contentKey(body) {
+      var d = typeof body === 'string' ? JSON.parse(body) : body;
+      return JSON.stringify([d.favorites || [], d.blacklist || [], d.bookmarks || []]);
+    }
+    function deferSync(response) {
+      var delays = [5000, 15000, 60000];
+      var delay = delays[Math.min(retryStep++, delays.length - 1)];
+      if (response) {
+        var value = response.headers.get('Retry-After');
+        var seconds = value && /^\d+(\.\d+)?$/.test(value) ? Number(value) * 1000 : Date.parse(value || '') - Date.now();
+        if (Number.isFinite(seconds) && seconds > 0) delay = Math.max(delay, Math.min(seconds, 86400000));
+      }
+      delay += Math.floor(Math.random() * Math.min(1000, delay / 10));
+      retryAt = Math.max(retryAt, Date.now() + delay);
+      clearTimeout(retryTimer); retryTimer = null;
+      if (retryStep > 3) return;  // the normal visible-page poll remains available
+      retryTimer = setTimeout(function() {
+        retryTimer = null;
+        if (document.visibilityState === 'visible' && navigator.onLine !== false) pull(true);
+      }, delay);
+    }
+    function clearSyncWait() {
+      waitingForCloud = false; retryAt = 0; retryStep = 0;
+      clearTimeout(retryTimer); retryTimer = null;
+    }
+    function olderRemote(remote) {
+      return syncBase.sub === currentSub() && Number.isFinite(remote.v) && remote.v < syncBase.v;
+    }
+    function waitForCloud(response) {
+      waitingForCloud = true;
+      setStatus('等待云端状态更新，改动保留在本地', 'err');
+      deferSync(response);
+    }
 
     // Flash the filter FAB when there are local changes that haven't
     // landed on the server. Colour depends on whether the user is signed in:
@@ -12982,16 +13240,43 @@ FILTER_JS_TEMPLATE = r"""
     // explanation instead of a red pill with a tooltip nobody can reach.
     var anonToastShown = false;
     var lastDirtySeen = !!dirty;
+    var anonToastTimer = null, anonToastObserver = null;
+    function cancelAnonToast() {
+      clearTimeout(anonToastTimer); anonToastTimer = null;
+      if (anonToastObserver) { anonToastObserver.disconnect(); anonToastObserver = null; }
+      document.removeEventListener('visibilitychange', cancelAnonToast);
+      window.removeEventListener('pagehide', cancelAnonToast);
+    }
     function maybeAnonToast() {
+      if (syncStatus.signedIn || !syncStatus.dirty) { cancelAnonToast(); return; }
       if (anonToastShown || lastDirtySeen) return;
-      if (!syncStatus.dirty || syncStatus.signedIn) return;
       anonToastShown = true;
-      hintSuppressUntil = Date.now() + 6500;
-      showToast(l10nSentence(['已保存在此浏览器', '登录可在其他设备恢复']), {
-        actionLabel: localizeText('登录'),
-        ms: 6000,
-        onAction: function() { try { openAvatarMenu(); } catch (_) {} }
-      });
+      hintSuppressUntil = Date.now() + 16000;
+      function present() {
+        if (syncStatus.signedIn || !syncStatus.dirty || document.visibilityState !== 'visible'
+            || uiStack.some(function(k) { return k !== 'sheet' && k !== 'favdrawer'; })) {
+          cancelAnonToast(); return;
+        }
+        if (stackEl && stackEl.querySelector('.sync-toast')) return;
+        cancelAnonToast();
+        hintSuppressUntil = Date.now() + 6500;
+        showToast(l10nSentence(['已保存在此浏览器', '登录可在其他设备恢复']), {
+          actionLabel: localizeText('登录'), ms: 6000,
+          onAction: function() { try { openAvatarMenu(); } catch (_) {} }
+        });
+      }
+      // Let the explicit save/undo message finish before offering account setup.
+      anonToastTimer = setTimeout(function() {
+        anonToastTimer = null;
+        if (stackEl) {
+          anonToastObserver = new MutationObserver(present);
+          anonToastObserver.observe(stackEl, {childList: true});
+        }
+        anonToastTimer = setTimeout(cancelAnonToast, 15000);
+        present();
+      }, 0);
+      document.addEventListener('visibilitychange', cancelAnonToast);
+      window.addEventListener('pagehide', cancelAnonToast);
     }
 
     // ---- M-089: the FAB's accessible name has to carry the visible count --
@@ -13179,7 +13464,7 @@ FILTER_JS_TEMPLATE = r"""
         // data we still hold.
         function wipe() {
           ['omakase_state_cache_v2', 'tabelog.auth',
-           'tabelog.bookmarks', 'tabelog.syncBase'].forEach(function(k) {
+           'tabelog.bookmarks', 'tabelog.syncBase', 'tabelog.pendingWrite'].forEach(function(k) {
             try { localStorage.removeItem(k); } catch (_) {}
           });
         }
@@ -13285,10 +13570,17 @@ FILTER_JS_TEMPLATE = r"""
       if (!sub || disk.sub !== sub) return false;
       if (syncBase.sub === sub && disk.v <= syncBase.v) return false;
       var base = (syncBase.sub === sub) ? syncBase : emptySyncBase(sub);
-      state.fav   = mergeSets(base.favorites, state.fav,   disk.favorites);
-      state.black = mergeSets(base.blacklist, state.black, disk.blacklist);
-      var bms = mergeBookmarks(base.bookmarks, bookmarks.slice(),
-                               JSON.parse(JSON.stringify(disk.bookmarks)));
+      var merged = {
+        fav: mergeSets(base.favorites, state.fav, disk.favorites),
+        black: mergeSets(base.blacklist, state.black, disk.blacklist),
+        bookmarks: mergeBookmarks(base.bookmarks, bookmarks.slice(),
+                     JSON.parse(JSON.stringify(disk.bookmarks))),
+      };
+      if (pendingWrite && pendingWrite.sub === sub) {
+        applyPostSendEdits(JSON.parse(pendingWrite.body), merged);
+      }
+      state.fav = merged.fav; state.black = merged.black;
+      var bms = merged.bookmarks;
       if (JSON.stringify(bms) !== JSON.stringify(bookmarks)) {
         bookmarks.length = 0;
         bms.forEach(function(b) { bookmarks.push(b); });
@@ -13340,12 +13632,14 @@ FILTER_JS_TEMPLATE = r"""
       // three-way merged (base = syncBase, so a remote delete still wins)
       // and whatever is dirty is re-pushed on top — the 409 path's merge.
       if (pullInFlight || pushInFlight) return;
+      if (Date.now() < retryAt || navigator.onLine === false) return;
       if (!force && Date.now() - lastPullAt < 1000) return;
       pullInFlight = true;
       lastPullAt = Date.now();
       // Snapshot the edit counter: if it moves while the GET is in flight,
       // the response below is stale by definition and gets discarded.
       var genAtStart = stateGen;
+      var subAtStart = currentSub();
       // For the M-042 rollback: what was on screen before the apply.
       var pre = null;
       setStatus('同步中…', 'busy');
@@ -13381,27 +13675,84 @@ FILTER_JS_TEMPLATE = r"""
             return null;
           }
           pullRetriedAfterSilent = false;
+          if (r.status === 429 || r.status === 503) { waitForCloud(r); return null; }
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
         })
         .then(function(remote) {
           if (!remote) return;
+          if (currentSub() !== subAtStart) return;
           // A local edit landed while this GET was in flight — applying the
           // response would revert it on screen. Drop it; the edit's pending
           // push flushes shortly and the next poll re-pulls fresh state.
           if (stateGen !== genAtStart) return;
           if (typeof remote !== 'object' || Array.isArray(remote)) remote = {};
           var sub = currentSub();
+          refreshPendingWrite();
           // M-041: the local data belongs to another account → the cloud
           // copy of the account signed in now replaces it (never a union:
           // that uploaded the previous person's favorites into this one).
-          if (syncBase.sub && syncBase.sub !== sub) {
+          if (localStateSub() && localStateSub() !== sub) {
+            storePendingWrite(null);
             adoptRemoteWholesale(remote);
+            clearSyncWait();
             setStatus('已切换账号，已改用云端数据', 'ok');
             return;
           }
+          adoptDiskSyncBase();
           var remoteV = typeof remote.v === 'number' ? remote.v : 0;
           var remoteW = typeof remote.w === 'string' ? remote.w : '';
+          if (olderRemote(remote)) { waitForCloud(); return; }
+          if (pendingWrite) {
+            var pending = pendingWrite;
+            if (remoteW === pending.w && contentKey(remote) === contentKey(pending.body)) {
+              prevSyncBase = pending.base;
+              syncBase = snapshotRemote(remote);
+              saveSyncBase(syncBase);
+              storePendingWrite(null, pending.w);
+              dirty = !contentMatchesBase();
+              saveCache(state, dirty);
+              clearSyncWait(); afterPullSettled(); return;
+            }
+            if (Number.isFinite(remote.v) && remote.v > pending.base.v) {
+              // The uncertain write may have landed before this later writer.
+              // Keep the original ancestor and the edits made after sending.
+              mergeRemoteIntoLocal(remote, pending.base, JSON.parse(pending.body));
+              syncBase = snapshotRemote(remote); saveSyncBase(syncBase);
+              storePendingWrite(null, pending.w); clearSyncWait();
+              dirty = !contentMatchesBase(); saveCache(state, dirty);
+              afterPullSettled(); return;
+            }
+            pending.reads = (pending.reads || 0) + 1;
+            var concurrentBase = remoteV === pending.base.v && remoteW !== pending.base.w;
+            var legacyRemote = typeof remote.v !== 'number';
+            if (concurrentBase || legacyRemote) {
+              var observation = JSON.stringify([remoteV, remoteW, contentKey(remote)]);
+              pending.observedReads = pending.observed === observation ? (pending.observedReads || 0) + 1 : 1;
+              pending.observed = observation;
+              if (pending.observedReads >= 2 && Date.now() - pending.startedAt >= 20000) {
+                var ancestor = concurrentBase && prevSyncBase && prevSyncBase.sub === sub &&
+                  prevSyncBase.v === remoteV - 1 ? prevSyncBase : emptySyncBase(sub);
+                mergeRemoteIntoLocal(remote, ancestor, JSON.parse(pending.body));
+                syncBase = snapshotRemote(remote); saveSyncBase(syncBase);
+                storePendingWrite(null, pending.w); clearSyncWait();
+                dirty = !contentMatchesBase(); saveCache(state, dirty);
+                afterPullSettled(); return;
+              }
+            } else { pending.observed = ''; pending.observedReads = 0; }
+            // Retry at most once, with exactly the same write id and body, after
+            // several reads of the original base across the KV visibility window.
+            pending.retryReady = !!(navigator.locks && navigator.locks.request) &&
+              pending.attempts < 2 && pending.reads >= 3 &&
+              Date.now() - pending.startedAt >= 75000 && remote.v === pending.base.v &&
+              remoteW === pending.base.w && contentKey(remote) === contentKey(pending.base);
+            // Readback observations stay in memory; an old tab must not write
+            // its old attempts count over another tab's claimed retry.
+            if (pending.retryReady) { clearSyncWait(); push(); }
+            else waitForCloud();
+            return;
+          }
+          clearSyncWait();
           var base = syncBase;
           if (syncBase.sub === sub && remoteV === syncBase.v) {
             if (remoteW === syncBase.w && (remoteW || !dirty)) {
@@ -13478,17 +13829,48 @@ FILTER_JS_TEMPLATE = r"""
     // the merge unions. A missing array on their side means "unknown", not
     // "empty" — treated as unchanged relative to the base, i.e. ours stands.
     // Renders before anything is persisted (M-046).
-    function mergeRemoteIntoLocal(theirs, base) {
+    function mergeRemoteIntoLocal(theirs, base, sent) {
       base = base || syncBase;
-      var fav   = mergeSets(base.favorites, state.fav,
-                            arrOr(theirs.favorites, base.favorites));
-      var black = mergeSets(base.blacklist, state.black,
-                            arrOr(theirs.blacklist, base.blacklist));
-      var bms   = mergeBookmarks(base.bookmarks, bookmarks.slice(),
-                    JSON.parse(JSON.stringify(arrOr(theirs.bookmarks, base.bookmarks))));
-      state.fav = fav; state.black = black;
-      replaceBookmarksArray(bms);
+      var merged = {
+        fav: mergeSets(base.favorites, state.fav, arrOr(theirs.favorites, base.favorites)),
+        black: mergeSets(base.blacklist, state.black, arrOr(theirs.blacklist, base.blacklist)),
+        bookmarks: mergeBookmarks(base.bookmarks, bookmarks.slice(),
+                     JSON.parse(JSON.stringify(arrOr(theirs.bookmarks, base.bookmarks)))),
+      };
+      if (sent) applyPostSendEdits(sent, merged);
+      state.fav = merged.fav; state.black = merged.black;
+      replaceBookmarksArray(merged.bookmarks);
       refreshAllMarkers();
+    }
+    // An uncertain body is not a confirmed ancestor. The normal merge above
+    // keeps its original unsent additions; this overlay keeps later edits,
+    // including canceling an addition that another writer has since seen.
+    function applyPostSendEdits(sent, merged) {
+      function applySet(before, current, out) {
+        var old = new Set(before);
+        old.forEach(function(u) { if (!current.has(u)) out.delete(u); });
+        current.forEach(function(u) { if (!old.has(u)) out.add(u); });
+      }
+      applySet(sent.favorites, state.fav, merged.fav);
+      applySet(sent.blacklist, state.black, merged.black);
+      var before = new Map(), current = new Map(), changed = new Map();
+      sent.bookmarks.forEach(function(b) { if (b && b.id) before.set(b.id, b); });
+      bookmarks.forEach(function(b) {
+        if (!b || !b.id) return; // Legacy id-less entries keep the normal merge rule.
+        current.set(b.id, b);
+        if (!before.has(b.id) || JSON.stringify(before.get(b.id)) !== JSON.stringify(b)) {
+          changed.set(b.id, b);
+        }
+      });
+      merged.bookmarks = merged.bookmarks.filter(function(b) {
+        return !b || !b.id || !before.has(b.id) || current.has(b.id);
+      }).map(function(b) {
+        if (!b || !changed.has(b.id)) return b;
+        var edit = changed.get(b.id);
+        changed.delete(b.id);
+        return edit;
+      });
+      changed.forEach(function(b) { merged.bookmarks.push(b); });
     }
     // M-041: signed into a different account than the local data belongs
     // to → the cloud copy replaces local state outright. The previous
@@ -13536,9 +13918,20 @@ FILTER_JS_TEMPLATE = r"""
         w: w,
       });
     }
-    var BODY_WARN_CHARS = 180000;   // the Worker rejects > 200,000 (M-053)
+    var BODY_WARN_BYTES = 180000, BODY_MAX_BYTES = 200000;
     var flBodyWarnAt = 0;           // last time the size toast was shown
     function push(conflictDepth) {
+      if (!navigator.locks || !navigator.locks.request) { pushLocked(conflictDepth); return; }
+      if (pushLockRequested) return;
+      pushLockRequested = true;
+      // Only the shared-record decision is serialized; network waits never hold
+      // this browser-local lock. It provides no cross-device or KV guarantee.
+      navigator.locks.request(PENDING_WRITE_KEY, function() {
+        pushLocked(conflictDepth);
+      }).catch(function() { waitForCloud(); })
+        .finally(function() { pushLockRequested = false; });
+    }
+    function pushLocked(conflictDepth) {
       conflictDepth = conflictDepth || 0;
       // Local mode (not signed in): nothing to push, but keep dirty=true so
       // the FAB keeps flashing — the whole point is for the user to notice
@@ -13556,6 +13949,10 @@ FILTER_JS_TEMPLATE = r"""
         return;
       }
       var sub = currentSub();
+      refreshPendingWrite();
+      if (localStateSub() && localStateSub() !== sub) { pull(true); return; }
+      if (Date.now() < retryAt || navigator.onLine === false || waitingForCloud) return;
+      if (pendingWrite && !pendingWrite.retryReady) { pull(true); return; }
       // M-041: the base belongs to another account → this device still
       // holds that account's data. Don't upload it; pull() swaps in the
       // cloud copy of the account that is signed in now.
@@ -13572,22 +13969,26 @@ FILTER_JS_TEMPLATE = r"""
       }
       // Nothing the server doesn't already have (another tab uploaded it,
       // or a keepalive flush landed) → don't spend a KV write on it.
-      if (syncBase.v > 0 && contentMatchesBase()) {
+      if (!pendingWrite && syncBase.v > 0 && contentMatchesBase()) {
         dirty = false;
         if (saveCache(state, false)) refreshAllMarkers();
         setStatus('已同步 ' + syncTimeText(), 'ok');   // H11
         updateNeedsSyncIndicator();
         return;
       }
-      pushInFlight = true;
-      setStatus('保存中…', 'busy');
       // Snapshot: if an edit lands while the PUT is in flight, the response
       // must not clear dirty — the queued follow-up push flushes it.
       var genAtPush = stateGen;
-      var w = randomWriteId();
-      var body = buildBody(w);
-      var baseBeforePush = syncBase;
-      if (body.length > BODY_WARN_CHARS) {
+      var w = pendingWrite ? pendingWrite.w : randomWriteId();
+      var body = pendingWrite ? pendingWrite.body : buildBody(w);
+      var baseBeforePush = pendingWrite ? pendingWrite.base : syncBase;
+      var key = contentKey(body), bytes = utf8Bytes(body);
+      if (key === rejectedContent || bytes > BODY_MAX_BYTES) {
+        rejectedContent = key; dirty = true; saveCache(state, true);
+        setStatus('同步数据超过上限，未能保存到云端', 'err');
+        return;
+      }
+      if (bytes > BODY_WARN_BYTES) {
         setStatus('同步数据接近上限，请删减收藏或书签', 'err');
         // M-053 / M-031: the PUT still goes out — behaviour towards the
         // Worker is unchanged — but #sync-status only exists while the
@@ -13600,13 +14001,21 @@ FILTER_JS_TEMPLATE = r"""
                     {ms: 8000});
         }
       }
+      pushInFlight = true;
+      setStatus('保存中…', 'busy');
+      var attempt = pendingWrite || {sub: sub, w: w, body: body,
+        base: JSON.parse(JSON.stringify(baseBeforePush)), startedAt: Date.now(), reads: 0, attempts: 0};
+      attempt.attempts++; attempt.retryReady = false;
+      storePendingWrite(attempt);
       fetchAuthed(API, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: body
       })
         .then(function(r) {
+          if (currentSub() !== sub) return;
           if (r.status === 401) {
+            storePendingWrite(null, w);
             if (pushRetriedAfterSilent) {
               pushRetriedAfterSilent = false;
               setStatus('登录已过期，请重新登录', 'err');
@@ -13632,6 +14041,7 @@ FILTER_JS_TEMPLATE = r"""
             return;
           }
           if (r.status === 409) {
+            storePendingWrite(null, w);
             // Another device wrote since our last pull/push. Merge its blob
             // into local state, rebase, and re-push on top of it via the
             // queue (the .finally below re-invokes immediately). Depth-
@@ -13644,13 +14054,14 @@ FILTER_JS_TEMPLATE = r"""
             }
             return r.json().then(function(theirs) {
               if (!theirs || typeof theirs !== 'object' || Array.isArray(theirs)) theirs = {};
+              if (olderRemote(theirs)) { waitForCloud(); return; }
               // A conflicting blob with no version means the server state
               // was wiped or never written (a real mass-delete from another
               // device would carry v). Merging against our old base would
               // read that as "everything deleted" and drop local data —
               // instead void the base so the merge unions and re-uploads.
               var base = (typeof theirs.v !== 'number') ? emptySyncBase(sub) : syncBase;
-              mergeRemoteIntoLocal(theirs, base);
+              mergeRemoteIntoLocal(theirs, base, JSON.parse(body));
               syncBase = snapshotRemote(theirs);
               saveSyncBase(syncBase);
               saveCache(state, true);   // still dirty until the re-push lands
@@ -13659,11 +14070,16 @@ FILTER_JS_TEMPLATE = r"""
             });
           }
           if (r.status === 413) {
-            // M-053: over the Worker's 200,000-char cap. Nothing to retry
+            storePendingWrite(null, w); rejectedContent = key;
+            // M-053: over the Worker's 200,000-byte cap. Nothing to retry
             // until the user trims; the data stays local and dirty.
             saveCache(state, true);
             setStatus('同步数据超过上限，未能保存到云端', 'err');
             return;
+          }
+          if (r.status === 429 || r.status === 503) {
+            storePendingWrite(null, w); dirty = true; saveCache(state, true);
+            waitForCloud(r); return;
           }
           if (!r.ok) throw new Error('HTTP ' + r.status);
           pushRetriedAfterSilent = false;
@@ -13675,6 +14091,7 @@ FILTER_JS_TEMPLATE = r"""
               var j = JSON.parse(t);
               if (j && typeof j.v === 'number') newV = j.v;
             } catch (_) {}
+            if (newV < syncBase.v) { waitForCloud(); return; }
             var sent = JSON.parse(body);
             prevSyncBase = baseBeforePush;
             syncBase = {
@@ -13686,7 +14103,8 @@ FILTER_JS_TEMPLATE = r"""
               bookmarks: sent.bookmarks || [],
             };
             saveSyncBase(syncBase);
-            dirty = (stateGen !== genAtPush);
+            storePendingWrite(null, w); clearSyncWait(); rejectedContent = '';
+            dirty = (stateGen !== genAtPush) || !contentMatchesBase();
             if (saveCache(state, dirty)) refreshAllMarkers();
             if (!dirty) {
               setStatus('已同步 ' + syncTimeText(), 'ok');   // H11
@@ -13696,12 +14114,13 @@ FILTER_JS_TEMPLATE = r"""
           });
         })
         .catch(function(e) {
+          if (currentSub() !== sub) return;
           // Keep dirty=true (in memory AND in localStorage) on failure so the
           // next pull — or a page refresh — doesn't silently clobber our
           // unsaved change with the stale remote state. Change recovers when
           // a future push succeeds.
-          saveCache(state, true);
-          setStatus('保存失败: ' + e.message + '（已存本地，稍后自动重试）', 'err');
+          dirty = true; saveCache(state, true);
+          waitForCloud();
         })
         .finally(function() {
           pushInFlight = false;
@@ -13736,17 +14155,25 @@ FILTER_JS_TEMPLATE = r"""
     var lastFlushGen = -1;
     function flushOnHide() {
       if (!dirty || pushInFlight || !configured()) return;
+      refreshPendingWrite();
+      if (pendingWrite || waitingForCloud || Date.now() < retryAt) return;
       // pagehide and visibilitychange→hidden both fire on a close; one
       // flush per edit generation is enough.
       if (stateGen === lastFlushGen) return;
       var sub = currentSub();
       if (syncBase.sub && syncBase.sub !== sub) return;   // M-041
       adoptDiskSyncBase();                                // M-001
-      if (syncBase.sub !== sub) syncBase = emptySyncBase(sub);
+      if (syncBase.sub !== sub) {
+        syncBase = emptySyncBase(sub);
+        saveSyncBase(syncBase);
+      }
       var body = buildBody(randomWriteId());
-      var bytes = body.length * 3;
-      try { bytes = new TextEncoder().encode(body).length; } catch (_) {}
+      if (contentKey(body) === rejectedContent) return;
+      var bytes = utf8Bytes(body);
       if (bytes > 60000) return;
+      var sent = JSON.parse(body);
+      storePendingWrite({sub: sub, w: sent.w, body: body,
+        base: JSON.parse(JSON.stringify(syncBase)), startedAt: Date.now(), reads: 0, attempts: 1});
       lastFlushGen = stateGen;
       clearTimeout(pushTimer); pushTimer = null;
       var headers = {'Content-Type': 'application/json'};
@@ -13797,11 +14224,12 @@ FILTER_JS_TEMPLATE = r"""
     // write. Whatever it merged in is uploaded by the tab that made the
     // edit, by the next boot (the disk dirty flag), or by this tab's next
     // own push / poll (afterPullSettled → contentMatchesBase).
-    var WATCHED_KEYS = [CACHE_KEY, BM_KEY, SYNC_BASE_KEY, AUTH_KEY];
+    var WATCHED_KEYS = [CACHE_KEY, BM_KEY, SYNC_BASE_KEY, AUTH_KEY, PENDING_WRITE_KEY];
     var lastSeenSub = currentSub();
     var reconcileTimer = null;
     function reconcile() {
       var changed = false;
+      refreshPendingWrite();
       // Auth changed in another tab (M-124): a sign-out used to drop this
       // tab into local mode silently. A sign-in / switch is picked up by
       // the next pull (its M-041 branch handles a different account).
@@ -14062,7 +14490,7 @@ FILTER_JS_TEMPLATE = r"""
       // 加入收藏, not 收藏: the bare run is the noun (EN "Saved") everywhere
       // else on the page, so the un-saved button used to read "☆ Saved" in
       // English. 加入收藏 is the verb entry (Save / お気に入りに追加).
-      label.textContent = on ? '⭐ 已收藏' : '☆ 加入收藏';
+      label.textContent = on ? ('⭐ ' + localizeText('已收藏')) : ('☆ ' + localizeText('加入收藏'));
     }
     function syncBlackButton(btn, d) {
       var label = btn.querySelector('.ff-black-label');
@@ -14072,7 +14500,7 @@ FILTER_JS_TEMPLATE = r"""
       btn.classList.toggle('rst-on-black', onB);   // M-078
       btn.style.background = '';
       btn.style.borderColor = '';
-      label.textContent = onB ? '✕ 已弃用' : '🚫 弃用';
+      label.textContent = localizeText(onB ? '恢复显示这间店' : '隐藏这间店');
     }
 
     // ===== Bottom-sheet popup =====
@@ -14082,6 +14510,59 @@ FILTER_JS_TEMPLATE = r"""
     var bsBackdrop = document.getElementById('bs-backdrop');
     var bsSheet    = document.getElementById('bs-sheet');
     var bsContent  = document.getElementById('bs-content');
+    var uxDetailBack = document.getElementById('ux-detail-back');
+    var uxDetailActions = document.getElementById('ux-detail-actions');
+    var uxDetailSource = null;
+    var uxDetailSourceHeld = false;
+    function uxCaptureSource(tab, d) {
+      var scroll = tab === 'fav' ? document.getElementById('fv-body') : document.getElementById('wb-list');
+      return {tab: tab, ref: d.detail_url, top: scroll ? scroll.scrollTop : 0,
+              index: wbList ? wbList.activeIdx : -1};
+    }
+    function uxReturnFromDetail() {
+      var source = uxDetailSource;
+      closeSheet(!!source && wbIsPhoneLike());
+      if (!source) { uxShowTab('map'); return; }
+      uxShowTab(source.tab);
+      requestAnimationFrame(function() {
+        if (bsActive || wbTabPref !== source.tab || (wbIsPhoneLike() && !favDrawerOpen())) return;
+        var scroll = document.getElementById(source.tab === 'fav' ? 'fv-body' : 'wb-list');
+        if (scroll) scroll.scrollTop = source.top;
+        if (source.tab === 'results') wbListRender(true);
+        var rows = document.querySelectorAll(source.tab === 'fav' ? '.fv-row' : '#wb-list .wb-row');
+        for (var i = 0; i < rows.length; i++) {
+          var ref = source.tab === 'fav' ? rows[i].getAttribute('data-fav-ref')
+            : (wbResultsSorted[Number(rows[i].getAttribute('data-i'))] || {}).detail_url;
+          if (ref === source.ref) { rows[i].focus({preventScroll: true}); break; }
+        }
+      });
+    }
+    if (uxDetailBack) uxDetailBack.addEventListener('click', uxReturnFromDetail);
+    function uxPaintDetailActions(d) {
+      if (!uxDetailActions) return;
+      uxDetailActions.innerHTML = '';
+      var save = bsContent.querySelector('.ff-fav-btn');
+      if (!save) {
+        save = document.createElement('button');
+        save.type = 'button'; save.className = 'ff-fav-btn rst-btn';
+        save.setAttribute('data-url', d.detail_url);
+        save.innerHTML = '<span class="ff-fav-label"></span>';
+      }
+      uxDetailActions.appendChild(save);
+      syncFavButton(save, d);
+      var maps = bsContent.querySelector('a.rst-gmaps');
+      if (!maps) {
+        maps = document.createElement('a'); maps.className = 'rst-gmaps';
+        maps.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d.lat + ',' + d.lon)
+          + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
+        maps.target = '_blank'; maps.rel = 'noopener';
+      }
+      maps.textContent = localizeText('地图导航');
+      maps.setAttribute('aria-label', localizeText('地图导航'));
+      uxDetailActions.appendChild(maps);
+      if (uxDetailBack) uxDetailBack.textContent = localizeText(!uxDetailSource ? '返回地图'
+        : uxDetailSource.tab === 'fav' ? '返回我的收藏' : '返回结果');
+    }
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
 
@@ -14352,7 +14833,8 @@ FILTER_JS_TEMPLATE = r"""
       var attrH = h;
       if (!fabStackEl) fabStackEl = document.querySelector('.map-fab-stack');
       if (h && fabStackEl) {
-        var maxLift = window.innerHeight - fabStackEl.offsetHeight - 26;
+        var navHeight = wbIsPhoneLike() ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-nav-measured')) || 56 : 0;
+        var maxLift = window.innerHeight - fabStackEl.offsetHeight - navHeight - 26;
         if (maxLift < 0) maxLift = 0;
         if (h > maxLift) h = maxLift;
       }
@@ -14416,6 +14898,20 @@ FILTER_JS_TEMPLATE = r"""
 
     function openSheet(d, opts) {
       var peek = !!(opts && opts.peek);
+      var source = opts && opts.source || (uxDetailSourceHeld ? uxDetailSource : null);
+      // Insert a newly selected list source below an already open map card.
+      if (bsActive && source && !uxDetailSourceHeld) closeSheet();
+      if (!bsActive) {
+        var opener = document.activeElement;
+        bsOpener = opener && opener !== document.body && !bsOwnsFocus(opener) ? opener : null;
+      }
+      uxDetailSource = source;
+      if (favDrawerOpen()) closeFavDrawer(false, !!source);
+      if (source && !uxDetailSourceHeld) {
+        // Keep the source entry even on desktop: a resize may return on a phone.
+        uiPush('favdrawer');
+        uxDetailSourceHeld = true;
+      }
       setHighlight(d);
       // Mutual exclusion with the filter sheet — both dock to the bottom.
       // M-027: routed through closeFilterUI so the mid/wide popover host is
@@ -14424,6 +14920,8 @@ FILTER_JS_TEMPLATE = r"""
       if (ffIsOpen()) closeFilterUI();
       bsSetPeek(peek);
       bsActive = d;
+      bsSetInteractive(true);
+      document.body.classList.add('ux-detail-open');
       // M-027: the column layouts have no peek and no bottom slot — the card
       // opens full height in #wb-detail, and on mid the left column collapses
       // to the 58px rail so the map keeps ~420px.
@@ -14454,6 +14952,7 @@ FILTER_JS_TEMPLATE = r"""
         // the popups.json fetch was in flight.
         if (bsActive !== d) return;
         bsContent.innerHTML = html;
+        uxPaintDetailActions(d);
         bindCardExtras(d);   // D4 / H2: ↑↓ stepper, aria-label, focus origin
         var favBtn   = bsContent.querySelector('.ff-fav-btn');
         var blackBtn = bsContent.querySelector('.ff-black-btn');
@@ -14493,8 +14992,12 @@ FILTER_JS_TEMPLATE = r"""
       scheduleKeepSelectionVisible();   // M-014
       syncSheetOffset();                // M-071
       uiPush('sheet');                  // M-015
+      uxSyncNav();
     }
-    function closeSheet() {
+    function closeSheet(keepSource) {
+      var restoreFocus = bsOwnsFocus(document.activeElement);
+      var heldSource = uxDetailSourceHeld;
+      uxDetailSourceHeld = false;
       // W-8 (2.3.0): on a phone the card covers most of the map, so by the
       // time it closes the user has usually lost track of which pin they
       // were reading about — and the sheet-offset logic may have nudged the
@@ -14518,9 +15021,15 @@ FILTER_JS_TEMPLATE = r"""
       // call resets the class explicitly via bsSetPeek(peek).
       bsBackdrop.classList.remove('bs-open');
       bsSheet.setAttribute('aria-hidden', 'true');
+      if (restoreFocus) bsRestoreFocus();
+      bsSetInteractive(false);
       bsActive = null;
+      document.body.classList.remove('ux-detail-open');
+      uxDetailSource = null;
+      uxSyncNav();
       syncSheetOffset();                // M-071: let the FABs drop back
       uiDrop('sheet');                  // M-015
+      if (heldSource && keepSource !== true) uiDrop('favdrawer');
       // Release the search-nav pin so the next pan can reap the marker.
       pinnedRow = null;
       clearHighlight();
@@ -14565,7 +15074,7 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('click', function(e) {
       if (e.target.closest('.rst-close')) closeSheet();
     });
-    uiRegister('sheet', closeSheet);   // M-015: Android back closes the card
+    uiRegister('sheet', uxReturnFromDetail);
     function expandSheet() {
       if (wbDetailMode()) return;       // M-027: no peek state to expand
       if (bsSheet.classList.contains('bs-peek')) {
@@ -14585,7 +15094,7 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('keydown', function(e){
       // W-8: one stage everywhere — Escape closes the card.
       if (e.key !== 'Escape' || !bsActive) return;
-      closeSheet();
+      uxReturnFromDetail();
     });
 
     // Grip drag handler. Downward swipe always dismisses the sheet (80px or
@@ -14813,6 +15322,11 @@ FILTER_JS_TEMPLATE = r"""
       for (var i = 0; i < nodes.length; i++) {
         if (nodes[i].textContent !== s) nodes[i].textContent = s;
       }
+      if (cls === 'ff-count') {
+        var done = document.getElementById('ux-filter-results');
+        if (done) done.textContent = localizeText('查看') + ' ' + n + ' ' + localizeText('家结果');
+        uxPaintContext();
+      }
       // P4: no longer per-number. recompute() calls renderCountSentence()
       // once, after both numbers and the empty state are settled.
     }
@@ -14850,10 +15364,12 @@ FILTER_JS_TEMPLATE = r"""
     // the drop by a tick lets the replacement keep the same entry instead of
     // burning a back()/pushState pair on every swap.
     var uiPopupN = 0;
-    map.on('popupopen',  function() { uiPopupN++; uiPush('popup'); });
+    map.on('popupopen',  function() { uiPopupN++; uiPush('popup'); document.body.classList.add('ux-map-popup'); });
     map.on('popupclose', function() {
       uiPopupN = Math.max(0, uiPopupN - 1);
-      setTimeout(function() { if (uiPopupN === 0) uiDrop('popup'); }, 0);
+      setTimeout(function() {
+        if (uiPopupN === 0) { uiDrop('popup'); document.body.classList.remove('ux-map-popup'); }
+      }, 0);
     });
     uiRegister('popup', function() { map.closePopup(); });
 
@@ -14897,7 +15413,7 @@ FILTER_JS_TEMPLATE = r"""
       var on = isFavClick ? isFav(d) : isBlack(d);
       var msg = isFavClick
         ? (on ? '已加入收藏' : '已取消收藏')
-        : (on ? '已加入弃用名单' : '已移出弃用名单');
+        : (on ? '已从找店结果隐藏，收藏保留' : '已恢复显示这间店');
       // #sync-stack is not one of the observed containers, so the toast text
       // is localized here rather than by the MutationObserver. showToast
       // already routes it through announce() (aria-live).
@@ -15578,7 +16094,9 @@ FILTER_JS_TEMPLATE = r"""
                           tab: (wbTabPref === 'fav' || wbTabPref === 'filter')
                                  ? wbTabPref : 'results',
                           leftCollapsed:
-                            document.body.classList.contains('wb-left-collapsed')}));
+                            document.body.classList.contains('wb-left-collapsed'),
+                          planningContext: uxPlanning || null,
+                          nearbyActive: !!uxNearbyActive}));
       } catch (_) {}
     }
     wbLoadListView();
@@ -15692,6 +16210,10 @@ FILTER_JS_TEMPLATE = r"""
       }
       var l2 = '';
       if (price) l2 += '<span class="wb-row-pr">' + escAttr(price) + '</span>';
+      if (wbList.sort === 'distance' && typeof d._wbD === 'number' && isFinite(d._wbD)) {
+        l2 += '<span class="wb-row-sep" aria-hidden="true">·</span><span class="ux-distance">'
+          + (d._wbD < 1000 ? Math.round(d._wbD) + ' m' : (d._wbD / 1000).toFixed(1) + ' km') + '</span>';
+      }
       if (d.st) {
         if (l2) l2 += '<span class="wb-row-sep" aria-hidden="true">·</span>';
         l2 += '<span lang="ja">' + escAttr(d.st) + '</span>';
@@ -15705,9 +16227,8 @@ FILTER_JS_TEMPLATE = r"""
         }
       }
       l3 += d.bookable
-        ? '<span class="wb-row-net">✓ ' + escAttr(wbT('可网订')) + '</span>'
-        : '<span class="wb-row-net off">' + escAttr(wbT('仅电话')) + ' / ' +
-          escAttr(wbT('到店')) + '</span>';
+        ? '<span class="wb-row-net">✓ ' + escAttr(wbT('有网上预约入口')) + '</span>'
+        : '<span class="wb-row-net off">' + escAttr(wbT('未检测到网订入口')) + '</span>';
 
       return '<button type="button" class="' + cls + '" role="option"' +
         ' tabindex="-1" id="wb-row-' + i + '" data-i="' + i +
@@ -16085,6 +16606,7 @@ FILTER_JS_TEMPLATE = r"""
         wbList.activeIdx = -1;
         wbEls.list.scrollTop = 0;
         wbScheduleSort();
+        uxPaintContext();
       });
       wbEls.selectBtn.addEventListener('click', function() {
         wbSetSelect(!wbList.select);
@@ -16127,7 +16649,7 @@ FILTER_JS_TEMPLATE = r"""
         }
         if (wbList.select) { wbToggleCheck(d, i); return; }
         wbSetActive(i, false);
-        gotoRestaurant(d);   // W-5: fly to it, then open the card
+        gotoRestaurant(d, {origin: 'results'});
       });
       listEl.addEventListener('mouseover', function(ev) {
         var row = ev.target.closest ? ev.target.closest('.wb-row') : null;
@@ -16161,7 +16683,7 @@ FILTER_JS_TEMPLATE = r"""
           var d = wbResultsSorted[wbList.activeIdx];
           if (!d) return;
           ev.preventDefault();
-          gotoRestaurant(d);   // W-5: same landing as a row click
+          gotoRestaurant(d, {origin: 'results'});
         } else if (k === ' ' || k === 'Spacebar') {
           if (!wbList.select) return;
           ev.preventDefault();
@@ -16788,6 +17310,7 @@ FILTER_JS_TEMPLATE = r"""
       var onFav  = (cur === 'fav');
       var onFilt = (cur === 'filter');
       var onRes  = !onFav && !onFilt;
+      document.body.classList.toggle('ux-filter-open', onFilt);
       for (var t = 0; t < WB_TABS.length; t++) {
         var b = document.getElementById(WB_TABS[t].btn);
         if (!b) continue;
@@ -16806,6 +17329,9 @@ FILTER_JS_TEMPLATE = r"""
       if (fhost) fhost.classList.toggle('on', onFilt);
       var fhead = document.getElementById('wb-left-head');
       if (fhead) fhead.classList.toggle('wb-head-filter', onFilt);
+      if (fhead) fhead.classList.toggle('ux-head-fav', onFav);
+      var done = document.getElementById('ux-filter-done');
+      if (done) done.classList.toggle('on', onFilt);
       favCloseMenu();
       if (onFav) favRender();
       else if (onRes) wbListRender(true);   // the window was measured hidden
@@ -16818,6 +17344,7 @@ FILTER_JS_TEMPLATE = r"""
       wbTabPref = wbNormTab(tab);
       wbSaveListView();              // rides in tabelog.listView, no new key
       favApplyTab();
+      uxSyncNav();
     }
     window.__wbSetTab = wbSetTab;
     (function() {
@@ -16958,13 +17485,14 @@ FILTER_JS_TEMPLATE = r"""
         if (favSelect) { favToggleCheck(ref, rowEl); return; }
         if (kind === 'rst') {
           var d = rowByUrl[ref];
-          if (d) gotoRestaurant(d);   // W-5
+          if (d) gotoRestaurant(d, {origin: 'fav'});
           return;
         }
         // Landmarks and pins are not in the cluster, so there is no card to
         // open — fly to them instead.
         var info = favRefInfo(ref);
         if (info && info.bm && typeof info.bm.lat === 'number') {
+          uxShowTab('map');
           map.flyTo([info.bm.lat, info.bm.lon],
                     Math.max(map.getZoom(), MARKER_MIN_ZOOM));   // W-5: was a bare 15
         }
@@ -17184,7 +17712,11 @@ FILTER_JS_TEMPLATE = r"""
     // consistent with what the filter is about to show.
     if (regionSel) {
       regionSel.addEventListener('change', function() {
+        uxNearbyActive = false;
+        uxLocationNote = '';
         apply();
+        uxPaintContext();
+        wbSaveListView();
         var i = filterState.region;
         if (i == null) return;
         var bb = prefBBox(i);
@@ -17493,6 +18025,9 @@ FILTER_JS_TEMPLATE = r"""
       wbMove(document.getElementById('ff-sheet-content'),
              document.getElementById('wb-filter-host') || (col ? wbFilterPop : ffSheet));
       wbMove(bsContent, col ? wbDetailBody : bsSheet);
+      var detailHome = col ? wbDetailBody : bsSheet;
+      if (uxDetailBack && bsContent.parentNode === detailHome) detailHome.insertBefore(uxDetailBack, bsContent);
+      wbMove(uxDetailActions, detailHome);
       wbMove(document.getElementById('ss-box'),
              col ? wbTopSearch : document.body);
       var ssTopEl = document.getElementById('ss-top');
@@ -17838,6 +18373,135 @@ FILTER_JS_TEMPLATE = r"""
     var wbFavGrip     = null;
     var wbFavTrapRelease = null;
     var wbUserLoc = null;       // {lat, lng} once #fab-locate produced a fix
+    var uxPlanning = null, uxRequestedPlan = null;
+    var uxNearbyActive = false, uxNearbyPending = false, uxLocationNote = '';
+    var uxNearbyTimer = null;
+    function uxSyncNav() {
+      var current = favDrawerOpen() ? wbTabPref : 'map';
+      document.querySelectorAll('#phone-nav [data-ux-tab]').forEach(function(button) {
+        if (button.getAttribute('data-ux-tab') === current) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+      });
+    }
+    function uxShowTab(tab) {
+      if (bsActive) closeSheet();
+      if (tab === 'map') { closeFavDrawer(); uxSyncNav(); return; }
+      if (wbIsPhoneLike()) openFavDrawer();
+      else if (wbLeftCollapsed()) {
+        document.body.classList.remove('wb-left-collapsed');
+        wbSyncVars();
+      }
+      wbSetTab(tab);
+    }
+    function uxPaintContext() {
+      var region = document.getElementById('ux-region');
+      var note = document.getElementById('ux-context-note');
+      var restore = document.getElementById('ux-restore-plan');
+      var near = document.getElementById('ux-nearby');
+      if (region) region.textContent = localizeText('选地区') + ' · '
+        + (filterState && filterState.region != null ? prefName(filterState.region) : localizeText('全部地区'));
+      if (restore) restore.hidden = !uxPlanning;
+      if (near) {
+        near.disabled = !!uxNearbyPending;
+        near.textContent = localizeText(uxNearbyPending ? '正在定位…' : '找附近');
+      }
+      if (note) {
+        note.textContent = uxLocationNote ? localizeText(uxLocationNote)
+          : !uxNearbyActive ? ''
+          : wbList.sort === 'distance' ? localizeText(wbUserLoc && wbUserLoc.fromCache
+            ? '按上次定位的直线距离排序，可重试找附近更新位置'
+            : '全部地区按直线距离排序，不限半径；保留其他筛选条件')
+          : localizeText('全部地区') + ' · ' + localizeText('排序') + '：' + wbSortLabel(wbList.sort);
+        if (uxNearbyActive && wbUserLoc && wbUserLoc.ts) note.textContent += ' · '
+          + localizeText('定位时间') + ' ' + new Date(wbUserLoc.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+      }
+    }
+    function uxLocationFailed() {
+      clearTimeout(uxNearbyTimer);
+      uxNearbyPending = false; uxRequestedPlan = null;
+      uxLocationNote = '未能取得位置，原地区与筛选已保留。可选地区或重试找附近';
+      uxPaintContext();
+      showToast(localizeText(uxLocationNote), {ms: 6000, actionLabel: localizeText('选地区'),
+        onAction: function() { openFilterUI({focus: '#ff-region'}); }});
+    }
+    function uxFindNearby() {
+      if (uxNearbyPending) return;
+      if (!window.confirm(localizeText('将按当前位置查找，切换为全部地区并按直线距离排序；保留其他筛选条件，可随时返回原地区规划。'))) return;
+      if (!locateCtl && !attachLocate()) { uxLocationFailed(); return; }
+      map.stop();
+      uxRequestedPlan = uxPlanning || {region: filterState.region, sort: wbList.sort,
+        center: [map.getCenter().lat, map.getCenter().lng], zoom: map.getZoom()};
+      uxNearbyPending = true; uxLocationNote = '';
+      uxPaintContext();
+      clearTimeout(uxNearbyTimer);
+      uxNearbyTimer = setTimeout(function() {
+        if (!uxNearbyPending) return;
+        if (locateCtl) locateCtl.stop();
+        uxLocationFailed();
+      }, 18000);
+      locateCtl.stop();
+      locateCtl.start();
+    }
+    function uxRestorePlanning() {
+      if (!uxPlanning) return;
+      var previous = uxPlanning;
+      uxPlanning = null; uxNearbyActive = false; uxNearbyPending = false; uxLocationNote = '';
+      clearTimeout(uxNearbyTimer);
+      if (locateCtl) locateCtl.stop();
+      map.stop();
+      regionSel.value = previous.region == null ? '' : String(previous.region);
+      wbList.sort = previous.sort;
+      if (wbEls && wbEls.sort) wbEls.sort.value = previous.sort;
+      apply(); wbScheduleSort(); wbSaveListView();
+      uxShowTab('results');
+      map.setView(previous.center, previous.zoom, {animate: false});
+      uxPaintContext();
+    }
+    // The return route outlives a toast and survives a page reload in the existing preference key.
+    try {
+      var uxStored = JSON.parse(localStorage.getItem(WB_LIST_KEY) || '{}');
+      var uxPlan = uxStored.planningContext;
+      if (uxPlan && (uxPlan.region == null || (Number.isInteger(uxPlan.region) && uxPlan.region >= 0 && uxPlan.region <= 46))
+          && WB_SORTS.indexOf(uxPlan.sort) >= 0 && Array.isArray(uxPlan.center)
+          && uxPlan.center.length === 2 && uxPlan.center.every(function(n) { return typeof n === 'number' && isFinite(n); })
+          && Math.abs(uxPlan.center[0]) <= 90 && Math.abs(uxPlan.center[1]) <= 180
+          && typeof uxPlan.zoom === 'number' && uxPlan.zoom >= 0 && uxPlan.zoom <= 22) {
+        uxPlanning = uxPlan;
+        uxNearbyActive = uxStored.nearbyActive === true;
+        if (uxNearbyActive) {
+          var uxFix = JSON.parse(localStorage.getItem(LAST_LOC_KEY) || '{}');
+          if (typeof uxFix.lat === 'number' && isFinite(uxFix.lat) && Math.abs(uxFix.lat) <= 90
+              && typeof uxFix.lon === 'number' && isFinite(uxFix.lon) && Math.abs(uxFix.lon) <= 180)
+            wbUserLoc = {lat: uxFix.lat, lng: uxFix.lon, fromCache: true,
+              ts: typeof uxFix.ts === 'number' && isFinite(uxFix.ts) ? uxFix.ts : null};
+          else uxNearbyActive = false;
+        }
+      }
+    } catch (_) {}
+    document.querySelectorAll('#phone-nav [data-ux-tab]').forEach(function(button) {
+      button.addEventListener('click', function() { uxShowTab(button.getAttribute('data-ux-tab')); });
+    });
+    document.getElementById('ux-region').addEventListener('click', function() { openFilterUI({focus: '#ff-region'}); });
+    document.getElementById('ux-nearby').addEventListener('click', uxFindNearby);
+    document.getElementById('ux-restore-plan').addEventListener('click', uxRestorePlanning);
+    document.getElementById('ux-filter-results').addEventListener('click', function() { uxShowTab('results'); });
+    if (window.ResizeObserver) new ResizeObserver(function(entries) {
+      document.documentElement.style.setProperty('--ux-context-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
+    }).observe(document.getElementById('ux-context'));
+    if (window.ResizeObserver) {
+      new ResizeObserver(function(entries) {
+        var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
+        if (height > 0) document.documentElement.style.setProperty('--ux-filter-done-h', height + 'px');
+      }).observe(document.getElementById('ux-filter-done'));
+      new ResizeObserver(function(entries) {
+        var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
+        if (height > 0) document.documentElement.style.setProperty('--phone-nav-measured', height + 'px');
+      }).observe(document.getElementById('phone-nav'));
+      new ResizeObserver(function(entries) {
+        document.documentElement.style.setProperty('--ux-actions-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
+      }).observe(uxDetailActions);
+    }
+    uxPaintContext();
 
     // ---- distance sort (F1): map centre until the user locates -----------
     function wbDistOptShown() {
@@ -17859,9 +18523,26 @@ FILTER_JS_TEMPLATE = r"""
     try {
       map.on('locationfound', function(e) {
         if (!e || !e.latlng) return;
-        wbUserLoc = {lat: e.latlng.lat, lng: e.latlng.lng};
+        wbUserLoc = {lat: e.latlng.lat, lng: e.latlng.lng, ts: Date.now()};
+        uxLocationNote = '';
+        if (uxNearbyPending) {
+          clearTimeout(uxNearbyTimer);
+          uxNearbyPending = false;
+          uxNearbyActive = true;
+          uxPlanning = uxRequestedPlan;
+          uxRequestedPlan = null;
+          uxLocationNote = '';
+          regionSel.value = '';
+          wbList.sort = 'distance';
+          if (wbEls && wbEls.sort) wbEls.sort.value = 'distance';
+          apply();
+          uxShowTab('results');
+          wbSaveListView();
+          uxPaintContext();
+        }
         wbSyncDistanceOpt();
         if (wbList.sort === 'distance') wbScheduleSort();
+        uxPaintContext();
       });
     } catch (_) {}
 
@@ -17930,11 +18611,14 @@ FILTER_JS_TEMPLATE = r"""
           a0.blur();
         }
       } catch (_) {}
-      wbFavTrapRelease = trapFocus(wbLeftEl, null, wbFavFab);
+      // These are application pages; the bottom navigation and search stay usable.
+      wbLeftEl.removeAttribute('aria-modal');
+      wbFavTrapRelease = focusInto(wbLeftEl, null, document.querySelector('#phone-nav [aria-current="page"]'));
+      uxSyncNav();
     }
     // `silent` is set only when the caller is already inside a wb:mode
     // dispatch — re-entering the same event would loop.
-    function closeFavDrawer(silent) {
+    function closeFavDrawer(silent, keepHistory) {
       if (!favDrawerOpen()) return;
       // Class off first: the trap hands focus back to the ≡, which sits
       // inside #ss-box — inert for as long as `wb-fav-open` is on <body>.
@@ -17950,7 +18634,8 @@ FILTER_JS_TEMPLATE = r"""
       wbFavTrapRelease = null;
       if (r) { try { r(); } catch (_) {} }
       if (!silent) wbFavNotifyMode();
-      uiDrop('favdrawer');                        // M-015
+      if (!keepHistory) uiDrop('favdrawer');       // M-015
+      uxSyncNav();
       // H2: trapFocus() hands focus back to whatever was active when the
       // drawer opened, and that is not always the pill — open the drawer
       // straight out of the filter sheet and activeElement is still a node
@@ -18161,8 +18846,15 @@ FILTER_JS_TEMPLATE = r"""
       })();
     }
     function fallbackSilentGIS(cb) {
-      cb = cb || function(){};
+      var caller = cb || function(){};
+      var settled = false;
+      var timer = setTimeout(function() { cb(false); }, 30000);
+      cb = function(ok) {
+        if (settled) return;
+        settled = true; clearTimeout(timer); caller(ok);
+      };
       whenGIS(function() {
+        if (settled) return;
         silentReAuth(function(ok) {
           if (ok) {
             refreshAuthUI();
@@ -18184,12 +18876,16 @@ FILTER_JS_TEMPLATE = r"""
     //      directly. No One Tap UI either.
     //   3) Last resort: GIS silent One Tap, then exchange the resulting
     //      credential for a fresh cookie.
+    var restoreInFlight = false, restorePending = false, restoreLastAt = 0;
     function tryRestoreSession(cb) {
-      cb = cb || function(){};
+      var caller = cb || function(){};
+      if (restoreInFlight) { caller(false); return; }
+      restoreInFlight = true; restorePending = false; restoreLastAt = Date.now();
+      cb = function(ok) { restoreInFlight = false; caller(ok); };
       var raw = loadAuth();
       if (!raw.sub && !raw.id_token) { cb(false); return; }
 
-      tryMe(function(ok) {
+      tryMe(function(ok, reason) {
         if (ok) {
           refreshAuthUI();
           // Only sync from here when startSync couldn't (stale local exp
@@ -18199,13 +18895,20 @@ FILTER_JS_TEMPLATE = r"""
           cb(true);
           return;
         }
+        if (reason === 'network') {
+          restorePending = true;
+          setStatus('网络暂不可用，登录状态保留，联网后重试', 'err');
+          cb(false); return;
+        }
         if (raw.id_token && raw.exp && Date.now() < raw.exp - 60000) {
-          exchangeForSession(raw.id_token, function(ok2, p) {
+          exchangeForSession(raw.id_token, function(ok2, p, failure) {
             if (ok2 && p) {
               saveSessionProfile(p);
               refreshAuthUI();
               if (!bootSyncedAuthed) { if (dirty) push(); else pull(); }
               cb(true);
+            } else if (failure === 'network') {
+              restorePending = true; cb(false);
             } else {
               fallbackSilentGIS(cb);
             }
@@ -18215,6 +18918,12 @@ FILTER_JS_TEMPLATE = r"""
         fallbackSilentGIS(cb);
       });
     }
+    function resumeSessionRestore() {
+      if (restorePending && !restoreInFlight && navigator.onLine !== false &&
+          document.visibilityState === 'visible' && Date.now() - restoreLastAt >= 1000) tryRestoreSession();
+    }
+    window.addEventListener('online', resumeSessionRestore);
+    document.addEventListener('visibilitychange', resumeSessionRestore);
 
     // Boot-time restore — fires immediately, no GIS wait, because the
     // common path is just an /api/me probe. Only the fall-through to
@@ -18423,6 +19132,27 @@ FILTER_JS_TEMPLATE = r"""
     }
     function downloadBackup() {
       var text = JSON.stringify(backupBlob(), null, 2);
+      var n = window.Native;
+      if (location.origin === 'https://jpfoodmap.com' && n && typeof n.exportJson === 'function' &&
+          utf8Bytes(text) <= BACKUP_MAX_BYTES) {
+        try {
+          Promise.resolve(n.exportJson('favorites.json', text)).then(function(result) {
+            if (result && result.status === 'saved') {
+              showToast(localizeText('备份文件已保存'), {ms: 4000}); return;
+            }
+            if (result && result.status === 'cancelled') return;
+            showToast(localizeText('保存文件失败，正在尝试浏览器下载'), {ms: 6000});
+            downloadBackupText(text);
+          }).catch(function() {
+            showToast(localizeText('保存文件失败，正在尝试浏览器下载'), {ms: 6000});
+            downloadBackupText(text);
+          });
+          return;
+        } catch (_) {}
+      }
+      downloadBackupText(text);
+    }
+    function downloadBackupText(text) {
       var blob = new Blob([text], {type: 'application/json'});
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
@@ -18441,29 +19171,61 @@ FILTER_JS_TEMPLATE = r"""
     // Accept either a string URL or an object carrying one — older/manual
     // exports might store favorites as {url|detail_url, name}.
     function pickUrl(x) {
-      if (typeof x === 'string') return x;
-      if (x && typeof x === 'object') return x.url || x.detail_url || '';
-      return '';
+      if (x && typeof x === 'object' && !Array.isArray(x)) {
+        if ((x.url != null && typeof x.url !== 'string') ||
+            (x.detail_url != null && typeof x.detail_url !== 'string')) return '';
+        x = x.url || x.detail_url || '';
+      }
+      if (typeof x !== 'string') return '';
+      var value = x.trim();
+      if (!/^https?:\/\//i.test(value) || /[\s\\]/.test(value)) return '';
+      try {
+        var url = new URL(value);
+        if (!url.hostname || (url.protocol !== 'https:' && url.protocol !== 'http:')) return '';
+        return value.replace(/^https?:/i, url.protocol);
+      } catch (_) { return ''; }
+    }
+    var BACKUP_MAX_BYTES = 2 * 1024 * 1024;
+    function validImportBookmark(b) {
+      if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.id !== 'string' || !b.id) return false;
+      var strings = ['name', 'name_src', 'name_sc', 'name_tc', 'name_jp', 'name_en',
+        'emoji', 'category', 'kind', 'list', 'ref', 'url', 'detail_url', 'note', 'address'];
+      if (strings.some(function(k) { return b[k] != null && typeof b[k] !== 'string'; })) return false;
+      if (b.created != null && typeof b.created !== 'string' && !Number.isFinite(b.created)) return false;
+      if (b.lat != null && (!Number.isFinite(b.lat) || Math.abs(b.lat) > 90)) return false;
+      if (b.lon != null && (!Number.isFinite(b.lon) || Math.abs(b.lon) > 180)) return false;
+      if (b.category === 'hidden') return b.id.indexOf('fb-') === 0;
+      if (b.category === 'meta') {
+        if (b.kind === 'list') return b.id.indexOf('list:') === 0 && typeof b.name === 'string';
+        if (b.kind === 'member') return typeof b.list === 'string' && b.list.indexOf('list:') === 0 &&
+          typeof b.ref === 'string' && !!b.ref;
+        return typeof b.kind === 'string' && !!b.kind;  // future metadata stays intact
+      }
+      return Number.isFinite(b.lat) && Number.isFinite(b.lon);
     }
     // Normalize an arbitrary parsed file into {favorites:[url], blacklist:[url],
     // bookmarks:[obj]}. Tolerates a bare array (treated as favorites) and the
     // legacy {fav, black} cache shape. Returns null if nothing usable.
     function normalizeImport(parsed) {
-      if (Array.isArray(parsed)) {
-        return {favorites: parsed.map(pickUrl).filter(Boolean), blacklist: [], bookmarks: []};
-      }
-      if (!parsed || typeof parsed !== 'object') return null;
-      var favSrc   = parsed.favorites || parsed.fav   || [];
-      var blackSrc = parsed.blacklist || parsed.black || [];
-      var bmSrc    = parsed.bookmarks || [];
-      if (!Array.isArray(favSrc) && !Array.isArray(blackSrc) && !Array.isArray(bmSrc)) return null;
-      return {
-        favorites: (Array.isArray(favSrc)   ? favSrc   : []).map(pickUrl).filter(Boolean),
-        blacklist: (Array.isArray(blackSrc) ? blackSrc : []).map(pickUrl).filter(Boolean),
-        bookmarks: (Array.isArray(bmSrc)    ? bmSrc    : []).filter(function(b) {
-          return b && typeof b === 'object';
-        })
-      };
+      try {
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (utf8Bytes(JSON.stringify(parsed)) > BACKUP_MAX_BYTES) return null;
+        if (Array.isArray(parsed)) parsed = {favorites: parsed};
+        var keys = ['favorites', 'fav', 'blacklist', 'black', 'bookmarks'];
+        if (!keys.some(function(k) { return Object.prototype.hasOwnProperty.call(parsed, k); })) return null;
+        if (keys.some(function(k) { return k in parsed && !Array.isArray(parsed[k]); })) return null;
+        var favSrc = parsed.favorites || parsed.fav || [];
+        var blackSrc = parsed.blacklist || parsed.black || [];
+        var bmSrc = parsed.bookmarks || [];
+        var fav = favSrc.map(pickUrl), black = blackSrc.map(pickUrl);
+        if (fav.some(function(u) { return !u.trim(); }) || black.some(function(u) { return !u.trim(); }) ||
+            !bmSrc.every(validImportBookmark)) return null;
+        var norm = JSON.parse(JSON.stringify(parsed));
+        norm.favorites = fav; norm.blacklist = black;
+        norm.bookmarks = JSON.parse(JSON.stringify(bmSrc));
+        norm.bookmarks.forEach(sanitizeBookmarkEmoji);
+        return norm;
+      } catch (_) { return null; }
     }
 
     var impBackdrop = document.getElementById('imp-backdrop');
@@ -18525,7 +19287,13 @@ FILTER_JS_TEMPLATE = r"""
     uiRegister('import', closeImportModal);   // M-015
 
     document.getElementById('ssm-import').addEventListener('click', function() {
-      impFile.click();
+      var n = window.Native;
+      if (location.origin === 'https://jpfoodmap.com' && n && typeof n.prepareJsonImport === 'function') {
+        n.prepareJsonImport().then(function(allowed) {
+          if (allowed) impFile.click();
+          else impFail(localizeText('读取文件失败'));
+        }).catch(function() { impFail(localizeText('读取文件失败')); });
+      } else impFile.click();
     });
     // H11: import used to report every outcome through window.alert() — a
     // browser-chrome dialog that blocks the page, cannot be styled, is
@@ -18545,6 +19313,7 @@ FILTER_JS_TEMPLATE = r"""
       impFile.value = '';   // let the same file be re-selected later
       if (!file) return;
       closeAvatarMenu();
+      if (file.size > BACKUP_MAX_BYTES) { impFail(localizeText('备份文件超过 2 MiB，尚未导入')); return; }
       var reader = new FileReader();
       reader.onload = function() {
         var parsed;
@@ -18561,11 +19330,7 @@ FILTER_JS_TEMPLATE = r"""
       reader.readAsText(file);
     });
 
-    // M-042 / M-133: the import path walks arbitrary user-supplied JSON. An
-    // exception halfway through used to escape into the click handler,
-    // leaving the modal open, the layers half-rebuilt and nothing on screen
-    // to explain it. Nothing here is atomic, but the damage now stops at a
-    // message the user can act on.
+    // Validate and build the complete import before changing memory or storage.
     function doImport() {
       try {
         doImportInner();
@@ -18584,18 +19349,22 @@ FILTER_JS_TEMPLATE = r"""
       }
       var report = [];
       var changed = false;
+      var norm = normalizeImport(pendingImport);
+      if (!norm) throw new Error('Invalid backup');
+      var nextFav = new Set(state.fav), nextBlack = new Set(state.black);
+      var nextBookmarks = JSON.parse(JSON.stringify(bookmarks));
 
       if (impFavCb.checked) {
-        var n0 = state.fav.size;
-        pendingImport.favorites.forEach(function(u) { state.fav.add(u); });
-        var df = state.fav.size - n0;
+        var n0 = nextFav.size;
+        norm.favorites.forEach(function(u) { nextFav.add(u); });
+        var df = nextFav.size - n0;
         report.push('收藏 +' + df);
         if (df) changed = true;
       }
       if (impBlackCb.checked) {
-        var b0 = state.black.size;
-        pendingImport.blacklist.forEach(function(u) { state.black.add(u); });
-        var db = state.black.size - b0;
+        var b0 = nextBlack.size;
+        norm.blacklist.forEach(function(u) { nextBlack.add(u); });
+        var db = nextBlack.size - b0;
         report.push('弃用 +' + db);
         if (db) changed = true;
       }
@@ -18606,7 +19375,7 @@ FILTER_JS_TEMPLATE = r"""
         var existing = new Set();
         bookmarks.forEach(function(bm) { if (bm && bm.id) existing.add(bm.id); });
         var added = 0, rejected = 0;
-        pendingImport.bookmarks.forEach(function(bm) {
+        norm.bookmarks.forEach(function(bm) {
           if (!bm.id || existing.has(bm.id)) return;   // dedup; skip id-less junk
           // M-133: coordinates from a hand-edited or foreign export were
           // never checked, so junk pins rode straight up to the cloud.
@@ -18624,27 +19393,31 @@ FILTER_JS_TEMPLATE = r"""
           }
           existing.add(bm.id);
           sanitizeBookmarkEmoji(bm);
-          bookmarks.push(bm);
+          nextBookmarks.push(bm);
           added++;
         });
         report.push('书签 +' + added);
         if (rejected) report.push('已跳过 ' + rejected);
         if (added) {
           changed = true;
-          // Full rebuild of both bookmark layers from the merged array —
-          // mirrors the pull() path so freshly-merged "hidden" tombstones
-          // re-hide their builtins correctly (a piecemeal render wouldn't).
-          bookmarksLayer.clearLayers();
-          userAttractionsLayer.clearLayers();
-          bmMarkerById = {};
-          rebuildHiddenIds();
-          bookmarks.forEach(function(bm) { renderBookmark(bm); });
-          renderFavoritesBuiltin();
-          saveBookmarks();
         }
       }
 
-      refreshAllMarkers();
+      var before = {fav: state.fav, black: state.black, bm: bookmarks.slice()};
+      try {
+        state.fav = nextFav; state.black = nextBlack;
+        bookmarks.length = 0;
+        nextBookmarks.forEach(function(bm) { bookmarks.push(bm); });
+        rebuildBookmarkLayers();
+        refreshAllMarkers();
+      } catch (e) {
+        state.fav = before.fav; state.black = before.black;
+        bookmarks.length = 0;
+        before.bm.forEach(function(bm) { bookmarks.push(bm); });
+        try { rebuildBookmarkLayers(); refreshAllMarkers(); } catch (_) {}
+        throw e;
+      }
+      if (changed) saveBookmarks();
       if (changed) schedulePush();
       closeImportModal();
       // H11: the success report is a toast too — it stays out of the way and
@@ -18834,7 +19607,12 @@ FILTER_JS_TEMPLATE = r"""
     var netInfo = navigator.connection || null;
     var netFast = !netInfo || !netInfo.effectiveType || netInfo.effectiveType === '4g';
     if (!(netInfo && netInfo.saveData) && netFast) {
-      var warmPopups = function() { loadPopups(); };
+      var warmPopups = function() {
+        var c = navigator.connection || null;
+        if (document.visibilityState !== 'visible' || (c && (c.saveData ||
+            (c.effectiveType && c.effectiveType !== '4g')))) return;
+        loadPopups().catch(function() {});
+      };
       if ('requestIdleCallback' in window) {
         requestIdleCallback(warmPopups, {timeout: 8000});
       } else {
@@ -19320,12 +20098,15 @@ FILTER_JS_TEMPLATE = r"""
         return !!(bsEl && bsEl.classList.contains('bs-open')) &&
                !/\bwb-(mid|wide)\b/.test(document.body.className);
       }
-      function paint() { bar.hidden = dismissed || !shown || sheetUp(); }
+      function paint() { bar.hidden = dismissed || !shown || sheetUp()
+        || !!(map._popup && map._popup.isOpen()) || favDrawerOpen(); }
       function dismiss() { markSeen(); dismissed = true; paint(); }
       if (bsEl && window.MutationObserver) {
         new MutationObserver(paint).observe(bsEl, {attributes: true, attributeFilter: ['class']});
       }
       document.addEventListener('wb:mode', paint);
+      map.on('popupopen popupclose', paint);
+      if (regionSel) regionSel.addEventListener('change', function() { if (regionSel.value !== '') dismiss(); });
       var x = document.getElementById('ib-close');
       if (x) x.addEventListener('click', dismiss);
       var reg = document.getElementById('ib-region');
@@ -19334,7 +20115,6 @@ FILTER_JS_TEMPLATE = r"""
         // (see wbFilterPop below); without this the click that opened it
         // would bubble on and shut it again in the same tick.
         e.stopPropagation();
-        dismiss();
         try {
           if (typeof window.__wbOpenFilter === 'function') {
             window.__wbOpenFilter({focus: '#ff-region'});
@@ -19860,6 +20640,26 @@ SAVE_CACHE_EVERY = 200
 # a single failure and a big one isn't allowed to quietly lose hundreds.
 MAX_DROPPED_ROWS_FLOOR = 10
 MAX_DROPPED_ROWS_PCT = 0.2
+
+
+def latest_scrape_date(rows: list[dict]) -> str | None:
+    """Latest valid row timestamp, independent of build and file modification times."""
+    dates = []
+    for row in rows:
+        raw = row.get("scraped_at")
+        if not isinstance(raw, str):
+            continue
+        try:
+            stamp = time.strptime(raw.strip()[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            continue
+        dates.append(time.strftime("%Y-%m-%d", stamp))
+    return max(dates) if dates else None
+
+
+def build_about_html(rows: list[dict]) -> str:
+    latest = latest_scrape_date(rows) or "暂无逐条记录"
+    return ONBOARD_HTML.replace("__LATEST_SCRAPE__", _html.escape(latest))
 
 
 def print_corpus_age(rows: list[dict]) -> None:
@@ -20571,7 +21371,7 @@ def main(argv: list[str] | None = None) -> None:
     # Anywhere in <body> works for the markup; the position matters only for
     # the cluster-colour override inside it, which has to land after folium's
     # <head> <link> to MarkerCluster.Default.css.
-    m.get_root().html.add_child(folium.Element(ONBOARD_HTML))
+    m.get_root().html.add_child(folium.Element(build_about_html(all_rows)))
     # M-033/M-034/M-028/M-089: sync banners, toasts, empty-state cards.
     # Added after the search box so its CSS (avatar badge, #ff-count.is-zero)
     # wins the tie against the earlier blocks it decorates.

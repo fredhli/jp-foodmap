@@ -37,6 +37,7 @@ class WorkerState:
         self.lock = threading.Lock()
         self.kv_window_ms = 0        # sleep between KV get and KV put
         self.put_fail = False        # force 5xx on PUT
+        self.put_status = None       # injected rejection for small-body limit tests
         self.session = True          # the seeded auth == a valid session cookie
         self.t0 = time.time()
 
@@ -52,6 +53,7 @@ class WorkerState:
             self.kv = {}
             self.log = []
             self.session = True
+            self.put_status = None
             self.t0 = time.time()
             if initial is not None:
                 self.kv['state:u1'] = json.dumps(initial)
@@ -177,16 +179,23 @@ class Handler(SimpleHTTPRequestHandler):
         if not STATE.session:
             self._send(401, 'no auth', 'text/plain')
             return
-        if len(body) > 200_000:
+        body_bytes = len(body.encode('utf-8'))
+        if body_bytes > 200_000:
             with STATE.lock:
                 STATE.log.append({'t': t_in, 'm': 'PUT', 'tab': tab, 'status': 413,
-                                  'chars': len(body)})
+                                  'chars': len(body), 'bytes': body_bytes})
             self._send(413, 'payload too large', 'text/plain')
             return
         try:
             parsed = json.loads(body)
         except Exception:
             self._send(400, 'invalid json', 'text/plain')
+            return
+        if STATE.put_status:
+            with STATE.lock:
+                STATE.log.append({'t': t_in, 'm': 'PUT', 'tab': tab, 'status': STATE.put_status,
+                                  'bytes': body_bytes, 'w': parsed.get('w'), 'sent': _summ(parsed)})
+            self._send(STATE.put_status, 'injected rejection', 'text/plain')
             return
         if STATE.put_fail:
             with STATE.lock:

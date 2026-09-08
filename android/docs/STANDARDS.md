@@ -145,7 +145,7 @@
 | # | 规则 | 验收 |
 |---|---|---|
 | 10.1 | 无 WorkManager、无 Service、无 AlarmManager、无 JobScheduler、无 wakelock、无 FCM、无后台网络；进程退后台只有 WebView 自己（已 `onPause()+pauseTimers()`）。 | `aapt2 dump xmltree`：**我们自己写的 `<service>` / `<receiver>` 为零**（任何 `com.fredhli.jpfoodmap*` 开头的组件出现即失败）；库合并进来的必须逐个白名单化并指到出处——2.0.0 的三条是 `androidx.credentials.playservices.CredentialProviderMetadataHolder`、`com.google.android.gms.auth.api.signin.RevocationBoundService`、`androidx.profileinstaller.ProfileInstallReceiver`，外加 provider `androidx.startup.InitializationProvider`，都不排期、不耗电。`dumpsys jobscheduler`/`alarm`/`power` 中本包无条目；`dumpsys activity services` 只允许 `org.chromium.` 的 WebView 渲染进程。实现见 `tools/power-audit.sh` §1。 |
-| 10.2 | `onPause`：`webView.onPause(); pauseTimers(); CookieManager.flush()`；`onResume` 反之。 | 静态审查；后台 5 分钟 `dumpsys batterystats --charged <pkg>` 无 CPU/网络计数增长（模拟器粗验）。 |
+| 10.2 | `onPause`：`webView.onPause(); pauseTimers(); CookieManager.flush()`；`onResume` 反之。 | 静态审查；后台稳定后采集 UID 的 `dumpsys batterystats --checkin --charged <pkg>`，保留累计值和 delta；UID 缺失、空输出、格式未知或重置记 SKIP。仅验已观察到的后台活动，不能证明所有 renderer CPU 为零，也不替代真机电量/温度测试。 |
 | 10.3 | 权限最小集：`INTERNET`、`ACCESS_NETWORK_STATE`、`ACCESS_COARSE_LOCATION`、`ACCESS_FINE_LOCATION`、`POST_NOTIFICATIONS`。硬性禁止：任何存储、相机、麦克风、电话、通讯录、`QUERY_ALL_PACKAGES`、`REQUEST_INSTALL_PACKAGES`、`SYSTEM_ALERT_WINDOW`、`WAKE_LOCK`、`RECEIVE_BOOT_COMPLETED`、`FOREGROUND_SERVICE*`。 | **`AndroidManifest.xml` 里我们自己声明的恰好这五项**（`tools/static-audit.sh` §4）。`aapt2 dump permissions` 读的是合并后的清单，2.0.0 上是 **8 项**：多出的三项必须逐条在 `manifest-merger-*-report.txt` 里指到具体的库并写进 `tools/power-audit.sh` 的白名单——`USE_BIOMETRIC` / `USE_FINGERPRINT`（`androidx.credentials` → `androidx.biometric`，原生登录必需，normal 级、安装时授予、系统权限页里看不到）与 `com.fredhli.jpfoodmap.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`（`androidx.core`，signature 级，只有本 APP 能用）。**出现第四条合并权限即失败。** |
 | 10.3a | `ACCESS_NETWORK_STATE` 的例外说明（2026-09-06 加入，原文只有四项）。**我们自己的 Kotlin 一行都不碰 `ConnectivityManager`**；它存在只为 Chromium：`NetworkChangeNotifierAutoDetect` 拿不到这条权限就不注册连通性回调，WebView 里的 `navigator.onLine` 于是恒为 `true`，网站自己的离线条 `#net-offline` 永远不出现，断网的用户得不到任何提示（§9.1）。protection level 是 `normal`：安装时授予、**不弹窗**、系统权限页里根本不列出，能读到的只有「有没有网、是什么网」——不涉及位置、身份、流量内容。耗电：回调是系统框架自己的，Chromium 在应用退到后台时会注销。 | 同一台模拟器同一条 offline 流程做过两次对照：无此权限 → `navigator.onLine` 期望 false 得 true、离线条不出现；有此权限 → 两条均 PASS（`gate/emulator` 与 `impl/shell-rework.md`）。**若主人不要这条权限**：删掉 manifest 那一行、把 `tools/static-audit.sh` §4 与 `tools/power-audit.sh` §1 的清单改回四项、把 §9.1 的括号句改成「APP 内不显示离线条（已知取舍）」，其余不动。 |
 | 10.4 | 不启用 `WebView.setWebContentsDebuggingEnabled` 于 release；`allowFileAccess=false`、`allowContentAccess=false`、`mixedContentMode=NEVER_ALLOW`、`javaScriptCanOpenWindowsAutomatically=false`、`mediaPlaybackRequiresUserGesture=true`。 | 静态审查。 |
@@ -160,6 +160,7 @@
 |---|---|---|
 | 11.1 | 没有服务端推送源，本版只做**标准 + 最小可验证能力**：一个渠道 `jpfoodmap_general`（IMPORTANCE_DEFAULT，无角标），一个「通知」开关（默认 **关**），一个「发送测试通知」按钮，通知点击打开 APP。 | 设置页：开关打开 → 系统权限弹窗（API 33+）→ 点测试 → 通知栏出现 → 点它 → APP 前台。 |
 | 11.2 | `POST_NOTIFICATIONS` **只在设置页打开开关时**申请，绝不在启动时；拒绝一次后开关回弹为关并说明去系统设置开。 | 冷启动无权限弹窗；`dumpsys notification` 无本包渠道直到开关打开。 |
+| 11.2a | readiness 同时检查 APP 开关、运行时权限、系统应用总开关和 `jpfoodmap_general` 渠道。仅渠道关闭时显示准确提示，并从「系统通知设置」打开 `ACTION_CHANNEL_NOTIFICATION_SETTINGS`（带包名和固定渠道 ID）。不删除或重建渠道来覆盖用户设置。 | 四种关闭原因分别显示；从系统返回后 onResume 刷新；连续测试仍只有固定 id 一条。 |
 | 11.3 | 通知内容策略（为将来）：静音、可替换（固定 id）、不叠加、不带 URL 参数；未来推送走 FCM data-only + 客户端决定文案（同 dashboard 2.8.0），需要 Firebase 项目——**不在本版**。 | 文档项。 |
 
 ---
@@ -207,3 +208,12 @@
 | `flow` | 1080×2400 @420 | 411×914 | 「普通手机还能用」，非必需 |
 
 模拟器上**验不了**的（真机清单，见 `android/README.md`）：真实折叠（display 切换）、One UI 外屏续用开关、Google 账号登录全流程、90 天静默续期、App Links 自动验证（需网站已上线 assetlinks）、真实 inset 数值、One UI 分屏拖动。
+
+
+## 15. 3.1.0 JSON 备份与恢复
+
+用户触发的 JSON 文件导入/导出通过系统 SAF，最大 UTF-8 2 MiB。网页负责格式、预览、校验及提交；壳不迁移或直接修改 localStorage。`exportJson` 仅通过既有 WebMessage 的精确 origin + 主框架校验，单次 `CreateDocument(application/json)`，实际写入完成才答 saved；取消答 cancelled，失败答 error。文件名限制安全 `.json` 名称，payload 必须是 JSON 对象，无后台重试。
+
+`prepareJsonImport` 经相同来源校验产生一次 3 秒授权，`onShowFileChooser` 仅接受当前 WebView、单选 JSON，交给 `ACTION_OPEN_DOCUMENT`。不放开 `file:` / `content:` 导航、WebSettings 文件访问或存储权限。回调仅接收系统选定的 content URI，并有界读取检查大小和 JSON；取消、页面替换、renderer 销毁及 Activity 销毁均释放回调/内存。网页再次检查 File 大小和完整导入结构。
+
+卸载/清除数据会删除 WebView 的本地收藏与会话，系统备份和设备迁移仍禁用。恢复先尝试同签名覆盖升级；只有已核实最新云端数据或可读 JSON 备份后，才考虑卸载。浏览器与此 APP 的本地存储不是同一份。

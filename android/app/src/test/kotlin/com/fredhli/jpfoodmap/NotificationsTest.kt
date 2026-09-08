@@ -122,6 +122,15 @@ class NotificationsTest {
         assertEquals(Notifications.Readiness.ON, Notifications.readiness(true, true, true))
     }
 
+    @Test
+    fun channelOnlyBlockAndGatePrecedence() {
+        assertEquals(Notifications.Readiness.CHANNEL_OFF, Notifications.readiness(true, true, true, false))
+        assertEquals(Notifications.Readiness.BLOCKED, Notifications.readiness(true, true, false, false))
+        assertEquals(Notifications.Readiness.NEEDS_PERMISSION, Notifications.readiness(true, false, true, false))
+        assertEquals(Notifications.Readiness.OFF, Notifications.readiness(false, true, true, false))
+        assertEquals(Notifications.Readiness.ON, Notifications.readiness(true, true, true, true))
+    }
+
     // ------------------------------------------------------------------ the ask
 
     @Test

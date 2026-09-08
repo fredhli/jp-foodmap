@@ -1,7 +1,7 @@
 # tests/
 
-Four suites, no framework, no CI yet — every one is a plain script you run
-with `uv run python` (or `node` for the Worker). Run them from the repo root.
+These are plain-script suites with no shared framework or CI wrapper. Run
+them from the repo root with the project Python (or `node` where shown).
 
 Before the 2.0.0 work there were no tests at all (audit M-056): the sync
 state machine, the Worker's KV read-modify-write, and a 9,000-line generator
@@ -13,7 +13,10 @@ were all defended by nothing but a careful reader.
 | `tests/compat/` | pre-2.0 `localStorage` still loads correctly | a build in `docs/`, Playwright Chromium |
 | `tests/worker/` | the Cloudflare Worker: routing, auth, KV, CORS, versioning | `node` |
 | `tests/sync/` | the browser-side sync state machine against a fake Worker | Playwright Chromium |
-| `tests/smoke_playwright.py` | the built page on 5 viewports, console clean | a build in `docs/`, Playwright Chromium |
+| `tests/smoke_playwright.py` | the built page on phone, Fold and desktop viewports, console clean | a build in `docs/`, Playwright Chromium |
+| `tests/feature_retention_playwright.py` | functional access paths for features outside the 3.1 UX demo | a build in `docs/`, Playwright Chromium or WebKit |
+| `tests/ux/` | 3.1 planning, navigation, detail return and short-viewport regressions | a build in `docs/`, Playwright WebKit or Chromium |
+| `tests/reliability/` | browser fault injection, resource deadlines, and the documented KV stale-read limit | a build in `docs/`; Node, with Playwright found from the project venv when needed |
 
 And one checker that is not a test suite but belongs to the same gate:
 
@@ -34,6 +37,12 @@ uv run python scripts/verify_build.py
 uv run python tests/pipeline/run.py
 uv run python tests/compat/run.py
 uv run python tests/smoke_playwright.py
+uv run python tests/feature_retention_playwright.py
+.venv-wsl/bin/python tests/ux/run.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux
+.venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux-supplement
+node tests/reliability/browser.mjs --built
+node tests/reliability/resource-deadlines.mjs
+node tests/reliability/kv-eventual.mjs
 node tests/worker/run.mjs
 uv run python tests/sync/run_all.py
 ```
@@ -102,10 +111,62 @@ uv run python tests/smoke_playwright.py --viewport fold-outer
 uv run python tests/smoke_playwright.py --screenshots /tmp/shots
 ```
 
-Five viewports (Fold 8 outer 416×657, Fold 8 inner portrait 616×816, Fold 8 inner landscape 816×616,
-iPhone 393×852, desktop 1440×900) × seven things: boot, local search, detail
-card, save/star, filter, account menu, F1 phone drawer. A console error that is not on the
-offline allowlist fails that viewport.
+Eleven viewports retain the older Fold samples (416×657, 616×816, 591×689,
+816×616), add the measured 3.1 Fold geometries (475×751, 932×704), cover
+iPhone widths 375, 393 and 430, and keep desktop 1000 and 1440. The phone
+checks click the visible Map / Results / Saved / Filters navigation, verify
+the one filter host, detail return and focus, and require Save / Maps to be
+reachable from both the first and a later marker detail. A console error that
+is not on the offline allowlist fails that viewport.
+
+## `tests/feature_retention_playwright.py` — features outside the UX demo
+
+```bash
+.venv-wsl/bin/python tests/feature_retention_playwright.py
+.venv-wsl/bin/python tests/feature_retention_playwright.py --browser webkit --output /tmp/feature-retention
+```
+
+This reads `tests/fixtures/feature-dom-2.3.0.json` as the published 2.3
+inventory, but static IDs are only prerequisites. It checks the complete region
+and advanced-filter choices, persists a filter change and a two-restaurant
+batch save, creates and renames collections, adds the same restaurants to two
+collections, batch-removes them from one collection while preserving the
+other membership and favourites, adds them back, copies list text through an
+observed clipboard API, and deletes one collection without removing its
+restaurants or the other membership.
+It also checks access to all four map layers, custom bookmarks and attractions,
+sharing, Tabelog, and account backup/import/privacy controls. Those latter
+checks cover entry points, not full external-service operations. Interactions
+use isolated browser state and every external HTTPS request is blocked.
+
+The history regression suite checks two-step source returns, close actions,
+rapid reopen, and layout changes against the built page:
+
+```bash
+.venv-wsl/bin/python tests/ux/back_history.py --built --browser chromium --output /tmp/back-chromium
+.venv-wsl/bin/python tests/ux/back_history.py --built --browser webkit --output /tmp/back-webkit
+```
+
+It observes navigation through a console probe installed before page load.
+For Android system-Back checks, use real input and CDP observations with
+`userGesture: false`: Playwright `page.evaluate` can change Chromium's
+history-skipping behavior by injecting user activation.
+
+## `tests/reliability/` — bounded failures and storage limits
+
+```bash
+node tests/reliability/browser.mjs --built
+node tests/reliability/resource-deadlines.mjs
+node tests/reliability/kv-eventual.mjs
+```
+
+`browser.mjs --built` injects hangs, partial bodies, status failures and
+lost responses into the generated page while blocking real services. It
+locates Playwright through the project Python environment when there is no
+standalone Node package. `resource-deadlines.mjs` checks that popup and
+transit downloads time out, release their in-flight state and can retry.
+`kv-eventual.mjs` preserves the executable demonstration that Cloudflare KV
+can serve a stale cross-region read and therefore cannot provide CAS.
 
 ## `tests/worker/` and `tests/sync/`
 

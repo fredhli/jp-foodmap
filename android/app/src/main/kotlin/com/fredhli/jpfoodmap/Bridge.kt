@@ -29,9 +29,8 @@ import org.json.JSONObject
  *
  * Every message is one of a closed set (docs/PLAN.md §5.4). The page can ask for a Google
  * credential, a share sheet, an external link, the settings screen, a haptic tick, or the
- * shell's half of the diagnostics — and nothing else. In particular the page cannot ask the
- * shell to read or write storage: favourites and bookmarks stay entirely the page's
- * business (STANDARDS §0.1).
+ * shell's half of the diagnostics, or a one-shot JSON file picker. Favourites and bookmarks
+ * stay in the page's storage; the shell only transfers the user-selected backup.
  *
  * Nothing here ever stores, logs or forwards an ID token: it goes from Credential Manager
  * straight into one replyProxy message and is never referenced again (STANDARDS §7.7).
@@ -46,6 +45,8 @@ class Bridge(private val host: MainActivity) {
         object Settings : Msg()
         object Haptic : Msg()
         object Metrics : Msg()
+        data class PrepareJsonImport(val req: String) : Msg()
+        data class ExportJson(val req: String, val filename: String, val text: String) : Msg()
     }
 
     /** Origins the listener accepts — the set [install] actually took, lowercase, unslashed. */
@@ -211,6 +212,19 @@ class Bridge(private val host: MainActivity) {
                 host.startActivity(Intent(host, AppSettingsActivity::class.java))
             Msg.Haptic -> host.hapticTick()
             Msg.Metrics -> reply.postMessage(host.metricsJson().toString())
+            is Msg.PrepareJsonImport -> reply.postMessage(JSONObject().apply {
+                put("t", "prepareJsonImportResult")
+                put("req", msg.req)
+                put("allowed", host.jsonFiles.prepareImport())
+            }.toString())
+            is Msg.ExportJson -> host.jsonFiles.export(msg.filename, msg.text) { status, error ->
+                reply.postMessage(JSONObject().apply {
+                    put("t", "exportJsonResult")
+                    put("req", msg.req)
+                    put("status", status)
+                    if (error != null) put("error", error)
+                }.toString())
+            }
         }
     }
 
@@ -321,18 +335,39 @@ class Bridge(private val host: MainActivity) {
         val FACADE_JS: String = """
             (function () {
               if (window.Native || !window.NativeBridge) return;
-              var B = window.NativeBridge, waiting = [];
+              var B = window.NativeBridge, waiting = [], files = {}, seq = 0;
+              function fileRequest(t, data, timeout) {
+                return new Promise(function (resolve) {
+                  if (document.hidden || (navigator.userActivation && !navigator.userActivation.isActive)) {
+                    resolve(t === "prepareJsonImport" ? false : {status:"error",error:"gesture"}); return;
+                  }
+                  var req = "file-" + (++seq);
+                  data.t = t; data.req = req;
+                  var timer = setTimeout(function () {
+                    delete files[req];
+                    resolve(t === "prepareJsonImport" ? false : {status:"error",error:"timeout"});
+                  }, timeout);
+                  files[req] = function (m) {
+                    clearTimeout(timer);
+                    resolve(t === "prepareJsonImport" ? m.allowed === true : {status:m.status,error:m.error});
+                  };
+                  send(data);
+                });
+              }
               function send(o) { try { B.postMessage(JSON.stringify(o)); } catch (e) {} }
               B.onmessage = function (ev) {
                 var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
                 if (!m) return;
+                if (m.t === "exportJsonResult" || m.t === "prepareJsonImportResult") {
+                  var done = files[m.req]; delete files[m.req]; if (done) done(m); return;
+                }
                 if (m.t === "metrics") { var r = waiting.shift(); if (r) r(m); return; }
                 if (m.t === "credential" && typeof window.__jpfmNativeCredential === "function") {
                   try { window.__jpfmNativeCredential(String(m.req || ""), m.idToken || null, m.error || null); } catch (e) {}
                 }
               };
               window.Native = {
-                version: "2.0.0",
+                version: "3.1.0",
                 app: "jpfoodmap",
                 labels: { signIn: "__SIGN_IN_LABEL__", settings: "__SETTINGS_LABEL__", browser: "__BROWSER_LABEL__" },
                 signIn: function (req, silent) { send({ t: "signin", req: String(req || ""), silent: !!silent }); },
@@ -341,6 +376,8 @@ class Bridge(private val host: MainActivity) {
                 openExternal: function (url) { send({ t: "open", url: String(url || "") }); },
                 openSettings: function () { send({ t: "settings" }); },
                 haptic: function () { send({ t: "haptic" }); },
+                prepareJsonImport: function () { return fileRequest("prepareJsonImport", {}, 5000); },
+                exportJson: function (filename, text) { return fileRequest("exportJson", {filename:filename,text:text}, 600000); },
                 metrics: function () { return new Promise(function (res) { waiting.push(res); send({ t: "metrics" }); }); }
               };
             })();
@@ -403,6 +440,7 @@ class Bridge(private val host: MainActivity) {
          * `share`'s `title` may be empty, because the façade sends String(title || "").
          */
         fun parse(json: String): Msg? {
+            if (json.length > JsonFiles.MAX_BYTES * 6 + 2048) return null
             val o = try {
                 JSONObject(json)
             } catch (_: JSONException) {
@@ -419,8 +457,18 @@ class Bridge(private val host: MainActivity) {
                 "settings" -> Msg.Settings
                 "haptic" -> Msg.Haptic
                 "metrics" -> Msg.Metrics
+                "prepareJsonImport" -> Msg.PrepareJsonImport(fileRequestId(o) ?: return null)
+                "exportJson" -> Msg.ExportJson(
+                    fileRequestId(o) ?: return null,
+                    requiredString(o, "filename") ?: return null,
+                    requiredString(o, "text") ?: return null,
+                )
                 else -> null
             }
+        }
+
+        private fun fileRequestId(o: JSONObject): String? = requiredString(o, "req")?.takeIf {
+            it.length <= 80 && Regex("[A-Za-z0-9_-]+").matches(it)
         }
 
         private fun requiredString(o: JSONObject, key: String): String? {

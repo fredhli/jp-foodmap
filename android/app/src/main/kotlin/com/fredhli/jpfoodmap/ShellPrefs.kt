@@ -8,10 +8,9 @@ import kotlin.math.roundToInt
  * The shell's three preferences. SharedPreferences, not DataStore (docs/PLAN.md D14): one
  * writer, three keys, no coroutines needed for it.
  *
- * NOTE FOR EVERY LATER TASK: the shell stores NOTHING ELSE. Favourites, blacklist,
- * bookmarks, language, filters and map position are the page's, in its own localStorage and
- * in the Worker's KV, and the shell must never read or write them (STANDARDS §0.1, and the
- * repo's CLAUDE.md red lines).
+ * These preferences are separate from the WebView's localStorage and session cookies,
+ * which also live in this app's data directory and are deleted by uninstall. The page owns
+ * favourites, bookmarks and map state; JSON transfer never edits those stores directly.
  *
  * Everything except [ShellPrefs.load] / [ShellPrefs.save] is deliberately free of
  * `android.*`: local unit tests run against the stub `android.jar` whose every method

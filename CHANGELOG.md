@@ -13,6 +13,70 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-08
+
+Website and Android release. Existing features and data are retained; no
+Widget is included.
+
+### Added
+
+- Phone layouts have a persistent text bottom bar for Map, Results, Saved,
+  and Filters. Area selection, nearby search, and return to the previous
+  planned area are explicit, while the existing filters and data remain
+  available.
+- `tabelog.pendingWrite` records the account, write id, exact body, merge
+  base, and bounded recovery counters before a PUT. An unknown result is
+  reconciled by readback across refreshes without generating a new write id;
+  ambiguous changes remain local and dirty.
+- Android JSON backup and restore use the system Storage Access Framework
+  through an origin- and main-frame-checked bridge. The page still owns the
+  schema and validates files; native transfer is capped at 2 MiB.
+
+### Changed
+
+- The phone detail flow now keeps its source (Map, Results, or Saved), gives
+  it an explicit return action, and keeps Save and map navigation available
+  as primary actions. Reservation copy describes whether a source link was
+  detected and tells users to confirm date, party size, and availability on
+  that source.
+- System Back returns from a restaurant to its original list, then to the
+  map. Closing or reopening details does not leave extra history entries.
+- The About sheet separates the historical corpus baseline from the newest
+  valid row-level timestamp produced by recent partial scraping. Restaurants
+  without row timestamps are not presented as freshly updated.
+- Sync measures JSON as UTF-8 before the Worker's 200,000-byte limit, blocks
+  an unchanged body after 413, respects bounded `Retry-After`, and retains a
+  cached signed-in identity through temporary network failure. Lower-version
+  GET/409 responses no longer lower the local merge base; versionless and
+  same-version/different-write-id compatibility remain supported.
+- Edits made after an uncertain upload survive recovery, including cancelling
+  a newly saved restaurant after another device has received it.
+- Android notification readiness includes the state of the actual channel
+  and links to its channel settings. The notification model remains one
+  user-enabled local channel; this release adds no server push or background
+  polling.
+- The Android power audit now compares numeric per-UID activity counters and
+  preserves their units. Missing or empty samples report SKIP instead of a
+  false PASS; the result is an activity check, not a physical energy or heat
+  measurement.
+
+### Fixed
+
+- Import validates the full candidate and all known field types before it
+  mutates memory or storage, preserves compatible unknown fields, and rolls
+  back a failed commit. There is no import undo claim.
+- Popup data, transit data, sign-in/session calls, and response body reads
+  now have bounded deadlines and release failed request state so a later
+  attempt can retry.
+- Phone and folding-width layouts account for the text bottom bar, safe-area
+  insets, visible keyboard height, scrollable dialogs, large text, and
+  landscape. Detail, filter, and import actions remain reachable in narrow
+  viewports.
+- Android export reports success only after the chosen JSON document is
+  written; cancellation and failure do not produce a false saved state.
+  Import authorization is single-use and accepts only the selected content
+  URI without enabling general file access.
+
 ## [2.3.0] - 2026-09-07
 
 UI release answering the 2.2.0 bug report

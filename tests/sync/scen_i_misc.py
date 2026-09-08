@@ -10,8 +10,9 @@ I3  M-046: localStorage writes throw -> status shows the warning, the
     Anonymous variant: the warning shows and the page keeps working.
 I4  M-053: a device whose push keeps failing still receives remote changes
     and re-pushes the merge once the network is back
-I5  M-053: a blob over the Worker's 200,000-char cap -> 413 -> a human
-    message, data stays local + dirty
+I5a UTF-8 data over 200,000 bytes stays complete and dirty with zero PUTs.
+I5b A small body rejected by the server with 413 is not repeatedly uploaded;
+    GET stays live and editing the content resumes sync.
 """
 import json
 import pathlib
@@ -125,19 +126,27 @@ def i4_dirty_keeps_pulling(br):
     ui1 = a.evaluate('window.__mcUI()')
     W.STATE.kv['state:u1'] = json.dumps(
         {'favorites': [U[0], U[9]], 'blacklist': [], 'bookmarks': [], 'v': 2, 'w': 'phone1'})
-    a.evaluate('window.__mcVisChange()'); a.wait_for_timeout(PW)
+    a.evaluate('window.__mcVisChange()')
+    a.wait_for_function('window.__mcUI().fav === 3', timeout=7500)
     ui2 = a.evaluate('window.__mcUI()')
+    failing_puts = list(puts('A'))
+    dirty_while_failing = a.evaluate("JSON.parse(localStorage.getItem('omakase_state_cache_v2')).dirty")
     W.STATE.put_fail = False
-    a.evaluate('window.__mcVisChange()'); a.wait_for_timeout(PW)
+    a.evaluate('window.__mcVisChange()')
+    a.wait_for_function('!window.__mcUI().fabPending', timeout=7500)
     ui3 = a.evaluate('window.__mcUI()')
     kv = W.STATE.blob()
     r = {'id': 'I4', 'name': 'dirty device with a failing push still receives',
          'fav_after_failed_push': ui1['fav'], 'fav_after_remote_change': ui2['fav'],
          'status_while_failing': ui2['status'], 'ui_final': ui3,
+         'dirty_while_failing': dirty_while_failing,
+         'failing_put_times': [x['t'] for x in failing_puts],
          'server_favorites': sorted(S(x) for x in (kv or {}).get('favorites') or []),
          'page_errors': list(a.mc_errors)}
     r['pass'] = (ui1['fav'] == 2 and ui2['fav'] == 3 and ui3['fav'] == 3
                  and set((kv or {}).get('favorites') or []) == {U[0], U[3], U[9]}
+                 and dirty_while_failing is True and ui2['fabPending']
+                 and all(y['t'] - x['t'] >= 4900 for x, y in zip(failing_puts, failing_puts[1:]))
                  and not ui3['fabPending'] and not r['page_errors'])
     ctx.close()
     return r
@@ -155,13 +164,53 @@ def i5_too_big(br):
     a.wait_for_timeout(PW + 1500)
     ui = a.evaluate('window.__mcUI()')
     cache = a.evaluate("() => JSON.parse(localStorage.getItem('omakase_state_cache_v2'))")
-    r = {'id': 'I5', 'name': 'blob over the 200k cap -> 413 with a human message',
+    body_bytes = a.evaluate("""() => new TextEncoder().encode(JSON.stringify({
+      favorites: JSON.parse(localStorage.getItem('omakase_state_cache_v2')).fav,
+      blacklist: [], bookmarks: [], baseV: 1, w: 'byte-check'})).length""")
+    r = {'id': 'I5a', 'name': 'UTF-8 body over 200k bytes is blocked before PUT',
          'status': ui['status'], 'ui': ui, 'puts': [x.get('status') for x in puts('A')],
          'disk_dirty': cache.get('dirty'), 'disk_fav_count': len(cache.get('fav') or []),
+         'body_bytes': body_bytes, 'all_favorites_retained': set(cache.get('fav') or []) == set([U[0]] + big),
          'page_errors': list(a.mc_errors)}
-    r['pass'] = ('同步数据超过上限' in ui['status'] and 413 in r['puts']
+    r['pass'] = ('同步数据超过上限' in ui['status'] and r['puts'] == [] and body_bytes > 200000
                  and cache.get('dirty') is True and r['disk_fav_count'] == 4301
+                 and r['all_favorites_retained']
                  and not r['page_errors'])
+    ctx.close()
+    return r
+
+
+def i5_server_413(br):
+    ctx = L.make_context(br, seed=seed([U[0]]))
+    a = L.open_tab(ctx, 'A')
+    W.STATE.put_status = 413
+    a.evaluate('u => window.__mcTapFav(u)', U[3]); a.wait_for_timeout(PW)
+    first_puts = list(puts('A'))
+    get0 = len([x for x in W.STATE.log if x['m'] == 'GET' and x.get('p') == '/api/state'])
+    for _ in range(3):
+        a.wait_for_timeout(1100)
+        a.evaluate('window.__mcVisChange()')
+    a.wait_for_timeout(300)
+    rejected_ui = a.evaluate('window.__mcUI()')
+    rejected_puts = list(puts('A'))
+    gets = len([x for x in W.STATE.log if x['m'] == 'GET' and x.get('p') == '/api/state']) - get0
+    cache = a.evaluate("JSON.parse(localStorage.getItem('omakase_state_cache_v2'))")
+    W.STATE.put_status = None
+    a.evaluate('u => window.__mcTapFav(u)', U[0])
+    a.wait_for_function('!window.__mcUI().fabPending', timeout=7500)
+    kv = W.STATE.blob()
+    r = {'id': 'I5b', 'name': 'server 413 blocks same content while GET and later edit work',
+         'first_put_statuses': [x.get('status') for x in first_puts],
+         'first_put_bytes': [x.get('bytes') for x in first_puts],
+         'puts_before_edit': len(rejected_puts), 'additional_gets': gets,
+         'rejected_ui': rejected_ui, 'disk_dirty': cache.get('dirty'),
+         'retained_favorites': sorted(S(u) for u in cache.get('fav') or []),
+         'final_favorites': sorted(S(u) for u in (kv or {}).get('favorites') or []),
+         'page_errors': list(a.mc_errors)}
+    r['pass'] = (r['first_put_statuses'] == [413] and all(n < 200000 for n in r['first_put_bytes'])
+                 and r['puts_before_edit'] == 1 and gets >= 3
+                 and cache.get('dirty') is True and set(cache.get('fav') or []) == {U[0], U[3]}
+                 and set((kv or {}).get('favorites') or []) == {U[3]} and not r['page_errors'])
     ctx.close()
     return r
 
@@ -173,7 +222,7 @@ def run(br=None):
     def go(br):
         for fn in (i1_keepalive, i2_storage_propagation,
                    lambda b: i3_storage_blocked(b, True), lambda b: i3_storage_blocked(b, False),
-                   i4_dirty_keeps_pulling, i5_too_big):
+                   i4_dirty_keeps_pulling, i5_too_big, i5_server_413):
             r = fn(br)
             out.append(r)
             print(r['id'], 'pass=', r['pass'], '|',

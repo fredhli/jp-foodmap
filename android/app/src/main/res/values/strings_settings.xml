@@ -58,4 +58,6 @@
     <string name="diag_again">再跑一次</string>
     <string name="diag_close">关闭</string>
     <string name="diag_copied">已复制到剪贴板</string>
+    <string name="settings_notify_hint_channel_off">此通知渠道已在系统设置中关闭。请打开系统通知设置恢复。</string>
+    <string name="settings_notify_system_settings">系统通知设置</string>
 </resources>

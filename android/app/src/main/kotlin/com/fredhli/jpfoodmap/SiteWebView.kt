@@ -17,6 +17,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.ValueCallback
 import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebSettingsCompat
@@ -265,8 +266,11 @@ object SiteWebView {
         }
     }
 
-    /** Popups and the location prompt; everything else is the framework default. */
+    /** Popups, one authorized JSON picker, and the location prompt. */
     private class ShellChromeClient(private val activity: MainActivity) : WebChromeClient() {
+
+        override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean =
+            activity.jsonFiles.choose(view, callback, params)
 
         override fun onCreateWindow(
             view: WebView,

@@ -58,9 +58,8 @@ import org.json.JSONObject
  *    position, the open restaurant card and the search box survive because the document was
  *    never reloaded (STANDARDS §3.1).
  *
- * What the shell deliberately does NOT do: read or write anything the page owns. No
- * localStorage, no favourites, no language, no map position. The page and the Worker are
- * the only owners of user data, and the repo's CLAUDE.md red lines say so.
+ * The page and Worker own favourites, language and map position. The shell only transfers
+ * a user-selected JSON backup through the system picker; it never edits localStorage.
  */
 class MainActivity : ComponentActivity() {
 
@@ -88,6 +87,8 @@ class MainActivity : ComponentActivity() {
 
     internal lateinit var popupCatcher: PopupCatcher
         private set
+
+    internal val jsonFiles = JsonFiles(this)
 
     private val bridge = Bridge(this)
 
@@ -392,6 +393,7 @@ class MainActivity : ComponentActivity() {
         // completion would post to a replyProxy belonging to a WebView about to be
         // destroyed; the coroutine already checks isDestroyed, but leaving the scope alive
         // keeps the activity referenced until the provider answers.
+        jsonFiles.dispose()
         bridge.dispose()
         webView?.let {
             webContainer.removeView(it)
@@ -474,6 +476,7 @@ class MainActivity : ComponentActivity() {
      * Parked in pendingUrl instead, which onResume turns into the load.
      */
     internal fun onRendererGone(view: WebView) {
+        jsonFiles.onNavigation()
         if (view !== webView) return // a view already replaced; nothing left to do for it
         val fresh = replaceWebView()
         val target = pendingUrl ?: lastUrl ?: START_URL
@@ -610,6 +613,7 @@ class MainActivity : ComponentActivity() {
     // =========================================================================================
 
     internal fun onPageStarted(view: WebView, url: String?) {
+        jsonFiles.onNavigation()
         if (view !== webView) return
         state = PageState.LOADING
         // The navigation exists: from here on the WebViewClient says how it ends.

@@ -1,3 +1,5 @@
+> 历史 2.0.0 实施计划。3.1.0 的 JSON SAF 契约与恢复规则以 STANDARDS.md §15 为准，当前验收见 STATUS.md；下文工具环境和版本数字为当时记录。
+
 # jpfoodmap Android APP 2.0.0 · 实施计划（PLAN）
 
 > 给主人的 10 行版本：

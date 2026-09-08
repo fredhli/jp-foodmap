@@ -5,7 +5,7 @@
     uv run python tests/smoke_playwright.py --viewport fold-outer
     uv run python tests/smoke_playwright.py --screenshots <dir>
 
-Ten things, on each of the six viewports the site is actually used at:
+Twelve things, on each of the viewports the site is actually used at:
 
   boot      the payload lands and the counter shows the corpus size
   search    typing a restaurant name hits the local index
@@ -14,11 +14,11 @@ Ten things, on each of the six viewports the site is actually used at:
   filter    changing one filter changes the visible count
   account   the avatar menu opens and scrolls
   lang      (W-9) first visit below 700px asks which language, once
-  fav-drawer  (W-6 / W-7) below 750px the ≡ in the search capsule opens the
-              结果 / 收藏 / 筛选 drawer, and 筛选 is a TAB of it — no bottom
-              sheet, no second scrim
-  chrome    (W-7 / W-10) the bottom FABs line up with #ff-fab and the intro
-              bar lines up with the search input
+  phone-nav (3.1) below 750px the visible Map / Results / Saved / Filters
+              navigation reaches each real panel, restores focus after a
+              detail, and keeps the filter content in one host
+  chrome    (W-10 / 3.1) the map controls clear the phone navigation and the
+              intro bar lines up with the search input
   workbench (W-1/2/3) mid + wide: the rail with both counts, the
             auto-collapsing detail column, and the left-column collapse
             (mid AND wide as of 2.3.0)
@@ -48,15 +48,15 @@ from lib_browser import (  # noqa: E402
     wait_ready,
 )
 
-# Fold 8 outer / Fold 8 inner portrait / Fold 8 inner at 60% / iPhone 15 /
-# desktop. The Fold sizes are the ones the site is used at on the road;
-# desktop is where trips get planned.
+# Historical Fold samples, actual 3.1 Fold CSS geometries, iPhone 15 and
+# desktop. Keep the historical samples because they protect the older shell
+# sizes while 475x751 and 932x704 pin the current Fold measurements.
 #
 # A-2 (2.3.0): WB_BP_SPLIT and WB_BP_MID are both 750 now, so the old
 # 520-699 "split" mode (a permanent bottom panel over the map) is
 # unreachable. Everything below 750px — the Fold's inner screen in portrait
 # (616), the same screen at 60% width (591), the cover screen (416) and every
-# phone — is the phone layout with the ≡ drawer.
+# phone — is the phone layout with the four-destination bottom navigation.
 VIEWPORTS = {
     "fold-outer": {"width": 416, "height": 657, "mobile": True},
     "fold-inner": {"width": 616, "height": 816, "mobile": True},
@@ -64,10 +64,14 @@ VIEWPORTS = {
     # is phone from 2.3.0 on. Kept as its own row because it is the narrowest
     # window the multi-window shell can hand the page and still be usable.
     "fold-inner-60": {"width": 591, "height": 689, "mobile": True},
+    "fold-actual-outer": {"width": 475, "height": 751, "mobile": True},
     # M-027: the mid layout (top bar + left column + icon rail) exists between
     # 750 and 1279px, and the Fold's inner screen in landscape lives there.
     "fold-inner-landscape": {"width": 816, "height": 616, "mobile": True},
+    "fold-actual-inner": {"width": 932, "height": 704, "mobile": True},
+    "iphone-small": {"width": 375, "height": 667, "mobile": True},
     "iphone": {"width": 393, "height": 852, "mobile": True},
+    "iphone-large": {"width": 430, "height": 932, "mobile": True},
     # W-2: the wide threshold moved 1100 -> 1280, so a 1000px window that used
     # to be one resize away from the old boundary is now solidly mid. A
     # non-touch mid viewport is its own layout (the rail, the collapsed detail
@@ -87,30 +91,29 @@ def eq(actual, expected, what: str) -> None:
 
 
 def open_filter_panel(page) -> None:
-    """W-7 (2.3.0): one host in every mode — #ff-sheet-content lives in
-    #wb-filter-host, the left column's third tab. Below 750px the entry point
-    is #ff-fab (which opens the drawer on that tab); at 750px and up it is the
-    top bar's 筛选 button. Assert on the content being laid out
-    (offsetParent) rather than on any host's class."""
+    """Open the single filter panel through the visible user entry point."""
     if page.eval_on_selector(
             "#ff-sheet-content", "el => el.offsetParent !== null"):
         return
-    opened = page.evaluate(
-        "() => { const b = Array.from(document.querySelectorAll('.wb-filter-btn'))"
-        "         .find(e => e.offsetParent !== null);"
-        "  if (b) { b.click(); return true; }"
-        "  const f = document.getElementById('ff-fab');"
-        "  if (f) { f.click(); return true; }"
-        "  return false; }"
-    )
-    if not opened:
-        raise AssertionError("no way to open the filter panel on this viewport")
+    phone = page.evaluate("() => !/wb-(mid|wide)/.test(document.body.className)")
+    if phone:
+        entry = page.locator('#phone-nav [data-ux-tab="filter"]')
+    else:
+        entry = page.locator('.wb-filter-btn:visible').first
+    if entry.count() != 1:
+        raise AssertionError("no unique visible way to open the filter panel")
+    entry.click(trial=True)
+    entry.click()
     page.wait_for_function(
         "() => { const c = document.getElementById('ff-sheet-content');"
         "  return c && c.offsetParent !== null; }",
         timeout=15000,
     )
     page.wait_for_timeout(350)
+    host = page.eval_on_selector(
+        "#ff-sheet-content", "el => el.parentElement && el.parentElement.id")
+    if host != "wb-filter-host":
+        raise AssertionError(f"filter content moved to a second host: {host!r}")
 
 
 # --- the six checks ---------------------------------------------------------
@@ -145,7 +148,12 @@ def check_search(page, name):
     # narrow" footer, not a no-results state — it is expected on a broad term.)
     # Close the dropdown again so it doesn't sit over the map for the next check.
     page.keyboard.press("Escape")
-    page.eval_on_selector("#ss-input", "el => { el.value = ''; el.blur(); }")
+    page.fill("#ss-input", "")
+    page.locator("#ss-input").blur()
+    page.wait_for_function(
+        "() => !document.getElementById('ss-list').classList.contains('open')",
+        timeout=5000,
+    )
     return f"{rows} local result rows"
 
 
@@ -183,12 +191,64 @@ def check_card(page, name):
     if not txt:
         raise AssertionError("detail sheet opened empty")
     photos = _photo_geometry(page)
+    # .bs-open starts the 250ms entrance transition. Wait for the action dock
+    # to finish entering before measuring actual user reachability.
+    page.wait_for_function("""() => [...document.querySelectorAll(
+      '#ux-detail-actions .ff-fav-btn,#ux-detail-actions .rst-gmaps')]
+      .length===2 && [...document.querySelectorAll(
+      '#ux-detail-actions .ff-fav-btn,#ux-detail-actions .rst-gmaps')]
+      .every(e=>{const r=e.getBoundingClientRect(),t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+        return r.top>=0&&r.bottom<=innerHeight&&(t===e||e.contains(t))})""",
+      timeout=3000)
+    first_actions = _detail_action_geometry(page)
+    page.evaluate("a => { window.__smokeFirstMarkerActions = a; }", first_actions)
     page.evaluate(
         "() => { const b = document.querySelector('#bs-content .rst-close');"
         "  if (b) b.click(); }"
     )
     page.wait_for_timeout(300)
     return f"card shows {txt[:20]!r}, {photos}"
+
+
+def _detail_action_geometry(page):
+    return page.evaluate("""() => { const sheet=document.getElementById('bs-sheet').getBoundingClientRect();
+      const content=document.getElementById('bs-content').getBoundingClientRect();
+      return {sheet:{top:sheet.top,bottom:sheet.bottom,height:sheet.height},
+      content:{top:content.top,bottom:content.bottom,height:content.height,scrollHeight:document.getElementById('bs-content').scrollHeight},
+      viewport:{width:innerWidth,height:innerHeight},items:['#ux-detail-actions .ff-fav-btn',
+      '#ux-detail-actions .rst-gmaps'].map(s=>{const e=document.querySelector(s);
+      if(!e)return null;const r=e.getBoundingClientRect(),t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+      return {top:r.top,bottom:r.bottom,h:r.height,inView:r.top>=0&&r.bottom<=innerHeight,hit:t===e||e.contains(t)};})};}""")
+
+
+def check_marker_actions(page, name):
+    """A marker-origin detail keeps Save and Maps in the visible action dock."""
+    page.evaluate("""() => { const el=document.getElementById('ff-rating');
+      el.value=el.min;el.dispatchEvent(new Event('input',{bubbles:true}));
+      el.dispatchEvent(new Event('change',{bubbles:true}));
+      const close=document.querySelector('#bs-content .rst-close');if(close)close.click();
+      if(window.__wbFavDrawer&&window.__wbFavDrawer.isOpen())window.__wbFavDrawer.close(); }""")
+    page.wait_for_timeout(400)
+    page.wait_for_function("""() => [...document.querySelectorAll('.leaflet-marker-icon')]
+      .some(e=>!e.classList.contains('bm-mk')&&!e.classList.contains('marker-cluster'))""", timeout=20000)
+    page.evaluate("""() => [...document.querySelectorAll('.leaflet-marker-icon')]
+      .find(e=>!e.classList.contains('bm-mk')&&!e.classList.contains('marker-cluster'))
+      .dispatchEvent(new MouseEvent('click',{bubbles:true}))""")
+    page.wait_for_function("() => document.getElementById('bs-sheet').classList.contains('bs-open')", timeout=20000)
+    page.wait_for_timeout(350)
+    actions = _detail_action_geometry(page)
+    first_actions = page.evaluate("() => window.__smokeFirstMarkerActions")
+    bad = lambda data: any(
+        a is None or a["h"] < 44 or not a["inView"] or not a["hit"]
+        for a in data["items"]
+    )
+    if bad(first_actions) or bad(actions):
+        raise AssertionError(
+            "marker-origin detail primary actions are not consistently reachable: "
+            f"first={first_actions}, later={actions}")
+    page.locator("#ux-detail-actions .ff-fav-btn").click(trial=True)
+    page.locator("#ux-detail-actions .rst-gmaps").click(trial=True)
+    return f"Save and Maps are visible 44px actions in {actions['viewport']}"
 
 
 def _photo_geometry(page):
@@ -247,8 +307,8 @@ def check_save(page, name):
         "    !e.classList.contains('marker-cluster'));"
         "  els[0].dispatchEvent(new MouseEvent('click', {bubbles: true})); }"
     )
-    page.wait_for_selector("#bs-content .ff-fav-btn", timeout=20000)
-    page.eval_on_selector("#bs-content .ff-fav-btn", "el => el.click()")
+    page.wait_for_selector("#ux-detail-actions .ff-fav-btn", timeout=20000)
+    page.eval_on_selector("#ux-detail-actions .ff-fav-btn", "el => el.click()")
     page.wait_for_function(
         "(n) => Number(document.getElementById('ff-fav-count').textContent) !== n",
         arg=n_before,
@@ -263,7 +323,7 @@ def check_save(page, name):
     )
     eq(after, before + 1, "favorites persisted to localStorage")
     # Undo so the run leaves no state behind for the next check.
-    page.eval_on_selector("#bs-content .ff-fav-btn", "el => el.click()")
+    page.eval_on_selector("#ux-detail-actions .ff-fav-btn", "el => el.click()")
     page.wait_for_timeout(300)
     page.evaluate(
         "() => { const b = document.querySelector('#bs-content .rst-close');"
@@ -383,154 +443,111 @@ def check_lang(page, name):
     return "asked once, answered, gone"
 
 
-def check_fav_drawer(page, name):
-    """W-6 / W-7: below 750px the ≡ at the left end of the search capsule
-    opens #wb-left as a LEFT drawer with three tabs (结果 / 收藏 / 筛选); at
-    750px and up the same element is the resident column and the ≡ is gone.
-    2.3.0: 筛选 is one of those three tabs — the bottom sheet is retired, so
-    #ff-sheet-content lives in #wb-filter-host and #ff-sheet never opens. One
-    Escape closes the whole drawer."""
-    # Earlier checks (save, filter) leave a .sync-toast on screen for a few
-    # seconds; let it expire before hit-testing rather than racing it.
-    try:
-        page.wait_for_function(
-            "() => !document.querySelector('.sync-toast')", timeout=8000)
-    except Exception:
-        pass
-    # W-7 (2.3.0): check_filter's open_filter_panel() now opens this very
-    # drawer on a phone (the filter panel is its third tab), so start from a
-    # known-closed state instead of hit-testing the ≡ through the open panel.
-    page.evaluate("() => { if (window.__wbFavDrawer && window.__wbFavDrawer.isOpen())"
-                  "  window.__wbFavDrawer.close(); }")
-    page.wait_for_timeout(350)
-    st = page.evaluate("""() => {
-      const f = document.getElementById('ss-drawer-btn');
-      if (!f) return {missing: true};
-      const cs = getComputedStyle(f);
-      const r = f.getBoundingClientRect();
-      const t = cs.display === 'none' ? null
-        : document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return {shown: cs.display !== 'none',
-              w: Math.round(r.width), h: Math.round(r.height),
-              inView: r.left >= 0 && r.top >= 0
-                      && r.right <= innerWidth && r.bottom <= innerHeight,
-              hit: !!(t && (t === f || f.contains(t))),
-              by: t ? (t.id || t.className || t.tagName) : null,
-              phone: !/wb-(split|mid|wide)/.test(document.body.className)};
-    }""")
-    if st.get("missing"):
-        raise AssertionError("#ss-drawer-btn is not in the page")
-    if not st["phone"]:
-        # >=520px: the ≡ must stay out of the way entirely.
-        if st["shown"]:
-            raise AssertionError("the phone drawer ≡ is visible on a workbench mode")
-        return "≡ correctly hidden (workbench mode)"
-    if not (st["shown"] and st["inView"] and st["hit"]):
-        raise AssertionError(f"the ≡ drawer entry is not reachable: {st}")
-    if st["w"] < 44 or st["h"] < 44:
-        raise AssertionError(f"the ≡ is below the 44px touch target: {st}")
+def check_phone_nav(page, name):
+    """3.1: exercise the visible four-destination phone navigation.
 
-    page.eval_on_selector("#ss-drawer-btn", "el => el.click()")
-    page.wait_for_function(
-        "() => document.body.classList.contains('wb-fav-open')", timeout=15000)
-    page.wait_for_timeout(350)
-    d = page.evaluate("""() => {
-      const l = document.getElementById('wb-left');
-      const r = l.getBoundingClientRect();
-      const s = document.getElementById('wb-sort');
-      const dist = s ? s.querySelector('option[value="distance"]') : null;
-      const tabs = Array.from(document.querySelectorAll('#wb-left-head .wb-tab'))
-        .filter(e => e.offsetParent !== null);
-      return {left: Math.round(r.left), top: Math.round(r.top),
-              height: Math.round(r.height), width: Math.round(r.width),
-              vh: innerHeight, vw: innerWidth,
-              tabs: tabs.length,
-              on: (document.querySelector('.wb-tab.on') || {}).id,
-              distHidden: dist ? dist.hidden : null,
-              // W-7: the filter panel is the third tab's body now; the other
-              // two phone hosts must still not have moved.
-              ff: document.getElementById('ff-sheet-content').parentElement.id,
-              bs: document.getElementById('bs-content').parentElement.id,
-              ss: document.getElementById('ss-box').parentElement === document.body};
-    }""")
-    if d["left"] != 0 or d["top"] != 0 or abs(d["height"] - d["vh"]) > 2:
-        raise AssertionError(f"drawer is not a full-height left panel: {d}")
-    if d["width"] > 380 or d["width"] > d["vw"]:
-        raise AssertionError(f"drawer geometry wrong: {d}")
-    # W-6: 结果 / 收藏 / 筛选.
-    if d["tabs"] != 3 or d["on"] not in ("wb-tab-results", "wb-tab-fav",
-                                         "wb-tab-filter"):
-        raise AssertionError(f"drawer tabs wrong: {d}")
-    if d["distHidden"] is False:
-        raise AssertionError("distance sort offered without the user ever locating")
-    if d["ff"] != "wb-filter-host" or d["bs"] != "bs-sheet" or not d["ss"]:
-        raise AssertionError(f"phone hosts moved: {d}")
+    The old hamburger and filter FAB remain as compatibility hooks, but they
+    are deliberately hidden. This check clicks the controls a user sees and
+    verifies their destination, the one filter host, detail return and focus.
+    """
+    phone = page.evaluate("() => !/wb-(mid|wide)/.test(document.body.className)")
+    if not phone:
+        shown = page.evaluate("""() => ['#phone-nav','#ss-drawer-btn','#ff-fab']
+          .filter(s => { const e=document.querySelector(s); return e && getComputedStyle(e).display!=='none'; })""")
+        if shown:
+            raise AssertionError(f"phone-only navigation leaked into workbench: {shown}")
+        return "phone navigation and legacy entries hidden in workbench"
 
-    # W-7: 筛选 is a tab of the drawer, not a sheet over it. The panel becomes
-    # visible in place, #ff-sheet stays shut and no second scrim appears.
-    page.evaluate("() => document.getElementById('wb-tab-filter').click()")
-    page.wait_for_timeout(400)
-    ex = page.evaluate(
-        "() => ({drawer: document.body.classList.contains('wb-fav-open'),"
-        "        under: document.body.classList.contains('wb-fav-under'),"
-        "        sheet: document.getElementById('ff-sheet')"
-        "                 .classList.contains('ff-open'),"
-        "        panel: document.getElementById('ff-sheet-content')"
-        "                 .offsetParent !== null,"
-        "        listHidden: document.getElementById('wb-list').hidden,"
-        "        on: (document.querySelector('.wb-tab.on') || {}).id})")
-    if not (ex["drawer"] and ex["panel"] and ex["listHidden"]) \
-            or ex["sheet"] or ex["under"] or ex["on"] != "wb-tab-filter":
-        raise AssertionError(f"筛选 did not become the drawer's third tab: {ex}")
-    # Back to the result list, in place.
-    page.evaluate("() => document.getElementById('wb-tab-results').click()")
-    page.wait_for_timeout(300)
-    mid = page.evaluate(
-        "() => ({drawer: document.body.classList.contains('wb-fav-open'),"
-        "        panel: document.getElementById('ff-sheet-content')"
-        "                 .offsetParent !== null,"
-        "        on: (document.querySelector('.wb-tab.on') || {}).id})")
-    if not mid["drawer"] or mid["panel"] or mid["on"] != "wb-tab-results":
-        raise AssertionError(f"leaving the 筛选 tab did not restore the list: {mid}")
-    # Escape closes the drawer itself.
-    page.keyboard.press("Escape")
+    state = page.evaluate("""() => {
+      const nav=document.getElementById('phone-nav'), nr=nav.getBoundingClientRect();
+      const buttons=[...nav.querySelectorAll('[data-ux-tab]')];
+      return {count:buttons.length, bottom:Math.round(nr.bottom), vh:innerHeight,
+        old:[getComputedStyle(document.getElementById('ss-drawer-btn')).display,
+             getComputedStyle(document.getElementById('ff-fab')).display],
+        buttons:buttons.map(b=>{const r=b.getBoundingClientRect(),t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+          return {tab:b.dataset.uxTab,w:r.width,h:r.height,inView:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,
+                  hit:t===b||b.contains(t)};})};
+    }""")
+    if state["count"] != 4 or [b["tab"] for b in state["buttons"]] != [
+            "map", "results", "fav", "filter"]:
+        raise AssertionError(f"phone navigation destinations changed: {state}")
+    if state["old"] != ["none", "none"]:
+        raise AssertionError(f"legacy phone entries compete with 3.1 navigation: {state}")
+    if abs(state["bottom"] - state["vh"]) > 1:
+        raise AssertionError(f"phone navigation is not docked to the viewport: {state}")
+    if any(b["h"] < 44 or not b["inView"] or not b["hit"] for b in state["buttons"]):
+        raise AssertionError(f"a phone navigation destination is unreachable: {state}")
+
+    def go(tab):
+        button = page.locator(f'#phone-nav [data-ux-tab="{tab}"]')
+        button.click(trial=True)
+        button.click()
+        page.wait_for_timeout(250)
+        current = page.get_attribute(f'#phone-nav [data-ux-tab="{tab}"]', 'aria-current')
+        if current != "page":
+            raise AssertionError(f"{tab} did not become the current destination")
+
+    go("results")
+    if not page.locator("#wb-list").is_visible():
+        raise AssertionError("Results did not expose the restaurant list")
+    go("filter")
+    filtered = page.evaluate("""() => ({panel:document.getElementById('ff-sheet-content').offsetParent!==null,
+      host:document.getElementById('ff-sheet-content').parentElement.id,
+      done:document.getElementById('ux-filter-done').offsetParent!==null,
+      sheet:document.getElementById('ff-sheet').classList.contains('ff-open'),
+      backdropDisplay:getComputedStyle(document.getElementById('wb-fav-backdrop')).display,
+      backdropPointer:getComputedStyle(document.getElementById('wb-fav-backdrop')).pointerEvents})""")
+    if not filtered["panel"] or filtered["host"] != "wb-filter-host" or not filtered["done"]:
+        raise AssertionError(f"Filters did not expose the single complete panel: {filtered}")
+    if filtered["sheet"] or filtered["backdropDisplay"] != "none":
+        raise AssertionError(f"Filters opened a competing modal layer: {filtered}")
+    go("fav")
+    if not page.locator("#wb-fav").is_visible() or not page.locator("#ux-saved-scope").is_visible():
+        raise AssertionError("Saved did not expose its list and scope")
+
+    # A real result click must provide a return action, and that action must
+    # restore the source row as the keyboard focus target.
+    go("results")
+    row = page.locator("#wb-list .wb-row").first
+    row.wait_for(state="visible")
+    ref = row.get_attribute("id")
+    row.click()
+    page.wait_for_selector("#bs-sheet.bs-open")
+    page.locator("#ux-detail-back").click(trial=True)
+    page.locator("#ux-detail-back").click()
     page.wait_for_timeout(350)
-    end = page.evaluate(
-        "() => ({open: document.body.classList.contains('wb-fav-open'),"
-        "        af: document.activeElement ? document.activeElement.id : null,"
-        "        scrim: getComputedStyle("
-        "          document.getElementById('wb-fav-backdrop')).pointerEvents})")
-    if end["open"] or end["scrim"] != "none":
-        raise AssertionError(f"drawer did not close cleanly: {end}")
-    if end["af"] != "ss-drawer-btn":
-        raise AssertionError(f"focus was not handed back to the ≡: {end}")
-    return f"drawer {d['width']}x{d['height']}, 3 tabs, tab {d['on']}, focus restored"
+    returned = page.evaluate("""() => ({tab:document.querySelector('#phone-nav [aria-current="page"]')?.dataset.uxTab,
+      focus:document.activeElement?.id,list:document.getElementById('wb-list').offsetParent!==null})""")
+    if returned != {"tab": "results", "focus": ref, "list": True}:
+        raise AssertionError(f"detail return lost its source or keyboard focus: {returned}")
+    go("map")
+    focused = page.evaluate("() => document.activeElement?.dataset.uxTab")
+    if focused != "map" or page.evaluate("() => document.body.classList.contains('wb-fav-open')"):
+        raise AssertionError(f"Map did not close the page panel or retain focus: {focused!r}")
+    return "4 reachable destinations, one filter host, detail source/focus restored"
 
 
 def check_chrome(page, name):
-    """W-7: the bottom-right FAB stack sits on exactly the same baseline as
-    #ff-fab on every phone viewport (a max-height:795px rule used to park it
-    56px higher, so an iPhone in Safari and the same iPhone as a PWA looked
-    different). W-10: #intro-bar's right edge lines up with the search
-    capsule's, not with the screen. The capsule (#ss-input-wrap) is the
-    anchor, not #ss-input — the input shrinks whenever the × is showing."""
+    """The map controls clear the 3.1 phone nav; intro aligns to search."""
     g = page.evaluate("""() => {
       const R = s => { const e = document.querySelector(s);
         if (!e) return null;
         if (getComputedStyle(e).display === 'none') return null;
         const r = e.getBoundingClientRect();
         return {r: r.right, b: r.bottom, w: r.width}; };
-      return {ff: R('#ff-fab'), stack: R('.map-fab-stack'),
+      const N=s=>{const e=document.querySelector(s);if(!e||getComputedStyle(e).display==='none')return null;
+        const r=e.getBoundingClientRect();return {t:r.top,b:r.bottom};};
+      return {nav:N('#phone-nav'), stack: N('.map-fab-stack'),
               intro: R('#intro-bar'), input: R('#ss-input-wrap'),
               phone: !/wb-(split|mid|wide)/.test(document.body.className)};
     }""")
     out = []
-    if g["phone"] and g["ff"] and g["stack"]:
-        d = abs(g["stack"]["b"] - g["ff"]["b"])
-        if d > 1:
+    if g["phone"] and g["nav"] and g["stack"]:
+        clearance = g["nav"]["t"] - g["stack"]["b"]
+        if clearance < -1:
             raise AssertionError(
-                f"the FAB stack is {d:.0f}px off #ff-fab's baseline: {g}")
-        out.append(f"FABs share #ff-fab's baseline ({g['ff']['b']:.0f}px)")
+                f"map controls overlap the phone navigation by {-clearance:.0f}px: {g}")
+        out.append(f"map controls clear phone navigation by {clearance:.0f}px")
     if g["phone"] and g["intro"] and g["input"]:
         d = abs(g["intro"]["r"] - g["input"]["r"])
         if d > 4:
@@ -538,7 +555,7 @@ def check_chrome(page, name):
                 f"#intro-bar's right edge is {d:.0f}px off the search "
                 f"capsule's: {g}")
         out.append(f"intro bar right edge within {d:.0f}px of the capsule's")
-    return "; ".join(out) or "workbench mode — neither pill is on screen"
+    return "; ".join(out) or "workbench mode — phone chrome is hidden"
 
 
 def check_workbench(page, name):
@@ -683,10 +700,9 @@ def check_goto_zoom(page, name):
         "() => { const b = document.querySelector('#bs-content .rst-close');"
         "  if (b) b.click(); }")
     page.wait_for_timeout(300)
-    # Phone-likes keep the list in the drawer behind the ≡ (W-6).
+    # Phone-likes keep the list behind the Results destination.
     if not page.evaluate("() => !!document.querySelector('.wb-row')"):
-        page.evaluate("() => { const b = document.getElementById('ss-drawer-btn');"
-                      "  if (b) b.click(); }")
+        page.locator('#phone-nav [data-ux-tab="results"]').click()
         page.wait_for_timeout(500)
     if not page.evaluate("() => !!document.querySelector('.wb-row')"):
         raise AssertionError("no result row to click")
@@ -800,11 +816,12 @@ CHECKS = [
     ("save", check_save),
     ("filter", check_filter),
     ("account", check_account),
-    ("fav-drawer", check_fav_drawer),   # W-6
-    ("chrome", check_chrome),           # W-7 / W-10
+    ("phone-nav", check_phone_nav),     # 3.1 four primary destinations
+    ("chrome", check_chrome),           # W-10 / 3.1 nav clearance
     ("workbench", check_workbench),     # W-1 / W-2 / W-3
     ("filter-copy", check_filter_copy), # W-8 / W-11 / W-12
     ("goto-zoom", check_goto_zoom),     # W-5
+    ("marker-actions", check_marker_actions),  # 3.1 primary action dock
 ]
 
 

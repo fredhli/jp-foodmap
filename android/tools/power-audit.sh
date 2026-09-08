@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Prove the shipped APK costs nothing while nobody is looking at it.
+# Inspect background components and recorded activity; this does not measure energy or heat.
 #
 #     android/tools/power-audit.sh                      # APK checks + device checks + 5 min soak
 #     android/tools/power-audit.sh --apk path/to.apk    # audit a specific APK
@@ -62,14 +62,15 @@ if [ -z "$APK" ]; then
     done
 fi
 
-pass_n=0; fail_n=0; warn_n=0
+pass_n=0; fail_n=0; warn_n=0; skip_n=0
 ok()   { pass_n=$((pass_n + 1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { fail_n=$((fail_n + 1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"
          [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/          /'; }
 warn() { warn_n=$((warn_n + 1)); printf '  \033[33mWARN\033[0m  %s\n' "$1"
          [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/          /'; }
+skip() { skip_n=$((skip_n + 1)); printf "  SKIP  %s\n" "$1"; }
 section() { printf '\n\033[1m%s\033[0m\n' "$1"; }
-adbs() { adb -s "$SERIAL" "$@"; }
+adbs() { timeout 30 adb -s "$SERIAL" "$@"; }
 
 printf '\033[1mpower-audit\033[0m  apk=%s  pkg=%s  serial=%s\n' "${APK:-none}" "$PKG" "$SERIAL"
 
@@ -258,25 +259,30 @@ else
     # ------------------------------------------------------- 3. the soak
     if [ "$SOAK" -gt 0 ]; then
         section "3. $SOAK s in the background (STANDARDS §10.2)"
-        # The package's own counters only. `Total run time` is the DEVICE's clock — it moves
-        # by exactly the length of the soak whatever any app does, and including it would
-        # make this check fail every single time and therefore mean nothing.
-        counters() {
-            adbs shell dumpsys batterystats --charged "$PKG" 2>/dev/null | tr -d '\r' \
-                | grep -E 'Wake lock|Job |Sync |Alarm|wifi_(full|scan)|Mobile network|Wi-Fi network|Foreground services' \
-                | grep -vE 'Total run time' \
-                | sed 's/[0-9]\{4,\}ms/<ms>/g' || true
-        }
+        # Leave time for the page's final keepalive before sampling stable background activity.
         adbs shell input keyevent KEYCODE_HOME >/dev/null 2>&1
-        before="$(counters)"
-        printf '          backgrounded; sleeping %ss…\n' "$SOAK"
-        sleep "$SOAK"
-        after="$(counters)"
-        if [ "$before" = "$after" ]; then
-            ok "battery counters unchanged across ${SOAK}s in the background"
+        sleep 10
+        sample_dir="$(mktemp -d "${TMPDIR:-/tmp}/jpfm-power.XXXXXX")"
+        uid="$(adbs shell pm list packages -U --user current "$PKG" 2>/dev/null | tr -d '\r' | awk -v pkg="$PKG" '$1 == "package:" pkg && $2 ~ /^uid:[0-9]+$/ {sub(/^uid:/, "", $2); print $2; exit}')"
+        printf '          numeric samples: %s\n' "$sample_dir"
+        if [ -z "$uid" ]; then
+            skip 'background counters: application UID unavailable'
+        elif ! adbs shell dumpsys batterystats --checkin --charged "$PKG" >"$sample_dir/before.csv" 2>/dev/null; then
+            skip 'background counters: first sample unavailable'
         else
-            bad "battery counters unchanged across ${SOAK}s in the background" \
-                "$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -30)"
+            printf '          backgrounded; sampling for %ss…\n' "$SOAK"
+            sleep "$SOAK"
+            if ! adbs shell dumpsys batterystats --checkin --charged "$PKG" >"$sample_dir/after.csv" 2>/dev/null; then
+                skip 'background counters: second sample unavailable'
+            else
+                python3 "$HERE/battery-counters.py" "$uid" "$sample_dir/before.csv" "$sample_dir/after.csv" >"$sample_dir/delta.json"
+                result=$?
+                case "$result" in
+                    0) ok "observed UID activity counters unchanged across ${SOAK}s; not an energy measurement" ;;
+                    1) bad "UID activity counters grew across ${SOAK}s" "$(cat "$sample_dir/delta.json")" ;;
+                    *) skip "background counters invalid/unavailable; see $sample_dir/delta.json" ;;
+                esac
+            fi
         fi
         # A second look at the schedulers: something could have registered while we waited.
         after_jobs="$(adbs shell dumpsys jobscheduler 2>/dev/null | tr -d '\r' \
@@ -291,7 +297,8 @@ fi
 fi
 
 # ================================================================= summary
-printf '\n\033[1msummary\033[0m  %d passed, %d failed, %d warnings\n' "$pass_n" "$fail_n" "$warn_n"
+printf '\n\033[1msummary\033[0m  %d passed, %d failed, %d warnings, %d skipped\n' "$pass_n" "$fail_n" "$warn_n" "$skip_n"
 [ "$fail_n" -gt 0 ] && { printf 'power-audit: RED\n'; exit 1; }
-printf 'power-audit: GREEN\n'
+[ "$skip_n" -gt 0 ] && { printf 'power-audit: INCOMPLETE (invalid or unavailable samples)\n'; exit 2; }
+printf 'power-audit: GREEN (observed checks only; no energy/thermal measurement)\n'
 exit 0

@@ -16,17 +16,16 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // PERMANENT IDENTITY. Once this is installed on the phone it cannot change without
-        // a fresh install that loses nothing (the shell stores no user data) but does lose
-        // the App Links verification and the launcher position. docs/PLAN.md D1.
+        // Keep this identity for in-place upgrades. Reinstalling removes WebView local
+        // data, including edits that were never synced or exported, and resets App Links.
         applicationId = "com.fredhli.jpfoodmap"
         minSdk = 31
         targetSdk = 36
         // major*10000 + minor*100 + patch, so the code can be read back off the name and
         // is strictly increasing for as long as the version number is. 2.2.0 = 20200, and
         // it moves with the site's APP_VERSION (docs/STANDARDS.md §14.1/§14.8).
-        versionCode = 20300
-        versionName = "2.3.0"
+        versionCode = 30100
+        versionName = "3.1.0"
     }
 
     buildFeatures {

@@ -2,6 +2,8 @@ package com.fredhli.jpfoodmap
 
 import android.app.Activity
 import android.os.Build
+import android.content.Intent
+import android.provider.Settings
 import android.os.Bundle
 import android.view.MenuItem
 import android.view.View
@@ -12,6 +14,7 @@ import android.widget.RadioGroup
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewCompat
@@ -120,10 +123,20 @@ class AppSettingsActivity : Activity() {
             val posted = notifySwitch.isChecked && Notifications.postTest(this)
             Toast.makeText(
                 this,
-                if (posted) R.string.settings_notify_test_sent else R.string.settings_notify_test_failed,
+                if (posted) R.string.settings_notify_test_sent else notifyFailureString(),
                 Toast.LENGTH_SHORT,
             ).show()
             refreshNotifyRow()
+        }
+
+        findViewById<Button>(R.id.notify_system_settings).setOnClickListener {
+            val channelOff = Notifications.canPost(this) && !Notifications.channelOn(this)
+            val settings = Intent(if (channelOff) Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS else Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            if (channelOff) settings.putExtra(Settings.EXTRA_CHANNEL_ID, Notifications.CHANNEL_ID)
+            try { startActivity(settings) } catch (_: android.content.ActivityNotFoundException) {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri()))
+            }
         }
 
         // Deliberately NOT "load the site in the WebView": this row exists for the things
@@ -226,12 +239,10 @@ class AppSettingsActivity : Activity() {
     }
 
     /**
-     * The hint under the switch, from the three facts that decide whether anything can
-     * actually reach the shade: the stored preference, the runtime grant, and the user's
-     * system-level switch for this app.
+     * The hint follows all four notification gates, including the channel setting.
      */
     private fun refreshNotifyRow() {
-        // The four-state rule is Notifications.readiness (pinned by NotificationsTest);
+        // Notifications.readiness owns the state precedence (pinned by NotificationsTest);
         // this screen only maps its answer onto a string. canPost() is hasPermission() AND
         // the system switch, and readiness only reaches its third argument once the second
         // is true — so passing it as `systemEnabled` is exactly the system switch.
@@ -239,15 +250,25 @@ class AppSettingsActivity : Activity() {
             switchOn = notifySwitch.isChecked,
             hasPermission = Notifications.hasPermission(this),
             systemEnabled = Notifications.canPost(this),
+            channelEnabled = Notifications.channelOn(this),
         )
         notifyHint.setText(
             when (readiness) {
                 Notifications.Readiness.OFF -> R.string.settings_notify_hint_off
                 Notifications.Readiness.NEEDS_PERMISSION -> R.string.settings_notify_hint_needs_permission
                 Notifications.Readiness.BLOCKED -> R.string.settings_notify_hint_blocked
+                Notifications.Readiness.CHANNEL_OFF -> R.string.settings_notify_hint_channel_off
                 Notifications.Readiness.ON -> R.string.settings_notify_hint_on
             },
         )
+    }
+
+    private fun notifyFailureString(): Int = when {
+        !notifySwitch.isChecked -> R.string.settings_notify_hint_off
+        !Notifications.hasPermission(this) -> R.string.settings_notify_hint_needs_permission
+        !Notifications.canPost(this) -> R.string.settings_notify_hint_blocked
+        !Notifications.channelOn(this) -> R.string.settings_notify_hint_channel_off
+        else -> R.string.settings_notify_test_failed
     }
 
     /** The policy the radio group currently shows, without a round trip through storage. */

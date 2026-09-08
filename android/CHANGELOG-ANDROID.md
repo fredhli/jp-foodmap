@@ -1,3 +1,10 @@
+## 3.1.0 · 2026-09-08
+
+- 通过系统文件选择器导入/保存 JSON 备份，支持取消；沿用网页数据格式和存储，最大 2 MiB。
+- 通知渠道单独关闭时准确显示，并提供系统渠道设置入口。
+- 功耗检查保留累计数值及变化；空采样/UID 缺失显示 SKIP，不再误报通过。
+- 纠正卸载恢复说明：未同步 WebView 本地数据随卸载删除，先备份或核实云端副本。
+
 # Changelog — Japan Foodmap for Android
 
 The APK's own history. The website has its own `CHANGELOG.md` at the repo root; this file

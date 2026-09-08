@@ -33,4 +33,6 @@
     <string name="diag_again">Run again</string>
     <string name="diag_close">Close</string>
     <string name="diag_copied">Copied to the clipboard</string>
+    <string name="settings_notify_hint_channel_off">This notification channel is off. Open system notification settings to enable it.</string>
+    <string name="settings_notify_system_settings">System notification settings</string>
 </resources>

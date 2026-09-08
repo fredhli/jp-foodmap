@@ -1,0 +1,1581 @@
+{
+  "source": "Published 2.3.0 HTML at 462f807",
+  "purpose": "Static inventory for independent feature-retention review; presence alone does not prove functionality. Intentionally replaced navigation IDs may change.",
+  "static_ids": 208,
+  "groups": {
+    "ff-": [
+      {
+        "tag": "div",
+        "id": "ff-sync-status",
+        "role": "status"
+      },
+      {
+        "tag": "div",
+        "id": "ff-help-pop",
+        "role": "tooltip"
+      },
+      {
+        "tag": "div",
+        "id": "ff-empty-map"
+      },
+      {
+        "tag": "button",
+        "id": "ff-empty-reset",
+        "type": "button"
+      },
+      {
+        "tag": "button",
+        "id": "ff-empty-zoomall",
+        "type": "button"
+      },
+      {
+        "tag": "button",
+        "id": "ff-fab",
+        "type": "button",
+        "title": "筛选"
+      },
+      {
+        "tag": "div",
+        "id": "ff-backdrop"
+      },
+      {
+        "tag": "div",
+        "id": "ff-sheet",
+        "role": "dialog"
+      },
+      {
+        "tag": "div",
+        "id": "ff-grip"
+      },
+      {
+        "tag": "div",
+        "id": "ff-sheet-content"
+      },
+      {
+        "tag": "span",
+        "id": "ff-sheet-title"
+      },
+      {
+        "tag": "span",
+        "id": "ff-head-counts"
+      },
+      {
+        "tag": "div",
+        "id": "ff-active-chips"
+      },
+      {
+        "tag": "span",
+        "id": "ff-chip-foreign"
+      },
+      {
+        "tag": "b",
+        "id": "ff-chip-foreign-n"
+      },
+      {
+        "tag": "div",
+        "id": "ff-empty-panel"
+      },
+      {
+        "tag": "button",
+        "id": "ff-empty-panel-reset",
+        "type": "button"
+      },
+      {
+        "tag": "span",
+        "id": "ff-region-sum"
+      },
+      {
+        "tag": "select",
+        "id": "ff-region",
+        "aria-label": "地区"
+      },
+      {
+        "tag": "span",
+        "id": "ff-rating-sum"
+      },
+      {
+        "tag": "b",
+        "id": "ff-rating-val"
+      },
+      {
+        "tag": "input",
+        "type": "range",
+        "id": "ff-rating"
+      },
+      {
+        "tag": "datalist",
+        "id": "ff-rating-ticks"
+      },
+      {
+        "tag": "div",
+        "id": "ff-rating-chips"
+      },
+      {
+        "tag": "span",
+        "id": "ff-price-sum"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ff-price-all"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ff-price-none"
+      },
+      {
+        "tag": "details",
+        "id": "ff-genre-box"
+      },
+      {
+        "tag": "span",
+        "id": "ff-genre-summary"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ff-genre-all"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ff-genre-none"
+      },
+      {
+        "tag": "span",
+        "id": "ff-award-sum"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ff-award-none"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "ff-bookable-only"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "ff-only-fav"
+      },
+      {
+        "tag": "b",
+        "id": "ff-fav-count"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "ff-hide-black"
+      },
+      {
+        "tag": "b",
+        "id": "ff-black-count"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "ff-hide-foreign"
+      },
+      {
+        "tag": "div",
+        "id": "ff-foreign-hint"
+      },
+      {
+        "tag": "span",
+        "id": "ff-foreign-hint-txt"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ff-foreign-show"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "ff-gcal-only"
+      },
+      {
+        "tag": "button",
+        "id": "ff-panel-reset",
+        "type": "button"
+      }
+    ],
+    "wb-": [
+      {
+        "tag": "header",
+        "id": "wb-top"
+      },
+      {
+        "tag": "div",
+        "id": "wb-brand"
+      },
+      {
+        "tag": "div",
+        "id": "wb-top-search"
+      },
+      {
+        "tag": "button",
+        "id": "wb-region-btn",
+        "type": "button"
+      },
+      {
+        "tag": "span",
+        "id": "wb-region-label"
+      },
+      {
+        "tag": "div",
+        "id": "wb-lang-wrap"
+      },
+      {
+        "tag": "button",
+        "id": "wb-lang",
+        "type": "button"
+      },
+      {
+        "tag": "div",
+        "id": "wb-lang-pop",
+        "role": "menu"
+      },
+      {
+        "tag": "button",
+        "id": "wb-sync",
+        "type": "button"
+      },
+      {
+        "tag": "div",
+        "id": "wb-top-acct"
+      },
+      {
+        "tag": "aside",
+        "id": "wb-left",
+        "aria-label": "结果"
+      },
+      {
+        "tag": "div",
+        "id": "wb-left-head"
+      },
+      {
+        "tag": "button",
+        "id": "wb-tab-results",
+        "type": "button",
+        "role": "tab"
+      },
+      {
+        "tag": "button",
+        "id": "wb-tab-fav",
+        "type": "button",
+        "role": "tab"
+      },
+      {
+        "tag": "button",
+        "id": "wb-tab-filter",
+        "type": "button",
+        "role": "tab"
+      },
+      {
+        "tag": "button",
+        "id": "wb-left-collapse",
+        "type": "button",
+        "title": "收起列表",
+        "aria-label": "收起列表"
+      },
+      {
+        "tag": "div",
+        "id": "wb-list-tools"
+      },
+      {
+        "tag": "div",
+        "id": "wb-list"
+      },
+      {
+        "tag": "div",
+        "id": "wb-list-foot"
+      },
+      {
+        "tag": "div",
+        "id": "wb-fav",
+        "role": "tabpanel"
+      },
+      {
+        "tag": "div",
+        "id": "wb-filter-host",
+        "role": "tabpanel"
+      },
+      {
+        "tag": "div",
+        "id": "wb-split-handle",
+        "role": "separator",
+        "aria-label": "调整面板高度"
+      },
+      {
+        "tag": "nav",
+        "id": "wb-rail"
+      },
+      {
+        "tag": "button",
+        "id": "wb-rail-back",
+        "type": "button",
+        "title": "还原列表",
+        "aria-label": "还原列表"
+      },
+      {
+        "tag": "section",
+        "id": "wb-detail",
+        "aria-label": "详情"
+      },
+      {
+        "tag": "div",
+        "id": "wb-detail-head"
+      },
+      {
+        "tag": "div",
+        "id": "wb-detail-body"
+      },
+      {
+        "tag": "div",
+        "id": "wb-filter-pop",
+        "role": "dialog"
+      },
+      {
+        "tag": "div",
+        "id": "wb-fav-backdrop"
+      }
+    ],
+    "ssm-": [
+      {
+        "tag": "div",
+        "id": "ssm-signed-in"
+      },
+      {
+        "tag": "img",
+        "id": "ssm-acct-pic"
+      },
+      {
+        "tag": "span",
+        "id": "ssm-acct-name"
+      },
+      {
+        "tag": "span",
+        "id": "ssm-acct-email"
+      },
+      {
+        "tag": "button",
+        "id": "ssm-signout",
+        "type": "button"
+      },
+      {
+        "tag": "div",
+        "id": "ssm-signed-out"
+      },
+      {
+        "tag": "div",
+        "id": "ssm-signin-btn"
+      },
+      {
+        "tag": "div",
+        "id": "ssm-cfg-msg"
+      },
+      {
+        "tag": "p",
+        "id": "ssm-signin-help"
+      },
+      {
+        "tag": "button",
+        "id": "ssm-reset",
+        "type": "button"
+      },
+      {
+        "tag": "button",
+        "id": "ssm-export",
+        "type": "button"
+      },
+      {
+        "tag": "button",
+        "id": "ssm-import",
+        "type": "button"
+      },
+      {
+        "tag": "input",
+        "id": "ssm-import-file",
+        "type": "file"
+      },
+      {
+        "tag": "a",
+        "id": "ssm-privacy-link"
+      },
+      {
+        "tag": "button",
+        "id": "ssm-delete-cloud",
+        "type": "button"
+      },
+      {
+        "tag": "span",
+        "id": "ssm-delete-label"
+      },
+      {
+        "tag": "div",
+        "id": "ssm-delete-msg",
+        "role": "status"
+      }
+    ],
+    "bm-": [
+      {
+        "tag": "div",
+        "id": "bm-backdrop"
+      },
+      {
+        "tag": "div",
+        "id": "bm-modal",
+        "role": "dialog"
+      },
+      {
+        "tag": "span",
+        "id": "bm-modal-title"
+      },
+      {
+        "tag": "span",
+        "id": "bm-coord"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "bm-copy",
+        "aria-label": "复制坐标",
+        "title": "复制坐标"
+      },
+      {
+        "tag": "input",
+        "type": "text",
+        "id": "bm-name"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "bm-use-place"
+      },
+      {
+        "tag": "input",
+        "type": "text",
+        "id": "bm-emoji"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "bm-emoji-more",
+        "title": "打开完整 emoji 选择器"
+      },
+      {
+        "tag": "emoji-picker",
+        "id": "bm-emoji-picker"
+      },
+      {
+        "tag": "div",
+        "id": "bm-lists"
+      },
+      {
+        "tag": "div",
+        "id": "bm-error"
+      }
+    ],
+    "flm-": [],
+    "ob-": [],
+    "about-": [
+      {
+        "tag": "div",
+        "id": "about-modal",
+        "role": "dialog"
+      },
+      {
+        "tag": "span",
+        "id": "about-title"
+      },
+      {
+        "tag": "p",
+        "id": "about-curation"
+      },
+      {
+        "tag": "a",
+        "id": "about-privacy"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "about-delete"
+      }
+    ],
+    "bs-": [
+      {
+        "tag": "div",
+        "id": "bs-backdrop"
+      },
+      {
+        "tag": "div",
+        "id": "bs-sheet",
+        "role": "dialog"
+      },
+      {
+        "tag": "button",
+        "id": "bs-grip",
+        "type": "button"
+      },
+      {
+        "tag": "span",
+        "id": "bs-grip-hint"
+      },
+      {
+        "tag": "div",
+        "id": "bs-banner"
+      },
+      {
+        "tag": "div",
+        "id": "bs-content"
+      }
+    ],
+    "mf-": [],
+    "ib-": [
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ib-region"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ib-legend"
+      },
+      {
+        "tag": "button",
+        "type": "button",
+        "id": "ib-close",
+        "aria-label": "关闭"
+      }
+    ],
+    "imp-": [
+      {
+        "tag": "div",
+        "id": "imp-backdrop"
+      },
+      {
+        "tag": "div",
+        "id": "imp-modal",
+        "role": "dialog"
+      },
+      {
+        "tag": "span",
+        "id": "imp-title"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "imp-fav"
+      },
+      {
+        "tag": "span",
+        "id": "imp-fav-n"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "imp-black"
+      },
+      {
+        "tag": "span",
+        "id": "imp-black-n"
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "id": "imp-bm"
+      },
+      {
+        "tag": "span",
+        "id": "imp-bm-n"
+      },
+      {
+        "tag": "div",
+        "id": "imp-error"
+      }
+    ]
+  },
+  "all_nodes": [
+    {
+      "tag": "script",
+      "id": "locate-plugin-js"
+    },
+    {
+      "tag": "div",
+      "id": "bs-backdrop"
+    },
+    {
+      "tag": "div",
+      "id": "bs-sheet",
+      "role": "dialog"
+    },
+    {
+      "tag": "button",
+      "id": "bs-grip",
+      "type": "button"
+    },
+    {
+      "tag": "span",
+      "id": "bs-grip-hint"
+    },
+    {
+      "tag": "div",
+      "id": "bs-banner"
+    },
+    {
+      "tag": "div",
+      "id": "bs-content"
+    },
+    {
+      "tag": "div",
+      "id": "ph-lb"
+    },
+    {
+      "tag": "img",
+      "id": "ph-lb-img"
+    },
+    {
+      "tag": "button",
+      "id": "ph-lb-x",
+      "type": "button",
+      "aria-label": "关闭"
+    },
+    {
+      "tag": "button",
+      "id": "fab-zoom-in",
+      "type": "button",
+      "title": "放大",
+      "aria-label": "放大"
+    },
+    {
+      "tag": "button",
+      "id": "fab-zoom-out",
+      "type": "button",
+      "title": "缩小",
+      "aria-label": "缩小"
+    },
+    {
+      "tag": "button",
+      "id": "fab-locate",
+      "type": "button",
+      "title": "定位到我的位置",
+      "aria-label": "定位到我的位置"
+    },
+    {
+      "tag": "button",
+      "id": "fab-layers",
+      "type": "button",
+      "title": "图层",
+      "aria-label": "图层"
+    },
+    {
+      "tag": "span",
+      "id": "fab-layers-badge"
+    },
+    {
+      "tag": "div",
+      "id": "layers-pop",
+      "role": "group",
+      "aria-label": "图层设置"
+    },
+    {
+      "tag": "button",
+      "id": "fab-transit-long",
+      "type": "button",
+      "title": "新干线 / JR 长途线路"
+    },
+    {
+      "tag": "button",
+      "id": "fab-transit-city",
+      "type": "button",
+      "title": "地铁 / 私铁 / 城市轨道"
+    },
+    {
+      "tag": "button",
+      "id": "fab-attractions",
+      "type": "button",
+      "title": "景点锚点"
+    },
+    {
+      "tag": "span",
+      "id": "lp-n-builtin"
+    },
+    {
+      "tag": "button",
+      "id": "fab-bookmarks",
+      "type": "button",
+      "title": "我的收藏"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "lp-attr-all"
+    },
+    {
+      "tag": "div",
+      "id": "ss-box"
+    },
+    {
+      "tag": "div",
+      "id": "ss-top"
+    },
+    {
+      "tag": "div",
+      "id": "ss-input-wrap"
+    },
+    {
+      "tag": "button",
+      "id": "ss-drawer-btn",
+      "type": "button",
+      "aria-label": "收藏与结果",
+      "title": "收藏与结果"
+    },
+    {
+      "tag": "span",
+      "id": "ss-icon"
+    },
+    {
+      "tag": "input",
+      "id": "ss-input",
+      "type": "text",
+      "role": "combobox",
+      "aria-label": "搜索餐厅 / 景点 / 地址"
+    },
+    {
+      "tag": "div",
+      "id": "ss-spinner"
+    },
+    {
+      "tag": "button",
+      "id": "ss-clear",
+      "type": "button",
+      "aria-label": "清空"
+    },
+    {
+      "tag": "button",
+      "id": "ss-avatar",
+      "type": "button",
+      "aria-label": "账户"
+    },
+    {
+      "tag": "img",
+      "id": "ss-avatar-pic"
+    },
+    {
+      "tag": "span",
+      "id": "ss-avatar-dot"
+    },
+    {
+      "tag": "div",
+      "id": "ss-menu"
+    },
+    {
+      "tag": "div",
+      "id": "ssm-signed-in"
+    },
+    {
+      "tag": "img",
+      "id": "ssm-acct-pic"
+    },
+    {
+      "tag": "span",
+      "id": "ssm-acct-name"
+    },
+    {
+      "tag": "span",
+      "id": "ssm-acct-email"
+    },
+    {
+      "tag": "button",
+      "id": "ssm-signout",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "ssm-signed-out"
+    },
+    {
+      "tag": "div",
+      "id": "ssm-signin-btn"
+    },
+    {
+      "tag": "div",
+      "id": "ssm-cfg-msg"
+    },
+    {
+      "tag": "p",
+      "id": "ssm-signin-help"
+    },
+    {
+      "tag": "button",
+      "id": "ssm-reset",
+      "type": "button"
+    },
+    {
+      "tag": "button",
+      "id": "ssm-export",
+      "type": "button"
+    },
+    {
+      "tag": "button",
+      "id": "ssm-import",
+      "type": "button"
+    },
+    {
+      "tag": "input",
+      "id": "ssm-import-file",
+      "type": "file"
+    },
+    {
+      "tag": "a",
+      "id": "ssm-privacy-link"
+    },
+    {
+      "tag": "button",
+      "id": "ssm-delete-cloud",
+      "type": "button"
+    },
+    {
+      "tag": "span",
+      "id": "ssm-delete-label"
+    },
+    {
+      "tag": "div",
+      "id": "ssm-delete-msg",
+      "role": "status"
+    },
+    {
+      "tag": "div",
+      "id": "ff-sync-status",
+      "role": "status"
+    },
+    {
+      "tag": "div",
+      "id": "ss-list",
+      "role": "listbox"
+    },
+    {
+      "tag": "div",
+      "id": "ss-genre"
+    },
+    {
+      "tag": "div",
+      "id": "ss-local"
+    },
+    {
+      "tag": "div",
+      "id": "ss-api"
+    },
+    {
+      "tag": "div",
+      "id": "bm-backdrop"
+    },
+    {
+      "tag": "div",
+      "id": "bm-modal",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "bm-modal-title"
+    },
+    {
+      "tag": "span",
+      "id": "bm-coord"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "bm-copy",
+      "aria-label": "复制坐标",
+      "title": "复制坐标"
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "id": "bm-name"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "bm-use-place"
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "id": "bm-emoji"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "bm-emoji-more",
+      "title": "打开完整 emoji 选择器"
+    },
+    {
+      "tag": "emoji-picker",
+      "id": "bm-emoji-picker"
+    },
+    {
+      "tag": "div",
+      "id": "bm-lists"
+    },
+    {
+      "tag": "div",
+      "id": "bm-error"
+    },
+    {
+      "tag": "div",
+      "id": "imp-backdrop"
+    },
+    {
+      "tag": "div",
+      "id": "imp-modal",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "imp-title"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "imp-fav"
+    },
+    {
+      "tag": "span",
+      "id": "imp-fav-n"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "imp-black"
+    },
+    {
+      "tag": "span",
+      "id": "imp-black-n"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "imp-bm"
+    },
+    {
+      "tag": "span",
+      "id": "imp-bm-n"
+    },
+    {
+      "tag": "div",
+      "id": "imp-error"
+    },
+    {
+      "tag": "div",
+      "id": "fl-backdrop"
+    },
+    {
+      "tag": "div",
+      "id": "fl-modal",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "fl-title"
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "id": "fl-name"
+    },
+    {
+      "tag": "div",
+      "id": "fl-error"
+    },
+    {
+      "tag": "div",
+      "id": "ff-help-pop",
+      "role": "tooltip"
+    },
+    {
+      "tag": "div",
+      "id": "help-kind-bookmark"
+    },
+    {
+      "tag": "div",
+      "id": "help-kind-attraction"
+    },
+    {
+      "tag": "div",
+      "id": "kb-help",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "kb-help-title"
+    },
+    {
+      "tag": "div",
+      "id": "lang-gate"
+    },
+    {
+      "tag": "div",
+      "id": "lang-gate-t"
+    },
+    {
+      "tag": "div",
+      "id": "intro-bar",
+      "role": "note"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ib-region"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ib-legend"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ib-close",
+      "aria-label": "关闭"
+    },
+    {
+      "tag": "div",
+      "id": "legend-pop",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "legend-title"
+    },
+    {
+      "tag": "div",
+      "id": "legend-prices"
+    },
+    {
+      "tag": "div",
+      "id": "legend-genres"
+    },
+    {
+      "tag": "div",
+      "id": "about-modal",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "about-title"
+    },
+    {
+      "tag": "p",
+      "id": "about-curation"
+    },
+    {
+      "tag": "a",
+      "id": "about-privacy"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "about-delete"
+    },
+    {
+      "tag": "div",
+      "id": "install-help",
+      "role": "dialog"
+    },
+    {
+      "tag": "span",
+      "id": "install-title"
+    },
+    {
+      "tag": "div",
+      "id": "ih-ios"
+    },
+    {
+      "tag": "div",
+      "id": "ih-desktop"
+    },
+    {
+      "tag": "div",
+      "id": "ih-generic"
+    },
+    {
+      "tag": "div",
+      "id": "install-snack",
+      "role": "status"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "is-go"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "is-later"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "is-never"
+    },
+    {
+      "tag": "div",
+      "id": "sync-banner",
+      "role": "alert"
+    },
+    {
+      "tag": "span",
+      "id": "sync-banner-msg"
+    },
+    {
+      "tag": "button",
+      "id": "sync-banner-x",
+      "type": "button",
+      "aria-label": "关闭"
+    },
+    {
+      "tag": "div",
+      "id": "sync-stack"
+    },
+    {
+      "tag": "div",
+      "id": "sync-hint"
+    },
+    {
+      "tag": "span",
+      "id": "sync-hint-msg"
+    },
+    {
+      "tag": "span",
+      "id": "sync-hint-btns"
+    },
+    {
+      "tag": "button",
+      "id": "sync-hint-signin",
+      "type": "button"
+    },
+    {
+      "tag": "button",
+      "id": "sync-hint-ok",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "sw-update"
+    },
+    {
+      "tag": "span",
+      "id": "sw-update-msg"
+    },
+    {
+      "tag": "span",
+      "id": "sw-update-btns"
+    },
+    {
+      "tag": "button",
+      "id": "sw-update-go",
+      "type": "button"
+    },
+    {
+      "tag": "button",
+      "id": "sw-update-later",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "net-offline"
+    },
+    {
+      "tag": "span",
+      "id": "net-offline-msg"
+    },
+    {
+      "tag": "div",
+      "id": "ff-empty-map"
+    },
+    {
+      "tag": "div",
+      "id": "ffe-none"
+    },
+    {
+      "tag": "button",
+      "id": "ff-empty-reset",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "ffe-offscreen"
+    },
+    {
+      "tag": "button",
+      "id": "ffe-off-close",
+      "type": "button",
+      "aria-label": "关闭"
+    },
+    {
+      "tag": "b",
+      "id": "ffe-off-n"
+    },
+    {
+      "tag": "button",
+      "id": "ff-empty-zoomall",
+      "type": "button"
+    },
+    {
+      "tag": "button",
+      "id": "ffe-off-never",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "sync-sr",
+      "role": "status"
+    },
+    {
+      "tag": "button",
+      "id": "ff-fab",
+      "type": "button",
+      "title": "筛选"
+    },
+    {
+      "tag": "div",
+      "id": "ff-backdrop"
+    },
+    {
+      "tag": "div",
+      "id": "ff-sheet",
+      "role": "dialog"
+    },
+    {
+      "tag": "div",
+      "id": "ff-grip"
+    },
+    {
+      "tag": "div",
+      "id": "ff-sheet-content"
+    },
+    {
+      "tag": "span",
+      "id": "ff-sheet-title"
+    },
+    {
+      "tag": "span",
+      "id": "ff-head-counts"
+    },
+    {
+      "tag": "div",
+      "id": "ff-active-chips"
+    },
+    {
+      "tag": "span",
+      "id": "ff-chip-foreign"
+    },
+    {
+      "tag": "b",
+      "id": "ff-chip-foreign-n"
+    },
+    {
+      "tag": "div",
+      "id": "ff-empty-panel"
+    },
+    {
+      "tag": "button",
+      "id": "ff-empty-panel-reset",
+      "type": "button"
+    },
+    {
+      "tag": "span",
+      "id": "ff-region-sum"
+    },
+    {
+      "tag": "select",
+      "id": "ff-region",
+      "aria-label": "地区"
+    },
+    {
+      "tag": "span",
+      "id": "ff-rating-sum"
+    },
+    {
+      "tag": "b",
+      "id": "ff-rating-val"
+    },
+    {
+      "tag": "input",
+      "type": "range",
+      "id": "ff-rating"
+    },
+    {
+      "tag": "datalist",
+      "id": "ff-rating-ticks"
+    },
+    {
+      "tag": "div",
+      "id": "ff-rating-chips"
+    },
+    {
+      "tag": "span",
+      "id": "ff-price-sum"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ff-price-all"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ff-price-none"
+    },
+    {
+      "tag": "details",
+      "id": "ff-genre-box"
+    },
+    {
+      "tag": "span",
+      "id": "ff-genre-summary"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ff-genre-all"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ff-genre-none"
+    },
+    {
+      "tag": "span",
+      "id": "ff-award-sum"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ff-award-none"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "ff-bookable-only"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "ff-only-fav"
+    },
+    {
+      "tag": "b",
+      "id": "ff-fav-count"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "ff-hide-black"
+    },
+    {
+      "tag": "b",
+      "id": "ff-black-count"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "ff-hide-foreign"
+    },
+    {
+      "tag": "div",
+      "id": "ff-foreign-hint"
+    },
+    {
+      "tag": "span",
+      "id": "ff-foreign-hint-txt"
+    },
+    {
+      "tag": "button",
+      "type": "button",
+      "id": "ff-foreign-show"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "id": "ff-gcal-only"
+    },
+    {
+      "tag": "button",
+      "id": "ff-panel-reset",
+      "type": "button"
+    },
+    {
+      "tag": "header",
+      "id": "wb-top"
+    },
+    {
+      "tag": "div",
+      "id": "wb-brand"
+    },
+    {
+      "tag": "div",
+      "id": "wb-top-search"
+    },
+    {
+      "tag": "button",
+      "id": "wb-region-btn",
+      "type": "button"
+    },
+    {
+      "tag": "span",
+      "id": "wb-region-label"
+    },
+    {
+      "tag": "div",
+      "id": "wb-lang-wrap"
+    },
+    {
+      "tag": "button",
+      "id": "wb-lang",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "wb-lang-pop",
+      "role": "menu"
+    },
+    {
+      "tag": "button",
+      "id": "wb-sync",
+      "type": "button"
+    },
+    {
+      "tag": "div",
+      "id": "wb-top-acct"
+    },
+    {
+      "tag": "aside",
+      "id": "wb-left",
+      "aria-label": "结果"
+    },
+    {
+      "tag": "div",
+      "id": "wb-left-head"
+    },
+    {
+      "tag": "button",
+      "id": "wb-tab-results",
+      "type": "button",
+      "role": "tab"
+    },
+    {
+      "tag": "button",
+      "id": "wb-tab-fav",
+      "type": "button",
+      "role": "tab"
+    },
+    {
+      "tag": "button",
+      "id": "wb-tab-filter",
+      "type": "button",
+      "role": "tab"
+    },
+    {
+      "tag": "button",
+      "id": "wb-left-collapse",
+      "type": "button",
+      "title": "收起列表",
+      "aria-label": "收起列表"
+    },
+    {
+      "tag": "div",
+      "id": "wb-list-tools"
+    },
+    {
+      "tag": "div",
+      "id": "wb-list"
+    },
+    {
+      "tag": "div",
+      "id": "wb-list-foot"
+    },
+    {
+      "tag": "div",
+      "id": "wb-fav",
+      "role": "tabpanel"
+    },
+    {
+      "tag": "div",
+      "id": "wb-filter-host",
+      "role": "tabpanel"
+    },
+    {
+      "tag": "div",
+      "id": "wb-split-handle",
+      "role": "separator",
+      "aria-label": "调整面板高度"
+    },
+    {
+      "tag": "nav",
+      "id": "wb-rail"
+    },
+    {
+      "tag": "button",
+      "id": "wb-rail-back",
+      "type": "button",
+      "title": "还原列表",
+      "aria-label": "还原列表"
+    },
+    {
+      "tag": "section",
+      "id": "wb-detail",
+      "aria-label": "详情"
+    },
+    {
+      "tag": "div",
+      "id": "wb-detail-head"
+    },
+    {
+      "tag": "div",
+      "id": "wb-detail-body"
+    },
+    {
+      "tag": "div",
+      "id": "wb-filter-pop",
+      "role": "dialog"
+    },
+    {
+      "tag": "div",
+      "id": "fv-menu",
+      "role": "menu"
+    },
+    {
+      "tag": "div",
+      "id": "fav-focus-bar"
+    },
+    {
+      "tag": "div",
+      "id": "wb-fav-backdrop"
+    },
+    {
+      "tag": "div",
+      "id": "map_fdf98776aa886042902a2c72b6e7b845"
+    }
+  ],
+  "public_js_hooks": [
+    "__jpfmBootId",
+    "__jpfmNativeCredential",
+    "__jpfmOpenShare",
+    "__shareRestaurant",
+    "__shareUrlFor",
+    "__wbCloseFilter",
+    "__wbFavDrawer",
+    "__wbMode",
+    "__wbOpenFilter",
+    "__wbRenderMs",
+    "__wbSetTab"
+  ]
+}

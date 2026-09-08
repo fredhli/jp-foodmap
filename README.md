@@ -9,9 +9,13 @@ Per-user Saved restaurants, the Hidden list, pins and lists sync through a
 small Cloudflare Worker (`worker/`) behind Google Sign-In. Visitors who skip
 sign-in keep their state purely in `localStorage`.
 
-**Version: 2.3.0.** See [CHANGELOG.md](CHANGELOG.md) for what changed, and
+**Version: 3.1.0.** See [CHANGELOG.md](CHANGELOG.md) for what changed, and
 [CLAUDE.md](CLAUDE.md) for the architecture notes, the storage-key contract
 and the backwards-compatibility red lines.
+
+The About sheet reports two different data dates: the historical corpus
+baseline and the latest valid row-level timestamp from a recent partial
+scrape. Rows without their own timestamp do not inherit that newer date.
 
 ## Install on a phone
 
@@ -25,21 +29,26 @@ The restaurant database, default-language popup data, and transit renderer
 are warmed by the service worker. Live map tiles, place search, and cloud
 sync still require a network connection.
 
+On a phone, the main destinations are always reachable from the text bottom
+bar: **Map**, **Results**, **Saved**, and **Filters**. The area and nearby
+controls stay separate so a nearby search can return to the planned area.
+
 ## Android APP
 
 `android/` holds a Kotlin WebView shell around this site, shipped as a
 sideloaded APK (`android/apk/jpfoodmap.apk`, carried to the phone by
 Dropbox — the APK is gitignored, the `BUILD-INFO.txt` stamp beside it is
-not). It is version-locked to the site: **2.3.0**, `versionCode 20300`,
+not). It is version-locked to the site: **3.1.0**, `versionCode 30100`,
 `minSdk 31`, `targetSdk 36`, built for one device (Galaxy Z Fold 8).
 
 What the shell adds over the PWA: the page survives a fold/unfold without
 reloading, `jpfoodmap.com` links open in it (App Links), sign-in goes
 through Android's Credential Manager because Google refuses web sign-in
 inside a WebView, off-site links open in a Custom Tab that Back returns
-from, and sharing raises the system sheet. Everything else is the site
-itself — the shell never reads or writes a favourite, a pin, a language or
-anything else the page owns.
+from, sharing raises the system sheet, and JSON import/export uses Android's
+system file picker. Everything else is the site itself: the shell transfers
+the selected JSON bytes but does not interpret or mutate Saved restaurants,
+Hidden entries, pins, lists, language, or other page-owned state.
 
 ```bash
 cd android && ./build.sh          # → apk/jpfoodmap.apk + apk/BUILD-INFO.txt
@@ -133,23 +142,34 @@ uv run python tests/sync/run_all.py     # sync state machine vs a fake Worker
 - **`tests/compat/run.py`** replays snapshots of pre-2.0 `localStorage` from
   `tests/compat/fixtures/*.json` against the current build. This is the
   executable form of the cardinal rule below.
-- **`tests/smoke_playwright.py`** boots the built page on five viewports
-  (Fold 8 outer 416×657, Fold 8 inner portrait 616×816, Fold 8 inner
-  landscape 816×616, iPhone 393×852, desktop 1440×900) and fails on any
-  console error that is not on the offline allowlist.
+- **`tests/smoke_playwright.py`** boots the built page on eleven viewports,
+  including the measured Fold windows at 475×751, 932×704 and 591×689,
+  iPhone widths 375/393/430, desktop widths 1000/1440 and the older Fold
+  samples. It fails on console errors outside the offline allowlist.
+- **`tests/feature_retention_playwright.py`** exercises the existing feature
+  entries and collection operations. **`tests/ux/`** covers the planning
+  flow, detail return and constrained viewports in Chromium or WebKit;
+  **`tests/reliability/`** injects network and storage failures.
 - **`tests/worker/run.mjs`** and **`tests/sync/run_all.py`** run against an
   in-memory KV mock and a fake Worker on localhost respectively. **Never
   point either at `api.jpfoodmap.com`** — that KV holds real user state.
 
 ## Backing up user data
 
-The only user-facing backup path is the avatar menu → **导出 favorites.json**
+The user-facing backup path is the avatar menu → **导出 favorites.json**
 (M-005). It writes a single JSON file containing the Saved list, the Hidden
-list, and every pin / list / list-membership entry, and the matching **导入
-favorites.json** reads it back with an undo step. There is no server-side
-snapshot, no per-user KV history, and no admin export: a KV value that gets
-trampled is gone. Tell anyone who cares about their list to export it before
-a big change.
+list, and every pin / list / list-membership entry. On Android 3.1.0 the
+system document picker chooses the destination; import uses the system file
+picker and is limited to a 2 MiB JSON file. The page validates the complete
+known structure before committing an import and preserves compatible future
+fields, but there is no import undo.
+
+The Android WebView keeps local page data in the app's private storage.
+Anything that has not reached sync or been exported to a chosen document is
+lost when the app is uninstalled. Signing in again can retrieve the current
+KV value; it cannot recreate a local-only edit or an older server snapshot.
+There is no server-side snapshot, per-user KV history, or admin export, so
+export before a big change.
 
 On the build side, `src/tabelog/paths.py` routes every write through
 `atomic_write_*` (write to `.tmp`, `os.replace` into place) and keeps one
@@ -190,13 +210,25 @@ npx wrangler deploy
   so check the compatibility matrix in `CLAUDE.md` before rolling back only
   one of them: an old page must keep working against a new Worker and vice
   versa.
-- Tagged releases (`v2.3.0`) mark the exact tree a deployment came from.
+- A release tag marks the exact tree a deployment came from.
 
 ## Sync
 
 Sign in with Google from the avatar menu. The Worker at `api.jpfoodmap.com`
 verifies the ID token, sets an `HttpOnly` session cookie, and persists state
 to Cloudflare KV keyed by the Google `sub`. `GET`/`PUT /api/state` carry a
-`v` / `baseV` version so two devices editing at once get a 409 and a
-three-way merge rather than a last-writer-wins overwrite. There is no setup
-beyond clicking sign-in.
+`v` / `baseV` version: when the Worker observes a changed base it returns
+409 and the client performs a three-way merge. An uncertain PUT is recorded
+under `tabelog.pendingWrite` before it is sent, then reconciled by bounded
+readback without inventing a new write identity.
+
+Tabs share the pending write's ownership and retry budget. Where Web Locks
+is available, a short browser-local lock coordinates claims and cleanup;
+network requests run after that lock is released. Without Web Locks, readback
+and merging continue, but the uncertain body is not automatically replayed.
+
+Cloudflare KV is eventually consistent and does not provide compare-and-set.
+Two devices can therefore read the same visible version and a later write can
+still overwrite an earlier one without a 409. Sync reduces that risk and
+keeps ambiguous changes local, but it is not a substitute for JSON backups.
+There is no setup beyond clicking sign-in.

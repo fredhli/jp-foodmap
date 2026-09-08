@@ -22,4 +22,5 @@
     <string name="shell_error_retry">重试</string>
     <string name="shell_error_settings">设置</string>
     <string name="shell_renderer_crashed">页面崩溃了，已重新载入。</string>
+    <string name="files_invalid_json">请选择不超过 2 MiB 的有效 JSON 备份文件。</string>
 </resources>

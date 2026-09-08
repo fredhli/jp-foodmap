@@ -513,18 +513,31 @@
       // M-010: cancellable transfer (see _abortLods).
       var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
       if (ctrl) this._lodAbort[key] = ctrl;
+      var timer;
+      var deadline = new Promise(function(_, reject) {
+        timer = setTimeout(function() {
+          var error = new Error('Transit request timed out'); error.name = 'TimeoutError';
+          reject(error);
+          if (ctrl) ctrl.abort();
+        }, 20000);
+        if (ctrl) ctrl.signal.addEventListener('abort', function() {
+          var error = new Error('Transit request cancelled'); error.name = 'AbortError';
+          reject(error);
+        }, {once: true});
+      });
       // M-193: the three lifecycle events map.py's FAB wiring listens on.
       // _loading was request de-duplication only and drove no UI at all, so
       // a slow or failed LOD looked exactly like "this area has no lines".
       this.fire('lodloadstart', { key: key });
-      var p = fetch(this.options.lodUrls[key], ctrl ? { signal: ctrl.signal } : undefined)
+      var request = Promise.resolve().then(function() {
+          return fetch(self.options.lodUrls[key], ctrl ? { signal: ctrl.signal } : undefined);
+        })
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
-        })
+        });
+      var p = Promise.race([request, deadline])
         .then(function(gj) {
-          delete self._lodInflight[key];
-          delete self._lodAbort[key];
           // M-010: the layer was removed while this was in flight (its
           // caches are already cleared) — parsing now would re-inflate the
           // heap we just gave back, for data nobody is looking at.
@@ -541,8 +554,6 @@
           self.fire('lodload', { key: key });
         })
         .catch(function(e) {
-          delete self._lodInflight[key];
-          delete self._lodAbort[key];
           // M-010: a cancel is a decision we made, not a failure — no
           // console noise, no error event, no FAB rollback.
           if (e && e.name === 'AbortError') return;
@@ -551,6 +562,11 @@
           // failed upgrade over a working LOD must not knock the FAB out.
           self.fire('lodloaderror',
                     { key: key, error: e, hasData: !!self._currentLodKey });
+        })
+        .finally(function() {
+          clearTimeout(timer);
+          if (self._lodInflight[key] === p) delete self._lodInflight[key];
+          if (self._lodAbort[key] === ctrl) delete self._lodAbort[key];
         });
       this._lodInflight[key] = p;
       return p;

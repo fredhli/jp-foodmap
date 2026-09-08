@@ -133,7 +133,7 @@ class BridgeTest {
         // silently stops existing rather than an error anybody sees.
         assertTrue(Bridge.FACADE_JS.contains("window.NativeBridge"))
         assertTrue(Bridge.FACADE_JS.contains("""app: "jpfoodmap""""))
-        assertTrue(Bridge.FACADE_JS.contains("""version: "2.0.0""""))
+        assertTrue(Bridge.FACADE_JS.contains("""version: "3.1.0""""))
         assertTrue(Bridge.FACADE_JS.contains("signIn: function (req, silent)"))
         assertTrue(Bridge.FACADE_JS.contains("""send({ t: "signout" })"""))
         assertTrue(Bridge.FACADE_JS.contains("share: function (title, url)"))

@@ -175,6 +175,13 @@
             android:text="@string/settings_notify_test"
             android:textSize="16sp" />
 
+            <Button
+                android:id="@+id/notify_system_settings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_notify_system_settings"
+                android:textAllCaps="false" />
+
         <Button
             android:id="@+id/open_browser"
             android:layout_width="match_parent"
