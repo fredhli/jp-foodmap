@@ -127,6 +127,10 @@ _TRAD_FIXUPS: tuple[tuple[str, str], ...] = (
     # 預訂座位 / 只訂座位 — so the rule only ever produced 預訂位位. Zero
     # upside, 100% damage; leave 訂座 alone.
     ("谷歌地圖", "Google 地圖"),
+    # M-3.2-08: s2twp turns 局部补采 into 區域性補採 in the About sheet
+    # note. Taiwan writes 局部 here; the four-character phrase is bounded
+    # enough that it cannot fire inside the Tabelog policy corpus.
+    ("區域性補採", "局部補採"),
 )
 
 
@@ -2209,7 +2213,7 @@ def build_filter_panel_html(
     </span>
   </div>
   <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">
-    勾选后只看对应获奖店；多选取并集，不勾则不限制
+    勾选后只看对应获奖店 · 多选取并集 · 不勾则不限制
   </div>
   <div style="display:flex;flex-wrap:wrap;margin-bottom:6px;">
 {award_rows}
@@ -2223,12 +2227,12 @@ def build_filter_panel_html(
   <div class="ff-sec-head"><span class="ff-sec-title">其它</span></div>
   <div class="ff-other-row">
     <label>
-      <input type="checkbox" id="ff-bookable-only"><span>只显示可以通过 Tabelog 预约</span>
+      <input type="checkbox" id="ff-bookable-only"><span>只看可网订的店</span>
     </label>
   </div>
   <div class="ff-other-row">
     <label>
-      <input type="checkbox" id="ff-only-fav"><span>在找店结果中只看已收藏</span>
+      <input type="checkbox" id="ff-only-fav"><span>只看已收藏</span>
     </label>
     <span class="ff-sec-links">⭐ <b id="ff-fav-count">0</b></span>
   </div>
@@ -4219,7 +4223,7 @@ ONBOARD_HTML = """
     <p id="about-curation"></p>
   </div>
   <div class="ob-sec">
-    <p class="ob-note">部分餐厅暂无逐条采集日期；局部补采不代表全库更新</p>
+    <p class="ob-note">部分餐厅暂无逐条采集日期 · 局部补采不代表全库更新</p>
     <p class="ob-note">营业状态与价格请以原站为准</p>
   </div>
   <div class="ob-sec">
@@ -4940,7 +4944,7 @@ BOOKMARKS_MODAL_HTML = """
     <button class="imp-close" type="button" aria-label="关闭">×</button>
   </div>
   <div class="imp-body">
-    <p class="imp-sub">选择要导入的内容，将合并到现有数据并自动去重（不会覆盖现有项）：</p>
+    <p class="imp-sub">选择要导入的内容 · 将合并到现有数据并自动去重 · 不会覆盖现有项</p>
     <label class="imp-opt">
       <input type="checkbox" id="imp-fav" checked>
       <span class="imp-opt-label">收藏</span>
@@ -8401,17 +8405,47 @@ FILTER_JS_TEMPLATE = r"""
   // Extension A + the compatibility block. Mirrors the Python-side
   // _CJK_RUN_RE so build-time and runtime tokenize identically.
   var CJK_RUN_RE = /[㐀-鿿豈-﫿]+/g;
+  // M-3.2-08 (SPEC D6 / F): the tokenizer replaces CJK ideograph runs and
+  // nothing else, so every full-width mark that sat BETWEEN two runs in the
+  // Chinese source shipped verbatim into the English and Japanese pages
+  // ("Signed in，reloading", "…on the map，saved restaurants…"). The strings
+  // the spec names got whole-sentence templates; this is the net under the
+  // ~30 runtime status lines that are not worth a template each. It fires
+  // only when a run was actually replaced, so untranslated Chinese copy
+  // keeps its own punctuation, and a second pass over an already-localized
+  // string is a no-op (no CJK run left to hit).
+  var PUNCT_EN = {'，': ', ', '；': '; ', '：': ': ', '、': ', ',
+                  '。': '. ', '（': ' (', '）': ')', '！': '! ',
+                  '？': '? '};
+  var PUNCT_RE = /[，；：、。（）！？]/g;
+  function l10nPunct(s) {
+    if (activeLang === 'en') {
+      return s.replace(PUNCT_RE, function(m) { return PUNCT_EN[m] || m; })
+              .replace(/ +([,.;:!?)])/g, '$1')
+              .replace(/\( +/g, '(');
+    }
+    if (activeLang === 'ja') {
+      return s.replace(/，/g, '、').replace(/；/g, '。');
+    }
+    return s;
+  }
   function localizeText(s) {
     if (!s || !I18N_MAP) return s;
-    return s.replace(CJK_RUN_RE, function(m) {
+    var hit = false;
+    var out = s.replace(CJK_RUN_RE, function(m) {
       var t = I18N_MAP[m];
-      return t === undefined ? m : t;
+      if (t === undefined) return m;
+      hit = true;
+      return t;
     });
+    return hit ? l10nPunct(out) : out;
   }
   // M-104: CJK punctuation looks wrong once the surrounding run has been
   // translated into English ("Signed in，reloading"). Latin scripts get the
-  // ASCII form; the CJK languages keep the full-width one.
-  function l10nComma() { return activeLang === 'en' ? ', ' : '，'; }
+  // ASCII form; ja gets the ideographic comma, zh keeps the full-width one.
+  function l10nComma() {
+    return activeLang === 'en' ? ', ' : (activeLang === 'ja' ? '、' : '，');
+  }
   function l10nParen(inner) {
     return activeLang === 'en' ? ' (' + inner + ')' : '（' + inner + '）';
   }
@@ -8421,7 +8455,7 @@ FILTER_JS_TEMPLATE = r"""
   // string with punctuation inside) is exactly what produced
   // "You booked 25 meters In range" in M-103.
   function l10nSentence(parts) {
-    var sep = activeLang === 'en' ? '. ' : '，';
+    var sep = activeLang === 'en' ? '. ' : (activeLang === 'ja' ? '、' : '，');
     var out = [];
     for (var i = 0; i < parts.length; i++) out.push(localizeText(parts[i]));
     return out.join(sep) + (activeLang === 'en' ? '.' : '。');
@@ -8462,11 +8496,13 @@ FILTER_JS_TEMPLATE = r"""
     'en':    'Saved: {n} · not affected by filters',
     'ja':    'お気に入り {n} 件 · 絞り込みの影響なし'
   };
+  // M-3.2-08 (SPEC F): one line in the 320px mid column and on a 402px
+  // phone. The long forms wrapped to two lines in EN and JA.
   var FOOT_TPL = {
-    'zh-CN': '其中 {n} 家有 Tabelog 网订入口',
-    'zh-TW': '其中 {n} 家有 Tabelog 網訂入口',
-    'en':    '{n} have a Tabelog booking link',
-    'ja':    'うち {n} 軒は食べログのネット予約リンクあり'
+    'zh-CN': '其中 {n} 家可网订',
+    'zh-TW': '其中 {n} 家可網訂',
+    'en':    '{n} bookable online',
+    'ja':    'うち {n} 軒がネット予約可'
   };
   var FOOT_BTN_TPL = {
     'zh-CN': '只看这 {n} 家',
@@ -10521,13 +10557,13 @@ FILTER_JS_TEMPLATE = r"""
       // 100% coverage — derived from `bookable`, not from the blurb. Mixed
       // Latin+CJK, so it is hand-written per language exactly like chipText
       // (letting the run tokenizer at "Tabelog网上可订" produces nonsense).
-      var netTxt = d && d.bookable ? '有 Tabelog 网订入口' : '未检测到 Tabelog 网订入口';
+      var netTxt = d && d.bookable ? '有 Tabelog 网订入口' : '无网订入口';
       if (lang === 'en') {
-        netTxt = d && d.bookable ? 'Tabelog booking link found' : 'No Tabelog booking link detected';
+        netTxt = d && d.bookable ? 'Bookable on Tabelog' : 'No online booking';
       } else if (lang === 'ja') {
-        netTxt = d && d.bookable ? '食べログのネット予約リンクあり' : '食べログのネット予約リンク未検出';
+        netTxt = d && d.bookable ? 'Tabelog で予約可' : 'ネット予約なし';
       } else if (lang === 'zh-TW') {
-        netTxt = d && d.bookable ? '有 Tabelog 網訂入口' : '未偵測到 Tabelog 網訂入口';
+        netTxt = d && d.bookable ? '有 Tabelog 網訂入口' : '無網訂入口';
       }
       row('网上订位',
           '<span class="rst-chip' + (d && d.bookable ? '' : ' rst-chip-off')
@@ -17013,9 +17049,14 @@ FILTER_JS_TEMPLATE = r"""
                         escAttr(wbT(bd[1])) + '</span>';
         }
       }
-      l3 += d.bookable
-        ? '<span class="wb-row-net">✓ ' + escAttr(wbT('有网上预约入口')) + '</span>'
-        : '<span class="wb-row-net off">' + escAttr(wbT('未检测到网订入口')) + '</span>';
+      // M-3.2-08 (SPEC F / PH table_E): the off state ("No online booking
+      // link detected" / "ネット予約リンク未検出") was the single widest
+      // string on the row and was truncated at 402 / 416 / 475 / 932. It is
+      // also the default — 74% of rows — so it carried no signal. Only the
+      // positive state prints now, in two words.
+      if (d.bookable) {
+        l3 += '<span class="wb-row-net">✓ ' + escAttr(wbT('可网订')) + '</span>';
+      }
 
       return '<button type="button" class="' + cls + '" role="option"' +
         ' tabindex="-1" id="wb-row-' + i + '" data-i="' + i +
