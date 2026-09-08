@@ -402,10 +402,43 @@
      focusable, announces its state via aria-expanded, and carries the peek
      hint as DOM text. touch-action:none keeps the drag gesture intact;
      the button resets below stop the UA stylesheet from restyling it. */
+  /* M-3.2-06 (SPEC B.4): the head row. 44px, three slots — source return,
+     grip, ×. The grip keeps every one of its old properties; the only
+     change is that it is now a flex child that shares the row instead of
+     owning a line of its own, which is what buys the card the 44px that
+     #ux-detail-back used to spend on one link. */
+  #bs-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 2px;
+    min-height: 44px; padding: 0 4px 0 6px; box-sizing: border-box;
+  }
+  #ux-detail-back {
+    flex: 0 0 auto; min-height: 44px; padding: 0 8px;
+    display: inline-flex; align-items: center;
+    border: 0; border-radius: var(--r-sm); background: none;
+    color: var(--accent-strong); cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4;
+    white-space: nowrap; max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #ux-detail-back[hidden] { display: none; }
+  #ux-detail-back:focus-visible,
+  #bs-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  #bs-close {
+    flex: 0 0 auto; width: 44px; height: 44px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 0; background: none; color: var(--fg-3); cursor: pointer;
+    font: 700 22px/1 var(--font-ui);
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* The head row owns the ×, so the one the card body draws in .rst-header
+     would be a second identical control 40px below it. It stays for the
+     column layouts, where #bs-content lives in #wb-detail-body and this
+     selector does not reach it. */
+  #bs-sheet .rst-close { display: none; }
   #bs-grip {
     position: relative;
-    display: block; width: 100%;
-    padding: 9px 0 6px; flex-shrink: 0;
+    display: block; flex: 1 1 auto; min-width: 0;
+    padding: 9px 0 6px; flex-shrink: 1;
     cursor: grab; touch-action: none;
     background: none; border: 0; margin: 0;
     font: inherit; color: inherit; text-align: center;
@@ -415,6 +448,68 @@
     content: ''; display: block;
     width: 38px; height: 4px; margin: 0 auto;
     background: #d1d5db; border-radius: 2px;
+  }
+  /* M-3.2-06 (SPEC B.4 / D.2): the card's single action row, pinned to the
+     bottom of the sheet. --glass-reg comes from the .glass-reg utility on
+     the element; the shadow is re-declared because the utility's --el-2
+     drops downward, and this surface is lit from below. */
+  #bs-foot {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    min-height: 52px; padding: 4px 12px; box-sizing: border-box;
+    border: 0; border-top: 1px solid var(--border-1);
+    box-shadow: 0 -4px 12px rgba(16, 24, 40, 0.06), var(--glass-inner-hi);
+  }
+  #bs-foot:empty { display: none; }
+  #bs-foot .bs-foot-btn {
+    flex: 1 1 auto; min-width: 0; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 0 10px; box-sizing: border-box;
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--fg-2);
+    font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-decoration: none; cursor: pointer;
+  }
+  #bs-foot .bs-foot-btn img { width: 17px; height: 17px; flex: 0 0 auto; }
+  /* One primary per view (SPEC D.2): Save while planning, Directions once
+     the user is standing in the city. */
+  #bs-foot .bs-foot-btn.bs-primary {
+    border-color: var(--accent); background: var(--accent); color: #fff;
+  }
+  #bs-foot .bs-foot-btn.bs-narrow { flex: 0 0 auto; width: 44px; padding: 0; }
+  /* Saved beats primary: once the place is starred the button is a state,
+     not a call to action, and it wears the same amber every other ⭐ on the
+     page wears. Declared after .bs-primary — same specificity, later wins. */
+  #bs-foot .ff-fav-btn.rst-on-fav {
+    border-color: #fbbf24; background: #fef3c7; color: #92400e;
+  }
+  #bs-foot .rst-tabelog { margin-left: 0; }
+  #bs-foot .bs-foot-lnk {
+    flex: 0 0 auto; display: inline-flex; align-items: center;
+    min-height: 44px; padding: 0 6px; border-radius: var(--r-sm);
+    color: var(--accent); text-decoration: none;
+    font-family: inherit; font-size: 13px; font-weight: 600; white-space: nowrap;
+  }
+  #bs-foot .bs-foot-btn:focus-visible,
+  #bs-foot .bs-foot-lnk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* ⋯ menu. Content layer, so it is opaque — glass never stacks on glass. */
+  #bs-more-wrap { position: relative; flex: 0 0 auto; }
+  #bs-more-menu {
+    position: absolute; right: 0; bottom: calc(100% + 6px);
+    min-width: 168px; padding: 4px; box-sizing: border-box;
+    border: 1px solid var(--border-1); border-radius: var(--r-md);
+    background: var(--bg-elev); box-shadow: var(--el-3);
+    display: flex; flex-direction: column;
+  }
+  #bs-more-menu[hidden] { display: none; }
+  #bs-more-menu > button {
+    min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm);
+    background: none; color: var(--fg-2); text-align: left; cursor: pointer;
+    font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.3;
+  }
+  #bs-more-menu > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (hover: hover) and (pointer: fine) {
+    #bs-more-menu > button:hover { background: var(--bg-subtle); }
   }
   /* M-152 / M-153: parked on the sheets + the bookmark modal for two frames
      around a viewport resize (Fold open/close, rotation, split-view drag) so
@@ -459,11 +554,6 @@
      expanded card. */
   #bs-sheet.bs-peek .rst-lists,
   #bs-sheet.bs-peek .rst-footer { display: none; }
-  /* The peek action bar is the ⭐ / 🚫 pair only — no border, no reserved
-     height, so the card stays inside the 40% budget. */
-  #bs-sheet.bs-peek .rst-actions-bar {
-    margin-top: 6px; padding-top: 0; border-top: 0;
-  }
   /* M-188: 44px in peek — this is the state whose whole job is to say
      "there is more, act on me", so it gets a real touch target. The full
      state keeps its original 19px so the card layout is unchanged. */
@@ -673,23 +763,11 @@
       transform: translate(-50%, -50%);
     }
   }
-  /* The chip row already draws the separator, so the action bar right
-     under it must not draw a second one. */
-  .rst-lists + .rst-actions-bar { margin-top: 8px; padding-top: 0;
-                                  border-top: 0; }
-  /* M-032: share sits in the action bar beside the Google Maps square and
-     matches it exactly — 28px visual, 44px inside the bar. */
+  /* M-032: share sits beside the Google Maps square and matches it exactly
+     — 28px visual, 44px hit area. M-3.2-06 moved it into the ⋯ menu on the
+     phone card; the class stays because the column layouts still draw the
+     28px square. */
   .rst-share { padding: 0; font-family: inherit; }
-  /* D5 / H3: the bottom action bar. 44px is unconditional here — this is
-     the row every visit ends on, and it is the last thing in the card, so
-     nothing is displaced by giving it thumb-sized targets on every device. */
-  .rst-actions-bar { display: flex; align-items: center; gap: 8px;
-                     flex-wrap: wrap; min-height: 44px;
-                     margin-top: 12px; padding-top: 10px;
-                     border-top: 1px solid #e5e7eb; }
-  .rst-actions-bar .rst-btn { min-height: 44px; padding: 0 12px;
-                              display: inline-flex; align-items: center; }
-  .rst-actions-bar .rst-gmaps { width: 44px; height: 44px; }
   .rst-tabelog { margin-left: auto; display: inline-flex; align-items: center;
                  min-height: 44px; color: #2563eb; text-decoration: none;
                  font-size: 13px; white-space: nowrap; }
@@ -764,6 +842,11 @@
     animation: rst-shimmer 1.1s ease-in-out 10;
   }
   .rst-photos .rst-ph.ld::after { content: none; }
+  /* M-3.2-06: a photo that never arrived keeps its grey 4:3 tile and stops
+     being a tap target. No fixed pixel height — the box is already at least
+     90px tall at 402px, and a hard min-height would break the box/img
+     aspect agreement smoke_playwright asserts. */
+  .rst-photos .rst-ph-err { cursor: default; }
   @keyframes rst-shimmer { to { transform: translateX(100%); } }
   /* W-4: full-screen photo viewer. Opened by a thumbnail tap, registered on
      the ui stack (uiRegister/uiPush) so Android's back gesture closes it
@@ -925,7 +1008,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, viewport-fit=cover" />
             <style>
-                #map_ea55210655bf2d8458f7126ea0f0e846 {
+                #map_e400828a41ef6b3da54e3dd43f41ff12 {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -970,16 +1053,28 @@
      pannable behind every sheet state, so claiming modality would tell
      screen readers the rest of the page is unreachable when it isn't. -->
 <div id="bs-sheet" role="dialog" aria-hidden="true">
-  <!-- M-188: disclosure button, not a div — keyboard-reachable, and the
+  <!-- M-3.2-06: one 44px head row instead of the grip row plus a full-width
+       #ux-detail-back row underneath it. Left = the source return (hidden
+       when the card was opened from the map or from a search result), middle
+       = the grip (still the drag surface), right = ×, which closes the card
+       and pans the map back to the restaurant (2.3.0 W-8).
+       M-188: disclosure button, not a div — keyboard-reachable, and the
        peek hint below is real DOM so the i18n walker can translate it
        (M-157). aria-expanded is kept in sync by bsSetPeek(). -->
-  <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content" inert>
-    <span id="bs-grip-hint"><span class="bs-hint-swipe">上滑查看详情</span><span class="bs-hint-tap">点击查看详情</span></span>
-  </button>
+  <div id="bs-head">
+    <button id="ux-detail-back" type="button" inert hidden></button>
+    <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content" inert>
+      <span id="bs-grip-hint"><span class="bs-hint-swipe">上滑查看详情</span><span class="bs-hint-tap">点击查看详情</span></span>
+    </button>
+    <button id="bs-close" type="button" inert aria-label="关闭">×</button>
+  </div>
   <div id="bs-banner" hidden></div>
-  <button id="ux-detail-back" type="button" inert>返回地图</button>
   <div id="bs-content" inert></div>
-  <div id="ux-detail-actions" inert></div>
+  <!-- M-3.2-06: the card's only action row. Painted by uxPaintDetailActions
+       through emojiHtml() — #bs-foot is NOT one of the emojify observer's
+       containers (#bs-content is), so a raw glyph here would stay a system
+       glyph on Windows. -->
+  <div id="bs-foot" class="glass-reg" inert></div>
 </div>
 <!-- W-4: the photo viewer. A thumbnail used to be an <a target="_blank"> to
      a bare JPEG, which in the Android shell classified as Nav.EXTERNAL and
@@ -5382,10 +5477,11 @@
   #wb-left .fv-tools > * { max-width: 100%; }
 
   /* ---- 3.1.x journeys that stay (SPEC A: F2 / F4 / F7). The UI shells
-     below are the ones M-3.2-04 (#ux-context), M-3.2-06 (#ux-detail-back /
-     #ux-detail-actions) and M-3.2-07 (#ux-filter-done / #ux-saved-scope)
-     replace; the behaviour they front is kept. ---- */
-  #ux-detail-back:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+     below are the ones M-3.2-04 (#ux-context) and M-3.2-07
+     (#ux-filter-done / #ux-saved-scope) replace; the behaviour they front is
+     kept. M-3.2-06 took #ux-detail-back into the card's head row and
+     replaced #ux-detail-actions with #bs-foot — both styled next to the
+     sheet they belong to, not here. ---- */
   #ux-filter-done { display: none; flex: 0 0 auto; padding: 10px 14px;
     border-top: 1px solid #e5e7eb; background: #fff; }
   #ux-filter-done.on { display: block; }
@@ -5396,18 +5492,6 @@
   #ux-saved-scope { display: none; }
   #wb-left-head.ux-head-fav .wb-counts { display: none; }
   #wb-left-head.ux-head-fav #ux-saved-scope { display: block; margin: 8px 0 0; }
-  #ux-detail-back { flex: 0 0 auto; border: 0; border-bottom: 1px solid #e5e7eb;
-    min-height: 44px; padding: 8px 14px; background: #fff; color: #1d4ed8;
-    text-align: left; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
-  #ux-detail-actions { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px;
-    padding: 10px 14px; border-top: 1px solid #e5e7eb; background: #fff; }
-  #ux-detail-actions .rst-btn, #ux-detail-actions .rst-gmaps {
-    flex: 1; width: auto; min-width: 0; min-height: 44px; height: auto; margin: 0;
-    display: inline-flex; justify-content: center; align-items: center; gap: 8px;
-    padding: 8px; box-sizing: border-box; border-radius: 8px; font-size: 14px;
-    line-height: 1.4; text-decoration: none;
-  }
-  #ux-detail-actions .rst-gmaps { background: #2563eb; color: #fff; }
   #sync-stack > .sync-toast, #sync-stack > #sync-hint { pointer-events: none; }
   #sync-stack > .sync-toast .sync-btn, #sync-hint .sync-btn { pointer-events: auto; }
   #bs-content { min-height: 0; }
@@ -5432,7 +5516,7 @@
     body.ux-detail-open #sync-hint { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #ux-detail-actions * { transition: none !important; }
+    #bs-foot * { transition: none !important; }
   }
 }
 </style>
@@ -5489,14 +5573,14 @@
   // via this table; runs without an entry are passed through unchanged.
   // Subtrees marked lang="ja" are skipped wholesale so Japanese names,
   // addresses and shinjitai genre tokens stay in their source form.
-  var TEXT_TRAD_MAP = {"首里城":"首裡城","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","大通公园":"大通公園","你在约":"你在約","日本环球影城":"日本環球影城","预约政策":"預約政策","图标必须是":"圖示必須是","重命名":"重新命名","热门餐厅":"熱門餐廳","已显示全部结果":"已顯示全部結果","不勾则不限制":"不勾則不限制","按子收藏夹":"按子收藏夾","南紀白浜温泉":"南紀白浜溫泉","已复制链接":"已複製連結","石垣岛":"石垣島","日光东照宫":"日光東照宮","上野公园":"上野公園","地图图例":"地圖圖例","你自己想标注的地点或建筑物":"你自己想標註的地點或建築物","伴手礼":"伴手禮","熱海温泉":"熱海溫泉","重试":"重試","备份文件超过":"備份檔案超過","已保存在此浏览器":"已儲存在此瀏覽器","联网后重试":"聯網後重試","点心":"點心","门司港怀旧":"門司港懷舊","丰洲市场":"豐洲市場","关闭":"關閉","你在另一个窗口切换了登录":"你在另一個視窗切換了登入","全部地区":"全部地區","神户港塔":"神戶港塔","御好烧":"御好燒","保存失败":"儲存失敗","长瀞町":"長瀞町","结果":"結果","足立美术馆":"足立美術館","列表为我的收藏":"列表為我的收藏","初始化失败":"初始化失敗","你的数据":"你的資料","服务暂不可用":"服務暫不可用","轻井泽":"輕井澤","弥彦神社":"彌彥神社","数据托管于":"資料託管於","富田农场":"富田農場","没有符合的店":"沒有符合的店","鸣门漩涡":"鳴門漩渦","可粘贴任意":"可貼上任意","从结果或详情里加入子收藏夹":"從結果或詳情里加入子收藏夾","鸟取砂丘":"鳥取砂丘","点底部的分享按钮":"點底部的分享按鈕","道后温泉":"道後溫泉","冲绳美丽海水族馆":"沖繩美麗海水族館","华严瀑布":"華嚴瀑布","导入":"匯入","退出登录":"退出登入","严岛神社":"嚴島神社","景点锚点":"景點錨點","类型":"類型","只看谷歌地图校准过坐标的餐厅":"只看Google 地圖校準過座標的餐廳","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","天妇罗":"天婦羅","奈良公园":"奈良公園","眺遊楼":"眺遊樓","已复制":"已複製","你在另一个窗口退出了登录":"你在另一個視窗退出了登入","出云大社":"出雲大社","武雄温泉":"武雄溫泉","已切到全部地区":"已切到全部地區","男鹿半岛":"男鹿半島","同时清除本设备数据":"同時清除本裝置資料","不接受预订":"不接受預訂","名称不能为空":"名稱不能為空","四万十川":"四萬十川","近江町市场":"近江町市場","默认不在地图上显示":"預設不在地圖上顯示","其他区域":"其他區域","新建书签":"新建書籤","同步数据超过上限":"同步資料超過上限","雾凇":"霧凇","伊豆半岛":"伊豆半島","未检测到":"未檢測到","不登录也完全可用":"不登入也完全可用","当前筛选的":"當前篩選的","显示全部":"顯示全部","最近局部补采":"最近區域性補採","检查网络":"檢查網路","定位被浏览器禁用":"定位被瀏覽器禁用","选择器":"選擇器","弃用当前":"棄用當前","请重新登录":"請重新登入","的餐厅":"的餐廳","数日前":"數日前","登录被取消":"登入被取消","和景点一起通过你的":"和景點一起透過你的","城市轨道":"城市軌道","也显示已隐藏的景点":"也顯示已隱藏的景點","在屏幕范围内":"在螢幕範圍內","请在浏览器设置中开启":"請在瀏覽器設定中開啟","与默认景点一起在地图上显示":"與預設景點一起在地圖上顯示","加入景点":"加入景點","青岛神社":"青島神社","选地区":"選地區","伊香保温泉":"伊香保溫泉","港未来町":"港未來町","石见银山":"石見銀山","用户自添景点":"使用者自添景點","收藏还是空的":"收藏還是空的","把地图装到主屏幕":"把地圖裝到主螢幕","尚未导入":"尚未匯入","网络暂不可用":"網路暫不可用","下吕温泉":"下呂溫泉","浏览器未提供存储用量":"瀏覽器未提供儲存用量","东京晴空塔":"東京晴空塔","加载失败":"載入失敗","弃用名单":"棄用名單","江之岛":"江之島","装好之后离线也能看地图":"裝好之後離線也能看地圖","全选可见":"全選可見","会津若松":"會津若松","能否预订":"能否預訂","节假日":"節假日","地铁":"地鐵","兼六园":"兼六園","保存中":"儲存中","银座":"銀座","数据来源":"資料來源","登录中":"登入中","中国料理":"中國料理","搜索失败":"搜尋失敗","地图组件无法加载":"地圖元件無法載入","结果包含所选地区内全部匹配餐厅":"結果包含所選地區內全部匹配餐廳","奥入濑溪流":"奧入瀨溪流","当前位置在地图范围之外":"當前位置在地圖範圍之外","选择要导入的内容":"選擇要匯入的內容","显示这个菜系":"顯示這個菜系","拉面":"拉麵","云端数据不受影响":"雲端資料不受影響","加载中":"載入中","仓敷美观地区":"倉敷美觀地區","新建子收藏夹":"新建子收藏夾","撤销":"撤銷","个其他匹配":"個其他匹配","下次一点就开":"下次一點就開","串烧":"串燒","世纪美术馆":"世紀美術館","请稍后再试":"請稍後再試","重置筛选":"重置篩選","你弃用的店":"你棄用的店","显示":"顯示","视野内":"視野內","名称":"名稱","有马温泉":"有馬溫泉","内脏":"內臟","南亚":"南亞","登录处理失败":"登入處理失敗","缩放回全部结果":"縮放回全部結果","状态未知":"狀態未知","删除":"刪除","秋叶原":"秋葉原","打开完整":"開啟完整","关闭当前层":"關閉當前層","金刀比罗宫":"金刀比羅宮","登录后可跨设备同步":"登入後可跨裝置同步","已开启":"已開啟","进一步压到":"進一步壓到","账号跨设备同步":"帳號跨裝置同步","重命名子收藏夹":"重新命名子收藏夾","御台场":"御台場","请确认它是导出的":"請確認它是匯出的","按钮里的选择器":"按鈕裡的選擇器","家因此被挡住":"家因此被擋住","点地图或列表里的店查看详情":"點地圖或列表裡的店檢視詳情","去掉地点约束":"去掉地點約束","仙岩园":"仙岩園","登录状态保留":"登入狀態保留","地区":"地區","热田神宫":"熱田神宮","勾选后只看对应获奖店":"勾選後只看對應獲獎店","新仓山浅间公园":"新倉山淺間公園","菜系图标":"菜系圖示","意面":"意麵","角岛大橋":"角島大橋","但不再同步到云端":"但不再同步到雲端","兴福寺":"興福寺","可导出可退出可删除":"可匯出可退出可刪除","放大地图聚合就会散开":"放大地圖聚合就會散開","下呂温泉":"下呂溫泉","恢复后会自动上传":"恢復後會自動上傳","搜索超时":"搜尋超時","指宿温泉":"指宿溫泉","草津温泉":"草津溫泉","聚合圆圈":"聚合圓圈","隐私与数据":"隱私與資料","筛选":"篩選","樱岛":"櫻島","和书签一起通过你的":"和書籤一起透過你的","符合筛选":"符合篩選","由布院温泉":"由布院溫泉","改动已存在本机":"改動已存在本機","书签会从本设备删除":"書籤會從本裝置刪除","热门":"熱門","距离约":"距離約","大须":"大須","哥拉巴园":"哥拉巴園","筛选条件太严格了":"篩選條件太嚴格了","价位":"價位","伏见稻荷大社":"伏見稻荷大社","浏览器不允许本站保存数据":"瀏覽器不允許本站儲存資料","地图只覆盖日本":"地圖只覆蓋日本","快捷键":"快捷鍵","是本站收录的最低分":"是本站收錄的最低分","有网上预约入口":"有網上預約入口","详情":"詳情","点击查看详情":"點選檢視詳情","鸭川海洋世界":"鴨川海洋世界","热海温泉":"熱海溫泉","地图校准":"地圖校準","登录后可在其它设备看到":"登入後可在其它裝置看到","知床国立公園":"知床國立公園","阿波舞会馆":"阿波舞會館","锦带桥":"錦帶橋","餐厅数据加载失败":"餐廳資料載入失敗","已合并本地改动":"已合併本地改動","隐藏非日本料理":"隱藏非日本料理","当前离线":"當前離線","其中高价位":"其中高價位","隐私政策":"隱私政策","夫妇岩":"夫婦岩","乳头温泉乡":"乳頭溫泉鄉","当日":"當日","加入子收藏夹":"加入子收藏夾","银奖":"銀獎","心斋桥":"心齋橋","历史采集基线":"歷史採集基線","饺子":"餃子","已选":"已選","查看":"檢視","本地存储":"本地儲存","倉敷美観地区":"倉敷美観地區","那须高原":"那須高原","东寻坊":"東尋坊","鹈户神宫":"鵜戶神宮","交差点":"交差點","删除景点":"刪除景點","端岛":"端島","久能山东照宫":"久能山東照宮","地图怎么看":"地圖怎麼看","延历寺":"延歷寺","中禅寺湖":"中禪寺湖","地点内匹配":"地點內匹配","没有晚餐价格的店改用午餐价格上限":"沒有晚餐價格的店改用午餐價格上限","越後湯沢温泉":"越後湯沢溫泉","松岛":"松島","成田国际机场":"成田國際機場","明治神宫":"明治神宮","调整面板高度":"調整面板高度","金奖":"金獎","缩小":"縮小","语言":"語言","海鲜":"海鮮","知床国立公园":"知床國立公園","周三":"週三","周五":"週五","全选":"全選","长途线路":"長途線路","已跳过无法识别的条目":"已跳過無法識別的條目","只存在这台设备":"只存在這臺裝置","龙泉洞":"龍泉洞","多选取并集":"多選取並集","分享这家店":"分享這家店","东京塔":"東京塔","说明":"說明","海游馆":"海遊館","备份":"備份","南纪白滨温泉":"南紀白濱溫泉","无痕窗口关闭即失":"無痕視窗關閉即失","福冈塔":"福岡塔","炭火烧鸟正":"炭火燒鳥正","关于本站":"關於本站","龙安寺":"龍安寺","箱根温泉":"箱根溫泉","请检查网络后刷新":"請檢查網路後重新整理","炭火烧鸟":"炭火燒鳥","养老溪谷":"養老溪谷","餐厅数据无法加载":"餐廳資料無法載入","安装":"安裝","正在删除":"正在刪除","越后汤泽温泉":"越後湯澤溫泉","选一个地区开始":"選一個地區開始","将合并到现有数据并自动去重":"將合併到現有資料並自動去重","无法解析该文件":"無法解析該檔案","无法取得位置":"無法取得位置","地图底图":"地圖底圖","关西国际机场":"關西國際機場","查看结果":"檢視結果","西点":"西點","再点添加":"再點新增","台湾料理":"臺灣料理","札幌市钟楼":"札幌市鐘樓","系统默认旅游锚点之外你自己加的去处":"系統預設旅遊錨點之外你自己加的去處","桂滨":"桂濱","旭川市旭山动物园":"旭川市旭山動物園","分组":"分組","烤鸡":"烤雞","黒部峡谷":"黒部峽谷","个书签":"個書籤","铁板烧":"鐵板燒","显示我的位置":"顯示我的位置","隐藏":"隱藏","已切换账号":"已切換帳號","韩":"韓","云端数据已回退":"雲端資料已回退","披萨":"披薩","大濠公园":"大濠公園","国际通":"國際通","周一":"週一","内没有匹配的餐厅":"內沒有匹配的餐廳","网上可订":"網上可訂","筑地市场":"築地市場","内蔵":"內蔵","放弃当前输入":"放棄當前輸入","已删除":"已刪除","位置与座位":"位置與座位","通天阁":"通天閣","东京国际机场":"東京國際機場","档":"檔","関西国際空港":"関西國際空港","只看网订":"只看網訂","以外的区域":"以外的區域","没有匹配的结果":"沒有匹配的結果","富冈制纱厂":"富岡制紗廠","展开列表":"展開列表","荞麦":"蕎麥","已恢复":"已恢復","乳頭温泉郷":"乳頭溫泉郷","东南亚料理":"東南亞料理","这是一张日本美食与景点地图":"這是一張日本美食與景點地圖","返回结果":"返回結果","导入备份":"匯入備份","下次登录会重新下载":"下次登入會重新下載","盖饭":"蓋飯","道後温泉":"道後溫泉","服务器出错":"伺服器出錯","只看这个":"只看這個","按距离排序":"按距離排序","地图控件":"地圖控制元件","图标":"圖示","黒川温泉":"黒川溫泉","高千穂峡":"高千穂峽","可网订":"可網訂","已启用":"已啟用","三朝温泉":"三朝溫泉","云端数据已删除":"雲端資料已刪除","保存":"儲存","改动已存本地":"改動已存本地","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","亲子丼":"親子丼","净土滨":"淨土濱","机车博物馆":"機車博物館","周日":"週日","登录脚本未加载":"登入指令碼未載入","确认删除":"確認刪除","地图搜索":"地圖搜尋","取消规则":"取消規則","未检测到网订入口":"未檢測到網訂入口","成田山新胜寺":"成田山新勝寺","銀山温泉":"銀山溫泉","周六":"週六","安装为应用":"安裝為應用","筛选结果":"篩選結果","浅草寺":"淺草寺","地图移动不改变筛选范围":"地圖移動不改變篩選範圍","吉野里遗址":"吉野裡遺址","国営":"國営","地图组件加载失败":"地圖元件載入失敗","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","只显示可以通过":"只顯示可以透過","预约方式请查看原政策":"預約方式請檢視原政策","小豆岛":"小豆島","多数可以在一个合理的天数内提前预订":"多數可以在一個合理的天數內提前預訂","放宽条件或重置筛选":"放寬條件或重置篩選","鬼怒川温泉":"鬼怒川溫泉","中东":"中東","翻译失败":"翻譯失敗","没有新增内容":"沒有新增內容","范围内":"範圍內","伊势神宫":"伊勢神宮","谷川岳":"谷川嶽","阿苏山":"阿蘇山","评分":"評分","同步失败":"同步失敗","不会覆盖现有项":"不會覆蓋現有項","严美溪":"嚴美溪","渡月桥":"渡月橋","改动仅存浏览器":"改動僅存瀏覽器","批量收藏":"批次收藏","景点":"景點","图层":"圖層","标记中间的图标代表菜系":"標記中間的圖示代表菜系","家餐厅":"家餐廳","等待云端状态更新":"等待雲端狀態更新","咖啡厅":"咖啡廳","书签标记":"書籤標記","暂停营业":"暫停營業","会津若松市":"會津若松市","韩餐":"韓餐","这个子收藏夹还是空的":"這個子收藏夾還是空的","车站":"車站","眺游楼":"眺遊樓","面包店等非正餐也按比例控量":"麵包店等非正餐也按比例控量","面类":"面類","复制失败":"複製失敗","预约":"預約","中东菜等":"中東菜等","同步冲突":"同步衝突","迁移":"遷移","请到来源网站确认日期与人数":"請到來源網站確認日期與人數","局部补采不代表全库更新":"區域性補採不代表全庫更新","或打开浏览器菜单选择安装":"或開啟瀏覽器選單選擇安裝","圆里的数字是这一片符合当前筛选条件的餐厅数量":"圓裡的數字是這一片符合當前篩選條件的餐廳數量","偕乐园":"偕樂園","中国料理眺游楼":"中國料理眺遊樓","地图导航":"地圖導航","缩放到全部结果":"縮放到全部結果","祇园":"祇園","请检查网络":"請檢查網路","恢复显示这间店":"恢復顯示這間店","同步数据接近上限":"同步資料接近上限","书签":"書籤","显示的是本机缓存的数据":"顯示的是本機快取的資料","福井县立恐龙博物馆":"福井縣立恐龍博物館","猎奇":"獵奇","梦":"夢","当前处于离线状态":"當前處於離線狀態","可预订":"可預訂","获奖":"獲獎","黑部峡谷":"黑部峽谷","小樽运河":"小樽運河","汉堡":"漢堡","请删减收藏或书签":"請刪減收藏或書籤","个景点":"個景點","道顿堀":"道頓堀","在结果里点星标就会出现在这里":"在結果裡點星標就會出現在這裡","简体":"簡體","未开启":"未開啟","隐藏弃用名单":"隱藏棄用名單","导入完成":"匯入完成","价格区间上限":"價格區間上限","我的书签标记":"我的書籤標記","选择":"選擇","按距离":"按距離","点地址栏右侧的安装图标":"點位址列右側的安裝圖示","登录可在其他设备恢复":"登入可在其他裝置恢復","这样":"這樣","收藏只在本次会话有效":"收藏只在本次會話有效","安装到主屏幕":"安裝到主螢幕","已从找店结果隐藏":"已從找店結果隱藏","用地点名填入":"用地點名填入","古宇利岛":"古宇利島","关东煮":"關東煮","东山东":"東山東","条结果":"條結果","需要预订":"需要預訂","网络不通":"網路不通","奖项":"獎項","已跳过":"已跳過","二条城":"二條城","比它更低的餐厅根本不在数据里":"比它更低的餐廳根本不在資料裡","锅物":"鍋物","网络问题或广告拦截插件":"網路問題或廣告攔截外掛","后乐园":"後樂園","已永久歇业":"已永久歇業","鸟羽水族馆":"鳥羽水族館","日式咖喱":"日式咖哩","已改用云端数据":"已改用雲端資料","淡路岛":"淡路島","大内宿":"大內宿","请先登录":"請先登入","铜奖":"銅獎","太宰府天满宫":"太宰府天滿宮","网上订位":"網上訂位","收藏只存在这台设备":"收藏只存在這臺裝置","台場":"臺場","登录已过期":"登入已過期","会津若松城":"會津若松城","聚焦搜索":"聚焦搜尋","网订入口":"網訂入口","田泽湖":"田澤湖","未分组":"未分組","大三岛":"大三島","已恢复显示这间店":"已恢復顯示這間店","同步数据":"同步資料","周二":"週二","这次筛选里有":"這次篩選裡有","复制":"複製","重新连接中":"重新連線中","在地图上显示出来的":"在地圖上顯示出來的","本设备上的本地缓存会保留":"本裝置上的本地快取會保留","恢复显示":"恢復顯示","在浏览器菜单里找添加到主屏幕或安装":"在瀏覽器選單裡找新增到主螢幕或安裝","一起显示":"一起顯示","新倉山浅間公園":"新倉山淺間公園","搜索中":"搜尋中","万座毛":"萬座毛","可随时删除":"可隨時刪除","子收藏夹":"子收藏夾","复制坐标":"複製座標","输入更多字以缩小范围":"輸入更多字以縮小範圍","文件格式无法识别":"檔案格式無法識別","白须神社":"白鬚神社","浏览器清理时可能删除本地收藏":"瀏覽器清理時可能刪除本地收藏","蔓桥":"蔓橋","预约入口不代表实时余位":"預約入口不代表實時餘位","乡土":"鄉土","删除书签":"刪除書籤","价格":"價格","长崎和平公园":"長崎和平公園","跨设备同步":"跨裝置同步","选择语言":"選擇語言","奥入瀬":"奧入瀬","正在尝试浏览器下载":"正在嘗試瀏覽器下載","家餐厅都不在地图范围内":"家餐廳都不在地圖範圍內","寿司":"壽司","还原列表":"還原列表","弃用":"棄用","在找店结果中只看已收藏":"在找店結果中只看已收藏","广岛和平纪念公园":"廣島和平紀念公園","交通图层加载失败":"交通圖層載入失敗","国際通":"國際通","鹤冈八幡宫":"鶴岡八幡宮","稍后":"稍後","涩谷路口":"澀谷路口","搜索餐厅":"搜尋餐廳","金泽":"金澤","已弃用":"已棄用","翻译":"翻譯","晚餐价格":"晚餐價格","改动保留在本地":"改動保留在本地","导出":"匯出","你研究后决定不会去的餐厅":"你研究後決定不會去的餐廳","横浜中華街":"橫浜中華街","私铁":"私鐵","收录规则":"收錄規則","鳴子温泉":"鳴子溫泉","下滩站":"下灘站","冈山城":"岡山城","请检查文件内容":"請檢查檔案內容","仅电话":"僅電話","佐渡岛":"佐渡島","选择添加到主屏幕":"選擇新增到主螢幕","读取文件失败":"讀取檔案失敗","会館":"會館","屋久岛":"屋久島","日元以下的高分正餐餐厅":"日元以下的高分正餐餐廳","未能保存到云端":"未能儲存到雲端","预订方式":"預訂方式","家能在网上订":"家能在網上訂","横滨中华街":"橫濱中華街","无休":"無休","鸣子温泉":"鳴子溫泉","不在当前数据里":"不在當前資料裡","餐厅库":"餐廳庫","重新载入":"重新載入","已复制坐标":"已複製座標","和收藏一起通过你的":"和收藏一起透過你的","地图上的地点标记":"地圖上的地點標記","直岛":"直島","只看这个菜系":"只看這個菜系","只读取你的邮箱和头像":"只讀取你的郵箱和頭像","简体中文":"簡體中文","已复制清单":"已複製清單","收藏与弃用":"收藏與棄用","登录成功":"登入成功","本站只收录每个区域评分前":"本站只收錄每個區域評分前","恢复网络后请重试":"恢復網路後請重試","复制清单文本":"複製清單文字","收藏当前":"收藏當前","大吊桥":"大吊橋","苗场山":"苗場山","函馆山":"函館山","地狱谷野猿公苑":"地獄谷野猿公苑","标记颜色取决于这家店申报的晚餐价格上限":"標記顏色取決於這家店申報的晚餐價格上限","此操作不可撤销":"此操作不可撤銷","等价物":"等價物","市内":"市內","你在另一个窗口登录了":"你在另一個視窗登入了","不影响餐厅收藏":"不影響餐廳收藏","备份文件已保存":"備份檔案已儲存","立即重试":"立即重試","里歴史公園":"裡歴史公園","返回地图":"返回地圖","坐标":"座標","东大寺":"東大寺","试试":"試試","东京迪士尼乐园":"東京迪士尼樂園","栗林公园":"栗林公園","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","批量弃用":"批次棄用","乌冬":"烏冬","从子收藏夹移除":"從子收藏夾移除","图层设置":"圖層設定","黑川温泉":"黑川溫泉","屏幕内":"螢幕內","新干线":"新幹線","找店范围":"找店範圍","银山温泉":"銀山溫泉","家结果":"家結果","请至少选择一项":"請至少選擇一項","有馬温泉":"有馬溫泉","隐藏这间店":"隱藏這間店","稍后自动重试":"稍後自動重試","国营常陆海滨公园":"國營常陸海濱公園","营业状态与价格请以原站为准":"營業狀態與價格請以原站為準","彦根城":"彥根城","长途":"長途","上滑查看详情":"上滑檢視詳情","周四":"週四","无":"無","地图仍为当前找店结果":"地圖仍為當前找店結果","账户":"帳戶","导入失败":"匯入失敗","韩国料理":"韓國料理","横浜":"橫浜","部分餐厅暂无逐条采集日期":"部分餐廳暫無逐條採集日期","收藏与结果":"收藏與結果","烧":"燒","请刷新重试":"請重新整理重試","重新加载":"重新載入","登录":"登入","白川乡":"白川鄉","距地图中心":"距地圖中心","会从地图上自动隐藏":"會從地圖上自動隱藏","删除我的云端数据":"刪除我的雲端資料","没有符合条件的餐厅":"沒有符合條件的餐廳","定位校准":"定位校準","保存文件失败":"儲存檔案失敗"};
+  var TEXT_TRAD_MAP = {"东大寺":"東大寺","不勾则不限制":"不勾則不限制","东京迪士尼乐园":"東京迪士尼樂園","服务暂不可用":"服務暫不可用","严岛神社":"嚴島神社","下吕温泉":"下呂溫泉","按钮里的选择器":"按鈕裡的選擇器","装好之后离线也能看地图":"裝好之後離線也能看地圖","有馬温泉":"有馬溫泉","用地点名填入":"用地點名填入","同步数据":"同步資料","此操作不可撤销":"此操作不可撤銷","将合并到现有数据并自动去重":"將合併到現有資料並自動去重","说明":"說明","和书签一起通过你的":"和書籤一起透過你的","旭川市旭山动物园":"旭川市旭山動物園","中国料理眺游楼":"中國料理眺遊樓","面包店等非正餐也按比例控量":"麵包店等非正餐也按比例控量","档":"檔","搜索餐厅":"搜尋餐廳","鸣门漩涡":"鳴門漩渦","删除景点":"刪除景點","地图组件无法加载":"地圖元件無法載入","热门":"熱門","请删减收藏或书签":"請刪減收藏或書籤","安装为应用":"安裝為應用","取消规则":"取消規則","中东菜等":"中東菜等","最近局部补采":"最近區域性補採","复制失败":"複製失敗","越后汤泽温泉":"越後湯澤溫泉","当日":"當日","未检测到":"未檢測到","立山黑部阿尔卑斯路线":"立山黑部阿爾卑斯路線","搜索中":"搜尋中","咖啡厅":"咖啡廳","登录处理失败":"登入處理失敗","地区":"地區","鸣子温泉":"鳴子溫泉","心斋桥":"心齋橋","周三":"週三","等待云端状态更新":"等待雲端狀態更新","正在删除":"正在刪除","热田神宫":"熱田神宮","删除书签":"刪除書籤","不登录也完全可用":"不登入也完全可用","输入更多字以缩小范围":"輸入更多字以縮小範圍","已开启":"已開啟","阿苏山":"阿蘇山","云端数据已删除":"雲端資料已刪除","无休":"無休","石垣岛":"石垣島","已复制":"已複製","未能保存到云端":"未能儲存到雲端","你在另一个窗口退出了登录":"你在另一個視窗退出了登入","请先登录":"請先登入","上野公园":"上野公園","请检查网络后刷新":"請檢查網路後重新整理","严美溪":"嚴美溪","收藏只存在这台设备":"收藏只存在這臺裝置","中禅寺湖":"中禪寺湖","由布院温泉":"由布院溫泉","联网后重试":"聯網後重試","汉堡":"漢堡","菜系图标":"菜系圖示","晚餐价格":"晚餐價格","是本站收录的最低分":"是本站收錄的最低分","彦根城":"彥根城","足立美术馆":"足立美術館","未开启":"未開啟","稍后":"稍後","改动仅存浏览器":"改動僅存瀏覽器","新干线":"新幹線","当前离线":"當前離線","没有符合的店":"沒有符合的店","聚焦搜索":"聚焦搜尋","加入景点":"加入景點","已保存在此浏览器":"已儲存在此瀏覽器","登录可在其他设备恢复":"登入可在其他裝置恢復","局部补采不代表全库更新":"區域性補採不代表全庫更新","只显示可以通过":"只顯示可以透過","熱海温泉":"熱海溫泉","天妇罗":"天婦羅","大须":"大須","富冈制纱厂":"富岡制紗廠","请至少选择一项":"請至少選擇一項","可导出可退出可删除":"可匯出可退出可刪除","图标":"圖示","蔓桥":"蔓橋","一乘谷朝仓氏遗迹":"一乘谷朝倉氏遺蹟","内蔵":"內蔵","福冈塔":"福岡塔","日式咖喱":"日式咖哩","韩":"韓","家餐厅":"家餐廳","你研究后决定不会去的餐厅":"你研究後決定不會去的餐廳","乌冬":"烏冬","太宰府天满宫":"太宰府天滿宮","你自己想标注的地点或建筑物":"你自己想標註的地點或建築物","本站只收录每个区域评分前":"本站只收錄每個區域評分前","鸟羽水族馆":"鳥羽水族館","隐藏这间店":"隱藏這間店","用户自添景点":"使用者自添景點","这样":"這樣","下呂温泉":"下呂溫泉","系统默认旅游锚点之外你自己加的去处":"系統預設旅遊錨點之外你自己加的去處","黑部峡谷":"黑部峽谷","地点内匹配":"地點內匹配","重置筛选":"重置篩選","图层设置":"圖層設定","国際通":"國際通","樱岛":"櫻島","登录中":"登入中","搜索超时":"搜尋超時","机车博物馆":"機車博物館","盖饭":"蓋飯","关西国际机场":"關西國際機場","已删除":"已刪除","淡路岛":"淡路島","能否预订":"能否預訂","条结果":"條結果","烧":"燒","已跳过无法识别的条目":"已跳過無法識別的條目","端岛":"端島","一起显示":"一起顯示","梦":"夢","圆里的数字是这一片符合当前筛选条件的餐厅数量":"圓裡的數字是這一片符合當前篩選條件的餐廳數量","重新加载":"重新載入","意面":"意麵","你在另一个窗口登录了":"你在另一個視窗登入了","点击查看详情":"點選檢視詳情","浏览器清理时可能删除本地收藏":"瀏覽器清理時可能刪除本地收藏","价位":"價位","读取文件失败":"讀取檔案失敗","拉面":"拉麵","调整面板高度":"調整面板高度","从结果或详情里加入子收藏夹":"從結果或詳情里加入子收藏夾","立即重试":"立即重試","只读取你的邮箱和头像":"只讀取你的郵箱和頭像","东京塔":"東京塔","不接受预订":"不接受預訂","白川乡":"白川鄉","选地区":"選地區","南亚":"南亞","浅草寺":"淺草寺","龙安寺":"龍安寺","分享这家店":"分享這家店","筑地市场":"築地市場","家结果":"家結果","距地图中心":"距地圖中心","周一":"週一","串烧":"串燒","位置与座位":"位置與座位","大内宿":"大內宿","石见银山":"石見銀山","首里城":"首裡城","同步数据超过上限":"同步資料超過上限","横滨中华街":"橫濱中華街","此餐厅当前不在筛选范围内":"此餐廳當前不在篩選範圍內","网络问题或广告拦截插件":"網路問題或廣告攔截外掛","鸭川海洋世界":"鴨川海洋世界","登录后可在其它设备看到":"登入後可在其它裝置看到","伊势神宫":"伊勢神宮","烤鸡":"烤雞","内脏":"內臟","青岛神社":"青島神社","御台场":"御台場","冲绳美丽海水族馆":"沖繩美麗海水族館","显示":"顯示","关闭当前层":"關閉當前層","桂滨":"桂濱","吉野里遗址":"吉野裡遺址","获奖":"獲獎","已显示全部结果":"已顯示全部結果","隐藏非日本料理":"隱藏非日本料理","重试":"重試","导入完成":"匯入完成","地图只覆盖日本":"地圖只覆蓋日本","已复制链接":"已複製連結","周六":"週六","退出登录":"退出登入","涩谷路口":"澀谷路口","保存中":"儲存中","小樽运河":"小樽運河","网订":"網訂","标记中间的图标代表菜系":"標記中間的圖示代表菜系","登录脚本未加载":"登入指令碼未載入","全部地区":"全部地區","云端数据已回退":"雲端資料已回退","御好烧":"御好燒","没有匹配的结果":"沒有匹配的結果","私铁":"私鐵","筛选条件太严格了":"篩選條件太嚴格了","导航":"導航","黒部峡谷":"黒部峽谷","翻译":"翻譯","祇园":"祇園","出云大社":"出雲大社","餐厅数据加载失败":"餐廳資料載入失敗","金刀比罗宫":"金刀比羅宮","世纪美术馆":"世紀美術館","伏见稻荷大社":"伏見稻荷大社","你在另一个窗口切换了登录":"你在另一個視窗切換了登入","门司港怀旧":"門司港懷舊","显示这个菜系":"顯示這個菜系","长途线路":"長途線路","浏览器不允许本站保存数据":"瀏覽器不允許本站儲存資料","标记颜色取决于这家店申报的晚餐价格上限":"標記顏色取決於這家店申報的晚餐價格上限","多选取并集":"多選取並集","的餐厅":"的餐廳","子收藏夹":"子收藏夾","黑川温泉":"黑川溫泉","上滑查看详情":"上滑檢視詳情","进一步压到":"進一步壓到","查看结果":"檢視結果","鹈户神宫":"鵜戶神宮","东京国际机场":"東京國際機場","伊香保温泉":"伊香保溫泉","无痕窗口关闭即失":"無痕視窗關閉即失","会津若松城":"會津若松城","重命名":"重新命名","奖项":"獎項","东寻坊":"東尋坊","已弃用":"已棄用","已合并本地改动":"已合併本地改動","长途":"長途","倉敷美観地区":"倉敷美観地區","会从地图上自动隐藏":"會從地圖上自動隱藏","勾选后只看对应获奖店":"勾選後只看對應獲獎店","筛选":"篩選","其他区域":"其他區域","弃用名单":"棄用名單","丰洲市场":"豐洲市場","显示我的位置":"顯示我的位置","导入失败":"匯入失敗","安装到主屏幕":"安裝到主螢幕","海鲜":"海鮮","按距离排序":"按距離排序","国营常陆海滨公园":"國營常陸海濱公園","福井县立恐龙博物馆":"福井縣立恐龍博物館","账号跨设备同步":"帳號跨裝置同步","营业状态与价格请以原站为准":"營業狀態與價格請以原站為準","草津温泉":"草津溫泉","延历寺":"延歷寺","展开列表":"展開列表","交差点":"交差點","偕乐园":"偕樂園","弃用当前":"棄用當前","图层":"圖層","轻井泽":"輕井澤","去掉地点约束":"去掉地點約束","导出":"匯出","寿司":"壽司","需要预订":"需要預訂","长崎和平公园":"長崎和平公園","函馆山":"函館山","会津若松":"會津若松","可预订":"可預訂","地图控件":"地圖控制元件","没有晚餐价格的店改用午餐价格上限":"沒有晚餐價格的店改用午餐價格上限","放弃当前输入":"放棄當前輸入","只看这个":"只看這個","道顿堀":"道頓堀","坐标":"座標","黒川温泉":"黒川溫泉","屋久岛":"屋久島","家因此被挡住":"家因此被擋住","不会覆盖现有项":"不會覆蓋現有項","里歴史公園":"裡歴史公園","也显示已隐藏的景点":"也顯示已隱藏的景點","选择添加到主屏幕":"選擇新增到主螢幕","搜索失败":"搜尋失敗","默认不在地图上显示":"預設不在地圖上顯示","明治神宫":"明治神宮","夫妇岩":"夫婦岩","文件格式无法识别":"檔案格式無法識別","横浜":"橫浜","直岛":"直島","银奖":"銀獎","你的数据":"你的資料","点心":"點心","地狱谷野猿公苑":"地獄谷野猿公苑","东山东":"東山東","古宇利岛":"古宇利島","当前筛选的":"當前篩選的","导入":"匯入","已跳过":"已跳過","恢复网络后请重试":"恢復網路後請重試","但不再同步到云端":"但不再同步到雲端","仅电话":"僅電話","亲子丼":"親子丼","调整左侧筛选条件可让它出现在地图上":"調整左側篩選條件可讓它出現在地圖上","部分餐厅暂无逐条采集日期":"部分餐廳暫無逐條採集日期","有马温泉":"有馬溫泉","松岛":"松島","迁移":"遷移","炭火烧鸟正":"炭火燒鳥正","神户港塔":"神戶港塔","显示的是本机缓存的数据":"顯示的是本機快取的資料","距离约":"距離約","复制":"複製","下次一点就开":"下次一點就開","披萨":"披薩","查看":"檢視","复制坐标":"複製座標","新仓山浅间公园":"新倉山淺間公園","金奖":"金獎","或打开浏览器菜单选择安装":"或開啟瀏覽器選單選擇安裝","成田山新胜寺":"成田山新勝寺","预约政策":"預約政策","状态未知":"狀態未知","乳头温泉乡":"乳頭溫泉鄉","这次筛选里有":"這次篩選裡有","在地图上显示出来的":"在地圖上顯示出來的","渡月桥":"渡月橋","国际通":"國際通","已永久歇业":"已永久歇業","银座":"銀座","当前位置在地图范围之外":"當前位置在地圖範圍之外","大三岛":"大三島","箱根温泉":"箱根溫泉","景点":"景點","大吊桥":"大吊橋","以外的区域":"以外的區域","价格":"價格","南纪白滨温泉":"南紀白濱溫泉","定位被浏览器禁用":"定位被瀏覽器禁用","网络不通":"網路不通","车站":"車站","批量弃用":"批次棄用","未分组":"未分組","这个子收藏夹还是空的":"這個子收藏夾還是空的","改动已存在本机":"改動已存在本機","已改用云端数据":"已改用雲端資料","请在浏览器设置中开启":"請在瀏覽器設定中開啟","确认删除":"確認刪除","这是一张日本美食与景点地图":"這是一張日本美食與景點地圖","地图仍为当前找店结果":"地圖仍為當前找店結果","收藏与结果":"收藏與結果","重命名子收藏夹":"重新命名子收藏夾","炭火烧鸟":"炭火燒鳥","兼六园":"兼六園","结果":"結果","选择语言":"選擇語言","只看这个菜系":"只看這個菜系","武雄温泉":"武雄溫泉","撤销":"撤銷","道后温泉":"道後溫泉","指宿温泉":"指宿溫泉","还原列表":"還原列表","净土滨":"淨土濱","结果包含所选地区内全部匹配餐厅":"結果包含所選地區內全部匹配餐廳","未检测到网订入口":"未檢測到網訂入口","类型":"類型","铁板烧":"鐵板燒","按子收藏夹":"按子收藏夾","金泽":"金澤","恢复显示":"恢復顯示","关闭":"關閉","华严瀑布":"華嚴瀑布","放宽条件或重置筛选":"放寬條件或重置篩選","简体":"簡體","铜奖":"銅獎","地图图例":"地圖圖例","哥拉巴园":"哥拉巴園","新建子收藏夹":"新建子收藏夾","下次登录会重新下载":"下次登入會重新下載","日光东照宫":"日光東照宮","餐厅库":"餐廳庫","找店范围":"找店範圍","秋叶原":"秋葉原","栗林公园":"栗林公園","大濠公园":"大濠公園","分组":"分組","加入收藏夹":"加入收藏夾","按距离":"按距離","可粘贴任意":"可貼上任意","日元以下的高分正餐餐厅":"日元以下的高分正餐餐廳","韩国料理":"韓國料理","仙岩园":"仙岩園","和收藏一起通过你的":"和收藏一起透過你的","跨设备同步":"跨裝置同步","雾凇":"霧凇","大通公园":"大通公園","不影响餐厅收藏":"不影響餐廳收藏","本设备上的本地缓存会保留":"本裝置上的本地快取會保留","地图搜索":"地圖搜尋","选择器":"選擇器","白须神社":"白鬚神社","没有新增内容":"沒有新增內容","收录规则":"收錄規則","近江町市场":"近江町市場","书签":"書籤","等价物":"等價物","家能在网上订":"家能在網上訂","显示全部":"顯示全部","日本环球影城":"日本環球影城","男鹿半岛":"男鹿半島","已启用":"已啟用","收藏还是空的":"收藏還是空的","你弃用的店":"你棄用的店","道後温泉":"道後溫泉","后乐园":"後樂園","列表为我的收藏":"列表為我的收藏","删除":"刪除","登录":"登入","聚合圆圈":"聚合圓圈","鬼怒川温泉":"鬼怒川溫泉","屏幕内":"螢幕內","可随时删除":"可隨時刪除","同步冲突":"同步衝突","仓敷美观地区":"倉敷美觀地區","热门餐厅":"熱門餐廳","苗场山":"苗場山","请重新登录":"請重新登入","网络暂不可用":"網路暫不可用","台湾料理":"臺灣料理","可网订":"可網訂","有网上预约入口":"有網上預約入口","没有符合条件的餐厅":"沒有符合條件的餐廳","横浜中華街":"橫浜中華街","无":"無","同时清除本设备数据":"同時清除本裝置資料","已复制坐标":"已複製座標","地图底图":"地圖底圖","谷川岳":"谷川嶽","佐渡岛":"佐渡島","关于本站":"關於本站","复制清单文本":"複製清單文字","评分":"評分","书签会从本设备删除":"書籤會從本裝置刪除","语言":"語言","暂停营业":"暫停營業","选择":"選擇","缩放到全部结果":"縮放到全部結果","其中高价位":"其中高價位","比它更低的餐厅根本不在数据里":"比它更低的餐廳根本不在資料裡","龙泉洞":"龍泉洞","銀山温泉":"銀山溫泉","书签标记":"書籤標記","保存":"儲存","符合筛选":"符合篩選","锦带桥":"錦帶橋","三朝温泉":"三朝溫泉","同步数据接近上限":"同步資料接近上限","只看网订":"只看網訂","点底部的分享按钮":"點底部的分享按鈕","收藏与弃用":"收藏與棄用","备份文件已保存":"備份檔案已儲存","初始化失败":"初始化失敗","点地图或列表里的店查看详情":"點地圖或列表裡的店檢視詳情","乳頭温泉郷":"乳頭溫泉郷","越後湯沢温泉":"越後湯沢溫泉","已切换账号":"已切換帳號","范围内":"範圍內","海游馆":"海遊館","东京晴空塔":"東京晴空塔","地铁":"地鐵","加载失败":"載入失敗","江之岛":"江之島","弥彦神社":"彌彥神社","在找店结果中只看已收藏":"在找店結果中只看已收藏","隐私与数据":"隱私與資料","历史采集基线":"歷史採集基線","再点添加":"再點新增","会津若松市":"會津若松市","鹤冈八幡宫":"鶴岡八幡宮","田泽湖":"田澤湖","韩餐":"韓餐","只存在这台设备":"只存在這臺裝置","隐藏弃用名单":"隱藏棄用名單","你在约":"你在約","札幌市钟楼":"札幌市鐘樓","地图组件加载失败":"地圖元件載入失敗","请确认它是导出的":"請確認它是匯出的","选择要导入的内容":"選擇要匯入的內容","地图移动不改变筛选范围":"地圖移動不改變篩選範圍","新建书签":"新建書籤","导入备份":"匯入備份","台場":"臺場","重新连接中":"重新連線中","价格区间上限":"價格區間上限","数据来源":"資料來源","全选可见":"全選可見","隐藏":"隱藏","已选":"已選","地图校准":"地圖校準","同步失败":"同步失敗","当前处于离线状态":"當前處於離線狀態","重新载入":"重新載入","从子收藏夹移除":"從子收藏夾移除","多数可以在一个合理的天数内提前预订":"多數可以在一個合理的天數內提前預訂","全选":"全選","简体中文":"簡體中文","在屏幕范围内":"在螢幕範圍內","热海温泉":"熱海溫泉","内没有匹配的餐厅":"內沒有匹配的餐廳","南紀白浜温泉":"南紀白浜溫泉","登录被取消":"登入被取消","东南亚料理":"東南亞料理","市内":"市內","地图怎么看":"地圖怎麼看","预约":"預約","那须高原":"那須高原","云端数据不受影响":"雲端資料不受影響","数日前":"數日前","久能山东照宫":"久能山東照宮","鸟取砂丘":"鳥取砂丘","周五":"週五","批量收藏":"批次收藏","城市轨道":"城市軌道","鳴子温泉":"鳴子溫泉","通天阁":"通天閣","翻译失败":"翻譯失敗","把地图装到主屏幕":"把地圖裝到主螢幕","关东煮":"關東煮","周日":"週日","只看谷歌地图校准过坐标的餐厅":"只看Google 地圖校準過座標的餐廳","请稍后再试":"請稍後再試","伴手礼":"伴手禮","恢复显示这间店":"恢復顯示這間店","已切到全部地区":"已切到全部地區","锅物":"鍋物","备份文件超过":"備份檔案超過","港未来町":"港未來町","广岛和平纪念公园":"廣島和平紀念公園","浏览器未提供存储用量":"瀏覽器未提供儲存用量","改动已存本地":"改動已存本地","国営":"國営","保存文件失败":"儲存檔案失敗","知床国立公园":"知床國立公園","加载中":"載入中","新倉山浅間公園":"新倉山淺間公園","乡土":"鄉土","下滩站":"下灘站","恢复后会自动上传":"恢復後會自動上傳","选一个地区开始":"選一個地區開始","收藏只在本次会话有效":"收藏只在本次會話有效","检查网络":"檢查網路","已复制清单":"已複製清單","和景点一起通过你的":"和景點一起透過你的","放大地图聚合就会散开":"放大地圖聚合就會散開","本地存储":"本地儲存","登录状态保留":"登入狀態保留","登录成功":"登入成功","个书签":"個書籤","改动保留在本地":"改動保留在本地","原子弹爆炸圆顶屋":"原子彈爆炸圓頂屋","缩放回全部结果":"縮放回全部結果","阿波舞会馆":"阿波舞會館","周二":"週二","周四":"週四","交通图层加载失败":"交通圖層載入失敗","尚未导入":"尚未匯入","知床国立公園":"知床國立公園","眺游楼":"眺遊樓","富田农场":"富田農場","数据托管于":"資料託管於","在浏览器菜单里找添加到主屏幕或安装":"在瀏覽器選單裡找新增到主螢幕或安裝","家餐厅都不在地图范围内":"家餐廳都不在地圖範圍內","已恢复显示这间店":"已恢復顯示這間店","四万十川":"四萬十川","收藏当前":"收藏當前","中国料理":"中國料理","会館":"會館","网上可订":"網上可訂","眺遊楼":"眺遊樓","筛选结果":"篩選結果","删除我的云端数据":"刪除我的雲端資料","无法取得位置":"無法取得位置","点地址栏右侧的安装图标":"點位址列右側的安裝圖示","备份":"備份","関西国際空港":"関西國際空港","图标必须是":"圖示必須是","请检查文件内容":"請檢查檔案內容","小豆岛":"小豆島","个其他匹配":"個其他匹配","服务器出错":"伺服器出錯","饺子":"餃子","缩小":"縮小","万座毛":"萬座毛","稍后自动重试":"稍後自動重試","定位校准":"定位校準","安装":"安裝","加入子收藏夹":"加入子收藏夾","视野内":"視野內","正在尝试浏览器下载":"正在嘗試瀏覽器下載","二条城":"二條城","登录后可跨设备同步":"登入後可跨裝置同步","奥入濑溪流":"奧入瀨溪流","西点":"西點","登录已过期":"登入已過期","面类":"面類","奈良公园":"奈良公園","账户":"帳戶","景点锚点":"景點錨點","试试":"試試","快捷键":"快捷鍵","角岛大橋":"角島大橋","已恢复":"已恢復","高千穂峡":"高千穂峽","请刷新重试":"請重新整理重試","不在当前数据里":"不在當前資料裡","隐私政策":"隱私政策","奥入瀬":"奧入瀬","保存失败":"儲存失敗","网订入口":"網訂入口","在结果里点星标就会出现在这里":"在結果裡點星標就會出現在這裡","名称":"名稱","打开完整":"開啟完整","伊豆半岛":"伊豆半島","银山温泉":"銀山溫泉","中东":"中東","节假日":"節假日","详情":"詳情","兴福寺":"興福寺","网上订位":"網上訂位","猎奇":"獵奇","养老溪谷":"養老溪谷","名称不能为空":"名稱不能為空","长瀞町":"長瀞町","个景点":"個景點","成田国际机场":"成田國際機場","地图上的地点标记":"地圖上的地點標記","请检查网络":"請檢查網路","冈山城":"岡山城","餐厅数据无法加载":"餐廳資料無法載入","与默认景点一起在地图上显示":"與預設景點一起在地圖上顯示","无法解析该文件":"無法解析該檔案","弃用":"棄用","荞麦":"蕎麥","我的书签标记":"我的書籤標記"};
   // English lookup, same shape — keys are CJK runs in the rendered
   // page, values come from data/i18n/en.json. Runs without an entry
   // stay in Chinese at runtime (the build log lists what's missing).
-  var TEXT_EN_MAP = {"米":"m","首里城":"Shuri Castle","和收藏一起透過你的":"synced with Saved via your","你在约":"You booked","日本环球影城":"Universal Studios Japan","预约政策":"Reservation policy","图标必须是":"Icon must be","金曜":"Fri","重命名":"Rename","热门餐厅":"Hot restaurants","已显示全部结果":"showing all results","不勾则不限制":"Leave unchecked for no filter","月曜":"Mon","按子收藏夹":"By list","更多":"More","已复制链接":"Link copied","菜系":"Cuisine","上野公园":"Ueno Park","地图图例":"Map legend","你自己想标注的地点或建筑物":"Places or buildings you want to mark yourself","伴手礼":"Gift food","重试":"Retry","备份文件超过":"The backup exceeds","已保存在此浏览器":"Saved in this browser","联网后重试":"reconnect to retry","点心":"Confectionery","丰洲市场":"Toyosu Market","关闭":"Close","小町通":"Komachi Street","你在另一个窗口切换了登录":"You switched accounts in another window","已加入收藏":"Added to Saved","全部地区":"All regions","日本環球影城":"Universal Studios Japan","御好烧":"Okonomiyaki","保存失败":"Save failed","同步":"Sync","未偵測到":"Not detected","结果":"Results","足立美术馆":"Adachi Museum of Art","列表为我的收藏":"This list shows your saved places","初始化失败":"Initialisation failed","你收藏的店":"A place you saved","你的数据":"Your data","服务暂不可用":"The service is unavailable right now","数据托管于":"Data is hosted on","是本站收錄的最低分":"is the lowest rating this site carries","你研究後決定不會去的餐廳":"Restaurants you've researched and decided not to visit","没有符合的店":"No matching restaurants","可粘贴任意":"Paste any","从结果或详情里加入子收藏夹":"Add places to it from the results list or a detail card","鸟取砂丘":"Tottori Sand Dunes","点底部的分享按钮":"Tap the share button at the bottom","导入":"Import","退出登录":"Sign out","上限":"max","金曜日":"Fri","景点锚点":"Landmarks","烤肉":"Yakiniku","类型":"Type","只看谷歌地图校准过坐标的餐厅":"Google-verified coordinates only","天妇罗":"Tempura","淺草寺":"Senso-ji","眺遊楼":"Tiao You Lou","土曜日":"Sat","已复制":"Copied","你在另一个窗口退出了登录":"You signed out in another window","出云大社":"Izumo Taisha","已切到全部地区":"All areas","同时清除本设备数据":"Also clear this device's data","不接受预订":"No reservations","名称不能为空":"Name cannot be empty","在地圖上顯示出來的":"of the","無休":"Open daily","近江町市场":"Omicho Market","默认不在地图上显示":"Not shown on the map by default","鳥取砂丘":"Tottori Sand Dunes","其他区域":"Other regions","已收藏":"Saved","新建书签":"New pin","同步数据超过上限":"Sync data exceeds the size limit","未检测到":"Not detected","不登录也完全可用":"Signing in is optional — everything works without it","当前筛选的":"All","祝祭日":"Holidays","显示全部":"Show all","最近局部补采":"Latest partial update","检查网络":"check your network","定位被浏览器禁用":"Location is blocked by the browser","选择器":"Picker","弃用当前":"Hide this one","奧入瀨溪流":"Oirase Gorge","请重新登录":"please sign in again","的餐厅":"rated restaurants","登录被取消":"Sign-in canceled","和景点一起通过你的":"synced with Landmarks via your","和果子":"wagashi","城市轨道":"Urban rail","也显示已隐藏的景点":"Also show hidden landmarks","在屏幕范围内":"On screen","请在浏览器设置中开启":"turn it on in the browser settings","与默认景点一起在地图上显示":"shown alongside the built-in Landmarks on the map","加入景点":"New landmark","选地区":"Choose area","繁體":"Traditional","東京迪士尼樂園":"Tokyo Disneyland","用户自添景点":"Custom Landmarks","收藏还是空的":"Nothing saved yet","把地图装到主屏幕":"Put this map on your home screen","尚未导入":"and has not been imported","网络暂不可用":"Network unavailable","浏览器未提供存储用量":"Storage usage not reported by this browser","东京晴空塔":"Tokyo Skytree","加载失败":"Load failed","弃用名单":"Hidden","装好之后离线也能看地图":"Once installed the map works offline too","全选可见":"Select visible","能否预订":"Reservations","节假日":"Holidays","地铁":"Subway","本站只收錄每個區域評分前":"We list only each region's top","保存中":"Saving","银座":"Ginza","未命名":"Unnamed","数据来源":"Data source","冰品":"Ice cream","京都美食":"Kyoto eats","登录中":"Signing in","看原文":"See original","正餐":"Mains","中国料理":"Chinese cuisine","搜索失败":"Search failed","地图组件无法加载":"map components can't load","结果包含所选地区内全部匹配餐厅":"Results include all matches in the selected area","奥入濑溪流":"Oirase Gorge","当前位置在地图范围之外":"Current location is outside the map","选择要导入的内容":"Choose what to import","显示这个菜系":"Show this cuisine","拉面":"Ramen","云端数据不受影响":"cloud data is not affected","加载中":"Loading","沾面":"Tsukemen","仓敷美观地区":"Kurashiki Bikan","新建子收藏夹":"New list","可隨時刪除":"deletable anytime","撤销":"Undo","名所":"Landmarks","个其他匹配":"more matches","人均":"Per person","持久化":"Persistent","下次一点就开":"one tap to open it next time","串烧":"Skewers","请稍后再试":"please try again later","年中無休":"Open daily","重置筛选":"Reset filters","你弃用的店":"A place you hid","收起列表":"Hide list","显示":"Show","视野内":"In view","內臟":"Offal","翻譯":"Translate","名称":"Name","内脏":"Offal","南亚":"South Asian","家店":"restaurants","登录处理失败":"Sign-in handling failed","缩放回全部结果":"Zoom back out to all results","晚":"Dinner","百名店":"Hyakumeiten","水曜日":"Wed","状态未知":"unknown","新世界":"Shinsekai","删除":"Delete","秋叶原":"Akihabara","打开完整":"Open full","关闭当前层":"Close the top layer","可":"Available","咖啡廳":"cafés","登录后可跨设备同步":"Sign in to sync across devices","通天閣":"Tsutenkaku","已开启":"on","築地場外市場":"Tsukiji Outer Market","进一步压到":"are further capped at","咖啡":"Cafe","账号跨设备同步":"account across devices","重命名子收藏夹":"Rename list","御台场":"Odaiba","请确认它是导出的":"please make sure it is an exported","按钮里的选择器":"Picker in the button","第":"No.","家因此被挡住":"places","点地图或列表里的店查看详情":"Pick a place on the map or in the list to see its details","去掉地点约束":"Remove the location filter","登录状态保留":"Your sign-in is kept","地区":"Region","勾选后只看对应获奖店":"Check to filter to award winners only","菜系图标":"Cuisine icons","意面":"Pasta","但不再同步到云端":"but won't sync to the cloud anymore","可导出可退出可删除":"and you can export it, sign out or delete it at any time","放大地图聚合就会散开":"Zoom in and the cluster breaks apart","恢复后会自动上传":"they will upload automatically once it is back","搜索超时":"Search timed out","收藏保留":"still saved","明治神宮":"Meiji Shrine","中":"Chinese","聚合圆圈":"Cluster circles","隐私与数据":"Privacy & data","筛选":"Filter","御台場":"Odaiba","甚至":"or even","和书签一起通过你的":"synced with Pins via your","符合筛选":"Match","改动已存在本机":"your changes are saved on this device","书签会从本设备删除":"and pins will be removed from this device","热门":"Hot","距离约":"approx.","東京塔":"Tokyo Tower","筛选条件太严格了":"The filters are too strict","价位":"Price","三朝溫泉":"Misasa Onsen","浏览器不允许本站保存数据":"The browser won't let this site store data","地图只覆盖日本":"This map covers Japan only","快捷键":"Keyboard shortcuts","日本語":"Japanese","是本站收录的最低分":"is the lowest rating this site carries","書籤":"Pins","有网上预约入口":"Online booking link found","详情":"Details","点击查看详情":"Click for details","登录后可在其它设备看到":"sign in to see them on your other devices","餐厅数据加载失败":"Restaurant data failed to load","已合并本地改动":"local changes merged","日元以下的高分正餐餐廳":"yen-or-under high-rated proper-meal restaurants on the map","隐藏非日本料理":"Hide non-Japanese","当前离线":"You are offline","其中高价位":"of which high-end","隐私政策":"Privacy policy","夫妇岩":"Meoto Iwa","最寄駅":"Nearest station","加入子收藏夹":"Add to a list","银奖":"Silver","历史采集基线":"Historical data baseline","饺子":"Gyoza","已选":"Selected","提前多久":"How far ahead","查看":"View","本地存储":"Local storage","除外":"Hidden","搜尋餐廳":"Search restaurants","清除":"Clear","删除景点":"Delete landmark","已用":"Used","地图怎么看":"How to read the map","木曜":"Thu","地点内匹配":"in this area","道頓堀":"Dotonbori","收藏":"Saved","下限":"floor","没有晚餐价格的店改用午餐价格上限":"Restaurants with no dinner price fall back to the lunch upper bound","明治神宫":"Meiji Shrine","调整面板高度":"Resize panel","金奖":"Gold","缩小":"Zoom out","语言":"Language","海鲜":"Seafood","知床国立公园":"Shiretoko National Park","周三":"Wed","周五":"Fri","全选":"All","其中":"of which","长途线路":"Long-haul lines","已跳过无法识别的条目":"Skipped unreadable entries","木曜日":"Thu","和景點一起透過你的":"synced with Landmarks via your","只存在这台设备":"Stored on this device only","多选取并集":"Multi-select = union","分享这家店":"Share this restaurant","东京塔":"Tokyo Tower","说明":"Help","海游馆":"Kaiyukan Aquarium","备份":"Backup","出雲大社":"Izumo Taisha","系統預設旅遊錨點之外你自己加的去處":"Destinations you add on top of the built-in Landmarks","无痕窗口关闭即失":"Private windows lose them on close","與預設景點一起在地圖上顯示":"shown alongside the built-in Landmarks on the map","草千里":"Kusasenri","炭火烧鸟正":"Charcoal yakitori","关于本站":"About this site","已移除":"Removed from","多數可以在一個合理的天數內提前預訂":"most can be booked a reasonable number of days ahead","请检查网络后刷新":"check your network, then refresh","炭火烧鸟":"Charcoal yakitori","餐厅数据无法加载":"restaurant data can't load","安装":"Install","正在删除":"Deleting","选一个地区开始":"Pick a region to start","将合并到现有数据并自动去重":"it will be merged into your existing data with duplicates skipped","岡山城":"Okayama Castle","无法解析该文件":"Could not parse the file","无法取得位置":"Couldn't get your location","排序":"Sort","土曜":"Sat","全部":"All","地图底图":"Base map","西餐":"Western","查看结果":"View results","西点":"Pastry","再点添加":"Tap \"Add\"","台湾料理":"Taiwanese","和書籤一起透過你的":"synced with Pins via your","景點":"Landmarks","系统默认旅游锚点之外你自己加的去处":"Destinations you add on top of the built-in Landmarks","分组":"Group by","烤鸡":"Yakitori","附近":"Nearby","个书签":"pins","铁板烧":"Teppanyaki","显示我的位置":"Show my location","拉麵":"Ramen","隐藏":"Hide","日曜":"Sun","已切换账号":"Account switched","韩":"Korean","云端数据已回退":"Cloud data rolled back","披萨":"Pizza","周一":"Mon","内没有匹配的餐厅":" has no matching restaurant","网上可订":"Bookable online","内蔵":"built-in","放弃当前输入":"Delete what you typed","知床國立公園":"Shiretoko National Park","已删除":"Deleted","位置与座位":"Location & seating","通天阁":"Tsutenkaku","档":"tiers","只看网订":"Bookable online only","以外的区域":" — elsewhere","没有匹配的结果":"No results","居酒屋":"Izakaya","正":"Sho","需要注意":"Also note","豐洲市場":"Toyosu Market","展开列表":"Show list","荞麦":"Soba","食":"食","已恢复":"Restored","东南亚料理":"Southeast Asian","这是一张日本美食与景点地图":"A map of Japan's best-rated restaurants and landmarks","返回结果":"Back to results","导入备份":"Import backup","下次登录会重新下载":"it is downloaded again at your next sign-in","盖饭":"Donburi","午":"Lunch","服务器出错":"The server returned an error","只看这个":"Show only this","按距离排序":"sorted by distance","地图控件":"Map controls","图标":"Icon","棄用名單":"Hidden","取消":"Cancel","可网订":"Bookable","地址":"Address","已启用":"Active","三朝温泉":"Misasa Onsen","我的收藏":"My Saved","收藏已有":"You have saved","云端数据已删除":"Your cloud data has been deleted","不再提示":"Don't show again","其中高價位":"of which high-end","保存":"Save","改动已存本地":"changes saved locally","调整左侧筛选条件可让它出现在地图上":"loosen the filters to bring it back onto the map","亲子丼":"Oyakodon","周日":"Sun","登录脚本未加载":"Sign-in script failed to load","定休":"Closed","倉敷美觀地區":"Kurashiki Bikan","确认删除":"Confirm deletion","地图搜索":"Map search","六本木新城":"Roppongi Hills","取消规则":"Cancellation","未检测到网订入口":"No online booking link detected","拉美料理":"Latin American","周六":"Sat","其他西餐":"Other Western","安装为应用":"Install as an app","放大":"Zoom in","筛选结果":"Filter results","浅草寺":"Senso-ji","地图移动不改变筛选范围":"Moving the map does not change the search area","吉野里遗址":"Yoshinogari Site","地图组件加载失败":"Map components failed to load","不定休":"Irregular","只显示可以通过":"Bookable via","预约方式请查看原政策":"See the original reservation policy","座位":"Seats","到店":"walk-in","多数可以在一个合理的天数内提前预订":"most can be booked a reasonable number of days ahead","放宽条件或重置筛选":"Loosen them, or reset the filters","這樣":"So","中东":"Middle East","翻译失败":"Translate failed","没有新增内容":"Nothing new to add","范围内":"In range","原文":"Original","首裡城":"Shuri Castle","定位到我的位置":"Locate me","中餐":"Chinese","评分":"Rating","同步失败":"Sync failed","例如":"e.g.","其它":"Other","不会覆盖现有项":"existing items are never overwritten","日本料理":"Japanese cuisine","改动仅存浏览器":"edits live in browser only","批量收藏":"Save all","景点":"Landmarks","图层":"Layers","标记中间的图标代表菜系":"The icon in the middle of a marker is the cuisine","家餐厅":"restaurants","等待云端状态更新":"Waiting for the cloud state to update","咖啡厅":"cafés","书签标记":"Map pins","暂停营业":"Temporarily closed","知道了":"Got it","韩餐":"Korean","这个子收藏夹还是空的":"This list is empty","车站":"Station","眺游楼":"Tiao You Lou","面包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","上一家":"Previous restaurant","面类":"Noodles","复制失败":"Copy failed","预约":"Booking","中东菜等":"Middle Eastern, etc.","同步冲突":"Sync conflict","迁移":"Migrate","请到来源网站确认日期与人数":"Check your date and party size on the source website","局部补采不代表全库更新":"A partial update does not refresh the whole database","或打开浏览器菜单选择安装":"Or open the browser menu and choose \"Install\"","比它更低的餐廳根本不在資料裡":"anything below it was never collected","圆里的数字是这一片符合当前筛选条件的餐厅数量":"The number in the circle is how many restaurants in that area match your current filters","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","地图导航":"Open map","五色沼":"Goshikinuma Ponds","缩放到全部结果":"Zoom to all results","请检查网络":"Check your network","恢复显示这间店":"Show this restaurant again","同步数据接近上限":"Sync data is close to the size limit","书签":"Pins","显示的是本机缓存的数据":"showing data cached on this device","猎奇":"Adventurous","大阪城":"Osaka Castle","当前处于离线状态":"You appear to be offline","可预订":"Reservations accepted","获奖":"Awards","早餐":"Breakfast","移到":"Add to list","汉堡":"Burgers","请删减收藏或书签":"please remove some saved places or pins","个景点":"landmarks","皇居":"Imperial Palace","道顿堀":"Dotonbori","在结果里点星标就会出现在这里":"Star a restaurant in the results and it shows up here","炭火焼鳥正":"Sumibi Yakitori Sho","简体":"Simplified","尾道":"Onomichi","未开启":"off","隐藏弃用名单":"Hide the Hidden list","导入完成":"Import complete","价格区间上限":"Upper end of the price range","我的书签标记":"My map pins","銀座":"Ginza","选择":"Select","按距离":"by distance","点地址栏右侧的安装图标":"Click the install icon at the right of the address bar","登录可在其他设备恢复":"sign in to restore it on other devices","这样":"So","秋葉原":"Akihabara","收藏只在本次会话有效":"saved places last only for this session","件":"results","安装到主屏幕":"Add to Home Screen","已从找店结果隐藏":"Hidden from search results","用地点名填入":"Use place name","关东煮":"Oden","条结果":"results","新宿御苑":"Shinjuku Gyoen","有":"Available","需要预订":"Reservation required","网络不通":"No network connection","栗林公園":"Ritsurin Garden","奖项":"Awards","已跳过":"skipped","帳號跨裝置同步":"account across devices","海遊館":"Kaiyukan Aquarium","比它更低的餐厅根本不在数据里":"anything below it was never collected","锅物":"Hot pot","网络问题或广告拦截插件":"network issue or ad blocker","意餐":"Italian","已永久歇业":"Permanently closed","日式咖喱":"Japanese curry","只看收藏":"Saved only","找附近":"Find nearby","已改用云端数据":"now using the cloud copy","法餐":"French","请先登录":"Sign in first","铜奖":"Bronze","网上订位":"Online booking","你自己想標註的地點或建築物":"Places or buildings you want to mark yourself","收藏只存在这台设备":"Saved places live on this device only","繁體中文":"Traditional Chinese","登录已过期":"Session expired","按城市":"By city","聚焦搜索":"Focus search","网订入口":"booking link","水曜":"Wed","未分组":"Not in a list","已加入":"Added to","炸物":"Fried","已恢复显示这间店":"Restaurant shown again","同步数据":"Sync data","小吃":"Snacks","周二":"Tue","美式料理":"American","这次筛选里有":"This filter is hiding","复制":"Copy","焼":"Grilled","重新连接中":"Reconnecting","在地图上显示出来的":"of the","本设备上的本地缓存会保留":"Local cache on this device is kept","在浏览器菜单里找添加到主屏幕或安装":"Look for \"Add to Home Screen\" or \"Install\" in your browser menu","一起显示":"Show them too","搜索中":"Searching","可随时删除":"deletable anytime","上野公園":"Ueno Park","子收藏夹":"Lists","复制坐标":"Copy coordinates","言語":"Language","月曜日":"Mon","祝日":"Holidays","输入更多字以缩小范围":"Type more to narrow the search","命中":"Matches","已同步":"Synced","文件格式无法识别":"Unrecognized file format","下一家":"Next restaurant","進一步壓到":"are further capped at","版本":"Version","浏览器清理时可能删除本地收藏":"The browser may delete them when it clears storage","预约入口不代表实时余位":"A booking link does not guarantee availability","乡土":"Regional","删除书签":"Delete pin","价格":"Price","跨设备同步":"sync across devices","选择语言":"Choose language","下回":"below","東京晴空塔":"Tokyo Skytree","正在尝试浏览器下载":"Trying a browser download","分":"min","有新版本":"New version available","家餐厅都不在地图范围内":"matching restaurants are outside the map","珍味":"Delicacies","正在看":"Viewing","寿司":"Sushi","还原列表":"Back to list","弃用":"Hide","在找店结果中只看已收藏":"Show only saved restaurants in search results","交通图层加载失败":"Transit layer failed to load","未検出":"Not detected","麵包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","稍后":"Later","火曜":"Tue","予約":"booking","搜索餐厅":"Search restaurants","已弃用":"Hidden","翻译":"Translate","晚餐价格":"Dinner price","全部已存在":"everything already exists","改动保留在本地":"Changes remain on this device","导出":"Export","你研究后决定不会去的餐厅":"Restaurants you've researched and decided not to visit","火曜日":"Tue","私铁":"Private rail","收录规则":"What gets listed","冈山城":"Okayama Castle","请检查文件内容":"please check the file contents","仅电话":"Phone only","选择添加到主屏幕":"Choose \"Add to Home Screen\"","读取文件失败":"Failed to read the file","日曜日":"Sun","日元以下的高分正餐餐厅":"yen-or-under high-rated proper-meal restaurants on the map","特急":"limited express","未能保存到云端":"could not be saved to the cloud","预订方式":"How to book","已取消收藏":"Removed from Saved","家能在网上订":"can be booked online","无休":"Open daily","英尺":"ft","不在当前数据里":"Not in the current data","非洲":"Africa","餐厅库":"Restaurant library","重新载入":"Reload","已复制坐标":"Coordinates copied","和收藏一起通过你的":"synced with Saved via your","烘焙":"Bakery","地图上的地点标记":"Place pins on the map","可貼上任意":"Paste any","夫婦岩":"Meoto Iwa","直岛":"Naoshima","吉野裡遺址":"Yoshinogari Site","只看这个菜系":"Show only this cuisine","只读取你的邮箱和头像":"We only read your email address and profile picture","简体中文":"Simplified Chinese","已复制清单":"List copied","收藏与弃用":"Saved and Hidden","登录成功":"Signed in","本站只收录每个区域评分前":"We list only each region's top","恢复网络后请重试":"please retry once you're back online","复制清单文本":"Copy as text","全清":"None","收藏当前":"Save this one","家":"restaurants","标记颜色取决于这家店申报的晚餐价格上限":"Marker colour follows the upper end of the restaurant's dinner price range","此操作不可撤销":"This cannot be undone","市内":"In-city","你在另一个窗口登录了":"You signed in from another window","不影响餐厅收藏":"saved restaurants are unchanged","备份文件已保存":"Backup file saved","步行":"walk","常用":"Common","會從地圖上自動隱藏":"automatically hidden from the map","酒吧":"Bar","近江町市場":"Omicho Market","立即重试":"Retry now","西":"Western","返回地图":"Back to map","坐标":"Coordinates","试试":"Try","东京迪士尼乐园":"Tokyo Disneyland","栗林公园":"Ritsurin Garden","甜品":"Desserts","加入收藏":"Save","本地模式":"Local mode","此餐厅当前不在筛选范围内":"This restaurant is outside the current filters","批量弃用":"Hide all","乌冬":"Udon","从子收藏夹移除":"Remove from list","清空":"Clear","網訂入口":"booking link","图层设置":"Layer settings","屏幕内":"On screen","新干线":"Shinkansen","的餐廳":"rated restaurants","找店范围":"Search area","其他":"Other","家结果":"results","请至少选择一项":"Select at least one item","三明治":"Sandwich","隐藏这间店":"Hide this restaurant","稍后自动重试":"will retry automatically","松江城":"Matsue Castle","距我的位置":"Distance from me","营业状态与价格请以原站为准":"Always check the original listing for opening status and prices","长途":"Long-haul","非日本料理":"Non-Japanese cuisine","上滑查看详情":"Swipe up for details","直島":"Naoshima","同步中":"Syncing","夕食":"Dinner","周四":"Thu","无":"None","地图仍为当前找店结果":"The map keeps the current search results","账户":"Account","导入失败":"Import failed","韩国料理":"Korean","横浜":"Yokohama","部分餐厅暂无逐条采集日期":"Some restaurants have no recorded collection date","收藏与结果":"Saved & results","烧":"Grilled","请刷新重试":"please refresh to retry","重新加载":"reloading","登录":"Sign in","距地图中心":"Distance from center","会从地图上自动隐藏":"automatically hidden from the map","删除我的云端数据":"Delete my cloud data","没有符合条件的餐厅":"No restaurants match","定位校准":"Verified coordinates","保存文件失败":"Saving failed","返回我的收藏":"Back to saved places","足立美術館":"Adachi Museum of Art"};
+  var TEXT_EN_MAP = {"版本":"Version","不勾则不限制":"Leave unchecked for no filter","东京迪士尼乐园":"Tokyo Disneyland","祝日":"Holidays","服务暂不可用":"The service is unavailable right now","繁體":"Traditional","日曜":"Sun","按钮里的选择器":"Picker in the button","装好之后离线也能看地图":"Once installed the map works offline too","用地点名填入":"Use place name","同步数据":"Sync data","人均":"Per person","此操作不可撤销":"This cannot be undone","持久化":"Persistent","将合并到现有数据并自动去重":"it will be merged into your existing data with duplicates skipped","说明":"Help","和书签一起通过你的":"synced with Pins via your","中国料理眺游楼":"Chinese Cuisine Tiao You Lou","面包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","档":"tiers","搜索餐厅":"Search restaurants","删除景点":"Delete landmark","地图组件无法加载":"map components can't load","热门":"Hot","请删减收藏或书签":"please remove some saved places or pins","安装为应用":"Install as an app","已加入收藏":"Added to Saved","明治神宮":"Meiji Shrine","取消规则":"Cancellation","中东菜等":"Middle Eastern, etc.","看原文":"See original","最近局部补采":"Latest partial update","复制失败":"Copy failed","知道了":"Got it","未检测到":"Not detected","大阪城":"Osaka Castle","沾面":"Tsukemen","搜索中":"Searching","名所":"Landmarks","多數可以在一個合理的天數內提前預訂":"most can be booked a reasonable number of days ahead","下限":"floor","咖啡厅":"cafés","其它":"Other","排序":"Sort","繁體中文":"Traditional Chinese","道頓堀":"Dotonbori","登录处理失败":"Sign-in handling failed","地区":"Region","周三":"Wed","等待云端状态更新":"Waiting for the cloud state to update","正在删除":"Deleting","同步":"Sync","删除书签":"Delete pin","家":"restaurants","不登录也完全可用":"Signing in is optional — everything works without it","输入更多字以缩小范围":"Type more to narrow the search","上野公園":"Ueno Park","已开启":"on","你研究後決定不會去的餐廳":"Restaurants you've researched and decided not to visit","云端数据已删除":"Your cloud data has been deleted","无休":"Open daily","已复制":"Copied","未能保存到云端":"could not be saved to the cloud","你在另一个窗口退出了登录":"You signed out in another window","请先登录":"Sign in first","上野公园":"Ueno Park","请检查网络后刷新":"check your network, then refresh","收藏只存在这台设备":"Saved places live on this device only","新世界":"Shinsekai","联网后重试":"reconnect to retry","汉堡":"Burgers","菜系图标":"Cuisine icons","晚餐价格":"Dinner price","是本站收录的最低分":"is the lowest rating this site carries","足立美术馆":"Adachi Museum of Art","未开启":"off","稍后":"Later","改动仅存浏览器":"edits live in browser only","新干线":"Shinkansen","当前离线":"You are offline","没有符合的店":"No matching restaurants","未検出":"Not detected","聚焦搜索":"Focus search","金曜日":"Fri","加入景点":"New landmark","已保存在此浏览器":"Saved in this browser","登录可在其他设备恢复":"sign in to restore it on other devices","局部补采不代表全库更新":"A partial update does not refresh the whole database","只显示可以通过":"Bookable via","天妇罗":"Tempura","直島":"Naoshima","加入收藏":"Save","请至少选择一项":"Select at least one item","可导出可退出可删除":"and you can export it, sign out or delete it at any time","图标":"Icon","内蔵":"built-in","日式咖喱":"Japanese curry","韩":"Korean","家餐厅":"restaurants","你研究后决定不会去的餐厅":"Restaurants you've researched and decided not to visit","乌冬":"Udon","你自己想标注的地点或建筑物":"Places or buildings you want to mark yourself","與預設景點一起在地圖上顯示":"shown alongside the built-in Landmarks on the map","本站只收录每个区域评分前":"We list only each region's top","炸物":"Fried","隐藏这间店":"Hide this restaurant","夕食":"Dinner","珍味":"Delicacies","地址":"Address","用户自添景点":"Custom Landmarks","这样":"So","小吃":"Snacks","系统默认旅游锚点之外你自己加的去处":"Destinations you add on top of the built-in Landmarks","東京晴空塔":"Tokyo Skytree","地点内匹配":"in this area","重置筛选":"Reset filters","图层设置":"Layer settings","首裡城":"Shuri Castle","登录中":"Signing in","無休":"Open daily","法餐":"French","搜索超时":"Search timed out","盖饭":"Donburi","尾道":"Onomichi","已删除":"Deleted","能否预订":"Reservations","条结果":"results","烧":"Grilled","已跳过无法识别的条目":"Skipped unreadable entries","除外":"Hidden","全部已存在":"everything already exists","和景點一起透過你的":"synced with Landmarks via your","土曜":"Sat","一起显示":"Show them too","已加入":"Added to","圆里的数字是这一片符合当前筛选条件的餐厅数量":"The number in the circle is how many restaurants in that area match your current filters","銀座":"Ginza","重新加载":"reloading","意面":"Pasta","你在另一个窗口登录了":"You signed in from another window","点击查看详情":"Click for details","浏览器清理时可能删除本地收藏":"The browser may delete them when it clears storage","价位":"Price","读取文件失败":"Failed to read the file","拉面":"Ramen","调整面板高度":"Resize panel","从结果或详情里加入子收藏夹":"Add places to it from the results list or a detail card","立即重试":"Retry now","只读取你的邮箱和头像":"We only read your email address and profile picture","东京塔":"Tokyo Tower","不接受预订":"No reservations","新宿御苑":"Shinjuku Gyoen","选地区":"Choose area","南亚":"South Asian","全部":"All","浅草寺":"Senso-ji","分享这家店":"Share this restaurant","家结果":"results","距地图中心":"Distance from center","周一":"Mon","串烧":"Skewers","移到":"Add to list","位置与座位":"Location & seating","木曜日":"Thu","首里城":"Shuri Castle","同步数据超过上限":"Sync data exceeds the size limit","此餐厅当前不在筛选范围内":"This restaurant is outside the current filters","网络问题或广告拦截插件":"network issue or ad blocker","登录后可在其它设备看到":"sign in to see them on your other devices","烤鸡":"Yakitori","東京迪士尼樂園":"Tokyo Disneyland","烘焙":"Bakery","内脏":"Offal","不再提示":"Don't show again","內臟":"Offal","御台场":"Odaiba","显示":"Show","关闭当前层":"Close the top layer","吉野里遗址":"Yoshinogari Site","御台場":"Odaiba","获奖":"Awards","已显示全部结果":"showing all results","隐藏非日本料理":"Hide non-Japanese","重试":"Retry","导入完成":"Import complete","棄用名單":"Hidden","地图只覆盖日本":"This map covers Japan only","已复制链接":"Link copied","和果子":"wagashi","周六":"Sat","退出登录":"Sign out","保存中":"Saving","鳥取砂丘":"Tottori Sand Dunes","网订":"Online","标记中间的图标代表菜系":"The icon in the middle of a marker is the cuisine","意餐":"Italian","登录脚本未加载":"Sign-in script failed to load","全部地区":"All regions","云端数据已回退":"Cloud data rolled back","御好烧":"Okonomiyaki","是本站收錄的最低分":"is the lowest rating this site carries","没有匹配的结果":"No results","私铁":"Private rail","例如":"e.g.","咖啡廳":"cafés","筛选条件太严格了":"The filters are too strict","导航":"Directions","翻译":"Translate","出云大社":"Izumo Taisha","餐厅数据加载失败":"Restaurant data failed to load","水曜日":"Wed","需要注意":"Also note","你在另一个窗口切换了登录":"You switched accounts in another window","清空":"Clear","显示这个菜系":"Show this cuisine","长途线路":"Long-haul lines","浏览器不允许本站保存数据":"The browser won't let this site store data","标记颜色取决于这家店申报的晚餐价格上限":"Marker colour follows the upper end of the restaurant's dinner price range","多选取并集":"Multi-select = union","的餐厅":"rated restaurants","子收藏夹":"Lists","上滑查看详情":"Swipe up for details","进一步压到":"are further capped at","我的收藏":"My Saved","查看结果":"View results","你自己想標註的地點或建築物":"Places or buildings you want to mark yourself","非日本料理":"Non-Japanese cuisine","无痕窗口关闭即失":"Private windows lose them on close","更多":"More","清除":"Clear","收藏":"Saved","重命名":"Rename","奖项":"Awards","已弃用":"Hidden","已合并本地改动":"local changes merged","甚至":"or even","咖啡":"Cafe","炭火焼鳥正":"Sumibi Yakitori Sho","长途":"Long-haul","会从地图上自动隐藏":"automatically hidden from the map","勾选后只看对应获奖店":"Check to filter to award winners only","筛选":"Filter","其他区域":"Other regions","弃用名单":"Hidden","丰洲市场":"Toyosu Market","五色沼":"Goshikinuma Ponds","显示我的位置":"Show my location","导入失败":"Import failed","草千里":"Kusasenri","土曜日":"Sat","安装到主屏幕":"Add to Home Screen","其他":"Other","海鲜":"Seafood","按距离排序":"sorted by distance","原文":"Original","分":"min","账号跨设备同步":"account across devices","营业状态与价格请以原站为准":"Always check the original listing for opening status and prices","展开列表":"Show list","拉美料理":"Latin American","水曜":"Wed","你收藏的店":"A place you saved","弃用当前":"Hide this one","图层":"Layers","予約":"booking","去掉地点约束":"Remove the location filter","导出":"Export","寿司":"Sushi","需要预订":"Reservation required","岡山城":"Okayama Castle","可预订":"Reservations accepted","地图控件":"Map controls","没有晚餐价格的店改用午餐价格上限":"Restaurants with no dinner price fall back to the lunch upper bound","中餐":"Chinese","帳號跨裝置同步":"account across devices","放弃当前输入":"Delete what you typed","只看这个":"Show only this","道顿堀":"Dotonbori","坐标":"Coordinates","家因此被挡住":"places","不会覆盖现有项":"existing items are never overwritten","東京塔":"Tokyo Tower","也显示已隐藏的景点":"Also show hidden landmarks","选择添加到主屏幕":"Choose \"Add to Home Screen\"","烤肉":"Yakiniku","六本木新城":"Roppongi Hills","網訂入口":"booking link","搜索失败":"Search failed","默认不在地图上显示":"Not shown on the map by default","明治神宫":"Meiji Shrine","夫妇岩":"Meoto Iwa","文件格式无法识别":"Unrecognized file format","横浜":"Yokohama","直岛":"Naoshima","未命名":"Unnamed","银奖":"Silver","你的数据":"Your data","点心":"Confectionery","近江町市場":"Omicho Market","当前筛选的":"All","导入":"Import","已跳过":"skipped","恢复网络后请重试":"please retry once you're back online","但不再同步到云端":"but won't sync to the cloud anymore","仅电话":"Phone only","亲子丼":"Oyakodon","最寄駅":"Nearest station","调整左侧筛选条件可让它出现在地图上":"loosen the filters to bring it back onto the map","部分餐厅暂无逐条采集日期":"Some restaurants have no recorded collection date","足立美術館":"Adachi Museum of Art","迁移":"Migrate","炭火烧鸟正":"Charcoal yakitori","显示的是本机缓存的数据":"showing data cached on this device","系統預設旅遊錨點之外你自己加的去處":"Destinations you add on top of the built-in Landmarks","只看收藏":"Saved only","距离约":"approx.","复制":"Copy","命中":"Matches","進一步壓到":"are further capped at","下次一点就开":"one tap to open it next time","常用":"Common","披萨":"Pizza","查看":"View","复制坐标":"Copy coordinates","金奖":"Gold","或打开浏览器菜单选择安装":"Or open the browser menu and choose \"Install\"","预约政策":"Reservation policy","状态未知":"unknown","这次筛选里有":"This filter is hiding","在地图上显示出来的":"of the","上限":"max","已永久歇业":"Permanently closed","银座":"Ginza","当前位置在地图范围之外":"Current location is outside the map","景点":"Landmarks","以外的区域":" — elsewhere","价格":"Price","定位被浏览器禁用":"Location is blocked by the browser","放大":"Zoom in","网络不通":"No network connection","车站":"Station","拉麵":"Ramen","搜尋餐廳":"Search restaurants","批量弃用":"Hide all","未分组":"Not in a list","这个子收藏夹还是空的":"This list is empty","金曜":"Fri","改动已存在本机":"your changes are saved on this device","日本環球影城":"Universal Studios Japan","未偵測到":"Not detected","已改用云端数据":"now using the cloud copy","美式料理":"American","已同步":"Synced","请在浏览器设置中开启":"turn it on in the browser settings","确认删除":"Confirm deletion","这是一张日本美食与景点地图":"A map of Japan's best-rated restaurants and landmarks","地图仍为当前找店结果":"The map keeps the current search results","有新版本":"New version available","收藏与结果":"Saved & results","重命名子收藏夹":"Rename list","到店":"walk-in","焼":"Grilled","炭火烧鸟":"Charcoal yakitori","结果":"Results","选择语言":"Choose language","年中無休":"Open daily","只看这个菜系":"Show only this cuisine","景點":"Landmarks","收藏已有":"You have saved","撤销":"Undo","祝祭日":"Holidays","还原列表":"Back to list","其中":"of which","结果包含所选地区内全部匹配餐厅":"Results include all matches in the selected area","未检测到网订入口":"No online booking link detected","日元以下的高分正餐餐廳":"yen-or-under high-rated proper-meal restaurants on the map","倉敷美觀地區":"Kurashiki Bikan","可":"Available","酒吧":"Bar","类型":"Type","铁板烧":"Teppanyaki","按子收藏夹":"By list","下回":"below","甜品":"Desserts","正餐":"Mains","本站只收錄每個區域評分前":"We list only each region's top","本地模式":"Local mode","关闭":"Close","放宽条件或重置筛选":"Loosen them, or reset the filters","简体":"Simplified","铜奖":"Bronze","地图图例":"Map legend","比它更低的餐廳根本不在資料裡":"anything below it was never collected","新建子收藏夹":"New list","下次登录会重新下载":"it is downloaded again at your next sign-in","餐厅库":"Restaurant library","在地圖上顯示出來的":"of the","知床國立公園":"Shiretoko National Park","找店范围":"Search area","出雲大社":"Izumo Taisha","秋叶原":"Akihabara","栗林公园":"Ritsurin Garden","下一家":"Next restaurant","皇居":"Imperial Palace","分组":"Group by","加入收藏夹":"Add to list","按距离":"by distance","可粘贴任意":"Paste any","日元以下的高分正餐餐厅":"yen-or-under high-rated proper-meal restaurants on the map","韩国料理":"Korean","中":"Chinese","和收藏一起通过你的":"synced with Saved via your","跨设备同步":"sync across devices","不影响餐厅收藏":"saved restaurants are unchanged","米":"m","本设备上的本地缓存会保留":"Local cache on this device is kept","非洲":"Africa","地图搜索":"Map search","选择器":"Picker","没有新增内容":"Nothing new to add","收录规则":"What gets listed","近江町市场":"Omicho Market","已移除":"Removed from","其中高價位":"of which high-end","不定休":"Irregular","书签":"Pins","步行":"walk","家能在网上订":"can be booked online","显示全部":"Show all","日本环球影城":"Universal Studios Japan","已启用":"Active","收藏还是空的":"Nothing saved yet","你弃用的店":"A place you hid","日本語":"Japanese","按城市":"By city","列表为我的收藏":"This list shows your saved places","删除":"Delete","登录":"Sign in","聚合圆圈":"Cluster circles","屏幕内":"On screen","火曜":"Tue","可随时删除":"deletable anytime","正在看":"Viewing","同步冲突":"Sync conflict","仓敷美观地区":"Kurashiki Bikan","热门餐厅":"Hot restaurants","请重新登录":"please sign in again","食":"食","网络暂不可用":"Network unavailable","台湾料理":"Taiwanese","可网订":"Bookable","有网上预约入口":"Online booking link found","日曜日":"Sun","没有符合条件的餐厅":"No restaurants match","定位到我的位置":"Locate me","早餐":"Breakfast","无":"None","同时清除本设备数据":"Also clear this device's data","已复制坐标":"Coordinates copied","地图底图":"Base map","关于本站":"About this site","复制清单文本":"Copy as text","评分":"Rating","书签会从本设备删除":"and pins will be removed from this device","有":"Available","日本料理":"Japanese cuisine","语言":"Language","提前多久":"How far ahead","可貼上任意":"Paste any","暂停营业":"Temporarily closed","京都美食":"Kyoto eats","选择":"Select","缩放到全部结果":"Zoom to all results","其中高价位":"of which high-end","比它更低的餐厅根本不在数据里":"anything below it was never collected","书签标记":"Map pins","保存":"Save","符合筛选":"Match","三朝温泉":"Misasa Onsen","同步数据接近上限":"Sync data is close to the size limit","只看网订":"Bookable online only","火曜日":"Tue","附近":"Nearby","点底部的分享按钮":"Tap the share button at the bottom","收藏与弃用":"Saved and Hidden","备份文件已保存":"Backup file saved","初始化失败":"Initialisation failed","点地图或列表里的店查看详情":"Pick a place on the map or in the list to see its details","已切换账号":"Account switched","范围内":"In range","海游馆":"Kaiyukan Aquarium","东京晴空塔":"Tokyo Skytree","地铁":"Subway","加载失败":"Load failed","和收藏一起透過你的":"synced with Saved via your","在找店结果中只看已收藏":"Show only saved restaurants in search results","隐私与数据":"Privacy & data","历史采集基线":"Historical data baseline","再点添加":"Tap \"Add\"","收起列表":"Hide list","晚":"Dinner","韩餐":"Korean","只存在这台设备":"Stored on this device only","隐藏弃用名单":"Hide the Hidden list","你在约":"You booked","百名店":"Hyakumeiten","地图组件加载失败":"Map components failed to load","请确认它是导出的":"please make sure it is an exported","选择要导入的内容":"Choose what to import","地图移动不改变筛选范围":"Moving the map does not change the search area","新建书签":"New pin","导入备份":"Import backup","件":"results","重新连接中":"Reconnecting","正":"Sho","可隨時刪除":"deletable anytime","已收藏":"Saved","价格区间上限":"Upper end of the price range","数据来源":"Data source","全选可见":"Select visible","隐藏":"Hide","已选":"Selected","同步失败":"Sync failed","当前处于离线状态":"You appear to be offline","第":"No.","重新载入":"Reload","从子收藏夹移除":"Remove from list","多数可以在一个合理的天数内提前预订":"most can be booked a reasonable number of days ahead","全选":"All","简体中文":"Simplified Chinese","在屏幕范围内":"On screen","築地場外市場":"Tsukiji Outer Market","内没有匹配的餐厅":" has no matching restaurant","登录被取消":"Sign-in canceled","东南亚料理":"Southeast Asian","市内":"In-city","地图怎么看":"How to read the map","预约":"Booking","云端数据不受影响":"cloud data is not affected","定休":"Closed","鸟取砂丘":"Tottori Sand Dunes","周五":"Fri","批量收藏":"Save all","城市轨道":"Urban rail","奧入瀨溪流":"Oirase Gorge","通天阁":"Tsutenkaku","翻译失败":"Translate failed","把地图装到主屏幕":"Put this map on your home screen","麵包店等非正餐也按比例控量":"bakeries and other non-meal types are also volume-capped","关东煮":"Oden","周日":"Sun","只看谷歌地图校准过坐标的餐厅":"Google-verified coordinates only","请稍后再试":"please try again later","找附近":"Find nearby","伴手礼":"Gift food","淺草寺":"Senso-ji","恢复显示这间店":"Show this restaurant again","已切到全部地区":"All areas","锅物":"Hot pot","备份文件超过":"The backup exceeds","浏览器未提供存储用量":"Storage usage not reported by this browser","改动已存本地":"changes saved locally","保存文件失败":"Saving failed","特急":"limited express","知床国立公园":"Shiretoko National Park","加载中":"Loading","松江城":"Matsue Castle","乡土":"Regional","恢复后会自动上传":"they will upload automatically once it is back","选一个地区开始":"Pick a region to start","木曜":"Thu","收藏只在本次会话有效":"saved places last only for this session","西餐":"Western","豐洲市場":"Toyosu Market","检查网络":"check your network","英尺":"ft","已复制清单":"List copied","和景点一起通过你的":"synced with Landmarks via your","放大地图聚合就会散开":"Zoom in and the cluster breaks apart","居酒屋":"Izakaya","本地存储":"Local storage","登录状态保留":"Your sign-in is kept","登录成功":"Signed in","个书签":"pins","栗林公園":"Ritsurin Garden","改动保留在本地":"Changes remain on this device","缩放回全部结果":"Zoom back out to all results","三朝溫泉":"Misasa Onsen","周二":"Tue","周四":"Thu","交通图层加载失败":"Transit layer failed to load","尚未导入":"and has not been imported","海遊館":"Kaiyukan Aquarium","眺游楼":"Tiao You Lou","這樣":"So","数据托管于":"Data is hosted on","在浏览器菜单里找添加到主屏幕或安装":"Look for \"Add to Home Screen\" or \"Install\" in your browser menu","已取消收藏":"Removed from Saved","家餐厅都不在地图范围内":"matching restaurants are outside the map","已恢复显示这间店":"Restaurant shown again","家店":"restaurants","收藏当前":"Save this one","全清":"None","中国料理":"Chinese cuisine","网上可订":"Bookable online","月曜":"Mon","午":"Lunch","眺遊楼":"Tiao You Lou","筛选结果":"Filter results","删除我的云端数据":"Delete my cloud data","言語":"Language","无法取得位置":"Couldn't get your location","点地址栏右侧的安装图标":"Click the install icon at the right of the address bar","备份":"Backup","图标必须是":"Icon must be","请检查文件内容":"please check the file contents","个其他匹配":"more matches","服务器出错":"The server returned an error","座位":"Seats","饺子":"Gyoza","缩小":"Zoom out","取消":"Cancel","稍后自动重试":"will retry automatically","書籤":"Pins","定位校准":"Verified coordinates","其他西餐":"Other Western","安装":"Install","加入子收藏夹":"Add to a list","视野内":"In view","正在尝试浏览器下载":"Trying a browser download","登录后可跨设备同步":"Sign in to sync across devices","奥入濑溪流":"Oirase Gorge","西点":"Pastry","會從地圖上自動隱藏":"automatically hidden from the map","小町通":"Komachi Street","登录已过期":"Session expired","面类":"Noodles","的餐廳":"rated restaurants","账户":"Account","通天閣":"Tsutenkaku","景点锚点":"Landmarks","试试":"Try","快捷键":"Keyboard shortcuts","已恢复":"Restored","请刷新重试":"please refresh to retry","不在当前数据里":"Not in the current data","隐私政策":"Privacy policy","保存失败":"Save failed","上一家":"Previous restaurant","网订入口":"booking link","在结果里点星标就会出现在这里":"Star a restaurant in the results and it shows up here","名称":"Name","打开完整":"Open full","中东":"Middle East","节假日":"Holidays","详情":"Details","网上订位":"Online booking","猎奇":"Adventurous","名称不能为空":"Name cannot be empty","夫婦岩":"Meoto Iwa","个景点":"landmarks","地图上的地点标记":"Place pins on the map","请检查网络":"Check your network","冰品":"Ice cream","菜系":"Cuisine","冈山城":"Okayama Castle","三明治":"Sandwich","吉野裡遺址":"Yoshinogari Site","距我的位置":"Distance from me","秋葉原":"Akihabara","和書籤一起透過你的":"synced with Pins via your","餐厅数据无法加载":"restaurant data can't load","同步中":"Syncing","月曜日":"Mon","与默认景点一起在地图上显示":"shown alongside the built-in Landmarks on the map","无法解析该文件":"Could not parse the file","翻譯":"Translate","已用":"Used","弃用":"Hide","荞麦":"Soba","我的书签标记":"My map pins","西":"Western"};
   // Japanese lookup, same shape. Values come from data/i18n/ja.json.
   // Runs without an entry stay in Chinese at runtime.
-  var TEXT_JA_MAP = {"米":"m","首里城":"首里城","和收藏一起透過你的":"お気に入りと一緒に、あなたの","你在约":"予約済","日本环球影城":"ユニバーサル・スタジオ・ジャパン","预约政策":"予約ポリシー","图标必须是":"アイコンは","金曜":"金曜","重命名":"名前を変更","热门餐厅":"人気店","已显示全部结果":"全件を表示中","不勾则不限制":"未チェックで制限なし","月曜":"月曜","按子收藏夹":"リスト別","更多":"その他の操作","已复制链接":"リンクをコピーしました","菜系":"ジャンル","上野公园":"上野公園","地图图例":"地図の凡例","你自己想标注的地点或建筑物":"自分で印を付けたい場所や建物","伴手礼":"お土産","重试":"再試行","备份文件超过":"バックアップが","已保存在此浏览器":"このブラウザに保存しました","联网后重试":"接続後に再試行します","点心":"和菓子","丰洲市场":"豊洲市場","关闭":"閉じる","小町通":"小町通り","你在另一个窗口切换了登录":"別のウィンドウでアカウントを切り替えました","已加入收藏":"お気に入りに追加しました","全部地区":"すべての地域","日本環球影城":"ユニバーサル・スタジオ・ジャパン","御好烧":"お好み焼き","保存失败":"保存失敗","同步":"同期","未偵測到":"未検出","结果":"検索結果","足立美术馆":"足立美術館","列表为我的收藏":"リストはお気に入りです","初始化失败":"初期化に失敗しました","你收藏的店":"お気に入りにした店","你的数据":"あなたのデータ","服务暂不可用":"サービスを一時的にご利用いただけません","数据托管于":"データの保管先は","是本站收錄的最低分":"がこのサイトのスコア下限です","你研究後決定不會去的餐廳":"リサーチして行かないと決めたレストラン","没有符合的店":"該当するお店がありません","可粘贴任意":"任意の絵文字を貼り付け可","从结果或详情里加入子收藏夹":"検索結果や詳細カードから追加してください","鸟取砂丘":"鳥取砂丘","点底部的分享按钮":"下部の共有ボタンをタップ","导入":"インポート","退出登录":"サインアウト","上限":"上限","金曜日":"金曜日","景点锚点":"名所","烤肉":"焼肉","类型":"種類","只看谷歌地图校准过坐标的餐厅":"Google 補正済みの座標のみ","天妇罗":"天ぷら","淺草寺":"浅草寺","眺遊楼":"眺遊楼","土曜日":"土曜日","已复制":"コピー済み","你在另一个窗口退出了登录":"別のウィンドウでサインアウトしました","出云大社":"出雲大社","已切到全部地区":"全エリア","同时清除本设备数据":"この端末のデータも消去しますか","不接受预订":"予約不可","名称不能为空":"名称は必須です","在地圖上顯示出來的":"地図に表示される","無休":"無休","近江町市场":"近江町市場","默认不在地图上显示":"既定では地図に表示されません","鳥取砂丘":"鳥取砂丘","其他区域":"他の地域","已收藏":"お気に入り済み","新建书签":"ピンを作成","同步数据超过上限":"同期データが上限を超えています","未检测到":"未検出","不登录也完全可用":"サインインしなくてもすべて使えます","当前筛选的":"条件に合う","祝祭日":"祝祭日","显示全部":"すべて表示","最近局部补采":"一部データの最終更新","检查网络":"ネットワークを確認","定位被浏览器禁用":"位置情報がブラウザでブロックされています","选择器":"ピッカー","弃用当前":"この店を除外","奧入瀨溪流":"奥入瀬渓流","请重新登录":"再度サインインしてください","的餐厅":"のレストランのみ掲載","登录被取消":"サインインがキャンセルされました","和景点一起通过你的":"名所と一緒に、あなたの","和果子":"和菓子","城市轨道":"都市鉄道","也显示已隐藏的景点":"非表示の名所も表示","在屏幕范围内":"画面内","请在浏览器设置中开启":"ブラウザの設定でオンにしてください","与默认景点一起在地图上显示":"内蔵の名所と一緒に地図に表示され","加入景点":"名所を作成","选地区":"エリア選択","繁體":"繁体字","東京迪士尼樂園":"東京ディズニーランド","用户自添景点":"カスタム名所","收藏还是空的":"お気に入りはまだありません","把地图装到主屏幕":"この地図をホーム画面に追加","尚未导入":"を超えているため、読み込んでいません","网络暂不可用":"ネットワークに接続できません","浏览器未提供存储用量":"このブラウザは使用量を提供していません","东京晴空塔":"東京スカイツリー","加载失败":"読み込み失敗","弃用名单":"除外リスト","装好之后离线也能看地图":"インストールすればオフラインでも地図を見られます","全选可见":"表示中をすべて選択","能否预订":"予約","节假日":"祝日","地铁":"地下鉄","本站只收錄每個區域評分前":"各エリアで評価上位","保存中":"保存中","银座":"銀座","未命名":"無題","数据来源":"データ出典","冰品":"アイス","京都美食":"京都グルメ","登录中":"サインイン中","看原文":"原文を見る","正餐":"メイン","中国料理":"中国料理","搜索失败":"検索失敗","地图组件无法加载":"地図コンポーネントを読み込めません","结果包含所选地区内全部匹配餐厅":"選択したエリア内の全候補です","奥入濑溪流":"奥入瀬渓流","当前位置在地图范围之外":"現在地は地図の範囲外です","选择要导入的内容":"インポートする内容を選択","显示这个菜系":"このジャンルを表示","拉面":"ラーメン","云端数据不受影响":"クラウドのデータには影響しません","加载中":"読み込み中","沾面":"つけ麺","仓敷美观地区":"倉敷美観地区","新建子收藏夹":"リストを作成","可隨時刪除":"いつでも削除できます","撤销":"元に戻す","名所":"名所","个其他匹配":"件の他の一致","人均":"予算","持久化":"永続化","下次一点就开":"次からワンタップで開けます","串烧":"串焼き","请稍后再试":"後でもう一度お試しください","年中無休":"年中無休","重置筛选":"フィルターをリセット","你弃用的店":"除外した店","收起列表":"リストを閉じる","显示":"表示","视野内":"表示範囲内","內臟":"ホルモン","翻譯":"翻訳","名称":"名称","内脏":"ホルモン","南亚":"南アジア","家店":"件です","登录处理失败":"サインイン処理失敗","缩放回全部结果":"すべての結果に戻る","晚":"ディナー","百名店":"百名店","水曜日":"水曜日","状态未知":"不明","新世界":"新世界","删除":"削除","秋叶原":"秋葉原","打开完整":"全画面で開く","关闭当前层":"最前面のレイヤーを閉じる","可":"可","咖啡廳":"カフェ","登录后可跨设备同步":"ログインすると端末間で同期できます","通天閣":"通天閣","已开启":"有効","築地場外市場":"築地場外市場","进一步压到":"はさらに","咖啡":"カフェ","账号跨设备同步":"アカウントでデバイス間同期されます","重命名子收藏夹":"リスト名を変更","御台场":"お台場","请确认它是导出的":"エクスポート済みの","按钮里的选择器":"ボタン内のピッカー","第":"第","家因此被挡住":"軒が隠れています","点地图或列表里的店查看详情":"地図またはリストからお店を選ぶと詳細が表示されます","去掉地点约束":"エリア指定を解除","登录状态保留":"ログイン情報を保持し","地区":"地域","勾选后只看对应获奖店":"チェックで受賞店のみ表示","菜系图标":"ジャンルのアイコン","意面":"パスタ","但不再同步到云端":"ただしクラウドには同期されなくなります","可导出可退出可删除":"で、いつでもエクスポート・サインアウト・削除ができます","放大地图聚合就会散开":"拡大すると散らばります","恢复后会自动上传":"回復すると自動でアップロードします","搜索超时":"検索がタイムアウトしました","收藏保留":"お気に入りは保持されます","明治神宮":"明治神宮","中":"中華","聚合圆圈":"まとめの丸","隐私与数据":"プライバシーとデータ","筛选":"フィルター","御台場":"お台場","甚至":"場合によっては","和书签一起通过你的":"ピンと一緒に、あなたの","符合筛选":"該当","改动已存在本机":"変更はこの端末に保存済みです","书签会从本设备删除":"ピンはこの端末から削除されます","热门":"人気","距离约":"約","東京塔":"東京タワー","筛选条件太严格了":"絞り込みが厳しすぎます","价位":"価格帯","三朝溫泉":"三朝温泉","浏览器不允许本站保存数据":"ブラウザがこのサイトのデータ保存を許可していません","地图只覆盖日本":"地図は日本国内のみ対応","快捷键":"キーボードショートカット","日本語":"日本語","是本站收录的最低分":"がこのサイトのスコア下限です","書籤":"ピン","有网上预约入口":"ネット予約リンクあり","详情":"詳細","点击查看详情":"タップで詳細","登录后可在其它设备看到":"ログインすると他の端末でも見られます","餐厅数据加载失败":"レストランデータの読み込みに失敗しました","已合并本地改动":"ローカルの変更を統合しました","日元以下的高分正餐餐廳":"円以下の高評価な食事系レストランは","隐藏非日本料理":"和食以外を隠す","当前离线":"現在オフラインです","其中高价位":"うち高単価の","隐私政策":"プライバシーポリシー","夫妇岩":"夫婦岩","最寄駅":"最寄駅","加入子收藏夹":"リストに追加","银奖":"銀賞","历史采集基线":"収集データの基準日","饺子":"餃子","已选":"選択中","提前多久":"予約時期","查看":"表示","本地存储":"ローカルストレージ","除外":"除外","搜尋餐廳":"レストラン検索","清除":"クリア","删除景点":"名所を削除","已用":"使用中","地图怎么看":"地図の見方","木曜":"木曜","地点内匹配":"このエリア内","道頓堀":"道頓堀","收藏":"お気に入り","下限":"下限","没有晚餐价格的店改用午餐价格上限":"ディナー価格がない店はランチ価格帯の上限を使います","明治神宫":"明治神宮","调整面板高度":"パネルの高さを調整","金奖":"金賞","缩小":"縮小","语言":"言語","海鲜":"海鮮","知床国立公园":"知床国立公園","周三":"水曜日","周五":"金曜日","全选":"全選択","其中":"うち","长途线路":"長距離路線","已跳过无法识别的条目":"読み取れない項目をスキップ","木曜日":"木曜日","和景點一起透過你的":"名所と一緒に、あなたの","只存在这台设备":"この端末にのみ保存されています","多选取并集":"複数選択 = 和集合","分享这家店":"この店を共有","东京塔":"東京タワー","说明":"説明","海游馆":"海遊館","备份":"バックアップ","出雲大社":"出雲大社","系統預設旅遊錨點之外你自己加的去處":"内蔵の名所に加えて自分で追加した行き先","无痕窗口关闭即失":"プライベートウィンドウでは閉じると失われます","與預設景點一起在地圖上顯示":"内蔵の名所と一緒に地図に表示され","草千里":"草千里","炭火烧鸟正":"炭火焼鳥 正","关于本站":"このサイトについて","已移除":"外しました","多數可以在一個合理的天數內提前預訂":"多くが妥当な日数で予約可能","请检查网络后刷新":"ネットワークを確認して再読み込みしてください","炭火烧鸟":"炭火焼鳥","餐厅数据无法加载":"レストランデータを読み込めません","安装":"インストール","正在删除":"削除中","选一个地区开始":"エリアを選んで始める","将合并到现有数据并自动去重":"既存データに統合され重複は自動的に除外されます","岡山城":"岡山城","无法解析该文件":"ファイルを解析できません","无法取得位置":"現在地を取得できません","排序":"並び替え","土曜":"土曜","全部":"すべて","地图底图":"ベースマップ","西餐":"西洋料理","查看结果":"結果を表示","西点":"洋菓子","再点添加":"「追加」をタップ","台湾料理":"台湾料理","和書籤一起透過你的":"ピンと一緒に、あなたの","景點":"名所","系统默认旅游锚点之外你自己加的去处":"内蔵の名所に加えて自分で追加した行き先","分组":"グループ","烤鸡":"焼鳥","附近":"近く","个书签":"件のピン","铁板烧":"鉄板焼き","显示我的位置":"現在地を表示","拉麵":"ラーメン","隐藏":"非表示","日曜":"日曜","已切换账号":"アカウントを切り替えました","韩":"韓","云端数据已回退":"クラウドのデータが巻き戻りました","披萨":"ピザ","周一":"月曜日","内没有匹配的餐厅":"内に一致するお店はありません","网上可订":"ネット予約可","内蔵":"内蔵","放弃当前输入":"入力を破棄しますか","知床國立公園":"知床国立公園","已删除":"削除しました","位置与座位":"場所と席数","通天阁":"通天閣","档":"段階","只看网订":"ネット予約のみ","以外的区域":"以外","没有匹配的结果":"結果なし","居酒屋":"居酒屋","正":"正","需要注意":"注意事項","豐洲市場":"豊洲市場","展开列表":"リストを開く","荞麦":"そば","食":"食","已恢复":"復元しました","东南亚料理":"東南アジア料理","这是一张日本美食与景点地图":"日本のグルメと名所の地図です","返回结果":"結果に戻る","导入备份":"バックアップをインポート","下次登录会重新下载":"次回サインイン時に再ダウンロードされます","盖饭":"丼物","午":"ランチ","服务器出错":"サーバーエラーが発生しました","只看这个":"これだけ表示","按距离排序":"距離順に切替","地图控件":"地図コントロール","图标":"アイコン","棄用名單":"除外リスト","取消":"キャンセル","可网订":"ネット予約可","地址":"住所","已启用":"適用中","三朝温泉":"三朝温泉","我的收藏":"お気に入り","收藏已有":"お気に入りは","云端数据已删除":"クラウドデータを削除しました","不再提示":"今後表示しない","其中高價位":"うち高単価の","保存":"保存","改动已存本地":"変更はローカルに保存済み","调整左侧筛选条件可让它出现在地图上":"フィルターを緩めると地図に表示されます","亲子丼":"親子丼","周日":"日曜日","登录脚本未加载":"サインインスクリプトの読み込み失敗","定休":"定休日","倉敷美觀地區":"倉敷美観地区","确认删除":"削除を確認","地图搜索":"マップ検索","六本木新城":"六本木ヒルズ","取消规则":"キャンセル","未检测到网订入口":"ネット予約リンク未検出","拉美料理":"中南米料理","周六":"土曜日","其他西餐":"その他洋食","安装为应用":"アプリとしてインストール","放大":"拡大","筛选结果":"フィルター結果","浅草寺":"浅草寺","地图移动不改变筛选范围":"地図を動かしても検索範囲は変わりません","吉野里遗址":"吉野ヶ里歴史公園","地图组件加载失败":"地図コンポーネントの読み込みに失敗しました","不定休":"不定休","只显示可以通过":"次のサイト経由で予約可:","预约方式请查看原政策":"予約方法は元の案内をご確認ください","座位":"席数","到店":"来店","多数可以在一个合理的天数内提前预订":"多くが妥当な日数で予約可能","放宽条件或重置筛选":"条件をゆるめるか、フィルターをリセットしてください","這樣":"こうして","中东":"中東","翻译失败":"翻訳に失敗","没有新增内容":"新規追加はありません","范围内":"範囲内","原文":"原文","首裡城":"首里城","定位到我的位置":"現在地に移動","中餐":"中華","评分":"評価","同步失败":"同期失敗","例如":"例:","其它":"その他","不会覆盖现有项":"既存の項目は上書きされません","日本料理":"日本料理","改动仅存浏览器":"変更はブラウザのみに保存","批量收藏":"まとめてお気に入り","景点":"名所","图层":"レイヤー","标记中间的图标代表菜系":"マーカー中央のアイコンはジャンルを表します","家餐厅":"軒のレストラン","等待云端状态更新":"クラウドの更新を待っています","咖啡厅":"カフェ","书签标记":"ピン","暂停营业":"臨時休業中","知道了":"OK","韩餐":"韓国","这个子收藏夹还是空的":"このリストは空です","车站":"駅","眺游楼":"眺遊楼","面包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","上一家":"前のお店","面类":"麺類","复制失败":"コピーできませんでした","预约":"予約","中东菜等":"中東料理など","同步冲突":"同期の競合","迁移":"移行","请到来源网站确认日期与人数":"元のサイトで日付と人数をご確認ください","局部补采不代表全库更新":"一部の更新は全店舗の更新を意味しません","或打开浏览器菜单选择安装":"またはブラウザのメニューから「インストール」を選ぶ","比它更低的餐廳根本不在資料裡":"それを下回る店はデータにありません","圆里的数字是这一片符合当前筛选条件的餐厅数量":"丸の中の数字は、そのエリアで現在の条件に合う店舗数です","中国料理眺游楼":"中国料理 眺遊楼","地图导航":"地図で開く","五色沼":"五色沼","缩放到全部结果":"すべての結果にズーム","请检查网络":"ネットワークを確認してください","恢复显示这间店":"このお店を再表示","同步数据接近上限":"同期データが上限に近づいています","书签":"ピン","显示的是本机缓存的数据":"この端末にキャッシュされたデータを表示しています","猎奇":"ゲテモノ","大阪城":"大阪城","当前处于离线状态":"現在オフラインです","可预订":"予約可","获奖":"受賞","早餐":"朝食","移到":"リストに追加","汉堡":"バーガー","请删减收藏或书签":"お気に入りやピンを減らしてください","个景点":"件の名所","皇居":"皇居","道顿堀":"道頓堀","在结果里点星标就会出现在这里":"検索結果で星を付けるとここに表示されます","炭火焼鳥正":"炭火焼鳥 正","简体":"簡体字","尾道":"尾道","未开启":"無効","隐藏弃用名单":"除外リストを隠す","导入完成":"インポート完了","价格区间上限":"価格帯の上限","我的书签标记":"自分のピン","銀座":"銀座","选择":"選択","按距离":"距離順","点地址栏右侧的安装图标":"アドレスバー右端のインストールアイコンをクリック","登录可在其他设备恢复":"サインインすれば他の端末でも復元できます","这样":"こうして","秋葉原":"秋葉原","收藏只在本次会话有效":"お気に入りはこのセッション中のみ有効です","件":"件","安装到主屏幕":"ホーム画面に追加","已从找店结果隐藏":"検索結果から除外しました","用地点名填入":"地点名を入れる","关东煮":"おでん","条结果":"件の結果","新宿御苑":"新宿御苑","有":"あり","需要预订":"完全予約制","网络不通":"ネットワークに接続できません","栗林公園":"栗林公園","奖项":"受賞","已跳过":"スキップ","帳號跨裝置同步":"アカウントでデバイス間同期されます","海遊館":"海遊館","比它更低的餐厅根本不在数据里":"それを下回る店はデータにありません","锅物":"鍋物","网络问题或广告拦截插件":"ネットワーク障害または広告ブロッカー","意餐":"イタリアン","已永久歇业":"閉店（永久）","日式咖喱":"日本式カレー","只看收藏":"お気に入りのみ","找附近":"近くを探す","已改用云端数据":"クラウドのデータに切り替えました","法餐":"フレンチ","请先登录":"先にサインインしてください","铜奖":"銅賞","网上订位":"ネット予約","你自己想標註的地點或建築物":"自分で印を付けたい場所や建物","收藏只存在这台设备":"お気に入りはこの端末にのみ保存されます","繁體中文":"繁体字中国語","登录已过期":"サインイン期限切れ","按城市":"都市別","聚焦搜索":"検索にフォーカス","网订入口":"ネット予約リンク","水曜":"水曜","未分组":"リスト未登録","已加入":"追加しました","炸物":"揚げ物","已恢复显示这间店":"このお店を再表示しました","同步数据":"同期データ","小吃":"軽食","周二":"火曜日","美式料理":"アメリカ料理","这次筛选里有":"この条件では","复制":"コピー","焼":"焼","重新连接中":"再接続中","在地图上显示出来的":"地図に表示される","本设备上的本地缓存会保留":"このデバイスのローカルキャッシュは保持されます","在浏览器菜单里找添加到主屏幕或安装":"ブラウザのメニューで「ホーム画面に追加」または「インストール」を探してください","一起显示":"まとめて表示","搜索中":"検索中","可随时删除":"いつでも削除できます","上野公園":"上野公園","子收藏夹":"リスト","复制坐标":"座標をコピー","言語":"言語","月曜日":"月曜日","祝日":"祝日","输入更多字以缩小范围":"もっと入力して絞り込む","命中":"該当","已同步":"同期済み","文件格式无法识别":"ファイル形式を認識できません","下一家":"次のお店","進一步壓到":"はさらに","版本":"バージョン","浏览器清理时可能删除本地收藏":"ブラウザがデータを削除すると失われる場合があります","预约入口不代表实时余位":"予約リンクは空席を保証するものではありません","乡土":"郷土","删除书签":"ピンを削除","价格":"価格","跨设备同步":"を端末間で同期","选择语言":"言語を選択","下回":"下回","東京晴空塔":"東京スカイツリー","正在尝试浏览器下载":"ブラウザーでのダウンロードを試みます","分":"分","有新版本":"新しいバージョンがあります","家餐厅都不在地图范围内":"軒はすべて地図の範囲外です","珍味":"珍味","正在看":"表示中","寿司":"寿司","还原列表":"リストに戻る","弃用":"除外","在找店结果中只看已收藏":"検索結果をお気に入りのお店に限定","交通图层加载失败":"交通レイヤーの読み込みに失敗しました","未検出":"未検出","麵包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","稍后":"後で","火曜":"火曜","予約":"予約","搜索餐厅":"レストラン検索","已弃用":"除外済み","翻译":"翻訳","晚餐价格":"ディナー価格","全部已存在":"すべて既存","改动保留在本地":"変更はこの端末に保存されています","导出":"エクスポート","你研究后决定不会去的餐厅":"リサーチして行かないと決めたレストラン","火曜日":"火曜日","私铁":"私鉄","收录规则":"掲載の基準","冈山城":"岡山城","请检查文件内容":"ファイルの内容をご確認ください","仅电话":"電話のみ","选择添加到主屏幕":"「ホーム画面に追加」を選ぶ","读取文件失败":"ファイルの読み込みに失敗しました","日曜日":"日曜日","日元以下的高分正餐餐厅":"円以下の高評価な食事系レストランは","特急":"特急","未能保存到云端":"クラウドに保存できませんでした","预订方式":"予約方法","已取消收藏":"お気に入りから外しました","家能在网上订":"軒はネット予約可","无休":"無休","英尺":"フィート","不在当前数据里":"現在のデータにありません","非洲":"アフリカ","餐厅库":"レストラン一覧","重新载入":"再読み込み","已复制坐标":"座標をコピーしました","和收藏一起通过你的":"お気に入りと一緒に、あなたの","烘焙":"ベーカリー","地图上的地点标记":"地図上の地点ピンです","可貼上任意":"任意の絵文字を貼り付け可","夫婦岩":"夫婦岩","直岛":"直島","吉野裡遺址":"吉野ヶ里歴史公園","只看这个菜系":"このジャンルのみ表示","只读取你的邮箱和头像":"取得するのはメールアドレスとプロフィール画像だけです","简体中文":"簡体字中国語","已复制清单":"リストをコピーしました","收藏与弃用":"お気に入りと除外","登录成功":"サインイン成功","本站只收录每个区域评分前":"各エリアで評価上位","恢复网络后请重试":"ネットワーク復旧後にもう一度お試しください","复制清单文本":"テキストをコピー","全清":"クリア","收藏当前":"この店をお気に入りに","家":"軒","标记颜色取决于这家店申报的晚餐价格上限":"マーカーの色はその店のディナー価格帯の上限で決まります","此操作不可撤销":"この操作は取り消せません","市内":"市内","你在另一个窗口登录了":"別のウィンドウでサインインしました","不影响餐厅收藏":"レストランのお気に入りには影響しません","备份文件已保存":"バックアップファイルを保存しました","步行":"徒歩","常用":"よく使う","會從地圖上自動隱藏":"地図から自動的に非表示になります","酒吧":"バー","近江町市場":"近江町市場","立即重试":"今すぐ再試行","西":"西洋","返回地图":"地図に戻る","坐标":"座標","试试":"試す","东京迪士尼乐园":"東京ディズニーランド","栗林公园":"栗林公園","甜品":"スイーツ","加入收藏":"お気に入りに追加","本地模式":"ローカルモード","此餐厅当前不在筛选范围内":"このレストランは現在のフィルター対象外です","批量弃用":"まとめて除外","乌冬":"うどん","从子收藏夹移除":"リストから外す","清空":"クリア","網訂入口":"ネット予約リンク","图层设置":"レイヤー設定","屏幕内":"画面内","新干线":"新幹線","的餐廳":"のレストランのみ掲載","找店范围":"検索範囲","其他":"その他","家结果":"軒の結果","请至少选择一项":"少なくとも 1 項目を選択してください","三明治":"サンドイッチ","隐藏这间店":"このお店を除外","稍后自动重试":"後で自動再試行します","松江城":"松江城","距我的位置":"現在地からの距離","营业状态与价格请以原站为准":"営業状況と価格は元サイトの情報をご確認ください","长途":"長距離","非日本料理":"和食以外","上滑查看详情":"上にスワイプで詳細","直島":"直島","同步中":"同期中","夕食":"夕食","周四":"木曜日","无":"なし","地图仍为当前找店结果":"地図には現在の検索結果が表示されます","账户":"アカウント","导入失败":"インポートに失敗しました","韩国料理":"韓国料理","横浜":"横浜","部分餐厅暂无逐条采集日期":"収集日が記録されていない店舗があります","收藏与结果":"お気に入りと検索結果","烧":"焼","请刷新重试":"再読み込みしてください","重新加载":"再読み込み中","登录":"サインイン","距地图中心":"地図中心からの距離","会从地图上自动隐藏":"地図から自動的に非表示になります","删除我的云端数据":"クラウドのデータを削除","没有符合条件的餐厅":"条件に合うお店がありません","定位校准":"座標の補正","保存文件失败":"保存できませんでした","返回我的收藏":"お気に入りに戻る","足立美術館":"足立美術館"};
+  var TEXT_JA_MAP = {"版本":"バージョン","不勾则不限制":"未チェックで制限なし","东京迪士尼乐园":"東京ディズニーランド","祝日":"祝日","服务暂不可用":"サービスを一時的にご利用いただけません","繁體":"繁体字","日曜":"日曜","按钮里的选择器":"ボタン内のピッカー","装好之后离线也能看地图":"インストールすればオフラインでも地図を見られます","用地点名填入":"地点名を入れる","同步数据":"同期データ","人均":"予算","此操作不可撤销":"この操作は取り消せません","持久化":"永続化","将合并到现有数据并自动去重":"既存データに統合され重複は自動的に除外されます","说明":"説明","和书签一起通过你的":"ピンと一緒に、あなたの","中国料理眺游楼":"中国料理 眺遊楼","面包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","档":"段階","搜索餐厅":"レストラン検索","删除景点":"名所を削除","地图组件无法加载":"地図コンポーネントを読み込めません","热门":"人気","请删减收藏或书签":"お気に入りやピンを減らしてください","安装为应用":"アプリとしてインストール","已加入收藏":"お気に入りに追加しました","明治神宮":"明治神宮","取消规则":"キャンセル","中东菜等":"中東料理など","看原文":"原文を見る","最近局部补采":"一部データの最終更新","复制失败":"コピーできませんでした","知道了":"OK","未检测到":"未検出","大阪城":"大阪城","沾面":"つけ麺","搜索中":"検索中","名所":"名所","多數可以在一個合理的天數內提前預訂":"多くが妥当な日数で予約可能","下限":"下限","咖啡厅":"カフェ","其它":"その他","排序":"並び替え","繁體中文":"繁体字中国語","道頓堀":"道頓堀","登录处理失败":"サインイン処理失敗","地区":"地域","周三":"水曜日","等待云端状态更新":"クラウドの更新を待っています","正在删除":"削除中","同步":"同期","删除书签":"ピンを削除","家":"軒","不登录也完全可用":"サインインしなくてもすべて使えます","输入更多字以缩小范围":"もっと入力して絞り込む","上野公園":"上野公園","已开启":"有効","你研究後決定不會去的餐廳":"リサーチして行かないと決めたレストラン","云端数据已删除":"クラウドデータを削除しました","无休":"無休","已复制":"コピー済み","未能保存到云端":"クラウドに保存できませんでした","你在另一个窗口退出了登录":"別のウィンドウでサインアウトしました","请先登录":"先にサインインしてください","上野公园":"上野公園","请检查网络后刷新":"ネットワークを確認して再読み込みしてください","收藏只存在这台设备":"お気に入りはこの端末にのみ保存されます","新世界":"新世界","联网后重试":"接続後に再試行します","汉堡":"バーガー","菜系图标":"ジャンルのアイコン","晚餐价格":"ディナー価格","是本站收录的最低分":"がこのサイトのスコア下限です","足立美术馆":"足立美術館","未开启":"無効","稍后":"後で","改动仅存浏览器":"変更はブラウザのみに保存","新干线":"新幹線","当前离线":"現在オフラインです","没有符合的店":"該当するお店がありません","未検出":"未検出","聚焦搜索":"検索にフォーカス","金曜日":"金曜日","加入景点":"名所を作成","已保存在此浏览器":"このブラウザに保存しました","登录可在其他设备恢复":"サインインすれば他の端末でも復元できます","局部补采不代表全库更新":"一部の更新は全店舗の更新を意味しません","只显示可以通过":"次のサイト経由で予約可:","天妇罗":"天ぷら","直島":"直島","加入收藏":"お気に入りに追加","请至少选择一项":"少なくとも 1 項目を選択してください","可导出可退出可删除":"で、いつでもエクスポート・サインアウト・削除ができます","图标":"アイコン","内蔵":"内蔵","日式咖喱":"日本式カレー","韩":"韓","家餐厅":"軒のレストラン","你研究后决定不会去的餐厅":"リサーチして行かないと決めたレストラン","乌冬":"うどん","你自己想标注的地点或建筑物":"自分で印を付けたい場所や建物","與預設景點一起在地圖上顯示":"内蔵の名所と一緒に地図に表示され","本站只收录每个区域评分前":"各エリアで評価上位","炸物":"揚げ物","隐藏这间店":"このお店を除外","夕食":"夕食","珍味":"珍味","地址":"住所","用户自添景点":"カスタム名所","这样":"こうして","小吃":"軽食","系统默认旅游锚点之外你自己加的去处":"内蔵の名所に加えて自分で追加した行き先","東京晴空塔":"東京スカイツリー","地点内匹配":"このエリア内","重置筛选":"フィルターをリセット","图层设置":"レイヤー設定","首裡城":"首里城","登录中":"サインイン中","無休":"無休","法餐":"フレンチ","搜索超时":"検索がタイムアウトしました","盖饭":"丼物","尾道":"尾道","已删除":"削除しました","能否预订":"予約","条结果":"件の結果","烧":"焼","已跳过无法识别的条目":"読み取れない項目をスキップ","除外":"除外","全部已存在":"すべて既存","和景點一起透過你的":"名所と一緒に、あなたの","土曜":"土曜","一起显示":"まとめて表示","已加入":"追加しました","圆里的数字是这一片符合当前筛选条件的餐厅数量":"丸の中の数字は、そのエリアで現在の条件に合う店舗数です","銀座":"銀座","重新加载":"再読み込み中","意面":"パスタ","你在另一个窗口登录了":"別のウィンドウでサインインしました","点击查看详情":"タップで詳細","浏览器清理时可能删除本地收藏":"ブラウザがデータを削除すると失われる場合があります","价位":"価格帯","读取文件失败":"ファイルの読み込みに失敗しました","拉面":"ラーメン","调整面板高度":"パネルの高さを調整","从结果或详情里加入子收藏夹":"検索結果や詳細カードから追加してください","立即重试":"今すぐ再試行","只读取你的邮箱和头像":"取得するのはメールアドレスとプロフィール画像だけです","东京塔":"東京タワー","不接受预订":"予約不可","新宿御苑":"新宿御苑","选地区":"エリア選択","南亚":"南アジア","全部":"すべて","浅草寺":"浅草寺","分享这家店":"この店を共有","家结果":"軒の結果","距地图中心":"地図中心からの距離","周一":"月曜日","串烧":"串焼き","移到":"リストに追加","位置与座位":"場所と席数","木曜日":"木曜日","首里城":"首里城","同步数据超过上限":"同期データが上限を超えています","此餐厅当前不在筛选范围内":"このレストランは現在のフィルター対象外です","网络问题或广告拦截插件":"ネットワーク障害または広告ブロッカー","登录后可在其它设备看到":"ログインすると他の端末でも見られます","烤鸡":"焼鳥","東京迪士尼樂園":"東京ディズニーランド","烘焙":"ベーカリー","内脏":"ホルモン","不再提示":"今後表示しない","內臟":"ホルモン","御台场":"お台場","显示":"表示","关闭当前层":"最前面のレイヤーを閉じる","吉野里遗址":"吉野ヶ里歴史公園","御台場":"お台場","获奖":"受賞","已显示全部结果":"全件を表示中","隐藏非日本料理":"和食以外を隠す","重试":"再試行","导入完成":"インポート完了","棄用名單":"除外リスト","地图只覆盖日本":"地図は日本国内のみ対応","已复制链接":"リンクをコピーしました","和果子":"和菓子","周六":"土曜日","退出登录":"サインアウト","保存中":"保存中","鳥取砂丘":"鳥取砂丘","网订":"ネット予約","标记中间的图标代表菜系":"マーカー中央のアイコンはジャンルを表します","意餐":"イタリアン","登录脚本未加载":"サインインスクリプトの読み込み失敗","全部地区":"すべての地域","云端数据已回退":"クラウドのデータが巻き戻りました","御好烧":"お好み焼き","是本站收錄的最低分":"がこのサイトのスコア下限です","没有匹配的结果":"結果なし","私铁":"私鉄","例如":"例:","咖啡廳":"カフェ","筛选条件太严格了":"絞り込みが厳しすぎます","导航":"経路","翻译":"翻訳","出云大社":"出雲大社","餐厅数据加载失败":"レストランデータの読み込みに失敗しました","水曜日":"水曜日","需要注意":"注意事項","你在另一个窗口切换了登录":"別のウィンドウでアカウントを切り替えました","清空":"クリア","显示这个菜系":"このジャンルを表示","长途线路":"長距離路線","浏览器不允许本站保存数据":"ブラウザがこのサイトのデータ保存を許可していません","标记颜色取决于这家店申报的晚餐价格上限":"マーカーの色はその店のディナー価格帯の上限で決まります","多选取并集":"複数選択 = 和集合","的餐厅":"のレストランのみ掲載","子收藏夹":"リスト","上滑查看详情":"上にスワイプで詳細","进一步压到":"はさらに","我的收藏":"お気に入り","查看结果":"結果を表示","你自己想標註的地點或建築物":"自分で印を付けたい場所や建物","非日本料理":"和食以外","无痕窗口关闭即失":"プライベートウィンドウでは閉じると失われます","更多":"その他の操作","清除":"クリア","收藏":"お気に入り","重命名":"名前を変更","奖项":"受賞","已弃用":"除外済み","已合并本地改动":"ローカルの変更を統合しました","甚至":"場合によっては","咖啡":"カフェ","炭火焼鳥正":"炭火焼鳥 正","长途":"長距離","会从地图上自动隐藏":"地図から自動的に非表示になります","勾选后只看对应获奖店":"チェックで受賞店のみ表示","筛选":"フィルター","其他区域":"他の地域","弃用名单":"除外リスト","丰洲市场":"豊洲市場","五色沼":"五色沼","显示我的位置":"現在地を表示","导入失败":"インポートに失敗しました","草千里":"草千里","土曜日":"土曜日","安装到主屏幕":"ホーム画面に追加","其他":"その他","海鲜":"海鮮","按距离排序":"距離順に切替","原文":"原文","分":"分","账号跨设备同步":"アカウントでデバイス間同期されます","营业状态与价格请以原站为准":"営業状況と価格は元サイトの情報をご確認ください","展开列表":"リストを開く","拉美料理":"中南米料理","水曜":"水曜","你收藏的店":"お気に入りにした店","弃用当前":"この店を除外","图层":"レイヤー","予約":"予約","去掉地点约束":"エリア指定を解除","导出":"エクスポート","寿司":"寿司","需要预订":"完全予約制","岡山城":"岡山城","可预订":"予約可","地图控件":"地図コントロール","没有晚餐价格的店改用午餐价格上限":"ディナー価格がない店はランチ価格帯の上限を使います","中餐":"中華","帳號跨裝置同步":"アカウントでデバイス間同期されます","放弃当前输入":"入力を破棄しますか","只看这个":"これだけ表示","道顿堀":"道頓堀","坐标":"座標","家因此被挡住":"軒が隠れています","不会覆盖现有项":"既存の項目は上書きされません","東京塔":"東京タワー","也显示已隐藏的景点":"非表示の名所も表示","选择添加到主屏幕":"「ホーム画面に追加」を選ぶ","烤肉":"焼肉","六本木新城":"六本木ヒルズ","網訂入口":"ネット予約リンク","搜索失败":"検索失敗","默认不在地图上显示":"既定では地図に表示されません","明治神宫":"明治神宮","夫妇岩":"夫婦岩","文件格式无法识别":"ファイル形式を認識できません","横浜":"横浜","直岛":"直島","未命名":"無題","银奖":"銀賞","你的数据":"あなたのデータ","点心":"和菓子","近江町市場":"近江町市場","当前筛选的":"条件に合う","导入":"インポート","已跳过":"スキップ","恢复网络后请重试":"ネットワーク復旧後にもう一度お試しください","但不再同步到云端":"ただしクラウドには同期されなくなります","仅电话":"電話のみ","亲子丼":"親子丼","最寄駅":"最寄駅","调整左侧筛选条件可让它出现在地图上":"フィルターを緩めると地図に表示されます","部分餐厅暂无逐条采集日期":"収集日が記録されていない店舗があります","足立美術館":"足立美術館","迁移":"移行","炭火烧鸟正":"炭火焼鳥 正","显示的是本机缓存的数据":"この端末にキャッシュされたデータを表示しています","系統預設旅遊錨點之外你自己加的去處":"内蔵の名所に加えて自分で追加した行き先","只看收藏":"お気に入りのみ","距离约":"約","复制":"コピー","命中":"該当","進一步壓到":"はさらに","下次一点就开":"次からワンタップで開けます","常用":"よく使う","披萨":"ピザ","查看":"表示","复制坐标":"座標をコピー","金奖":"金賞","或打开浏览器菜单选择安装":"またはブラウザのメニューから「インストール」を選ぶ","预约政策":"予約ポリシー","状态未知":"不明","这次筛选里有":"この条件では","在地图上显示出来的":"地図に表示される","上限":"上限","已永久歇业":"閉店（永久）","银座":"銀座","当前位置在地图范围之外":"現在地は地図の範囲外です","景点":"名所","以外的区域":"以外","价格":"価格","定位被浏览器禁用":"位置情報がブラウザでブロックされています","放大":"拡大","网络不通":"ネットワークに接続できません","车站":"駅","拉麵":"ラーメン","搜尋餐廳":"レストラン検索","批量弃用":"まとめて除外","未分组":"リスト未登録","这个子收藏夹还是空的":"このリストは空です","金曜":"金曜","改动已存在本机":"変更はこの端末に保存済みです","日本環球影城":"ユニバーサル・スタジオ・ジャパン","未偵測到":"未検出","已改用云端数据":"クラウドのデータに切り替えました","美式料理":"アメリカ料理","已同步":"同期済み","请在浏览器设置中开启":"ブラウザの設定でオンにしてください","确认删除":"削除を確認","这是一张日本美食与景点地图":"日本のグルメと名所の地図です","地图仍为当前找店结果":"地図には現在の検索結果が表示されます","有新版本":"新しいバージョンがあります","收藏与结果":"お気に入りと検索結果","重命名子收藏夹":"リスト名を変更","到店":"来店","焼":"焼","炭火烧鸟":"炭火焼鳥","结果":"検索結果","选择语言":"言語を選択","年中無休":"年中無休","只看这个菜系":"このジャンルのみ表示","景點":"名所","收藏已有":"お気に入りは","撤销":"元に戻す","祝祭日":"祝祭日","还原列表":"リストに戻る","其中":"うち","结果包含所选地区内全部匹配餐厅":"選択したエリア内の全候補です","未检测到网订入口":"ネット予約リンク未検出","日元以下的高分正餐餐廳":"円以下の高評価な食事系レストランは","倉敷美觀地區":"倉敷美観地区","可":"可","酒吧":"バー","类型":"種類","铁板烧":"鉄板焼き","按子收藏夹":"リスト別","下回":"下回","甜品":"スイーツ","正餐":"メイン","本站只收錄每個區域評分前":"各エリアで評価上位","本地模式":"ローカルモード","关闭":"閉じる","放宽条件或重置筛选":"条件をゆるめるか、フィルターをリセットしてください","简体":"簡体字","铜奖":"銅賞","地图图例":"地図の凡例","比它更低的餐廳根本不在資料裡":"それを下回る店はデータにありません","新建子收藏夹":"リストを作成","下次登录会重新下载":"次回サインイン時に再ダウンロードされます","餐厅库":"レストラン一覧","在地圖上顯示出來的":"地図に表示される","知床國立公園":"知床国立公園","找店范围":"検索範囲","出雲大社":"出雲大社","秋叶原":"秋葉原","栗林公园":"栗林公園","下一家":"次のお店","皇居":"皇居","分组":"グループ","加入收藏夹":"リストに追加","按距离":"距離順","可粘贴任意":"任意の絵文字を貼り付け可","日元以下的高分正餐餐厅":"円以下の高評価な食事系レストランは","韩国料理":"韓国料理","中":"中華","和收藏一起通过你的":"お気に入りと一緒に、あなたの","跨设备同步":"を端末間で同期","不影响餐厅收藏":"レストランのお気に入りには影響しません","米":"m","本设备上的本地缓存会保留":"このデバイスのローカルキャッシュは保持されます","非洲":"アフリカ","地图搜索":"マップ検索","选择器":"ピッカー","没有新增内容":"新規追加はありません","收录规则":"掲載の基準","近江町市场":"近江町市場","已移除":"外しました","其中高價位":"うち高単価の","不定休":"不定休","书签":"ピン","步行":"徒歩","家能在网上订":"軒はネット予約可","显示全部":"すべて表示","日本环球影城":"ユニバーサル・スタジオ・ジャパン","已启用":"適用中","收藏还是空的":"お気に入りはまだありません","你弃用的店":"除外した店","日本語":"日本語","按城市":"都市別","列表为我的收藏":"リストはお気に入りです","删除":"削除","登录":"サインイン","聚合圆圈":"まとめの丸","屏幕内":"画面内","火曜":"火曜","可随时删除":"いつでも削除できます","正在看":"表示中","同步冲突":"同期の競合","仓敷美观地区":"倉敷美観地区","热门餐厅":"人気店","请重新登录":"再度サインインしてください","食":"食","网络暂不可用":"ネットワークに接続できません","台湾料理":"台湾料理","可网订":"ネット予約可","有网上预约入口":"ネット予約リンクあり","日曜日":"日曜日","没有符合条件的餐厅":"条件に合うお店がありません","定位到我的位置":"現在地に移動","早餐":"朝食","无":"なし","同时清除本设备数据":"この端末のデータも消去しますか","已复制坐标":"座標をコピーしました","地图底图":"ベースマップ","关于本站":"このサイトについて","复制清单文本":"テキストをコピー","评分":"評価","书签会从本设备删除":"ピンはこの端末から削除されます","有":"あり","日本料理":"日本料理","语言":"言語","提前多久":"予約時期","可貼上任意":"任意の絵文字を貼り付け可","暂停营业":"臨時休業中","京都美食":"京都グルメ","选择":"選択","缩放到全部结果":"すべての結果にズーム","其中高价位":"うち高単価の","比它更低的餐厅根本不在数据里":"それを下回る店はデータにありません","书签标记":"ピン","保存":"保存","符合筛选":"該当","三朝温泉":"三朝温泉","同步数据接近上限":"同期データが上限に近づいています","只看网订":"ネット予約のみ","火曜日":"火曜日","附近":"近く","点底部的分享按钮":"下部の共有ボタンをタップ","收藏与弃用":"お気に入りと除外","备份文件已保存":"バックアップファイルを保存しました","初始化失败":"初期化に失敗しました","点地图或列表里的店查看详情":"地図またはリストからお店を選ぶと詳細が表示されます","已切换账号":"アカウントを切り替えました","范围内":"範囲内","海游馆":"海遊館","东京晴空塔":"東京スカイツリー","地铁":"地下鉄","加载失败":"読み込み失敗","和收藏一起透過你的":"お気に入りと一緒に、あなたの","在找店结果中只看已收藏":"検索結果をお気に入りのお店に限定","隐私与数据":"プライバシーとデータ","历史采集基线":"収集データの基準日","再点添加":"「追加」をタップ","收起列表":"リストを閉じる","晚":"ディナー","韩餐":"韓国","只存在这台设备":"この端末にのみ保存されています","隐藏弃用名单":"除外リストを隠す","你在约":"予約済","百名店":"百名店","地图组件加载失败":"地図コンポーネントの読み込みに失敗しました","请确认它是导出的":"エクスポート済みの","选择要导入的内容":"インポートする内容を選択","地图移动不改变筛选范围":"地図を動かしても検索範囲は変わりません","新建书签":"ピンを作成","导入备份":"バックアップをインポート","件":"件","重新连接中":"再接続中","正":"正","可隨時刪除":"いつでも削除できます","已收藏":"お気に入り済み","价格区间上限":"価格帯の上限","数据来源":"データ出典","全选可见":"表示中をすべて選択","隐藏":"非表示","已选":"選択中","同步失败":"同期失敗","当前处于离线状态":"現在オフラインです","第":"第","重新载入":"再読み込み","从子收藏夹移除":"リストから外す","多数可以在一个合理的天数内提前预订":"多くが妥当な日数で予約可能","全选":"全選択","简体中文":"簡体字中国語","在屏幕范围内":"画面内","築地場外市場":"築地場外市場","内没有匹配的餐厅":"内に一致するお店はありません","登录被取消":"サインインがキャンセルされました","东南亚料理":"東南アジア料理","市内":"市内","地图怎么看":"地図の見方","预约":"予約","云端数据不受影响":"クラウドのデータには影響しません","定休":"定休日","鸟取砂丘":"鳥取砂丘","周五":"金曜日","批量收藏":"まとめてお気に入り","城市轨道":"都市鉄道","奧入瀨溪流":"奥入瀬渓流","通天阁":"通天閣","翻译失败":"翻訳に失敗","把地图装到主屏幕":"この地図をホーム画面に追加","麵包店等非正餐也按比例控量":"ベーカリーなど食事以外のお店も比率で制限","关东煮":"おでん","周日":"日曜日","只看谷歌地图校准过坐标的餐厅":"Google 補正済みの座標のみ","请稍后再试":"後でもう一度お試しください","找附近":"近くを探す","伴手礼":"お土産","淺草寺":"浅草寺","恢复显示这间店":"このお店を再表示","已切到全部地区":"全エリア","锅物":"鍋物","备份文件超过":"バックアップが","浏览器未提供存储用量":"このブラウザは使用量を提供していません","改动已存本地":"変更はローカルに保存済み","保存文件失败":"保存できませんでした","特急":"特急","知床国立公园":"知床国立公園","加载中":"読み込み中","松江城":"松江城","乡土":"郷土","恢复后会自动上传":"回復すると自動でアップロードします","选一个地区开始":"エリアを選んで始める","木曜":"木曜","收藏只在本次会话有效":"お気に入りはこのセッション中のみ有効です","西餐":"西洋料理","豐洲市場":"豊洲市場","检查网络":"ネットワークを確認","英尺":"フィート","已复制清单":"リストをコピーしました","和景点一起通过你的":"名所と一緒に、あなたの","放大地图聚合就会散开":"拡大すると散らばります","居酒屋":"居酒屋","本地存储":"ローカルストレージ","登录状态保留":"ログイン情報を保持し","登录成功":"サインイン成功","个书签":"件のピン","栗林公園":"栗林公園","改动保留在本地":"変更はこの端末に保存されています","缩放回全部结果":"すべての結果に戻る","三朝溫泉":"三朝温泉","周二":"火曜日","周四":"木曜日","交通图层加载失败":"交通レイヤーの読み込みに失敗しました","尚未导入":"を超えているため、読み込んでいません","海遊館":"海遊館","眺游楼":"眺遊楼","這樣":"こうして","数据托管于":"データの保管先は","在浏览器菜单里找添加到主屏幕或安装":"ブラウザのメニューで「ホーム画面に追加」または「インストール」を探してください","已取消收藏":"お気に入りから外しました","家餐厅都不在地图范围内":"軒はすべて地図の範囲外です","已恢复显示这间店":"このお店を再表示しました","家店":"件です","收藏当前":"この店をお気に入りに","全清":"クリア","中国料理":"中国料理","网上可订":"ネット予約可","月曜":"月曜","午":"ランチ","眺遊楼":"眺遊楼","筛选结果":"フィルター結果","删除我的云端数据":"クラウドのデータを削除","言語":"言語","无法取得位置":"現在地を取得できません","点地址栏右侧的安装图标":"アドレスバー右端のインストールアイコンをクリック","备份":"バックアップ","图标必须是":"アイコンは","请检查文件内容":"ファイルの内容をご確認ください","个其他匹配":"件の他の一致","服务器出错":"サーバーエラーが発生しました","座位":"席数","饺子":"餃子","缩小":"縮小","取消":"キャンセル","稍后自动重试":"後で自動再試行します","書籤":"ピン","定位校准":"座標の補正","其他西餐":"その他洋食","安装":"インストール","加入子收藏夹":"リストに追加","视野内":"表示範囲内","正在尝试浏览器下载":"ブラウザーでのダウンロードを試みます","登录后可跨设备同步":"ログインすると端末間で同期できます","奥入濑溪流":"奥入瀬渓流","西点":"洋菓子","會從地圖上自動隱藏":"地図から自動的に非表示になります","小町通":"小町通り","登录已过期":"サインイン期限切れ","面类":"麺類","的餐廳":"のレストランのみ掲載","账户":"アカウント","通天閣":"通天閣","景点锚点":"名所","试试":"試す","快捷键":"キーボードショートカット","已恢复":"復元しました","请刷新重试":"再読み込みしてください","不在当前数据里":"現在のデータにありません","隐私政策":"プライバシーポリシー","保存失败":"保存失敗","上一家":"前のお店","网订入口":"ネット予約リンク","在结果里点星标就会出现在这里":"検索結果で星を付けるとここに表示されます","名称":"名称","打开完整":"全画面で開く","中东":"中東","节假日":"祝日","详情":"詳細","网上订位":"ネット予約","猎奇":"ゲテモノ","名称不能为空":"名称は必須です","夫婦岩":"夫婦岩","个景点":"件の名所","地图上的地点标记":"地図上の地点ピンです","请检查网络":"ネットワークを確認してください","冰品":"アイス","菜系":"ジャンル","冈山城":"岡山城","三明治":"サンドイッチ","吉野裡遺址":"吉野ヶ里歴史公園","距我的位置":"現在地からの距離","秋葉原":"秋葉原","和書籤一起透過你的":"ピンと一緒に、あなたの","餐厅数据无法加载":"レストランデータを読み込めません","同步中":"同期中","月曜日":"月曜日","与默认景点一起在地图上显示":"内蔵の名所と一緒に地図に表示され","无法解析该文件":"ファイルを解析できません","翻譯":"翻訳","已用":"使用中","弃用":"除外","荞麦":"そば","我的书签标记":"自分のピン","西":"西洋"};
   function normalizeForSearch(s) {
     // Strip whitespace so "中国料理眺游楼" matches names that carry spaces
     // ("中国料理 眺遊楼..."). NFKC already folds full-width U+3000 to a
@@ -6084,6 +6168,24 @@
     'en':    'Show only these {n}',
     'ja':    'この {n} 軒だけ表示'
   };
+  // M-3.2-06 (SPEC F): two whole-sentence templates. Both carry a comma in
+  // Chinese, and the runtime localizer works one CJK run at a time — so
+  // translating them run-by-run leaves the full-width 「，」 standing in the
+  // middle of the English and Japanese strings. Hand-written per language
+  // and stripped from the build's CJK scan (_COUNT_TPL_LITERAL_RE), exactly
+  // like COUNT_TPL / FAV_TPL.
+  var RSVNOTE_TPL = {
+    'zh-CN': '网订入口 ≠ 余位，请到 Tabelog 确认',
+    'zh-TW': '網訂入口 ≠ 餘位，請到 Tabelog 確認',
+    'en':    'Booking link ≠ availability — confirm on Tabelog',
+    'ja':    '予約リンクは空席を保証しません。Tabelog でご確認ください'
+  };
+  var HIDETOAST_TPL = {
+    'zh-CN': '已从结果隐藏，收藏保留',
+    'zh-TW': '已從結果隱藏，收藏保留',
+    'en':    'Hidden from results — still saved',
+    'ja':    '結果から除外しました（お気に入りは保持）'
+  };
   // W-5 (2.3.0): the card's ↑↓ stepper is capped. The number is a literal
   // in the sentence, and a bare "500" between two CJK runs would split the
   // string into three separately-translated fragments — hence a template.
@@ -6229,6 +6331,10 @@
     // Built at runtime — reached through observeDynamic below, which runs
     // this pass over every inserted subtree for exactly these two.
     ['.rst-close',                     'aria-label', '关闭'],
+    // M-3.2-06: the card head row's × and its ⋯ menu trigger. Static
+    // markup for the first, runtime-built for the second — the second
+    // already ships localized, this entry is the belt-and-braces pass.
+    ['#bs-close',                      'aria-label', '关闭'],
     ['.ss-fav',                        'title',      '加入收藏'],
     // D4: the detail card's "第 n / N 家" stepper. Built at runtime inside
     // #bs-content, so observeDynamic re-runs this pass over it.
@@ -6298,6 +6404,10 @@
     // emoji at construction (makeIcon → emojiImg) so they stay unobserved;
     // the Leaflet popup pane is hooked by initMap() once it exists.
     observeDynamic(document.getElementById('bs-content'), true, true);
+    // M-3.2-06: the card's action row is a sibling of #bs-content, not a
+    // child, so it needs its own root — syncFavButton writes a bare ⭐ into
+    // it and Windows has no glyph for one.
+    observeDynamic(document.getElementById('bs-foot'), true, true);
     observeDynamic(document.getElementById('bm-modal'), true, true);
     observeDynamic(document.getElementById('ss-list'), true, true);
     // Filter sheet has dynamic textContent rewrites (cuisine summary
@@ -7005,7 +7115,10 @@
       if (!bsActive) return false;
       var host = document.getElementById('bs-content');
       var b = host && host.querySelector(sel);
-      if (!b && uxDetailActions) b = uxDetailActions.querySelector(sel);
+      if (!b) {
+        var foot = document.getElementById('bs-foot');
+        if (foot) b = foot.querySelector(sel);
+      }
       if (b) { b.click(); return true; }
       return false;
     }
@@ -8071,13 +8184,14 @@
       if (b === 1 || b === 2) return 'phone';
       return null;   // nothing extractable — say nothing (hard premise ④)
     }
-    // Pure zh-CN runs; the #bs-content localizer turns them into EN / JA /
-    // zh-TW. Never a guess: null mode renders an em dash, not a default.
+    // M-3.2-06 (SPEC B.4 / U16): a decision tile is one line, and the only
+    // thing this one decides is "can I book online from here". A ✓ or an em
+    // dash — every wording that used to live here folded to two or four
+    // lines and pushed the photos off the first screen. The nuance moved to
+    // the policy table (a real 有/无 chip) and to RSVNOTE_TPL under it.
+    // Glyphs, not words, so there is nothing to translate.
     function bookingText(mode) {
-      if (mode === 'net')   return '有网上预约入口';
-      if (mode === 'phone') return '预约方式请查看原政策';
-      if (mode === 'no')    return '不接受预订';
-      return '—';
+      return (mode === 'net') ? '✓' : '—';
     }
     // D3 / §5.4: the policy table. Only rows the build step could actually
     // extract are drawn — no placeholder dashes, no "shops like this
@@ -8244,15 +8358,19 @@
           // blocking the card's first paint. 320x240 = the 4/3 the CSS uses.
           // W-4: a <button>, not an <a> — see #ph-lb. data-big carries the
           // full-size URL the viewer loads.
-          // onerror hides with visibility, not display: the grid is a fixed
-          // repeat(3, 1fr), so removing a box from the flow shifted the
-          // other two into the wrong columns.
+          // M-3.2-06 (SPEC B.4, the photo placeholder): onerror hid the whole
+          // box, which left a hole in a fixed repeat(3, 1fr) grid — one
+          // dead photo and the card had a blank band where a row of three
+          // should be. Only the <img> is hidden now; the button keeps its
+          // 4:3 grey placeholder (and .ld stops the shimmer), so a failed
+          // photo reads as "no picture", not as broken layout.
           return '<button type="button" class="rst-ph" data-big="'
                + escapeHtml(big) + '">'
                + '<img src="' + escapeHtml(thumb) + '" loading="lazy" alt="" '
                + 'width="320" height="240" decoding="async" '
                + 'onload="this.parentElement.classList.add(\'ld\')" '
-               + 'onerror="this.parentElement.style.visibility=\'hidden\'">'
+               + 'onerror="this.style.visibility=\'hidden\';'
+               + 'this.parentElement.classList.add(\'ld\',\'rst-ph-err\')">'
                + '</button>';
         }).join('') + '</div>';
       }
@@ -8285,28 +8403,11 @@
       // on the results list so the user can pick the right pin if there are
       // dupes. Title stays English (emoji's universal) so the build-time CJK
       // scan doesn't pick up phantom runs from JS string literals.
-      var gmapsQ = encodeURIComponent(
-        ((d.name || '') + ' ' + (addr || '')).trim()
-      );
-      var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + gmapsQ
-                   + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
-      var gmapsBtn = '<a class="rst-gmaps" href="' + gmapsUrl
-                   + '" target="_blank" rel="noopener" '
-                   + 'aria-label="Open in Google Maps" '
-                   + 'title="Open in Google Maps">'
-                   + '<img src="img/google-maps-v2.png" alt="Google Maps" '
-                   + 'width="18" height="18" loading="lazy"></a>';
-      // M-032: share this one restaurant (?r=<id> deep link). The helper
-      // ships in the same build; the typeof guard is for the case where a
-      // stale service-worker HTML meets a newer/older script — a dead button
-      // is worse than no button. aria-label / title get localized by the
-      // ATTR_L10N pass observeDynamic runs over #bs-content.
-      var shareBtn = (typeof window.__shareRestaurant === 'function')
-        ? '<button type="button" class="rst-gmaps rst-share" '
-          + 'aria-label="分享这家店" title="分享这家店">'
-          + emojiImg('🔗', 'height:18px;width:18px;vertical-align:0;')
-          + '</button>'
-        : '';
+      // M-3.2-06: the card body no longer ends in an action bar — Save /
+      // Directions / Tabelog / ⋯ all live in #bs-foot, built by
+      // uxPaintDetailActions. Google Maps, share and Tabelog moved with it,
+      // so the three builders that used to sit here are gone; the deep-link
+      // URL is rebuilt from d.lat / d.lon / d.gpid over there.
       // TEMP-ish: "location calibrated by Google" note, shown under the
       // address when this row was Google-calibrated (d.gcal). Hand-tuned per
       // language like chipText, so the runtime CJK localizer doesn't fragment
@@ -8405,13 +8506,16 @@
         + '<div class="rst-decision">'
           + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '晚', dinner)
           + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '午', lunch)
-          + '<div class="rst-tile"><div class="rst-tile-k">预订方式</div>'
+          + '<div class="rst-tile"><div class="rst-tile-k">网订</div>'
             + '<div class="rst-tile-v">'
             + bookingText(bookingMode(d, pol)) + '</div></div>'
         + '</div>'
         + '<div class="rst-sec">预约政策</div>'
-        + '<p class="rst-reservation-note">预约入口不代表实时余位，请到来源网站确认日期与人数</p>'
         + polTbl
+        // SPEC B.4: the caveat belongs under the table it qualifies, not
+        // above it and not inside the decision tile.
+        + '<p class="rst-reservation-note">'
+        + escapeHtml(RSVNOTE_TPL[_lang] || RSVNOTE_TPL['zh-CN']) + '</p>'
         + rawPolicy
         + (holHtml
             ? '<div class="rst-holiday">'
@@ -8430,17 +8534,6 @@
         // made from another surface) repaints this one row instead of the
         // whole card, and the card keeps its scroll position.
         + '<div class="rst-lists"></div>'
-        // D5: one 44px action row at the end of the card, Tabelog on the
-        // right where an "exit to the source" link belongs.
-        + '<div class="rst-actions-bar">'
-          + '<button class="ff-fav-btn rst-btn" data-url="' + url + '">'
-            + '<span class="ff-fav-label">☆ 收藏</span></button>'
-          + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
-            + '<span class="ff-black-label">🚫 弃用</span></button>'
-          + gmapsBtn
-          + shareBtn
-          + '<a class="rst-tabelog" href="' + url + '" target="_blank" rel="noopener">Tabelog ↗</a>'
-        + '</div>'
       + '</div>';
     }
     // ---- D4 / H2: card navigation + focus bookkeeping --------------------
@@ -8515,12 +8608,12 @@
     // The card and action dock move between hosts when the layout changes.
     var bsOpener = null;
     function bsOwnsFocus(el) {
-      return !!el && [bsSheet, bsContent, uxDetailBack, uxDetailActions].some(function(node) {
+      return !!el && [bsSheet, bsContent, uxDetailBack, bsFoot].some(function(node) {
         return node && node.contains(el);
       });
     }
     function bsSetInteractive(open) {
-      [bsContent, uxDetailBack, uxDetailActions, bsGrip].forEach(function(node) {
+      [bsContent, uxDetailBack, bsFoot, bsGrip, bsClose].forEach(function(node) {
         if (node) node.inert = !open;
       });
     }
@@ -12741,7 +12834,8 @@
     var bsSheet    = document.getElementById('bs-sheet');
     var bsContent  = document.getElementById('bs-content');
     var uxDetailBack = document.getElementById('ux-detail-back');
-    var uxDetailActions = document.getElementById('ux-detail-actions');
+    var bsFoot = document.getElementById('bs-foot');
+    var bsClose = document.getElementById('bs-close');
     var uxDetailSource = null;
     var uxDetailSourceHeld = false;
     function uxCaptureSource(tab, d) {
@@ -12754,6 +12848,20 @@
       closeSheet(!!source && wbIsPhoneLike());
       if (!source) { uxShowTab('map'); return; }
       uxShowTab(source.tab);
+      uxRestoreSourceFocus(source);
+    }
+    // M-3.2-06 / SPEC C2 + DT D15: in a column layout the source list never
+    // left the screen, so Escape and Back mean "close the card", not
+    // "navigate back to the tab you are already looking at". F4 is
+    // untouched — scroll position and the focused row still come back.
+    function uxCloseDetail() {
+      var source = uxDetailSource;
+      closeSheet();
+      if (source) uxRestoreSourceFocus(source);
+    }
+    // F4: put the caret back on the row the card was opened from, at the
+    // scroll offset the list had at that moment.
+    function uxRestoreSourceFocus(source) {
       requestAnimationFrame(function() {
         if (bsActive || wbTabPref !== source.tab || (wbIsPhoneLike() && !favDrawerOpen())) return;
         var scroll = document.getElementById(source.tab === 'fav' ? 'fv-body' : 'wb-list');
@@ -12768,31 +12876,112 @@
       });
     }
     if (uxDetailBack) uxDetailBack.addEventListener('click', uxReturnFromDetail);
-    function uxPaintDetailActions(d) {
-      if (!uxDetailActions) return;
-      uxDetailActions.innerHTML = '';
-      var save = bsContent.querySelector('.ff-fav-btn');
-      if (!save) {
-        save = document.createElement('button');
-        save.type = 'button'; save.className = 'ff-fav-btn rst-btn';
-        save.setAttribute('data-url', d.detail_url);
-        save.innerHTML = '<span class="ff-fav-label"></span>';
-      }
-      uxDetailActions.appendChild(save);
-      syncFavButton(save, d);
-      var maps = bsContent.querySelector('a.rst-gmaps');
-      if (!maps) {
-        maps = document.createElement('a'); maps.className = 'rst-gmaps';
-        maps.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d.lat + ',' + d.lon)
-          + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
-        maps.target = '_blank'; maps.rel = 'noopener';
-      }
-      maps.textContent = localizeText('地图导航');
-      maps.setAttribute('aria-label', localizeText('地图导航'));
-      uxDetailActions.appendChild(maps);
-      if (uxDetailBack) uxDetailBack.textContent = localizeText(!uxDetailSource ? '返回地图'
-        : uxDetailSource.tab === 'fav' ? '返回我的收藏' : '返回结果');
+    // W-8 (2.3.0): × closes and hands the map back, marker re-centred by
+    // closeSheet(). It is NOT "return to the source list" — that is what the
+    // left half of the head row and the system Back are for.
+    if (bsClose) bsClose.addEventListener('click', function() { closeSheet(); });
+    // ---- M-3.2-06: the card's head row + its one action row --------------
+    // SPEC B.4. The source return moved into the 44px head row it shares
+    // with the grip and the ×, and the whole action vocabulary — Save,
+    // Directions, Tabelog, ⋯ — collapsed into #bs-foot. Nothing is drawn
+    // twice: the card body no longer ends in .rst-actions-bar.
+    function uxSyncDetailHead() {
+      if (!uxDetailBack) return;
+      // Map / search origins get no return link: there is no list to go back
+      // to, and × already puts the map back under the user's thumb.
+      var key = !uxDetailSource ? null
+              : (uxDetailSource.tab === 'fav' ? '收藏' : '结果');
+      uxDetailBack.hidden = !key;
+      uxDetailBack.textContent = key ? ('← ' + localizeText(key)) : '';
     }
+    function bsMoreEl() { return document.getElementById('bs-more-menu'); }
+    function bsCloseMore() {
+      var m = bsMoreEl();
+      if (!m || m.hidden) return;
+      m.hidden = true;
+      var t = document.getElementById('bs-more');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    }
+    function uxPaintDetailActions(d) {
+      uxSyncDetailHead();
+      if (!bsFoot) return;
+      // SPEC B.4 / D.2: one primary per view. Planning at home (70% of use)
+      // ends on ⭐; standing in the city with a nearby search running, it
+      // ends on Directions. uxPlanning is non-null exactly while the nearby
+      // mode holds a planning context to return to (M-3.2-05).
+      var nearby = (typeof uxPlanning !== 'undefined') && !!uxPlanning;
+      var mapsUrl = 'https://www.google.com/maps/search/?api=1&query='
+        + encodeURIComponent(d.lat + ',' + d.lon)
+        + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
+      var url = escAttr(d.detail_url);
+      // Built through emojiHtml(): #bs-foot is outside every emojify
+      // observer's root except the one startDynamicObservers() adds for it,
+      // and the first paint happens before that observer can see it.
+      bsFoot.innerHTML =
+          '<button type="button" class="ff-fav-btn bs-foot-btn'
+        +   (nearby ? '' : ' bs-primary') + '" data-url="' + url + '">'
+        +   '<span class="ff-fav-label"></span></button>'
+        + '<a class="rst-gmaps bs-foot-btn' + (nearby ? ' bs-primary' : '')
+        +   '" href="' + escAttr(mapsUrl) + '" target="_blank" rel="noopener">'
+        +   '<img src="img/google-maps-v2.png" alt="" width="17" height="17" '
+        +   'loading="lazy"><span>' + escAttr(localizeText('导航')) + '</span></a>'
+        + '<a class="rst-tabelog bs-foot-lnk" href="' + url
+        +   '" target="_blank" rel="noopener">Tabelog ↗</a>'
+        + '<span id="bs-more-wrap">'
+        +   '<button type="button" id="bs-more" class="bs-foot-btn bs-narrow"'
+        +   ' aria-haspopup="true" aria-expanded="false" aria-controls="bs-more-menu"'
+        +   ' aria-label="' + escAttr(localizeText('更多')) + '">⋯</button>'
+        +   '<div id="bs-more-menu" role="menu" hidden>'
+        +     '<button type="button" class="ff-black-btn" role="menuitem" data-url="' + url + '">'
+        +       '<span class="ff-black-label"></span></button>'
+        +     '<button type="button" class="rst-share" role="menuitem">'
+        +       escAttr(localizeText('分享这家店')) + '</button>'
+        +     '<button type="button" id="bs-add-list" role="menuitem">'
+        +       escAttr(localizeText('加入收藏夹')) + '</button>'
+        +   '</div>'
+        + '</span>';
+      var save = bsFoot.querySelector('.ff-fav-btn');
+      if (save) syncFavButton(save, d);
+      var black = bsFoot.querySelector('.ff-black-btn');
+      if (black) syncBlackButton(black, d);
+      // M-032: navigator.share has to be reached synchronously from the
+      // gesture — no lookup, no await between the click and the call.
+      var share = bsFoot.querySelector('.rst-share');
+      if (share) {
+        if (typeof window.__shareRestaurant === 'function') {
+          share.addEventListener('click', function(ev) { window.__shareRestaurant(d, ev); });
+        } else {
+          share.hidden = true;
+        }
+      }
+      // The list picker is the chip row in the card body (E11 / M-031);
+      // this is a shortcut to it, not a second way to edit membership.
+      var addList = bsFoot.querySelector('#bs-add-list');
+      if (addList) addList.addEventListener('click', function() {
+        var row = bsContent && bsContent.querySelector('.rst-lists');
+        if (!row) return;
+        try { row.scrollIntoView({block: 'center', behavior: 'smooth'}); } catch (_) {}
+        var chip = row.querySelector('.rst-list-chip');
+        if (chip) { try { chip.focus({preventScroll: true}); } catch (_) {} }
+      });
+      var more = bsFoot.querySelector('#bs-more');
+      if (more) more.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var m = bsMoreEl();
+        if (!m) return;
+        var open = m.hidden;
+        m.hidden = !open;
+        more.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      var menu = bsMoreEl();
+      if (menu) menu.addEventListener('click', function() { bsCloseMore(); });
+    }
+    // Anywhere else on the page dismisses the ⋯ menu; it is a three-item
+    // popover, not a surface worth a ui-stack entry of its own.
+    document.addEventListener('click', function(e) {
+      if (e.target.closest && e.target.closest('#bs-more-wrap')) return;
+      bsCloseMore();
+    });
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
 
@@ -13303,7 +13492,13 @@
     document.addEventListener('click', function(e) {
       if (e.target.closest('.rst-close')) closeSheet();
     });
-    uiRegister('sheet', uxReturnFromDetail);
+    // M-3.2-06 / SPEC C2 + DT D15: Back and Escape mean "go back to the list
+    // I came from" only where the list is not on screen. In the column
+    // layouts it is, permanently, so there the same key means "close".
+    uiRegister('sheet', function() {
+      if (wbIsPhoneLike()) uxReturnFromDetail();
+      else uxCloseDetail();
+    });
     function expandSheet() {
       if (wbDetailMode()) return;       // M-027: no peek state to expand
       if (bsSheet.classList.contains('bs-peek')) {
@@ -13321,9 +13516,13 @@
     // map.on('click') below.
     bsBackdrop.addEventListener('click', closeSheet);
     document.addEventListener('keydown', function(e){
-      // W-8: one stage everywhere — Escape closes the card.
+      // W-8: one stage everywhere — Escape closes the card. M-3.2-06: the
+      // ⋯ menu is the one thing that closes ahead of it.
       if (e.key !== 'Escape' || !bsActive) return;
-      uxReturnFromDetail();
+      var menu = document.getElementById('bs-more-menu');
+      if (menu && !menu.hidden) { bsCloseMore(); return; }
+      if (wbIsPhoneLike()) uxReturnFromDetail();
+      else uxCloseDetail();
     });
 
     // Grip drag handler. Downward swipe always dismisses the sheet (80px or
@@ -13652,13 +13851,16 @@
       }
       runToggle();
       var on = isFavClick ? isFav(d) : isBlack(d);
+      // M-3.2-06: the "hidden" sentence is a whole-sentence template now.
+      // Translated run-by-run it left the full-width 「，」 standing in the
+      // middle of the English and Japanese strings (SPEC F, D6).
       var msg = isFavClick
-        ? (on ? '已加入收藏' : '已取消收藏')
-        : (on ? '已从找店结果隐藏，收藏保留' : '已恢复显示这间店');
+        ? localizeText(on ? '已加入收藏' : '已取消收藏')
+        : (on ? l10nTpl(HIDETOAST_TPL, {}) : localizeText('已恢复显示这间店'));
       // #sync-stack is not one of the observed containers, so the toast text
       // is localized here rather than by the MutationObserver. showToast
       // already routes it through announce() (aria-live).
-      showToast(localizeText(msg), {
+      showToast(msg, {
         actionLabel: localizeText('撤销'),
         ms: 5000,
         onAction: runToggle
@@ -16287,8 +16489,12 @@
              document.getElementById('wb-filter-host') || (col ? wbFilterPop : ffSheet));
       wbMove(bsContent, col ? wbDetailBody : bsSheet);
       var detailHome = col ? wbDetailBody : bsSheet;
-      if (uxDetailBack && bsContent.parentNode === detailHome) detailHome.insertBefore(uxDetailBack, bsContent);
-      wbMove(uxDetailActions, detailHome);
+      // M-3.2-06 / SPEC C2: #ux-detail-back stays put, inside #bs-head. The
+      // column layouts keep a resident list, so "back to results" has
+      // nothing to do there — and #bs-sheet is display:none in both of them,
+      // which is the whole enforcement. #bs-foot does still travel: it is
+      // the card's action row in every layout (M-3.2-09 styles it there).
+      wbMove(bsFoot, detailHome);
       wbMove(document.getElementById('ss-box'),
              col ? wbTopSearch : document.body);
       var ssTopEl = document.getElementById('ss-top');
@@ -16796,15 +17002,10 @@
     document.getElementById('ux-nearby').addEventListener('click', uxFindNearby);
     document.getElementById('ux-restore-plan').addEventListener('click', uxRestorePlanning);
     document.getElementById('ux-filter-results').addEventListener('click', function() { uxShowTab('results'); });
-    if (window.ResizeObserver) {
-      new ResizeObserver(function(entries) {
-        var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
-        if (height > 0) document.documentElement.style.setProperty('--ux-filter-done-h', height + 'px');
-      }).observe(document.getElementById('ux-filter-done'));
-      new ResizeObserver(function(entries) {
-        document.documentElement.style.setProperty('--ux-actions-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
-      }).observe(uxDetailActions);
-    }
+    // M-3.2-06: the two ResizeObservers that lived here published
+    // --ux-filter-done-h and --ux-actions-h. Both were write-only once
+    // M-3.2-02 dropped the bottom bar that read them — two observers firing
+    // on every card paint for a variable no rule mentions.
     // Repaint on a layout change: the region chip hides on mid / wide.
     document.addEventListener('wb:mode', uxPaintContext);
     uxPaintContext();
@@ -18931,14 +19132,14 @@
 })();
 </script>
     
-            <div class="folium-map" id="map_ea55210655bf2d8458f7126ea0f0e846" ></div>
+            <div class="folium-map" id="map_e400828a41ef6b3da54e3dd43f41ff12" ></div>
         
 </body>
 <script>
     
     
-            var map_ea55210655bf2d8458f7126ea0f0e846 = L.map(
-                "map_ea55210655bf2d8458f7126ea0f0e846",
+            var map_e400828a41ef6b3da54e3dd43f41ff12 = L.map(
+                "map_e400828a41ef6b3da54e3dd43f41ff12",
                 {
                     center: [36.2048, 138.2529],
                     crs: L.CRS.EPSG3857,
@@ -18955,7 +19156,7 @@
 
         
     
-            var tile_layer_74c815324be34d488a98f65deea06c08 = L.tileLayer(
+            var tile_layer_4e806d4f8fad09e36d697dd05478ba8f = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=cb1_2x1u_1_c4779020cbbb3d72f50dc858",
                 {
   "minZoom": 0,
@@ -18975,16 +19176,16 @@
             );
         
     
-            tile_layer_74c815324be34d488a98f65deea06c08.addTo(map_ea55210655bf2d8458f7126ea0f0e846);
+            tile_layer_4e806d4f8fad09e36d697dd05478ba8f.addTo(map_e400828a41ef6b3da54e3dd43f41ff12);
         
     
-            var marker_cluster_47eb2f13f41802b7067c120bbf7be752 = L.markerClusterGroup(
+            var marker_cluster_7058cc2c086c433e16e4d4ef62d2ea4f = L.markerClusterGroup(
                 {
 }
             );
         
     
-            marker_cluster_47eb2f13f41802b7067c120bbf7be752.addTo(map_ea55210655bf2d8458f7126ea0f0e846);
+            marker_cluster_7058cc2c086c433e16e4d4ef62d2ea4f.addTo(map_e400828a41ef6b3da54e3dd43f41ff12);
         
 </script>
 </html>

@@ -40,14 +40,14 @@ def focus_visible(page):
     return page.evaluate("""()=>{let e=document.activeElement,r=e.getBoundingClientRect();return e!==document.body
       && !e.closest('[inert]') && getComputedStyle(e).visibility==='visible'
       && r.width>0 && r.height>0 && r.right>0 && r.left<innerWidth && r.bottom>0 && r.top<innerHeight
-      && !e.closest('#ux-detail-actions,#ux-detail-back,#bs-content')}""")
+      && !e.closest('#bs-foot,#bs-head,#bs-content')}""")
 
 def open_search(page):
     page.locator('#ss-input').fill('寿司')
     page.wait_for_selector('#ss-local .ss-row:not(.ss-empty)')
     page.locator('#ss-local .ss-row:not(.ss-empty)').first.click()
     page.wait_for_function("document.getElementById('bs-sheet').classList.contains('bs-open')")
-    page.wait_for_selector('#bs-content .rst-actions-bar',state='attached')
+    page.wait_for_selector('#bs-foot .ff-fav-btn',state='attached')
     page.wait_for_timeout(650)
 
 def cache(page):
@@ -63,7 +63,7 @@ def open_marker(page):
     point=page.evaluate("""()=>{let e=window.uxFocusMarker,r=e.getBoundingClientRect();e.focus();return {x:r.left+r.width/2,y:r.top+r.height/2}}""")
     page.mouse.click(point['x'],point['y'])
     page.wait_for_function("document.getElementById('bs-sheet').classList.contains('bs-open')")
-    page.wait_for_selector('#bs-content .rst-actions-bar',state='attached')
+    page.wait_for_selector('#bs-foot .ff-fav-btn',state='attached')
     page.wait_for_timeout(650)
 
 def closed_detail(page,name):
@@ -71,15 +71,15 @@ def closed_detail(page,name):
     before=cache(page)
     save(page,name)
     check(focus_visible(page),'closed detail kept invisible focus')
-    check(page.evaluate("['bs-content','ux-detail-actions','ux-detail-back','bs-grip'].every(id=>document.getElementById(id).inert)"),'closed nodes remain interactive')
+    check(page.evaluate("['bs-content','bs-foot','ux-detail-back','bs-grip'].every(id=>document.getElementById(id).inert)"),'closed nodes remain interactive')
     page.keyboard.press('Space');page.wait_for_timeout(150)
     check(cache(page)==before,'Space altered closed restaurant')
     for _ in range(3):
         page.keyboard.press('Tab')
-        check(page.evaluate("!document.activeElement.closest('#ux-detail-actions,#ux-detail-back,#bs-content,#bs-grip')"),'Tab reached closed detail')
+        check(page.evaluate("!document.activeElement.closest('#bs-foot,#bs-head,#bs-content')"),'Tab reached closed detail')
     if not args.baseline:
         page.locator('#ss-input').focus()
-        page.locator('#ux-detail-actions .ff-fav-btn').focus()
+        page.locator('#bs-foot .ff-fav-btn').focus()
         check(focus_visible(page),'closed Save accepted focus')
         page.keyboard.press('Escape');page.keyboard.press('Escape')
         page.locator('#ss-input').evaluate('(e)=>e.blur()')
@@ -179,15 +179,15 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
             if w<750:lib_browser.phone_tab(page,'map')
             for action in ['.ff-fav-btn','.rst-gmaps','back']:
                 open_search(page)
-                selector='#ux-detail-back' if action=='back' else '#ux-detail-actions '+action
+                selector=('#bs-close' if w<750 else '#bs-content .rst-close') if action=='back' else '#bs-foot '+action
                 page.locator(selector).focus();page.keyboard.press('Escape')
                 closed_detail(page,f'{args.browser}-{w}-close-focus-{action.replace(".","")}')
             for action,method in [('.ff-fav-btn','escape'),('.rst-gmaps','mouse'),('back','history')]:
                 open_marker(page)
-                selector='#ux-detail-back' if action=='back' else '#ux-detail-actions '+action
+                selector=('#bs-close' if w<750 else '#bs-content .rst-close') if action=='back' else '#bs-foot '+action
                 page.locator(selector).focus()
                 if method=='escape':page.keyboard.press('Escape')
-                elif method=='mouse':page.locator('#bs-content .rst-close').click()
+                elif method=='mouse':page.locator('#bs-close' if w<750 else '#bs-content .rst-close').click()
                 else:page.evaluate('history.back()')
                 page.wait_for_function("!document.getElementById('bs-sheet').classList.contains('bs-open')")
                 closed_detail(page,f'{args.browser}-{w}-marker-close-{method}')
@@ -197,16 +197,16 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
             page.evaluate("document.addEventListener('pointerdown',()=>window.uxSourceTop=document.getElementById('wb-list').scrollTop,{once:true})")
             page.locator('#'+row_id).click()
             page.wait_for_function("document.getElementById('bs-sheet').classList.contains('bs-open')");page.wait_for_timeout(650)
-            if page.locator('#ux-detail-actions .ff-fav-btn').get_attribute('aria-pressed')!='true':
-                page.locator('#ux-detail-actions .ff-fav-btn').click()
-            page.locator('#ux-detail-actions .ff-fav-btn').focus();page.keyboard.press('Escape');page.wait_for_timeout(500)
+            if page.locator('#bs-foot .ff-fav-btn').get_attribute('aria-pressed')!='true':
+                page.locator('#bs-foot .ff-fav-btn').click()
+            page.locator('#bs-foot .ff-fav-btn').focus();page.keyboard.press('Escape');page.wait_for_timeout(500)
             check(page.evaluate('document.activeElement.id')==row_id,'result focus did not return to selected row')
             check(page.evaluate("Math.abs(document.getElementById('wb-list').scrollTop-window.uxSourceTop)<=1"),'source result scroll lost')
             tab('fav');page.locator('#fv-group').select_option('city');page.wait_for_timeout(250)
             saved=page.locator('.fv-row[data-fav-kind="rst"]').first
             saved_ref=saved.get_attribute('data-fav-ref');saved.click()
             page.wait_for_function("document.getElementById('bs-sheet').classList.contains('bs-open')");page.wait_for_timeout(650)
-            page.locator('#ux-detail-actions .rst-gmaps').focus();page.evaluate('history.back()');page.wait_for_timeout(500)
+            page.locator('#bs-foot .rst-gmaps').focus();page.evaluate('history.back()');page.wait_for_timeout(500)
             save(page,f'{args.browser}-{w}-source-return',expectedRef=saved_ref,
                  activeRef=page.evaluate("document.activeElement.getAttribute('data-fav-ref')"),
                  sheetOpen=page.locator('#bs-sheet').get_attribute('class'))
@@ -215,15 +215,15 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
             open_search(page)
             page.evaluate("window.uxSameDetail=document.getElementById('bs-content')")
             page.set_viewport_size({'width':475,'height':751});page.wait_for_timeout(400)
-            page.locator('#ux-detail-actions .ff-fav-btn').focus();page.keyboard.press('Escape')
+            page.locator('#bs-foot .ff-fav-btn').focus();page.keyboard.press('Escape')
             closed_detail(page,f'{args.browser}-rotation-closed')
             page.set_viewport_size({'width':1440,'height':900});page.wait_for_timeout(400)
             check(page.evaluate("window.uxSameDetail===document.getElementById('bs-content') && window.uxSameDetail.inert"),'closed moved detail state lost')
             open_search(page)
-            saved_before=page.locator('#ux-detail-actions .ff-fav-btn').get_attribute('aria-pressed')
-            page.locator('#ux-detail-actions .ff-fav-btn').click()
-            check(page.locator('#ux-detail-actions .ff-fav-btn').get_attribute('aria-pressed')!=saved_before,'reopened dock remains inert')
-            page.locator('#ux-detail-back').click()
+            saved_before=page.locator('#bs-foot .ff-fav-btn').get_attribute('aria-pressed')
+            page.locator('#bs-foot .ff-fav-btn').click()
+            check(page.locator('#bs-foot .ff-fav-btn').get_attribute('aria-pressed')!=saved_before,'reopened dock remains inert')
+            page.locator('#bs-content .rst-close').click()
         check(not errors,errors)
         records.append({'name':f'{args.browser}-{w}-assertions','pass':not args.baseline,'baseline':args.baseline,'pageErrors':errors})
         (args.output/'results.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))

@@ -256,11 +256,12 @@ def main(argv: list[str] | None = None) -> int:
         page.locator("#wb-list .wb-row").first.click()
         page.wait_for_selector("#bs-sheet.bs-open")
         page.locator("#bs-content").evaluate("e => e.scrollTop = e.scrollHeight")
-        share = page.locator("#bs-content .rst-share")
-        tabelog = page.locator("#bs-content .rst-tabelog")
+        page.locator("#bs-more").click()
+        share = page.locator("#bs-more-menu .rst-share")
+        tabelog = page.locator("#bs-foot .rst-tabelog")
         assert_hit(share, "restaurant share")
         assert_hit(tabelog, "restaurant Tabelog link")
-        page.locator("#ux-detail-back").click()
+        page.locator("#bs-close").click()
         records.append({"case": "detail-share-and-source", "pass": True})
 
         # Account/data routes: actually open the account panel and hit-test

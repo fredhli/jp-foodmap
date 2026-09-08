@@ -30,9 +30,9 @@ with lib_browser.serve_docs(8977) as base,sync_playwright() as p:
     page.wait_for_selector('#bs-sheet.bs-open')
     page.locator('#ux-detail-back').focus()
     page.keyboard.press('f')
-    assert page.locator('#ux-detail-actions .ff-fav-btn').get_attribute('aria-pressed')=='true'
+    assert page.locator('#bs-foot .ff-fav-btn').get_attribute('aria-pressed')=='true'
     page.keyboard.press('f')
-    assert page.locator('#ux-detail-actions .ff-fav-btn').get_attribute('aria-pressed')=='false'
+    assert page.locator('#bs-foot .ff-fav-btn').get_attribute('aria-pressed')=='false'
     page.keyboard.press('f')
     page.wait_for_timeout(300)
     assert page.locator('.sync-toast-msg').filter(has_text='登录可在其他设备恢复').count()==0, 'anonymous hint overlaps the explicit action'
@@ -41,8 +41,8 @@ with lib_browser.serve_docs(8977) as base,sync_playwright() as p:
         page.set_viewport_size({'width':w,'height':h})
         page.wait_for_timeout(250)
         assert page.evaluate("window.uxContentNode===document.getElementById('bs-content')"), 'detail was replaced'
-        page.locator('#ux-detail-actions .ff-fav-btn').click(trial=True)
-        page.locator('#ux-detail-actions .rst-gmaps').click(trial=True)
+        page.locator('#bs-foot .ff-fav-btn').click(trial=True)
+        page.locator('#bs-foot .rst-gmaps').click(trial=True)
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
         page.screenshot(path=str(args.output/f'{args.browser}-resize-{w}.png'))
     page.keyboard.press('Escape')

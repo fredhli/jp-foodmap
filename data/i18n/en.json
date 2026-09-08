@@ -1126,5 +1126,8 @@
   "已切到全部地区": "All areas",
   "按距离排序": "sorted by distance",
   "地图只覆盖日本": "This map covers Japan only",
-  "无法取得位置": "Couldn't get your location"
+  "无法取得位置": "Couldn't get your location",
+  "导航": "Directions",
+  "网订": "Online",
+  "加入收藏夹": "Add to list"
 }

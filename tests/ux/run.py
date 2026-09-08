@@ -86,20 +86,30 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
             old_scroll=page.evaluate('window.uxClickScroll')
             page.wait_for_selector('#bs-sheet.bs-open',state='attached')
             page.wait_for_timeout(400)
-            page.locator('#ux-detail-actions .ff-fav-btn').click(trial=True)
-            page.locator('#ux-detail-actions .rst-gmaps').click(trial=True)
-            page.locator('#ux-detail-actions .ff-fav-btn').click()
+            page.locator('#bs-foot .ff-fav-btn').click(trial=True)
+            page.locator('#bs-foot .rst-gmaps').click(trial=True)
+            page.locator('#bs-foot .ff-fav-btn').click()
             record(page,prefix+'-detail')
-            assert page.locator('#ux-detail-back').inner_text()=='返回结果'
-            page.locator('#ux-detail-back').click()
+            # M-3.2-06 / SPEC C2: the source-return link is a phone affordance.
+            # The column layouts keep the list on screen, so there is no link
+            # there and Escape means "close".
+            if w<750:
+                assert page.locator('#ux-detail-back').inner_text()=='← 结果'
+                page.locator('#ux-detail-back').click()
+            else:
+                assert page.locator('#ux-detail-back').is_hidden()
+                page.locator('#bs-content .rst-close').click()
             page.wait_for_timeout(250)
             assert abs(page.locator('#wb-list').evaluate('(e)=>e.scrollTop')-old_scroll)<=1, 'result scroll lost'
             tab('fav')
             page.locator('.fv-row').first.click()
             page.wait_for_selector('#bs-sheet.bs-open',state='attached')
             page.wait_for_timeout(200)
-            assert page.locator('#ux-detail-back').inner_text()=='返回我的收藏'
-            page.locator('#ux-detail-back').click()
+            if w<750:
+                assert page.locator('#ux-detail-back').inner_text()=='← 收藏'
+                page.locator('#ux-detail-back').click()
+            else:
+                page.locator('#bs-content .rst-close').click()
             assert page.locator('#wb-tab-fav').get_attribute('aria-selected')=='true'
             if w in (393,1440):
                 tab('results')

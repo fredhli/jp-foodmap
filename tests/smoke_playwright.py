@@ -199,9 +199,9 @@ def check_card(page, name):
     # .bs-open starts the 250ms entrance transition. Wait for the action dock
     # to finish entering before measuring actual user reachability.
     page.wait_for_function("""() => [...document.querySelectorAll(
-      '#ux-detail-actions .ff-fav-btn,#ux-detail-actions .rst-gmaps')]
+      '#bs-foot .ff-fav-btn,#bs-foot .rst-gmaps')]
       .length===2 && [...document.querySelectorAll(
-      '#ux-detail-actions .ff-fav-btn,#ux-detail-actions .rst-gmaps')]
+      '#bs-foot .ff-fav-btn,#bs-foot .rst-gmaps')]
       .every(e=>{const r=e.getBoundingClientRect(),t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
         return r.top>=0&&r.bottom<=innerHeight&&(t===e||e.contains(t))})""",
       timeout=3000)
@@ -220,8 +220,8 @@ def _detail_action_geometry(page):
       const content=document.getElementById('bs-content').getBoundingClientRect();
       return {sheet:{top:sheet.top,bottom:sheet.bottom,height:sheet.height},
       content:{top:content.top,bottom:content.bottom,height:content.height,scrollHeight:document.getElementById('bs-content').scrollHeight},
-      viewport:{width:innerWidth,height:innerHeight},items:['#ux-detail-actions .ff-fav-btn',
-      '#ux-detail-actions .rst-gmaps'].map(s=>{const e=document.querySelector(s);
+      viewport:{width:innerWidth,height:innerHeight},items:['#bs-foot .ff-fav-btn',
+      '#bs-foot .rst-gmaps'].map(s=>{const e=document.querySelector(s);
       if(!e)return null;const r=e.getBoundingClientRect(),t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
       return {top:r.top,bottom:r.bottom,h:r.height,inView:r.top>=0&&r.bottom<=innerHeight,hit:t===e||e.contains(t)};})};}""")
 
@@ -251,8 +251,8 @@ def check_marker_actions(page, name):
         raise AssertionError(
             "marker-origin detail primary actions are not consistently reachable: "
             f"first={first_actions}, later={actions}")
-    page.locator("#ux-detail-actions .ff-fav-btn").click(trial=True)
-    page.locator("#ux-detail-actions .rst-gmaps").click(trial=True)
+    page.locator("#bs-foot .ff-fav-btn").click(trial=True)
+    page.locator("#bs-foot .rst-gmaps").click(trial=True)
     return f"Save and Maps are visible 44px actions in {actions['viewport']}"
 
 
@@ -312,8 +312,8 @@ def check_save(page, name):
         "    !e.classList.contains('marker-cluster'));"
         "  els[0].dispatchEvent(new MouseEvent('click', {bubbles: true})); }"
     )
-    page.wait_for_selector("#ux-detail-actions .ff-fav-btn", timeout=20000)
-    page.eval_on_selector("#ux-detail-actions .ff-fav-btn", "el => el.click()")
+    page.wait_for_selector("#bs-foot .ff-fav-btn", timeout=20000)
+    page.eval_on_selector("#bs-foot .ff-fav-btn", "el => el.click()")
     page.wait_for_function(
         "(n) => Number(document.getElementById('ff-fav-count').textContent) !== n",
         arg=n_before,
@@ -328,7 +328,7 @@ def check_save(page, name):
     )
     eq(after, before + 1, "favorites persisted to localStorage")
     # Undo so the run leaves no state behind for the next check.
-    page.eval_on_selector("#ux-detail-actions .ff-fav-btn", "el => el.click()")
+    page.eval_on_selector("#bs-foot .ff-fav-btn", "el => el.click()")
     page.wait_for_timeout(300)
     page.evaluate(
         "() => { const b = document.querySelector('#bs-content .rst-close');"

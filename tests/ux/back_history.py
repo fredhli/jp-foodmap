@@ -68,14 +68,14 @@ probe = r"""(() => {
     }
     const snap={t:performance.now(),width:innerWidth,height:innerHeight,body:document.body.className,
       ready:!!document.querySelector('.ff-count')?.textContent.match(/\d/),
-      detail:el('bs-sheet')?.classList.contains('bs-open'),full:!!el('bs-content')?.querySelector('.rst-actions-bar'),
+      detail:el('bs-sheet')?.classList.contains('bs-open'),full:!!el('bs-content')?.querySelector('.rst-lists'),
       drawer:document.body.classList.contains('wb-fav-open'),history:history.state,length:history.length,
-      back:el('ux-detail-back')?.textContent,sourceTab:document.querySelector('.wb-tab[aria-selected=true]')?.id,
+      back:el('ux-detail-back')?.hidden?'':el('ux-detail-back')?.textContent,sourceTab:document.querySelector('.wb-tab[aria-selected=true]')?.id,
       scroll:el('wb-list')?.scrollTop,active:{id:active?.id,ref:active?.getAttribute('data-fav-ref'),box:box(active),
-        inDetail:!!active?.closest('#bs-content,#ux-detail-actions,#ux-detail-back,#bs-grip')},
-      inert:['bs-content','ux-detail-actions','ux-detail-back','bs-grip'].map(id=>!!el(id)?.inert),
-      save:el('ux-detail-actions')?.querySelector('.ff-fav-btn')?.getAttribute('aria-pressed'),
-      saveHit:hit(el('ux-detail-actions')?.querySelector('.ff-fav-btn')),mapsHit:hit(el('ux-detail-actions')?.querySelector('.rst-gmaps')),
+        inDetail:!!active?.closest('#bs-content,#bs-foot,#bs-head')},
+      inert:['bs-content','bs-foot','ux-detail-back','bs-grip'].map(id=>!!el(id)?.inert),
+      save:el('bs-foot')?.querySelector('.ff-fav-btn')?.getAttribute('aria-pressed'),
+      saveHit:hit(el('bs-foot')?.querySelector('.ff-fav-btn')),mapsHit:hit(el('bs-foot')?.querySelector('.rst-gmaps')),
       favorites:JSON.parse(localStorage.getItem('omakase_state_cache_v2')||'{}').fav||[],
       marker:marker?.point,markerSelector:marker?.selector,mapHit,events:events.splice(0)};
     console.debug('UX_HISTORY '+JSON.stringify(snap));
@@ -139,10 +139,10 @@ with lib_browser.serve_docs(8988 if args.browser=='chromium' else 8989) as base,
             page.locator('#ss-input').fill('寿司')
             page.locator('#ss-local .ss-row:not(.ss-empty)').first.click()
             wait(lambda s:s.get('detail') and s.get('full'),'search detail')
-            page.locator('#bs-content .rst-close').click();closed()
+            page.locator('#bs-close' if state['width']<750 else '#bs-content .rst-close').click();closed()
             wait(lambda s:s.get('marker'),'visible marker')
             page.locator(state['markerSelector']).click();wait(lambda s:s.get('detail') and s.get('full'),'marker detail')
-            verify(state['back']=='返回地图','map source gained list route')
+            verify(not state['back'],'map source gained list route')
             before_push=sum(e['kind']=='pushState' for e in events)
             page.go_back();closed()
             verify(not state['drawer'],'map source returned to drawer')
@@ -158,14 +158,14 @@ with lib_browser.serve_docs(8988 if args.browser=='chromium' else 8989) as base,
                 page.set_viewport_size({'width':475,'height':751});wait(lambda s:s.get('width')==475,'resize');page.wait_for_timeout(300)
             before_push=sum(e['kind']=='pushState' for e in events)
             if name in ('close-button','rapid-reopen'):
-                page.locator('#bs-content .rst-close').click()
+                page.locator('#bs-close' if state['width']<750 else '#bs-content .rst-close').click()
                 if name=='rapid-reopen':
                     wait(lambda s:not s.get('detail') and s.get('marker'),'reopen marker')
                     page.locator(state['markerSelector']).click();wait(lambda s:s.get('detail') and s.get('full'),'reopened')
                     page.wait_for_timeout(400)
                     verify(state['history']=={'tabelogUi':'sheet'},'reopen history state stale')
                     verify(state['saveHit'] and state['mapsHit'],'reopened actions unavailable')
-                    page.locator('#ux-detail-actions .ff-fav-btn').click();page.wait_for_timeout(180)
+                    page.locator('#bs-foot .ff-fav-btn').click();page.wait_for_timeout(180)
                     verify(state['save']=='true','reopened save failed')
                     page.go_back()
                 closed();verify(not state['drawer'],'direct close left drawer')
@@ -179,7 +179,7 @@ with lib_browser.serve_docs(8988 if args.browser=='chromium' else 8989) as base,
                 if name=='return-button':
                     page.locator('#ux-detail-back').click()
                 elif name=='escape-save':
-                    page.locator('#ux-detail-actions .ff-fav-btn').click()
+                    page.locator('#bs-foot .ff-fav-btn').click()
                     page.wait_for_timeout(150)
                     page.keyboard.press('Escape')
                 else:

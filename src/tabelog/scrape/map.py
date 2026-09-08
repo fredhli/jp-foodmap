@@ -186,7 +186,8 @@ _CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 # translatable UI copy — strip them or every one of them is reported as a
 # missing EN/JA translation.
 _COUNT_TPL_LITERAL_RE = re.compile(
-    r"var (?:COUNT_TPL|FAV_TPL|FOOT_TPL|FOOT_BTN_TPL|LANDMARK_TPL|NAVCAP_TPL|BACKTO_TPL)"
+    r"var (?:COUNT_TPL|FAV_TPL|FOOT_TPL|FOOT_BTN_TPL|LANDMARK_TPL|NAVCAP_TPL"
+    r"|BACKTO_TPL|RSVNOTE_TPL|HIDETOAST_TPL)"
     r"\s*=\s*[^;]+;"
 )
 
@@ -4408,10 +4409,11 @@ PHONE_DRAWER_HTML = """
   #wb-left .fv-tools > * { max-width: 100%; }
 
   /* ---- 3.1.x journeys that stay (SPEC A: F2 / F4 / F7). The UI shells
-     below are the ones M-3.2-04 (#ux-context), M-3.2-06 (#ux-detail-back /
-     #ux-detail-actions) and M-3.2-07 (#ux-filter-done / #ux-saved-scope)
-     replace; the behaviour they front is kept. ---- */
-  #ux-detail-back:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+     below are the ones M-3.2-04 (#ux-context) and M-3.2-07
+     (#ux-filter-done / #ux-saved-scope) replace; the behaviour they front is
+     kept. M-3.2-06 took #ux-detail-back into the card's head row and
+     replaced #ux-detail-actions with #bs-foot — both styled next to the
+     sheet they belong to, not here. ---- */
   #ux-filter-done { display: none; flex: 0 0 auto; padding: 10px 14px;
     border-top: 1px solid #e5e7eb; background: #fff; }
   #ux-filter-done.on { display: block; }
@@ -4422,18 +4424,6 @@ PHONE_DRAWER_HTML = """
   #ux-saved-scope { display: none; }
   #wb-left-head.ux-head-fav .wb-counts { display: none; }
   #wb-left-head.ux-head-fav #ux-saved-scope { display: block; margin: 8px 0 0; }
-  #ux-detail-back { flex: 0 0 auto; border: 0; border-bottom: 1px solid #e5e7eb;
-    min-height: 44px; padding: 8px 14px; background: #fff; color: #1d4ed8;
-    text-align: left; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
-  #ux-detail-actions { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px;
-    padding: 10px 14px; border-top: 1px solid #e5e7eb; background: #fff; }
-  #ux-detail-actions .rst-btn, #ux-detail-actions .rst-gmaps {
-    flex: 1; width: auto; min-width: 0; min-height: 44px; height: auto; margin: 0;
-    display: inline-flex; justify-content: center; align-items: center; gap: 8px;
-    padding: 8px; box-sizing: border-box; border-radius: 8px; font-size: 14px;
-    line-height: 1.4; text-decoration: none;
-  }
-  #ux-detail-actions .rst-gmaps { background: #2563eb; color: #fff; }
   #sync-stack > .sync-toast, #sync-stack > #sync-hint { pointer-events: none; }
   #sync-stack > .sync-toast .sync-btn, #sync-hint .sync-btn { pointer-events: auto; }
   #bs-content { min-height: 0; }
@@ -4458,7 +4448,7 @@ PHONE_DRAWER_HTML = """
     body.ux-detail-open #sync-hint { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #ux-detail-actions * { transition: none !important; }
+    #bs-foot * { transition: none !important; }
   }
 </style>
 <div id="wb-fav-backdrop"></div>
@@ -5319,10 +5309,43 @@ MOBILE_UX_ASSETS = """
      focusable, announces its state via aria-expanded, and carries the peek
      hint as DOM text. touch-action:none keeps the drag gesture intact;
      the button resets below stop the UA stylesheet from restyling it. */
+  /* M-3.2-06 (SPEC B.4): the head row. 44px, three slots — source return,
+     grip, ×. The grip keeps every one of its old properties; the only
+     change is that it is now a flex child that shares the row instead of
+     owning a line of its own, which is what buys the card the 44px that
+     #ux-detail-back used to spend on one link. */
+  #bs-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 2px;
+    min-height: 44px; padding: 0 4px 0 6px; box-sizing: border-box;
+  }
+  #ux-detail-back {
+    flex: 0 0 auto; min-height: 44px; padding: 0 8px;
+    display: inline-flex; align-items: center;
+    border: 0; border-radius: var(--r-sm); background: none;
+    color: var(--accent-strong); cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.4;
+    white-space: nowrap; max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #ux-detail-back[hidden] { display: none; }
+  #ux-detail-back:focus-visible,
+  #bs-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  #bs-close {
+    flex: 0 0 auto; width: 44px; height: 44px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 0; background: none; color: var(--fg-3); cursor: pointer;
+    font: 700 22px/1 var(--font-ui);
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* The head row owns the ×, so the one the card body draws in .rst-header
+     would be a second identical control 40px below it. It stays for the
+     column layouts, where #bs-content lives in #wb-detail-body and this
+     selector does not reach it. */
+  #bs-sheet .rst-close { display: none; }
   #bs-grip {
     position: relative;
-    display: block; width: 100%;
-    padding: 9px 0 6px; flex-shrink: 0;
+    display: block; flex: 1 1 auto; min-width: 0;
+    padding: 9px 0 6px; flex-shrink: 1;
     cursor: grab; touch-action: none;
     background: none; border: 0; margin: 0;
     font: inherit; color: inherit; text-align: center;
@@ -5332,6 +5355,68 @@ MOBILE_UX_ASSETS = """
     content: ''; display: block;
     width: 38px; height: 4px; margin: 0 auto;
     background: #d1d5db; border-radius: 2px;
+  }
+  /* M-3.2-06 (SPEC B.4 / D.2): the card's single action row, pinned to the
+     bottom of the sheet. --glass-reg comes from the .glass-reg utility on
+     the element; the shadow is re-declared because the utility's --el-2
+     drops downward, and this surface is lit from below. */
+  #bs-foot {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    min-height: 52px; padding: 4px 12px; box-sizing: border-box;
+    border: 0; border-top: 1px solid var(--border-1);
+    box-shadow: 0 -4px 12px rgba(16, 24, 40, 0.06), var(--glass-inner-hi);
+  }
+  #bs-foot:empty { display: none; }
+  #bs-foot .bs-foot-btn {
+    flex: 1 1 auto; min-width: 0; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 0 10px; box-sizing: border-box;
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--fg-2);
+    font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-decoration: none; cursor: pointer;
+  }
+  #bs-foot .bs-foot-btn img { width: 17px; height: 17px; flex: 0 0 auto; }
+  /* One primary per view (SPEC D.2): Save while planning, Directions once
+     the user is standing in the city. */
+  #bs-foot .bs-foot-btn.bs-primary {
+    border-color: var(--accent); background: var(--accent); color: #fff;
+  }
+  #bs-foot .bs-foot-btn.bs-narrow { flex: 0 0 auto; width: 44px; padding: 0; }
+  /* Saved beats primary: once the place is starred the button is a state,
+     not a call to action, and it wears the same amber every other ⭐ on the
+     page wears. Declared after .bs-primary — same specificity, later wins. */
+  #bs-foot .ff-fav-btn.rst-on-fav {
+    border-color: #fbbf24; background: #fef3c7; color: #92400e;
+  }
+  #bs-foot .rst-tabelog { margin-left: 0; }
+  #bs-foot .bs-foot-lnk {
+    flex: 0 0 auto; display: inline-flex; align-items: center;
+    min-height: 44px; padding: 0 6px; border-radius: var(--r-sm);
+    color: var(--accent); text-decoration: none;
+    font-family: inherit; font-size: 13px; font-weight: 600; white-space: nowrap;
+  }
+  #bs-foot .bs-foot-btn:focus-visible,
+  #bs-foot .bs-foot-lnk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* ⋯ menu. Content layer, so it is opaque — glass never stacks on glass. */
+  #bs-more-wrap { position: relative; flex: 0 0 auto; }
+  #bs-more-menu {
+    position: absolute; right: 0; bottom: calc(100% + 6px);
+    min-width: 168px; padding: 4px; box-sizing: border-box;
+    border: 1px solid var(--border-1); border-radius: var(--r-md);
+    background: var(--bg-elev); box-shadow: var(--el-3);
+    display: flex; flex-direction: column;
+  }
+  #bs-more-menu[hidden] { display: none; }
+  #bs-more-menu > button {
+    min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm);
+    background: none; color: var(--fg-2); text-align: left; cursor: pointer;
+    font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.3;
+  }
+  #bs-more-menu > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (hover: hover) and (pointer: fine) {
+    #bs-more-menu > button:hover { background: var(--bg-subtle); }
   }
   /* M-152 / M-153: parked on the sheets + the bookmark modal for two frames
      around a viewport resize (Fold open/close, rotation, split-view drag) so
@@ -5376,11 +5461,6 @@ MOBILE_UX_ASSETS = """
      expanded card. */
   #bs-sheet.bs-peek .rst-lists,
   #bs-sheet.bs-peek .rst-footer { display: none; }
-  /* The peek action bar is the ⭐ / 🚫 pair only — no border, no reserved
-     height, so the card stays inside the 40% budget. */
-  #bs-sheet.bs-peek .rst-actions-bar {
-    margin-top: 6px; padding-top: 0; border-top: 0;
-  }
   /* M-188: 44px in peek — this is the state whose whole job is to say
      "there is more, act on me", so it gets a real touch target. The full
      state keeps its original 19px so the card layout is unchanged. */
@@ -5590,23 +5670,11 @@ MOBILE_UX_ASSETS = """
       transform: translate(-50%, -50%);
     }
   }
-  /* The chip row already draws the separator, so the action bar right
-     under it must not draw a second one. */
-  .rst-lists + .rst-actions-bar { margin-top: 8px; padding-top: 0;
-                                  border-top: 0; }
-  /* M-032: share sits in the action bar beside the Google Maps square and
-     matches it exactly — 28px visual, 44px inside the bar. */
+  /* M-032: share sits beside the Google Maps square and matches it exactly
+     — 28px visual, 44px hit area. M-3.2-06 moved it into the ⋯ menu on the
+     phone card; the class stays because the column layouts still draw the
+     28px square. */
   .rst-share { padding: 0; font-family: inherit; }
-  /* D5 / H3: the bottom action bar. 44px is unconditional here — this is
-     the row every visit ends on, and it is the last thing in the card, so
-     nothing is displaced by giving it thumb-sized targets on every device. */
-  .rst-actions-bar { display: flex; align-items: center; gap: 8px;
-                     flex-wrap: wrap; min-height: 44px;
-                     margin-top: 12px; padding-top: 10px;
-                     border-top: 1px solid #e5e7eb; }
-  .rst-actions-bar .rst-btn { min-height: 44px; padding: 0 12px;
-                              display: inline-flex; align-items: center; }
-  .rst-actions-bar .rst-gmaps { width: 44px; height: 44px; }
   .rst-tabelog { margin-left: auto; display: inline-flex; align-items: center;
                  min-height: 44px; color: #2563eb; text-decoration: none;
                  font-size: 13px; white-space: nowrap; }
@@ -5681,6 +5749,11 @@ MOBILE_UX_ASSETS = """
     animation: rst-shimmer 1.1s ease-in-out 10;
   }
   .rst-photos .rst-ph.ld::after { content: none; }
+  /* M-3.2-06: a photo that never arrived keeps its grey 4:3 tile and stops
+     being a tap target. No fixed pixel height — the box is already at least
+     90px tall at 402px, and a hard min-height would break the box/img
+     aspect agreement smoke_playwright asserts. */
+  .rst-photos .rst-ph-err { cursor: default; }
   @keyframes rst-shimmer { to { transform: translateX(100%); } }
   /* W-4: full-screen photo viewer. Opened by a thumbnail tap, registered on
      the ui stack (uiRegister/uiPush) so Android's back gesture closes it
@@ -6184,16 +6257,28 @@ BOTTOM_SHEET_HTML = """
      pannable behind every sheet state, so claiming modality would tell
      screen readers the rest of the page is unreachable when it isn't. -->
 <div id="bs-sheet" role="dialog" aria-hidden="true">
-  <!-- M-188: disclosure button, not a div — keyboard-reachable, and the
+  <!-- M-3.2-06: one 44px head row instead of the grip row plus a full-width
+       #ux-detail-back row underneath it. Left = the source return (hidden
+       when the card was opened from the map or from a search result), middle
+       = the grip (still the drag surface), right = ×, which closes the card
+       and pans the map back to the restaurant (2.3.0 W-8).
+       M-188: disclosure button, not a div — keyboard-reachable, and the
        peek hint below is real DOM so the i18n walker can translate it
        (M-157). aria-expanded is kept in sync by bsSetPeek(). -->
-  <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content" inert>
-    <span id="bs-grip-hint"><span class="bs-hint-swipe">上滑查看详情</span><span class="bs-hint-tap">点击查看详情</span></span>
-  </button>
+  <div id="bs-head">
+    <button id="ux-detail-back" type="button" inert hidden></button>
+    <button id="bs-grip" type="button" aria-expanded="true" aria-controls="bs-content" inert>
+      <span id="bs-grip-hint"><span class="bs-hint-swipe">上滑查看详情</span><span class="bs-hint-tap">点击查看详情</span></span>
+    </button>
+    <button id="bs-close" type="button" inert aria-label="关闭">×</button>
+  </div>
   <div id="bs-banner" hidden></div>
-  <button id="ux-detail-back" type="button" inert>返回地图</button>
   <div id="bs-content" inert></div>
-  <div id="ux-detail-actions" inert></div>
+  <!-- M-3.2-06: the card's only action row. Painted by uxPaintDetailActions
+       through emojiHtml() — #bs-foot is NOT one of the emojify observer's
+       containers (#bs-content is), so a raw glyph here would stay a system
+       glyph on Windows. -->
+  <div id="bs-foot" class="glass-reg" inert></div>
 </div>
 <!-- W-4: the photo viewer. A thumbnail used to be an <a target="_blank"> to
      a bare JPEG, which in the Android shell classified as Nav.EXTERNAL and
@@ -8229,6 +8314,24 @@ FILTER_JS_TEMPLATE = r"""
     'en':    'Show only these {n}',
     'ja':    'この {n} 軒だけ表示'
   };
+  // M-3.2-06 (SPEC F): two whole-sentence templates. Both carry a comma in
+  // Chinese, and the runtime localizer works one CJK run at a time — so
+  // translating them run-by-run leaves the full-width 「，」 standing in the
+  // middle of the English and Japanese strings. Hand-written per language
+  // and stripped from the build's CJK scan (_COUNT_TPL_LITERAL_RE), exactly
+  // like COUNT_TPL / FAV_TPL.
+  var RSVNOTE_TPL = {
+    'zh-CN': '网订入口 ≠ 余位，请到 Tabelog 确认',
+    'zh-TW': '網訂入口 ≠ 餘位，請到 Tabelog 確認',
+    'en':    'Booking link ≠ availability — confirm on Tabelog',
+    'ja':    '予約リンクは空席を保証しません。Tabelog でご確認ください'
+  };
+  var HIDETOAST_TPL = {
+    'zh-CN': '已从结果隐藏，收藏保留',
+    'zh-TW': '已從結果隱藏，收藏保留',
+    'en':    'Hidden from results — still saved',
+    'ja':    '結果から除外しました（お気に入りは保持）'
+  };
   // W-5 (2.3.0): the card's ↑↓ stepper is capped. The number is a literal
   // in the sentence, and a bare "500" between two CJK runs would split the
   // string into three separately-translated fragments — hence a template.
@@ -8374,6 +8477,10 @@ FILTER_JS_TEMPLATE = r"""
     // Built at runtime — reached through observeDynamic below, which runs
     // this pass over every inserted subtree for exactly these two.
     ['.rst-close',                     'aria-label', '关闭'],
+    // M-3.2-06: the card head row's × and its ⋯ menu trigger. Static
+    // markup for the first, runtime-built for the second — the second
+    // already ships localized, this entry is the belt-and-braces pass.
+    ['#bs-close',                      'aria-label', '关闭'],
     ['.ss-fav',                        'title',      '加入收藏'],
     // D4: the detail card's "第 n / N 家" stepper. Built at runtime inside
     // #bs-content, so observeDynamic re-runs this pass over it.
@@ -8443,6 +8550,10 @@ FILTER_JS_TEMPLATE = r"""
     // emoji at construction (makeIcon → emojiImg) so they stay unobserved;
     // the Leaflet popup pane is hooked by initMap() once it exists.
     observeDynamic(document.getElementById('bs-content'), true, true);
+    // M-3.2-06: the card's action row is a sibling of #bs-content, not a
+    // child, so it needs its own root — syncFavButton writes a bare ⭐ into
+    // it and Windows has no glyph for one.
+    observeDynamic(document.getElementById('bs-foot'), true, true);
     observeDynamic(document.getElementById('bm-modal'), true, true);
     observeDynamic(document.getElementById('ss-list'), true, true);
     // Filter sheet has dynamic textContent rewrites (cuisine summary
@@ -9150,7 +9261,10 @@ FILTER_JS_TEMPLATE = r"""
       if (!bsActive) return false;
       var host = document.getElementById('bs-content');
       var b = host && host.querySelector(sel);
-      if (!b && uxDetailActions) b = uxDetailActions.querySelector(sel);
+      if (!b) {
+        var foot = document.getElementById('bs-foot');
+        if (foot) b = foot.querySelector(sel);
+      }
       if (b) { b.click(); return true; }
       return false;
     }
@@ -10216,13 +10330,14 @@ FILTER_JS_TEMPLATE = r"""
       if (b === 1 || b === 2) return 'phone';
       return null;   // nothing extractable — say nothing (hard premise ④)
     }
-    // Pure zh-CN runs; the #bs-content localizer turns them into EN / JA /
-    // zh-TW. Never a guess: null mode renders an em dash, not a default.
+    // M-3.2-06 (SPEC B.4 / U16): a decision tile is one line, and the only
+    // thing this one decides is "can I book online from here". A ✓ or an em
+    // dash — every wording that used to live here folded to two or four
+    // lines and pushed the photos off the first screen. The nuance moved to
+    // the policy table (a real 有/无 chip) and to RSVNOTE_TPL under it.
+    // Glyphs, not words, so there is nothing to translate.
     function bookingText(mode) {
-      if (mode === 'net')   return '有网上预约入口';
-      if (mode === 'phone') return '预约方式请查看原政策';
-      if (mode === 'no')    return '不接受预订';
-      return '—';
+      return (mode === 'net') ? '✓' : '—';
     }
     // D3 / §5.4: the policy table. Only rows the build step could actually
     // extract are drawn — no placeholder dashes, no "shops like this
@@ -10389,15 +10504,19 @@ FILTER_JS_TEMPLATE = r"""
           // blocking the card's first paint. 320x240 = the 4/3 the CSS uses.
           // W-4: a <button>, not an <a> — see #ph-lb. data-big carries the
           // full-size URL the viewer loads.
-          // onerror hides with visibility, not display: the grid is a fixed
-          // repeat(3, 1fr), so removing a box from the flow shifted the
-          // other two into the wrong columns.
+          // M-3.2-06 (SPEC B.4, the photo placeholder): onerror hid the whole
+          // box, which left a hole in a fixed repeat(3, 1fr) grid — one
+          // dead photo and the card had a blank band where a row of three
+          // should be. Only the <img> is hidden now; the button keeps its
+          // 4:3 grey placeholder (and .ld stops the shimmer), so a failed
+          // photo reads as "no picture", not as broken layout.
           return '<button type="button" class="rst-ph" data-big="'
                + escapeHtml(big) + '">'
                + '<img src="' + escapeHtml(thumb) + '" loading="lazy" alt="" '
                + 'width="320" height="240" decoding="async" '
                + 'onload="this.parentElement.classList.add(\'ld\')" '
-               + 'onerror="this.parentElement.style.visibility=\'hidden\'">'
+               + 'onerror="this.style.visibility=\'hidden\';'
+               + 'this.parentElement.classList.add(\'ld\',\'rst-ph-err\')">'
                + '</button>';
         }).join('') + '</div>';
       }
@@ -10430,28 +10549,11 @@ FILTER_JS_TEMPLATE = r"""
       // on the results list so the user can pick the right pin if there are
       // dupes. Title stays English (emoji's universal) so the build-time CJK
       // scan doesn't pick up phantom runs from JS string literals.
-      var gmapsQ = encodeURIComponent(
-        ((d.name || '') + ' ' + (addr || '')).trim()
-      );
-      var gmapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + gmapsQ
-                   + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
-      var gmapsBtn = '<a class="rst-gmaps" href="' + gmapsUrl
-                   + '" target="_blank" rel="noopener" '
-                   + 'aria-label="Open in Google Maps" '
-                   + 'title="Open in Google Maps">'
-                   + '<img src="img/google-maps-v2.png" alt="Google Maps" '
-                   + 'width="18" height="18" loading="lazy"></a>';
-      // M-032: share this one restaurant (?r=<id> deep link). The helper
-      // ships in the same build; the typeof guard is for the case where a
-      // stale service-worker HTML meets a newer/older script — a dead button
-      // is worse than no button. aria-label / title get localized by the
-      // ATTR_L10N pass observeDynamic runs over #bs-content.
-      var shareBtn = (typeof window.__shareRestaurant === 'function')
-        ? '<button type="button" class="rst-gmaps rst-share" '
-          + 'aria-label="分享这家店" title="分享这家店">'
-          + emojiImg('🔗', 'height:18px;width:18px;vertical-align:0;')
-          + '</button>'
-        : '';
+      // M-3.2-06: the card body no longer ends in an action bar — Save /
+      // Directions / Tabelog / ⋯ all live in #bs-foot, built by
+      // uxPaintDetailActions. Google Maps, share and Tabelog moved with it,
+      // so the three builders that used to sit here are gone; the deep-link
+      // URL is rebuilt from d.lat / d.lon / d.gpid over there.
       // TEMP-ish: "location calibrated by Google" note, shown under the
       // address when this row was Google-calibrated (d.gcal). Hand-tuned per
       // language like chipText, so the runtime CJK localizer doesn't fragment
@@ -10550,13 +10652,16 @@ FILTER_JS_TEMPLATE = r"""
         + '<div class="rst-decision">'
           + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '晚', dinner)
           + priceTile('人均' + (_lang === 'en' ? ' · ' : '·') + '午', lunch)
-          + '<div class="rst-tile"><div class="rst-tile-k">预订方式</div>'
+          + '<div class="rst-tile"><div class="rst-tile-k">网订</div>'
             + '<div class="rst-tile-v">'
             + bookingText(bookingMode(d, pol)) + '</div></div>'
         + '</div>'
         + '<div class="rst-sec">预约政策</div>'
-        + '<p class="rst-reservation-note">预约入口不代表实时余位，请到来源网站确认日期与人数</p>'
         + polTbl
+        // SPEC B.4: the caveat belongs under the table it qualifies, not
+        // above it and not inside the decision tile.
+        + '<p class="rst-reservation-note">'
+        + escapeHtml(RSVNOTE_TPL[_lang] || RSVNOTE_TPL['zh-CN']) + '</p>'
         + rawPolicy
         + (holHtml
             ? '<div class="rst-holiday">'
@@ -10575,17 +10680,6 @@ FILTER_JS_TEMPLATE = r"""
         // made from another surface) repaints this one row instead of the
         // whole card, and the card keeps its scroll position.
         + '<div class="rst-lists"></div>'
-        // D5: one 44px action row at the end of the card, Tabelog on the
-        // right where an "exit to the source" link belongs.
-        + '<div class="rst-actions-bar">'
-          + '<button class="ff-fav-btn rst-btn" data-url="' + url + '">'
-            + '<span class="ff-fav-label">☆ 收藏</span></button>'
-          + '<button class="ff-black-btn rst-btn" data-url="' + url + '">'
-            + '<span class="ff-black-label">🚫 弃用</span></button>'
-          + gmapsBtn
-          + shareBtn
-          + '<a class="rst-tabelog" href="' + url + '" target="_blank" rel="noopener">Tabelog ↗</a>'
-        + '</div>'
       + '</div>';
     }
     // ---- D4 / H2: card navigation + focus bookkeeping --------------------
@@ -10660,12 +10754,12 @@ FILTER_JS_TEMPLATE = r"""
     // The card and action dock move between hosts when the layout changes.
     var bsOpener = null;
     function bsOwnsFocus(el) {
-      return !!el && [bsSheet, bsContent, uxDetailBack, uxDetailActions].some(function(node) {
+      return !!el && [bsSheet, bsContent, uxDetailBack, bsFoot].some(function(node) {
         return node && node.contains(el);
       });
     }
     function bsSetInteractive(open) {
-      [bsContent, uxDetailBack, uxDetailActions, bsGrip].forEach(function(node) {
+      [bsContent, uxDetailBack, bsFoot, bsGrip, bsClose].forEach(function(node) {
         if (node) node.inert = !open;
       });
     }
@@ -14886,7 +14980,8 @@ FILTER_JS_TEMPLATE = r"""
     var bsSheet    = document.getElementById('bs-sheet');
     var bsContent  = document.getElementById('bs-content');
     var uxDetailBack = document.getElementById('ux-detail-back');
-    var uxDetailActions = document.getElementById('ux-detail-actions');
+    var bsFoot = document.getElementById('bs-foot');
+    var bsClose = document.getElementById('bs-close');
     var uxDetailSource = null;
     var uxDetailSourceHeld = false;
     function uxCaptureSource(tab, d) {
@@ -14899,6 +14994,20 @@ FILTER_JS_TEMPLATE = r"""
       closeSheet(!!source && wbIsPhoneLike());
       if (!source) { uxShowTab('map'); return; }
       uxShowTab(source.tab);
+      uxRestoreSourceFocus(source);
+    }
+    // M-3.2-06 / SPEC C2 + DT D15: in a column layout the source list never
+    // left the screen, so Escape and Back mean "close the card", not
+    // "navigate back to the tab you are already looking at". F4 is
+    // untouched — scroll position and the focused row still come back.
+    function uxCloseDetail() {
+      var source = uxDetailSource;
+      closeSheet();
+      if (source) uxRestoreSourceFocus(source);
+    }
+    // F4: put the caret back on the row the card was opened from, at the
+    // scroll offset the list had at that moment.
+    function uxRestoreSourceFocus(source) {
       requestAnimationFrame(function() {
         if (bsActive || wbTabPref !== source.tab || (wbIsPhoneLike() && !favDrawerOpen())) return;
         var scroll = document.getElementById(source.tab === 'fav' ? 'fv-body' : 'wb-list');
@@ -14913,31 +15022,112 @@ FILTER_JS_TEMPLATE = r"""
       });
     }
     if (uxDetailBack) uxDetailBack.addEventListener('click', uxReturnFromDetail);
-    function uxPaintDetailActions(d) {
-      if (!uxDetailActions) return;
-      uxDetailActions.innerHTML = '';
-      var save = bsContent.querySelector('.ff-fav-btn');
-      if (!save) {
-        save = document.createElement('button');
-        save.type = 'button'; save.className = 'ff-fav-btn rst-btn';
-        save.setAttribute('data-url', d.detail_url);
-        save.innerHTML = '<span class="ff-fav-label"></span>';
-      }
-      uxDetailActions.appendChild(save);
-      syncFavButton(save, d);
-      var maps = bsContent.querySelector('a.rst-gmaps');
-      if (!maps) {
-        maps = document.createElement('a'); maps.className = 'rst-gmaps';
-        maps.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d.lat + ',' + d.lon)
-          + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
-        maps.target = '_blank'; maps.rel = 'noopener';
-      }
-      maps.textContent = localizeText('地图导航');
-      maps.setAttribute('aria-label', localizeText('地图导航'));
-      uxDetailActions.appendChild(maps);
-      if (uxDetailBack) uxDetailBack.textContent = localizeText(!uxDetailSource ? '返回地图'
-        : uxDetailSource.tab === 'fav' ? '返回我的收藏' : '返回结果');
+    // W-8 (2.3.0): × closes and hands the map back, marker re-centred by
+    // closeSheet(). It is NOT "return to the source list" — that is what the
+    // left half of the head row and the system Back are for.
+    if (bsClose) bsClose.addEventListener('click', function() { closeSheet(); });
+    // ---- M-3.2-06: the card's head row + its one action row --------------
+    // SPEC B.4. The source return moved into the 44px head row it shares
+    // with the grip and the ×, and the whole action vocabulary — Save,
+    // Directions, Tabelog, ⋯ — collapsed into #bs-foot. Nothing is drawn
+    // twice: the card body no longer ends in .rst-actions-bar.
+    function uxSyncDetailHead() {
+      if (!uxDetailBack) return;
+      // Map / search origins get no return link: there is no list to go back
+      // to, and × already puts the map back under the user's thumb.
+      var key = !uxDetailSource ? null
+              : (uxDetailSource.tab === 'fav' ? '收藏' : '结果');
+      uxDetailBack.hidden = !key;
+      uxDetailBack.textContent = key ? ('← ' + localizeText(key)) : '';
     }
+    function bsMoreEl() { return document.getElementById('bs-more-menu'); }
+    function bsCloseMore() {
+      var m = bsMoreEl();
+      if (!m || m.hidden) return;
+      m.hidden = true;
+      var t = document.getElementById('bs-more');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    }
+    function uxPaintDetailActions(d) {
+      uxSyncDetailHead();
+      if (!bsFoot) return;
+      // SPEC B.4 / D.2: one primary per view. Planning at home (70% of use)
+      // ends on ⭐; standing in the city with a nearby search running, it
+      // ends on Directions. uxPlanning is non-null exactly while the nearby
+      // mode holds a planning context to return to (M-3.2-05).
+      var nearby = (typeof uxPlanning !== 'undefined') && !!uxPlanning;
+      var mapsUrl = 'https://www.google.com/maps/search/?api=1&query='
+        + encodeURIComponent(d.lat + ',' + d.lon)
+        + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
+      var url = escAttr(d.detail_url);
+      // Built through emojiHtml(): #bs-foot is outside every emojify
+      // observer's root except the one startDynamicObservers() adds for it,
+      // and the first paint happens before that observer can see it.
+      bsFoot.innerHTML =
+          '<button type="button" class="ff-fav-btn bs-foot-btn'
+        +   (nearby ? '' : ' bs-primary') + '" data-url="' + url + '">'
+        +   '<span class="ff-fav-label"></span></button>'
+        + '<a class="rst-gmaps bs-foot-btn' + (nearby ? ' bs-primary' : '')
+        +   '" href="' + escAttr(mapsUrl) + '" target="_blank" rel="noopener">'
+        +   '<img src="img/google-maps-v2.png" alt="" width="17" height="17" '
+        +   'loading="lazy"><span>' + escAttr(localizeText('导航')) + '</span></a>'
+        + '<a class="rst-tabelog bs-foot-lnk" href="' + url
+        +   '" target="_blank" rel="noopener">Tabelog ↗</a>'
+        + '<span id="bs-more-wrap">'
+        +   '<button type="button" id="bs-more" class="bs-foot-btn bs-narrow"'
+        +   ' aria-haspopup="true" aria-expanded="false" aria-controls="bs-more-menu"'
+        +   ' aria-label="' + escAttr(localizeText('更多')) + '">⋯</button>'
+        +   '<div id="bs-more-menu" role="menu" hidden>'
+        +     '<button type="button" class="ff-black-btn" role="menuitem" data-url="' + url + '">'
+        +       '<span class="ff-black-label"></span></button>'
+        +     '<button type="button" class="rst-share" role="menuitem">'
+        +       escAttr(localizeText('分享这家店')) + '</button>'
+        +     '<button type="button" id="bs-add-list" role="menuitem">'
+        +       escAttr(localizeText('加入收藏夹')) + '</button>'
+        +   '</div>'
+        + '</span>';
+      var save = bsFoot.querySelector('.ff-fav-btn');
+      if (save) syncFavButton(save, d);
+      var black = bsFoot.querySelector('.ff-black-btn');
+      if (black) syncBlackButton(black, d);
+      // M-032: navigator.share has to be reached synchronously from the
+      // gesture — no lookup, no await between the click and the call.
+      var share = bsFoot.querySelector('.rst-share');
+      if (share) {
+        if (typeof window.__shareRestaurant === 'function') {
+          share.addEventListener('click', function(ev) { window.__shareRestaurant(d, ev); });
+        } else {
+          share.hidden = true;
+        }
+      }
+      // The list picker is the chip row in the card body (E11 / M-031);
+      // this is a shortcut to it, not a second way to edit membership.
+      var addList = bsFoot.querySelector('#bs-add-list');
+      if (addList) addList.addEventListener('click', function() {
+        var row = bsContent && bsContent.querySelector('.rst-lists');
+        if (!row) return;
+        try { row.scrollIntoView({block: 'center', behavior: 'smooth'}); } catch (_) {}
+        var chip = row.querySelector('.rst-list-chip');
+        if (chip) { try { chip.focus({preventScroll: true}); } catch (_) {} }
+      });
+      var more = bsFoot.querySelector('#bs-more');
+      if (more) more.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var m = bsMoreEl();
+        if (!m) return;
+        var open = m.hidden;
+        m.hidden = !open;
+        more.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      var menu = bsMoreEl();
+      if (menu) menu.addEventListener('click', function() { bsCloseMore(); });
+    }
+    // Anywhere else on the page dismisses the ⋯ menu; it is a three-item
+    // popover, not a surface worth a ui-stack entry of its own.
+    document.addEventListener('click', function(e) {
+      if (e.target.closest && e.target.closest('#bs-more-wrap')) return;
+      bsCloseMore();
+    });
     var bsGrip     = document.getElementById('bs-grip');
     var bsActive   = null;
 
@@ -15448,7 +15638,13 @@ FILTER_JS_TEMPLATE = r"""
     document.addEventListener('click', function(e) {
       if (e.target.closest('.rst-close')) closeSheet();
     });
-    uiRegister('sheet', uxReturnFromDetail);
+    // M-3.2-06 / SPEC C2 + DT D15: Back and Escape mean "go back to the list
+    // I came from" only where the list is not on screen. In the column
+    // layouts it is, permanently, so there the same key means "close".
+    uiRegister('sheet', function() {
+      if (wbIsPhoneLike()) uxReturnFromDetail();
+      else uxCloseDetail();
+    });
     function expandSheet() {
       if (wbDetailMode()) return;       // M-027: no peek state to expand
       if (bsSheet.classList.contains('bs-peek')) {
@@ -15466,9 +15662,13 @@ FILTER_JS_TEMPLATE = r"""
     // map.on('click') below.
     bsBackdrop.addEventListener('click', closeSheet);
     document.addEventListener('keydown', function(e){
-      // W-8: one stage everywhere — Escape closes the card.
+      // W-8: one stage everywhere — Escape closes the card. M-3.2-06: the
+      // ⋯ menu is the one thing that closes ahead of it.
       if (e.key !== 'Escape' || !bsActive) return;
-      uxReturnFromDetail();
+      var menu = document.getElementById('bs-more-menu');
+      if (menu && !menu.hidden) { bsCloseMore(); return; }
+      if (wbIsPhoneLike()) uxReturnFromDetail();
+      else uxCloseDetail();
     });
 
     // Grip drag handler. Downward swipe always dismisses the sheet (80px or
@@ -15797,13 +15997,16 @@ FILTER_JS_TEMPLATE = r"""
       }
       runToggle();
       var on = isFavClick ? isFav(d) : isBlack(d);
+      // M-3.2-06: the "hidden" sentence is a whole-sentence template now.
+      // Translated run-by-run it left the full-width 「，」 standing in the
+      // middle of the English and Japanese strings (SPEC F, D6).
       var msg = isFavClick
-        ? (on ? '已加入收藏' : '已取消收藏')
-        : (on ? '已从找店结果隐藏，收藏保留' : '已恢复显示这间店');
+        ? localizeText(on ? '已加入收藏' : '已取消收藏')
+        : (on ? l10nTpl(HIDETOAST_TPL, {}) : localizeText('已恢复显示这间店'));
       // #sync-stack is not one of the observed containers, so the toast text
       // is localized here rather than by the MutationObserver. showToast
       // already routes it through announce() (aria-live).
-      showToast(localizeText(msg), {
+      showToast(msg, {
         actionLabel: localizeText('撤销'),
         ms: 5000,
         onAction: runToggle
@@ -18432,8 +18635,12 @@ FILTER_JS_TEMPLATE = r"""
              document.getElementById('wb-filter-host') || (col ? wbFilterPop : ffSheet));
       wbMove(bsContent, col ? wbDetailBody : bsSheet);
       var detailHome = col ? wbDetailBody : bsSheet;
-      if (uxDetailBack && bsContent.parentNode === detailHome) detailHome.insertBefore(uxDetailBack, bsContent);
-      wbMove(uxDetailActions, detailHome);
+      // M-3.2-06 / SPEC C2: #ux-detail-back stays put, inside #bs-head. The
+      // column layouts keep a resident list, so "back to results" has
+      // nothing to do there — and #bs-sheet is display:none in both of them,
+      // which is the whole enforcement. #bs-foot does still travel: it is
+      // the card's action row in every layout (M-3.2-09 styles it there).
+      wbMove(bsFoot, detailHome);
       wbMove(document.getElementById('ss-box'),
              col ? wbTopSearch : document.body);
       var ssTopEl = document.getElementById('ss-top');
@@ -18941,15 +19148,10 @@ FILTER_JS_TEMPLATE = r"""
     document.getElementById('ux-nearby').addEventListener('click', uxFindNearby);
     document.getElementById('ux-restore-plan').addEventListener('click', uxRestorePlanning);
     document.getElementById('ux-filter-results').addEventListener('click', function() { uxShowTab('results'); });
-    if (window.ResizeObserver) {
-      new ResizeObserver(function(entries) {
-        var height = Math.ceil(entries[0].target.getBoundingClientRect().height);
-        if (height > 0) document.documentElement.style.setProperty('--ux-filter-done-h', height + 'px');
-      }).observe(document.getElementById('ux-filter-done'));
-      new ResizeObserver(function(entries) {
-        document.documentElement.style.setProperty('--ux-actions-h', Math.ceil(entries[0].target.getBoundingClientRect().height) + 'px');
-      }).observe(uxDetailActions);
-    }
+    // M-3.2-06: the two ResizeObservers that lived here published
+    // --ux-filter-done-h and --ux-actions-h. Both were write-only once
+    // M-3.2-02 dropped the bottom bar that read them — two observers firing
+    // on every card paint for a variable no rule mentions.
     // Repaint on a layout change: the region chip hides on mid / wide.
     document.addEventListener('wb:mode', uxPaintContext);
     uxPaintContext();
