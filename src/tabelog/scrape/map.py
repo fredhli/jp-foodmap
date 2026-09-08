@@ -1669,7 +1669,7 @@ def build_filter_panel_html(
      mutually exclusive (opening one closes the other), so they share the
      same vertical slot at the bottom of the viewport. */
   #ff-backdrop {{
-    position: fixed; inset: 0; z-index: 10001;
+    position: fixed; inset: 0; z-index: calc(var(--z-sheet) - 1);
     background: rgba(0,0,0,0.35);
     opacity: 0; pointer-events: none;
     transition: opacity 0.22s ease-out;
@@ -1679,7 +1679,7 @@ def build_filter_panel_html(
     position: fixed; left: 0; right: 0; bottom: 0;
     /* M-152: single horizontal axis at every width — see #bs-sheet. */
     margin-left: auto; margin-right: auto;
-    z-index: 10002;
+    z-index: var(--z-sheet);
     /* M-091: percentage cap plus an absolute floor for the map below. */
     max-height: min(75vh, calc(100vh - 132px));
     max-height: min(75dvh, calc(100dvh - 132px));
@@ -1693,13 +1693,13 @@ def build_filter_panel_html(
     padding-bottom: env(safe-area-inset-bottom);
   }}
   #ff-sheet.ff-open {{ transform: translateY(0); }}
-  @media (min-width: 700px) {{
+  @media (min-width: 750px) {{
     #ff-sheet {{ width: min(560px, calc(100vw - 32px));
                  max-height: min(80vh, calc(100vh - 132px));
                  max-height: min(80dvh, calc(100dvh - 132px));
                  border-radius: 12px 12px 0 0; }}   /* G8 */
   }}
-  @media (min-width: 1100px) {{
+  @media (min-width: 1280px) {{
     #ff-sheet {{ width: min(640px, calc(100vw - 32px));
                  max-height: min(85vh, calc(100vh - 132px));
                  max-height: min(85dvh, calc(100dvh - 132px)); }}
@@ -1746,7 +1746,7 @@ def build_filter_panel_html(
   #ff-fab {{
     position: fixed;
     bottom: calc(18px + env(safe-area-inset-bottom)); left: 14px;
-    z-index: 9995;
+    z-index: var(--z-float);
     background: #fff; color: #374151;
     border: 1px solid #d1d5db;
     border-radius: 999px;
@@ -2425,6 +2425,218 @@ HEAD_BRANDING = """
 """
 HEAD_BRANDING = HEAD_BRANDING.replace("__MANIFEST_V__", MANIFEST_VERSION)  # M-150
 
+
+# ---------------------------------------------------------------------------
+# M-3.2-01: the cascade skeleton and the design tokens.
+#
+# This block is the FIRST stylesheet in the document (added to <head> before
+# HEAD_BRANDING at the assembly point) for two reasons:
+#
+#   1. The `@layer` statement below is what fixes the layer ORDER. A layer
+#      first seen anywhere else would be appended in the order it was seen,
+#      so this line has to precede every other rule on the page.
+#   2. `:root` custom properties have to be declared before the rules that
+#      read them, or the first paint uses the fallback.
+#
+# What is deliberately NOT here: any rule that paints. 3.2.0 M-01 defines the
+# vocabulary and changes nothing on screen — the token values are the values
+# already in use, and the only class rules are the two glass utilities, which
+# nothing wears yet (M-3.2-02 … 09 put them on the control layer).
+#
+# Cascade-layer gotcha that decided the whole layout of this milestone:
+# **unlayered rules beat every layered rule**, and for `!important` the layer
+# order reverses. So
+#   · vendor CSS (leaflet.css / MarkerCluster*.css, folium's own <style>) is
+#     left unlayered and therefore still wins ties against our layered CSS —
+#     which is exactly the relationship it already had, because it is emitted
+#     after our <head> blocks and before our <body> blocks. The three rules of
+#     ours that beat a vendor rule on specificity alone stay unlayered too,
+#     marked with the `@layer-exempt` sentinel (see css_layer()).
+#   · all of our own blocks go into ONE layer (`components`), so their mutual
+#     order stays source order and the 38 `!important` declarations keep the
+#     same winner. Splitting them across layers would silently reverse every
+#     `!important` collision. The finer names below are declared and reserved
+#     for 4.0.0, which can move blocks one at a time behind a screenshot gate.
+CSS_LAYER_ORDER = ("reset", "vendor", "tokens", "base", "layout",
+                   "components", "surfaces", "utilities", "overrides")
+
+DESIGN_TOKENS_CSS = """
+<style>@layer __LAYER_ORDER__;</style>
+<style>
+@layer tokens {
+  :root {
+    /* ---- colour: the values already on the page, named -------------------
+       Greys are Tailwind gray, the accent is Tailwind blue-600 (100 uses).
+       Naming them is what makes 4.0.0's theme work a 30-line edit. */
+    --fg-1: #111827;      /* headings */
+    --fg-2: #374151;      /* body */
+    --fg-3: #6b7280;      /* secondary / captions */
+    --fg-4: #9ca3af;      /* placeholder / disabled */
+    --accent: #2563eb;
+    --accent-strong: #1d4ed8;
+    --accent-soft: #eff6ff;
+    --danger: #dc2626;
+    --danger-soft: #fef2f2;
+    --ok: #16a34a;
+    --border-1: #e5e7eb;
+    --border-2: #d1d5db;
+    --bg-elev: #ffffff;   /* content layers are always opaque */
+    --bg-subtle: #f3f4f6;
+    --scrim: rgba(17, 24, 39, 0.35);
+    /* SPEC D.1 drops the drawer scrim to .18; the drawer itself is
+       M-3.2-02's, so the token that block will read is defined here and the
+       .35 one keeps its current value for the modals. */
+    --scrim-light: rgba(17, 24, 39, 0.18);
+
+    /* ---- radius: 15 values on the page collapse to four ---------------- */
+    --r-pill: 999px;
+    --r-lg: 16px;         /* sheets, drawers, dialog shells */
+    --r-md: 12px;         /* cards, intro bar, toast, primary button */
+    --r-sm: 8px;          /* secondary buttons, inputs */
+
+    /* ---- elevation ---------------------------------------------------- */
+    --el-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.10);
+    --el-2: 0 4px 12px rgba(16, 24, 40, 0.12);
+    --el-3: 0 8px 24px rgba(16, 24, 40, 0.16);
+
+    /* ---- glass (M-3.2-02+ consumers) -----------------------------------
+       Only the control layer that floats over the map may wear this, never a
+       content surface. The 1px inner highlight is not decoration: about 60%
+       of the "glass" read comes from it rather than from the blur
+       (design-research REPORT §2.3). */
+    --glass-tint-thin: rgba(255, 255, 255, 0.72);
+    --glass-tint-reg: rgba(255, 255, 255, 0.84);
+    --glass-blur-thin: blur(16px) saturate(160%);
+    --glass-blur-reg: blur(20px) saturate(170%);
+    --glass-hairline: rgba(255, 255, 255, 0.55);
+    --glass-inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    --glass-fallback: #ffffff;
+
+    /* ---- type --------------------------------------------------------- */
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+               "Hiragino Sans", "Hiragino Kaku Gothic ProN", "PingFang SC",
+               "Microsoft YaHei", "Noto Sans JP", "Segoe UI", Roboto,
+               sans-serif;
+    --font-num: ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN",
+                var(--font-ui);
+
+    /* ---- motion: nine durations on the page collapse to three ---------- */
+    --ease-out: cubic-bezier(.32, .72, 0, 1);
+    --ease-std: cubic-bezier(.2, 0, 0, 1);
+    --dur-1: 120ms;       /* press / colour */
+    --dur-2: 160ms;       /* fade */
+    --dur-3: 220ms;       /* drawer + card travel */
+
+    /* ---- z-index: 30 bare numbers between 9990 and 99999 collapse to 12
+       named steps, 100 apart so 4.0.0 has room to insert.
+       Two deviations from the draft order in groundwork-4.0/tokens.draft.css,
+       both because the live page documents the opposite and this milestone
+       must not repaint anything:
+         · --z-rail sits ABOVE --z-column: #wb-rail (9993) is drawn over
+           #wb-left (9990) while the column slides out from under it.
+         · --z-bar sits ABOVE --z-sheet: #wb-top's own comment says "over the
+           sheets (10002), under #bm-backdrop". */
+    --z-map: 0;
+    --z-map-chrome: 9000;   /* attribution, scale, locate control */
+    --z-column: 9200;       /* #wb-left / #wb-detail / the split handle */
+    --z-rail: 9250;         /* #wb-rail */
+    --z-float: 9300;        /* FAB stack, #ff-fab, #intro-bar, #ss-box */
+    --z-sheet: 9500;        /* bottom sheets + the phone drawer, scrim at -1 */
+    --z-bar: 9550;          /* #wb-top, #wb-filter-pop */
+    --z-popover: 9600;      /* layers / language / account / help popovers */
+    --z-modal: 9700;        /* bookmark, list, import, about, language gate */
+    --z-lightbox: 9800;     /* #ph-lb */
+    --z-toast: 9900;        /* #sync-banner and the bottom stack */
+    --z-boot-fail: 9990;    /* showBootFailure() — the last thing standing */
+  }
+}
+@layer utilities {
+  /* Defined, worn by nothing until M-3.2-02. Two rules, both mandatory:
+     a browser without backdrop-filter, and a user who asked for less
+     transparency, get OPAQUE white — half-transparent with no blur means the
+     map texture reads straight through the text. */
+  .glass-thin, .glass-reg {
+    background: var(--glass-tint-thin);
+    -webkit-backdrop-filter: var(--glass-blur-thin);
+    backdrop-filter: var(--glass-blur-thin);
+    border: 0.5px solid var(--glass-hairline);
+    box-shadow: var(--el-2), var(--glass-inner-hi);
+  }
+  .glass-reg {
+    background: var(--glass-tint-reg);
+    -webkit-backdrop-filter: var(--glass-blur-reg);
+    backdrop-filter: var(--glass-blur-reg);
+  }
+  /* Performance gate (SPEC D.1, GW §2.1): backdrop-filter re-samples the
+     tiles under it every frame, so it is switched off for the duration of a
+     pan / zoom. initMap() puts the class on at movestart and takes it off
+     120ms after moveend. */
+  body.map-moving .glass-thin,
+  body.map-moving .glass-reg {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @supports not ((backdrop-filter: blur(1px))
+                 or (-webkit-backdrop-filter: blur(1px))) {
+    .glass-thin, .glass-reg { background: var(--glass-fallback); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .glass-thin, .glass-reg {
+      background: var(--glass-fallback);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      border-color: var(--border-2);
+    }
+  }
+}
+</style>
+"""
+DESIGN_TOKENS_CSS = DESIGN_TOKENS_CSS.replace(
+    "__LAYER_ORDER__", ", ".join(CSS_LAYER_ORDER))
+
+# Marker pair that keeps a rule OUT of the layer wrapper below. Use it only
+# where a rule of ours has to keep beating an unlayered vendor rule it wins
+# against on specificity alone today — every such rule is a bug the moment it
+# is layered, because a layered normal declaration loses to an unlayered one
+# no matter how specific it is.
+LAYER_EXEMPT_OPEN = "/* @layer-exempt-start */"
+LAYER_EXEMPT_CLOSE = "/* @layer-exempt-end */"
+
+_STYLE_BLOCK_RE = re.compile(r"(<style>)(.*?)(</style>)", re.S)
+
+
+def css_layer(html: str, layer: str = "components") -> str:
+    """Wrap every <style> block in `html` in `@layer <layer> { … }`.
+
+    Nothing else changes — the rules keep their source order, and blocks that
+    all land in the same layer keep resolving against each other exactly as
+    they do today. Text between LAYER_EXEMPT_OPEN / LAYER_EXEMPT_CLOSE is
+    emitted outside the wrapper (see the marker's docstring).
+    """
+    if layer not in CSS_LAYER_ORDER:
+        raise ValueError(f"unknown cascade layer {layer!r}")
+
+    def wrap(match: re.Match) -> str:
+        out = []
+        rest = match.group(2)
+        while True:
+            head, sep, tail = rest.partition(LAYER_EXEMPT_OPEN)
+            if head.strip():
+                out.append("@layer %s {%s}\n" % (layer, head))
+            if not sep:
+                break
+            exempt, sep2, rest = tail.partition(LAYER_EXEMPT_CLOSE)
+            if not sep2:
+                raise ValueError("unbalanced @layer-exempt marker in a <style>")
+            out.append(exempt)
+        return match.group(1) + "\n" + "".join(out) + match.group(3)
+
+    layered, n = _STYLE_BLOCK_RE.subn(wrap, html)
+    if not n:
+        raise ValueError(f"css_layer({layer}): no <style> block found")
+    return layered
+
+
 # Web OAuth client ID for jpfoodmap (Google Cloud project: tabelog-map).
 # Public by design — gets inlined into the page JS so the GIS library knows
 # which app is asking for a sign-in. Not a secret; safe in git.
@@ -2491,7 +2703,7 @@ MAP_FAB_HTML = """
        (0 outside the workbench modes) so the stack tracks the map's own edge
        instead of the window's. */
     right: calc(14px + env(safe-area-inset-right) + var(--wb-right, 0px));
-    z-index: 9995;
+    z-index: var(--z-float);
     display: flex; flex-direction: column; gap: 8px;
     pointer-events: none;
     transition: bottom 0.25s ease-out;
@@ -2553,13 +2765,20 @@ MAP_FAB_HTML = """
   }
   /* Built-in landmarks the user has hidden via the popup. Default state:
      hidden entirely. When the body carries .attr-show-all (fab-attractions
-     in its third state) they re-appear ghosted so they can be un-hidden. */
+     in its third state) they re-appear ghosted so they can be un-hidden.
+     M-3.2-01: unlayered on purpose. This beats leaflet.css's
+     `.leaflet-marker-icon { display: block }` on specificity (0,2,0 vs
+     0,1,0) — and leaflet.css is not in a cascade layer, so a layered copy
+     of this rule would lose no matter how specific it is and every hidden
+     landmark would come back. */
+  /* @layer-exempt-start */
   .leaflet-marker-icon.bm-mk-hidden { display: none; }
   body.attr-show-all .leaflet-marker-icon.bm-mk-hidden {
     display: block;
     opacity: 0.45;
     filter: grayscale(1);
   }
+  /* @layer-exempt-end */
   /* Low-zoom collapsed marker. At zoom < ZOOM_LOW_THRESHOLD (Python side,
      mirrored in JS) the full emoji+label hides and a 16px bare emoji
      stands in — same size as the restaurant cluster icons, but with no
@@ -2588,9 +2807,12 @@ MAP_FAB_HTML = """
   /* M-159: Leaflet's own zoom control is off (folium builds the map with
      zoomControl disabled), so pinch was the only way to zoom on a laptop
      trackpad without a scroll wheel. Desktop / tablet only — a phone has
-     pinch and the column is already five buttons tall. */
+     pinch and the column is already five buttons tall.
+     M-3.2-01: 699 -> 749 so "phone" means the same width here as it does in
+     wbModeFor(); 700-749 used to get desktop zoom buttons on a layout the
+     JS was already treating as a phone. */
   .map-fab.map-fab-zoom { font-size: 22px; font-weight: 400; line-height: 1; }
-  @media (max-width: 699px) { .map-fab.map-fab-zoom { display: none; } }
+  @media (max-width: 749px) { .map-fab.map-fab-zoom { display: none; } }
   .map-fab:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   .map-fab .map-fab-svg {
     width: 20px; height: 20px; display: block;
@@ -2601,7 +2823,7 @@ MAP_FAB_HTML = """
   .map-fab.map-fab-circle.locating { background: #2563eb; color: #fff;
                                      border-color: #2563eb; }
   /* Tighten on narrow screens — drop the label, keep just the icon. */
-  @media (max-width: 480px) {
+  @media (max-width: 559px) {
     /* F2 / M-078: square 44px targets instead of a 37x35 icon pill. */
     .map-fab { width: 44px; height: 44px; padding: 0;
                justify-content: center; align-self: flex-end; }
@@ -2734,12 +2956,12 @@ MAP_FAB_HTML = """
   #layers-pop[hidden] { display: none; }
   /* The stack is position:fixed WITH a z-index, so it is its own stacking
      context — a z-index on #layers-pop alone can never lift the panel over
-     the detail card (10002) or the search capsule (9996). Raise the whole
+     the detail card (--z-sheet) or the search capsule. Raise the whole
      stack for as long as the panel is up instead. It only ever applies
      after the user reached #fab-layers and opened the menu, so M-071's
      "buttons behind a near-fullscreen card beat buttons jammed under the
      search box" trade-off is untouched in every other state. */
-  .map-fab-stack.lp-open { z-index: 10003; }
+  .map-fab-stack.lp-open { z-index: var(--z-popover); }
   #layers-pop.lp-down {
     bottom: auto; top: calc(100% + 8px);
     transform-origin: top right;
@@ -2921,33 +3143,34 @@ SEARCH_BOX_HTML = """
                                      var(--app-inset-top, 0px)) + 8px));
     --chrome-inset: 12px;
   }
-  @media (max-width: 480px) { :root { --chrome-inset: 8px; } }
+  @media (max-width: 559px) { :root { --chrome-inset: 8px; } }
   #ss-box {
     position: fixed;
     top: var(--chrome-top); left: 50%;
     transform: translateX(-50%);
-    z-index: 9996;
+    z-index: calc(var(--z-float) + 1);
     /* H5 / M-086: 380px was set for a phone and never grew — on a desktop
        the box used a fifth of the width while its own rows ellipsized. */
     width: min(calc(100vw - 2 * var(--chrome-inset)),
                clamp(380px, 64vw, 560px));
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
-  /* M-073: the search box sits *below* the two bottom sheets (10002), so an
-     open restaurant card covered the result dropdown and the account menu —
-     on a short window every single row was unreachable. Lift the whole box
-     while something is dropped out of it, and only then: 10003 clears both
-     sheets but stays under #bm-backdrop (10010), so the bookmark modal's
-     scrim still means "nothing else is clickable".
+  /* M-073: the search box sits *below* the two bottom sheets (--z-sheet),
+     so an open restaurant card covered the result dropdown and the account
+     menu — on a short window every single row was unreachable. Lift the
+     whole box while something is dropped out of it, and only then:
+     --z-popover clears both sheets but stays under #bm-backdrop
+     (--z-modal - 1), so the bookmark modal's scrim still means "nothing
+     else is clickable".
      Two selectors, deliberately not one list: the class is toggled by
      ssFinalize/ssCloseDropdown for the search dropdown, and the :has()
      rule covers the account menu without reaching into its handler. A
      browser without :has() simply drops that second rule. */
   #ss-box.ss-open {
-    z-index: 10003;
+    z-index: var(--z-popover);
   }
   #ss-box:has(#ss-menu.open) {
-    z-index: 10003;
+    z-index: var(--z-popover);
   }
   #ss-input-wrap {
     position: relative; display: flex; align-items: center;
@@ -3201,10 +3424,10 @@ SEARCH_BOX_HTML = """
      pointer instead, it now covers all of them. Kept separate from the
      layout block below on purpose: widening #ss-box to calc(100vw - 16px)
      on an iPad would stretch the search box across the whole screen. */
-  @media (max-width: 480px), (hover: none) and (pointer: coarse) {
+  @media (max-width: 559px), (hover: none) and (pointer: coarse) {
     #ss-input { font-size: 16px; }       /* iOS no-zoom */
   }
-  @media (max-width: 480px) {
+  @media (max-width: 559px) {
     /* H8 / M-090: 8px was measured from the viewport edge, which on a
        notched phone is under the status bar. env() is 0 elsewhere. */
     #ss-box { top: calc(env(safe-area-inset-top) + 8px);
@@ -3483,7 +3706,7 @@ HELP_POPOVER_HTML = """
 <style>
   #ff-help-pop {
     position: fixed;
-    z-index: 10030;
+    z-index: calc(var(--z-popover) + 2);
     max-width: 260px;
     background: #1f2937; color: #f3f4f6;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -3540,7 +3763,7 @@ HELP_POPOVER_HTML = """
      walks into them. -->
 <style>
   #kb-help {
-    position: fixed; z-index: 10035;
+    position: fixed; z-index: calc(var(--z-modal) + 1);
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(340px, calc(100vw - 32px));
     max-height: min(80vh, 520px); max-height: min(80dvh, 520px);
@@ -3610,7 +3833,12 @@ ONBOARD_HTML = """
      so all three sizes are one soft, high-transparency blue instead; the
      number inside already says how many. The
      selectors carry an extra class (0,2,0) so they outrank the vendor
-     sheet's (0,1,0) — no !important needed, and none is used. */
+     sheet's (0,1,0) — no !important needed, and none is used.
+     M-3.2-01: and therefore unlayered on purpose — specificity only decides
+     ties inside one layer, and MarkerCluster.Default.css is unlayered, so a
+     layered copy of this block would lose and the clusters would go back to
+     green/yellow/orange. */
+  /* @layer-exempt-start */
   .leaflet-pane .marker-cluster-small,
   .leaflet-pane .marker-cluster-medium,
   .leaflet-pane .marker-cluster-large {
@@ -3623,6 +3851,7 @@ ONBOARD_HTML = """
     color: #1e3a8a;
     font-weight: 700;
   }
+  /* @layer-exempt-end */
 
   /* ---- M-109: first-visit value bar -----------------------------------
      One dismissible row under the search box, never a full-screen scrim:
@@ -3634,7 +3863,7 @@ ONBOARD_HTML = """
     /* W-10: the same inset #ss-box uses, so the two stack edge-to-edge
        instead of 12 vs 8. */
     left: var(--chrome-inset); right: var(--chrome-inset);
-    z-index: 9995;
+    z-index: var(--z-float);
     box-sizing: border-box;
     display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
     /* Room on the right for the absolutely-positioned × — as a flex item it
@@ -3661,16 +3890,18 @@ ONBOARD_HTML = """
      comes off the usable width, hence the smaller text basis — with 160 the
      two CTAs wrapped onto a third row at 393px. Must stay AFTER the .ib-txt
      rule above: same specificity, so source order decides. */
-  @media (max-width: 480px) {
+  @media (max-width: 559px) {
     #intro-bar { right: calc(var(--chrome-inset) + 44px); }
     #intro-bar .ib-txt { flex-basis: 120px; }
   }
-  /* A-2 (2.3.0): the phone layout reaches 749px now. Above 480px #ss-box is
-     a CENTRED clamp() box rather than the full-bleed one the rule above
-     assumes, so a symmetric inset lands the bar 100+px to the right of the
-     capsule on a 591 / 616px Fold screen. Mirror #ss-box's own width formula
-     and take the same 44px avatar column off the right edge. */
-  @media (min-width: 481px) and (max-width: 749px) {
+  /* A-2 (2.3.0): the phone layout reaches 749px now. Above the compact
+     breakpoint #ss-box is a CENTRED clamp() box rather than the full-bleed
+     one the rule above assumes, so a symmetric inset lands the bar 100+px to
+     the right of the capsule on a 591 / 616px Fold screen. Mirror #ss-box's
+     own width formula and take the same 44px avatar column off the right
+     edge. M-3.2-01: 481 -> 560, so the Fold's 60% inner screen (591) sits in
+     the `medium` band with one owner instead of between two. */
+  @media (min-width: 560px) and (max-width: 749px) {
     #intro-bar {
       --ss-w: min(calc(100vw - 2 * var(--chrome-inset)),
                   clamp(380px, 64vw, 560px));
@@ -3710,7 +3941,7 @@ ONBOARD_HTML = """
      Same geometry and behaviour contract as #kb-help: centered card, no
      scrim, closed by Esc / the back gesture / its own ×. */
   .ob-modal {
-    position: fixed; z-index: 10035;
+    position: fixed; z-index: calc(var(--z-modal) + 1);
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(360px, calc(100vw - 32px));
     max-height: min(82vh, 620px); max-height: min(82dvh, 620px);
@@ -3785,7 +4016,7 @@ ONBOARD_HTML = """
 
   /* ---- M-066: the one-shot install snackbar --------------------------- */
   #install-snack {
-    position: fixed; z-index: 10036;
+    position: fixed; z-index: calc(var(--z-modal) + 2);
     left: 50%; transform: translateX(-50%);
     bottom: calc(env(safe-area-inset-bottom) + 16px);
     width: min(420px, calc(100vw - 24px));
@@ -3842,11 +4073,11 @@ ONBOARD_HTML = """
      written in their own language, which is the whole point. */
   #lang-gate[hidden] { display: none; }
   #lang-gate .lg-scrim {
-    position: fixed; inset: 0; z-index: 10050;
+    position: fixed; inset: 0; z-index: calc(var(--z-modal) + 3);
     background: rgba(15, 23, 42, 0.45);
   }
   #lang-gate .lg-card {
-    position: fixed; z-index: 10051;
+    position: fixed; z-index: calc(var(--z-modal) + 4);
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(320px, calc(100vw - 40px));
     box-sizing: border-box;
@@ -4073,7 +4304,7 @@ PHONE_DRAWER_HTML = """
   /* Its own scrim, deliberately NOT #ff-backdrop: that one is the filter
      sheet's and carries .ff-open, which closeFilterUI() clears. */
   #wb-fav-backdrop {
-    position: fixed; inset: 0; z-index: 10001;
+    position: fixed; inset: 0; z-index: calc(var(--z-sheet) - 1);
     background: rgba(0,0,0,0.35);
     opacity: 0; pointer-events: none;
     transition: opacity 0.22s ease-out;
@@ -4088,7 +4319,7 @@ PHONE_DRAWER_HTML = """
     position: fixed; left: 0; top: 0; bottom: 0; right: auto;
     width: min(86vw, 380px);
     height: auto;
-    z-index: 10002;
+    z-index: var(--z-sheet);
     transform: none;
     pointer-events: auto;
     padding-top: env(safe-area-inset-top);
@@ -4110,10 +4341,11 @@ PHONE_DRAWER_HTML = """
   /* W-6: the filter sheet opens ON TOP of the drawer instead of replacing it
      (openFilterUI adds the class, closeFilterUI takes it off), so the back
      gesture closes the filter first and lands back on the list. #ff-backdrop
-     is 10001 and #ff-sheet 10002 — the drawer and its own scrim have to drop
-     under both, and #wb-left is inert for the duration anyway (INERT_SEL). */
-  body.wb-fav-under #wb-left      { z-index: 9998; }
-  body.wb-fav-under #wb-fav-backdrop { z-index: 9997; }
+     is --z-sheet - 1 and #ff-sheet --z-sheet — the drawer and its own scrim
+     have to drop under both (down into the --z-float band), and #wb-left is
+     inert for the duration anyway (INERT_SEL). */
+  body.wb-fav-under #wb-left      { z-index: calc(var(--z-float) + 3); }
+  body.wb-fav-under #wb-fav-backdrop { z-index: calc(var(--z-float) + 2); }
   /* The scrim covers the whole viewport, so the FABs behind it are dimmed
      and unclickable either way — hide them outright rather than leave two
      ghost buttons showing through. Same move openFilterUI() makes with
@@ -4175,7 +4407,7 @@ PHONE_DRAWER_HTML = """
   :root { --phone-nav-h: 0px; --ux-context-h: 0px; }
   #phone-nav { display: none; }
   #ux-context {
-    position: fixed; z-index: 9996;
+    position: fixed; z-index: calc(var(--z-float) + 1);
     top: calc(var(--wb-top) + 8px); left: calc(var(--wb-left) + 12px);
     right: calc(var(--wb-right) + 12px); width: fit-content; max-width: calc(100vw - 24px);
     display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
@@ -4238,7 +4470,7 @@ PHONE_DRAWER_HTML = """
       outline: 2px solid #2563eb; outline-offset: 2px; }
     #ss-top > #ux-nearby:disabled { color: #64748b; cursor: wait; }
     #ux-context.ux-context-idle { display: none; }
-    #phone-nav { position: fixed; z-index: 10005; inset: auto 0 0;
+    #phone-nav { position: fixed; z-index: var(--z-bar); inset: auto 0 0;
       display: grid; grid-template-columns: repeat(4,minmax(0,1fr));
       min-height: calc(56px + max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px))); box-sizing: border-box;
       padding: 4px max(6px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));
@@ -4303,7 +4535,7 @@ BOOKMARKS_MODAL_HTML = """
      every visitor a ~2.6s CDN fetch for a feature almost nobody opens. -->
 <style>
   #bm-backdrop {
-    position: fixed; inset: 0; z-index: 10010;
+    position: fixed; inset: 0; z-index: calc(var(--z-modal) - 1);
     background: rgba(0,0,0,0.35);
     opacity: 0; pointer-events: none;
     transition: opacity 0.2s ease-out;
@@ -4312,7 +4544,7 @@ BOOKMARKS_MODAL_HTML = """
   #bm-modal {
     position: fixed; left: 50%; top: 50%;
     transform: translate(-50%, -50%) scale(0.96);
-    z-index: 10011;
+    z-index: var(--z-modal);
     width: min(92vw, 340px);
     max-height: 90vh; max-height: 90dvh;
     background: #fff;
@@ -4418,7 +4650,7 @@ BOOKMARKS_MODAL_HTML = """
   /* M-081: the 16px anti-zoom rule applies to every touch device, not just
      the ≤480px ones (see the same split in SEARCH_BOX_HTML); the keyboard-
      avoidance repositioning stays phone-only. */
-  @media (max-width: 480px), (hover: none) and (pointer: coarse) {
+  @media (max-width: 559px), (hover: none) and (pointer: coarse) {
     #bm-modal .bm-row > input { font-size: 16px; }
     #bm-modal #bm-emoji { font-size: 18px; }
   }
@@ -4427,7 +4659,7 @@ BOOKMARKS_MODAL_HTML = """
      keyboard) kept the centered modal and put 保存 / 取消 behind the
      keyboard. One comma. The visualViewport listener in FILTER_JS refines
      this further when the API is available. */
-  @media (max-width: 480px), (pointer: coarse) {
+  @media (max-width: 559px), (pointer: coarse) {
     #bm-modal { top: 7dvh; transform: translate(-50%, 0) scale(0.96); }
     #bm-modal.bm-open { transform: translate(-50%, 0) scale(1); }
   }
@@ -4695,12 +4927,12 @@ BOOKMARKS_MODAL_HTML = """
      Lives in this constant (not SEARCH_BOX_HTML) so it rides the same
      body-level injection as #bm-modal — confirmed-safe for position:fixed. */
   #imp-backdrop {
-    position: fixed; inset: 0; z-index: 11000;
+    position: fixed; inset: 0; z-index: calc(var(--z-modal) + 5);
     background: rgba(0,0,0,0.35); display: none;
   }
   #imp-backdrop.imp-open { display: block; }
   #imp-modal {
-    position: fixed; z-index: 11001;
+    position: fixed; z-index: calc(var(--z-modal) + 6);
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(360px, calc(100vw - 32px));
     background: #fff; border-radius: 14px;
@@ -4802,7 +5034,7 @@ BOOKMARKS_MODAL_HTML = """
 FAV_LIST_MODAL_HTML = """
 <style>
   #fl-backdrop {
-    position: fixed; inset: 0; z-index: 10020;
+    position: fixed; inset: 0; z-index: calc(var(--z-modal) - 1);
     background: rgba(0,0,0,0.35);
     opacity: 0; pointer-events: none;
     transition: opacity 0.2s ease-out;
@@ -4811,7 +5043,7 @@ FAV_LIST_MODAL_HTML = """
   #fl-modal {
     position: fixed; left: 50%; top: 50%;
     transform: translate(-50%, -50%) scale(0.96);
-    z-index: 10021;
+    z-index: var(--z-modal);
     /* 360 not 340: eight 34px presets + gaps fit on one row at this width,
        and the row only wraps below ~330px of viewport (split-view). */
     width: min(92vw, 360px);
@@ -4832,7 +5064,7 @@ FAV_LIST_MODAL_HTML = """
   /* Same keyboard-avoidance anchor as #bm-modal (M-080/M-081): fixed
      centering is relative to the layout viewport, so with a soft keyboard up
      the 保存 / 取消 row sits behind it on anything touch. */
-  @media (max-width: 480px), (pointer: coarse) {
+  @media (max-width: 559px), (pointer: coarse) {
     #fl-modal { top: 7dvh; transform: translate(-50%, 0) scale(0.96); }
     #fl-modal.fl-open { transform: translate(-50%, 0) scale(1); }
   }
@@ -4874,7 +5106,7 @@ FAV_LIST_MODAL_HTML = """
     outline: 2px solid #2563eb; outline-offset: 1px;
   }
   /* M-081: 16px suppresses iOS focus-zoom on every touch device. */
-  @media (max-width: 480px), (hover: none) and (pointer: coarse) {
+  @media (max-width: 559px), (hover: none) and (pointer: coarse) {
     #fl-modal #fl-name { font-size: 16px; }
   }
   #fl-modal .fl-emoji-list {
@@ -5102,7 +5334,7 @@ MOBILE_UX_ASSETS = """
      legacy JS references (bsBackdrop.classList.add(...)) don't have to be
      ripped out; the .bs-open class is now a no-op. */
   #bs-backdrop {
-    position: fixed; inset: 0; z-index: 10001;
+    position: fixed; inset: 0; z-index: calc(var(--z-sheet) - 1);
     pointer-events: none;
     background: transparent;
   }
@@ -5114,7 +5346,7 @@ MOBILE_UX_ASSETS = """
        200ms. Auto margins between left:0 and right:0 center the sheet on
        the same axis at every width, and the breakpoint only sets a width. */
     margin-left: auto; margin-right: auto;
-    z-index: 10002;
+    z-index: var(--z-sheet);
     /* M-091: the cap was a bare percentage, so on a 416px-tall landscape
        Fold the expanded card left a 116px sliver of map. Keep whichever of
        the two is smaller — the fraction, or "the viewport minus 132px". */
@@ -5136,14 +5368,14 @@ MOBILE_UX_ASSETS = """
      (e.g., loading placeholder → full card) would make it jump wider.
      M-152: width only — left/right/transform stay exactly as the base rule
      set them, so crossing this breakpoint never re-animates the sheet. */
-  @media (min-width: 700px) {
+  @media (min-width: 750px) {
     #bs-sheet { width: min(680px, calc(100vw - 32px));
                 max-height: min(80vh, calc(100vh - 132px));
                 max-height: min(80dvh, calc(100dvh - 132px));
                 border-radius: 12px 12px 0 0; }   /* G8 */
   }
   /* Desktop: roomier sheet so the 2-column popup layout has space. */
-  @media (min-width: 1100px) {
+  @media (min-width: 1280px) {
     #bs-sheet { width: min(880px, calc(100vw - 32px));
                 max-height: min(85vh, calc(100vh - 132px));
                 max-height: min(85dvh, calc(100dvh - 132px)); }
@@ -5247,8 +5479,8 @@ MOBILE_UX_ASSETS = """
   /* ===== Restaurant detail card (lives inside #bs-content) ===== */
   /* M-111 / D1: the card is a query container. Its host moves between the
      bottom sheet (up to 880px wide) and the workbench's 340/384px right
-     column, so a `@media (min-width: 1100px)` two-column rule was reading
-     the wrong number entirely — the viewport is wide, the card is not. */
+     column, so a viewport-width two-column rule was reading the wrong
+     number entirely — the viewport is wide, the card is not. */
   .rst-card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
               font-size: 13px; color: #1f2937;
               container-type: inline-size; container-name: rstcard; }
@@ -5522,7 +5754,7 @@ MOBILE_UX_ASSETS = """
      browser's own pinch-zoom works here (the map's gesture guards are bound
      to .leaflet-container only and this overlay sits above it). */
   #ph-lb {
-    position: fixed; inset: 0; z-index: 11002;   /* above every sheet/modal */
+    position: fixed; inset: 0; z-index: var(--z-lightbox);   /* above every sheet/modal */
     background: rgba(0, 0, 0, 0.92);
     display: flex; align-items: center; justify-content: center;
     padding: 16px;
@@ -5597,13 +5829,13 @@ MOBILE_UX_ASSETS = """
     .rst-btn.rst-on-black:hover { background: #fecaca; }
   }
   /* Tablet+: tighter title, larger photos */
-  @media (min-width: 700px) {
+  @media (min-width: 750px) {
     .rst-card { font-size: 14px; }
     .rst-title { font-size: 18px; }
     .rst-photos { gap: 8px; }
   }
   /* Desktop: photos still 3-up but bigger */
-  @media (min-width: 1100px) {
+  @media (min-width: 1280px) {
     #bs-content { padding: 0 22px 22px; }
     .rst-card { font-size: 14px; }
     .rst-title { font-size: 20px; }
@@ -5679,8 +5911,13 @@ MOBILE_UX_ASSETS = """
 #                  stays quiet — it lives in #ff-sync-status as before.
 #   #sync-stack    bottom stack: transient toasts + the dismissible
 #                  "sign in to sync" hint (M-033). Sits above the two bottom
-#                  sheets (10002) so a toast fired from an open restaurant
-#                  card is actually visible, but below #bm-backdrop (10010).
+#                  sheets (--z-toast > --z-sheet) so a toast fired from an
+#                  open restaurant card is actually visible, but below
+#                  #bm-backdrop. M-3.2-01: SPEC asks for this stack to stop
+#                  covering the locate / layers FABs. Lowering z is not the
+#                  way — it would put toasts back under an open card. The
+#                  stack keeps its right edge clear of the FAB column
+#                  instead (see #sync-stack's padding-right below).
 #   #ff-empty-map  centred "nothing matches" card over the map (M-028).
 #   #sync-sr       the polite live region every non-visual announcement
 #                  funnels through (M-089).
@@ -5709,7 +5946,7 @@ SYNC_UI_HTML = """
     position: fixed;
     top: calc(var(--chrome-top) + 48px);
     left: 50%; transform: translateX(-50%);
-    z-index: 10005;
+    z-index: var(--z-toast);
     width: min(calc(100vw - 24px), 460px);
     box-sizing: border-box;
     display: flex; align-items: flex-start; gap: 8px;
@@ -5732,13 +5969,24 @@ SYNC_UI_HTML = """
   }
 
   /* ---- M-033: bottom stack (toasts + sign-in hint) ---- */
+  /* M-3.2-01 / PH: the hint is 460px wide at the height the FAB column
+     occupies, so on a phone it covered the locate / layers FABs and
+     swallowed the taps —
+     the container is pointer-events:none but its children are not. The fix
+     is horizontal, not vertical: --fab-w is the live width of the FAB
+     column (the stack's own JS publishes it, and the attribution credit
+     already reserves the same gutter), so the toast simply stops short of
+     it. Dropping the stack UNDER the FABs instead would have hidden every
+     toast behind an open restaurant card, which is the thing --z-toast >
+     --z-sheet exists to prevent. */
   #sync-stack {
     position: fixed;
     left: 0; right: 0;
     bottom: calc(76px + env(safe-area-inset-bottom));
-    z-index: 10005;
+    z-index: var(--z-toast);
     display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 0 12px; pointer-events: none;
+    padding: 0 calc(12px + var(--fab-w, 0px)) 0 12px;
+    pointer-events: none;
   }
   #sync-stack > * {
     pointer-events: auto;
@@ -5827,7 +6075,7 @@ SYNC_UI_HTML = """
   #ff-empty-map {
     position: fixed;
     top: 50%; left: 50%; transform: translate(-50%, -50%);
-    z-index: 9994;
+    z-index: calc(var(--z-float) - 1);
     width: min(calc(100vw - 48px), 320px);
     box-sizing: border-box;
     padding: 16px 18px;
@@ -6085,7 +6333,7 @@ WORKBENCH_HTML = """
   #wb-top {
     position: fixed; top: 0; left: 0; right: 0;
     height: var(--wb-top);
-    z-index: 10004;          /* over the sheets (10002), under #bm-backdrop */
+    z-index: var(--z-bar);   /* over the sheets, under #bm-backdrop */
     box-sizing: border-box;
     background: #fff;
     border-bottom: 1px solid #e5e7eb;
@@ -6132,7 +6380,7 @@ WORKBENCH_HTML = """
     max-height: none; margin-top: 0;
     border-radius: 0; border-left: none; border-bottom: none;
     box-shadow: 6px 0 16px rgba(0,0,0,0.10);
-    z-index: 10003;
+    z-index: var(--z-popover);
   }
   /* Fixed widths, not var(--wb-left): with a card open on a mid viewport
      the column is a 58px rail, and search results still want the full one. */
@@ -6167,7 +6415,7 @@ WORKBENCH_HTML = """
   body.wb-mid #wb-lang { padding: 0 9px; }
   #wb-lang-pop {
     position: absolute; top: calc(100% + 6px); right: 0;
-    z-index: 10006;
+    z-index: calc(var(--z-popover) + 1);
     min-width: 148px; padding: 4px;
     background: #fff;
     border: 1px solid #e5e7eb; border-radius: 10px;
@@ -6224,7 +6472,7 @@ WORKBENCH_HTML = """
   /* ---------- left column / split-mode bottom panel ---------- */
   #wb-left {
     position: fixed;
-    z-index: 9990;
+    z-index: var(--z-column);
     box-sizing: border-box;
     background: #fff;
     flex-direction: column;
@@ -6311,7 +6559,7 @@ WORKBENCH_HTML = """
   body.wb-split #wb-split-handle {
     display: block;
     position: fixed; left: 0; right: 0; bottom: var(--wb-bottom);
-    height: 16px; z-index: 9991;
+    height: 16px; z-index: calc(var(--z-column) + 1);
     background: transparent; cursor: row-resize; touch-action: none;
   }
   #wb-split-handle::before {
@@ -6328,7 +6576,7 @@ WORKBENCH_HTML = """
   body.wb-wide.wb-left-collapsed #wb-rail {
     display: flex;
     position: fixed; top: var(--wb-top); left: 0; bottom: 0; width: 58px;
-    z-index: 9993;
+    z-index: var(--z-rail);
     flex-direction: column; align-items: center; gap: 6px;
     padding: 8px 0;
     box-sizing: border-box;
@@ -6361,7 +6609,7 @@ WORKBENCH_HTML = """
   /* ---------- detail column ---------- */
   #wb-detail {
     position: fixed; top: var(--wb-top); right: 0; bottom: 0;
-    z-index: 9992;
+    z-index: calc(var(--z-column) + 2);
     box-sizing: border-box;
     background: #fff; border-left: 1px solid #e5e7eb;
     flex-direction: column; overflow: hidden;
@@ -6412,7 +6660,7 @@ WORKBENCH_HTML = """
   /* ---------- A3: non-modal filter popover (mid / wide) ---------- */
   #wb-filter-pop {
     position: fixed; top: calc(var(--wb-top) + 6px); right: 12px;
-    z-index: 10004;
+    z-index: var(--z-bar);
     box-sizing: border-box;
     width: min(640px, calc(100vw - 24px));
     max-height: calc(100dvh - var(--wb-top) - 24px);
@@ -6513,8 +6761,14 @@ WORKBENCH_HTML = """
 
   /* H8 / M-090: the credit lives inside the map container, so it inherits
      the inset for free — all it ever lacked was the bottom safe-area inset.
-     env() is 0 on every non-notched device, so nothing moves there. */
+     env() is 0 on every non-notched device, so nothing moves there.
+     M-3.2-01: unlayered on purpose. leaflet.css sets the shorthand
+     `padding: 0 5px` on the same selector at the same specificity, and it is
+     unlayered — layer this and the inset silently goes back to 0 on exactly
+     the notched phones it exists for (and on no machine we screenshot). */
+  /* @layer-exempt-start */
   .leaflet-control-attribution { padding-bottom: env(safe-area-inset-bottom); }
+  /* @layer-exempt-end */
   /* M-159: the scale bar has to clear #ff-fab (18px + 44px tall + slack);
      on the workbench modes #ff-fab is gone, so it drops back down. */
   .leaflet-control-scale { margin-bottom: 78px !important; }
@@ -6963,7 +7217,7 @@ FAV_TAB_HTML = """
 
   /* ---------- the "…" menu ---------- */
   #fv-menu {
-    position: fixed; z-index: 10006; display: none;
+    position: fixed; z-index: calc(var(--z-popover) + 1); display: none;
     min-width: 168px; max-width: 260px; max-height: 62dvh; overflow-y: auto;
     padding: 5px; box-sizing: border-box;
     border: 1px solid #e5e7eb; border-radius: 10px;
@@ -6995,7 +7249,7 @@ FAV_TAB_HTML = """
   /* Floats over the map, never over the left column: the insets are the same
      --wb-* variables the .folium-map rule uses, so it tracks every mode. */
   #fav-focus-bar {
-    position: fixed; z-index: 9995; display: none;
+    position: fixed; z-index: var(--z-float); display: none;
     top: 66px;
     left: calc(var(--wb-left) + 8px); right: calc(var(--wb-right) + 8px);
     justify-content: center; pointer-events: none;
@@ -8687,7 +8941,7 @@ FILTER_JS_TEMPLATE = r"""
     el.setAttribute('role', 'alert');
     el.style.cssText =
       'position:fixed;top:12px;left:50%;transform:translateX(-50%);' +
-      'z-index:99999;background:#dc2626;color:#fff;padding:10px 16px;' +
+      'z-index:var(--z-boot-fail, 99999);background:#dc2626;color:#fff;padding:10px 16px;' +
       'border-radius:8px;font:13px -apple-system,BlinkMacSystemFont,' +
       "'Segoe UI',sans-serif;box-shadow:0 4px 12px rgba(0,0,0,0.3);" +
       'max-width:calc(100vw - 32px);text-align:center;';
@@ -9072,6 +9326,29 @@ FILTER_JS_TEMPLATE = r"""
       viewSaveTimer = setTimeout(saveViewNow, 250);
     });
     window.addEventListener('pagehide', saveViewNow);
+    // M-3.2-01: the glass performance gate. backdrop-filter re-samples every
+    // tile under the element on every frame, which is exactly the frames a
+    // pan cannot spare on a 402px phone. body.map-moving turns the blur off
+    // for the duration; the trailing 120ms covers Leaflet's inertia and the
+    // zoom animation's last frames, and a new movestart cancels it so a
+    // flicked map never blinks the blur back on mid-gesture. Nothing wears
+    // the glass classes until M-3.2-02 — this ships first so the class is
+    // already correct when they arrive.
+    var mapMoveTimer = 0;
+    function mapMovingOn() {
+      clearTimeout(mapMoveTimer);
+      document.body.classList.add('map-moving');
+    }
+    function mapMovingOff() {
+      clearTimeout(mapMoveTimer);
+      mapMoveTimer = setTimeout(function() {
+        document.body.classList.remove('map-moving');
+      }, 120);
+    }
+    map.on('movestart', mapMovingOn);
+    map.on('zoomstart', mapMovingOn);
+    map.on('moveend',   mapMovingOff);
+    map.on('zoomend',   mapMovingOff);
     // iOS Safari bfcache restore: the page comes back with stale container
     // dimensions, so tiles render at the wrong size (often a gray band on
     // the right edge or below the address bar). invalidateSize() forces
@@ -10625,7 +10902,10 @@ FILTER_JS_TEMPLATE = r"""
       // desktop-comparison bucket). J / K keep working on every layout:
       // bsNav() falls back to the filtered corpus.
       var wbm = (typeof window.__wbMode === 'function') ? window.__wbMode() : 'phone';
-      var list = (wbm === 'phone') ? null : bsNavList();
+      // M-3.2-01: "is this one of the column modes", not "is this 'phone'" —
+      // the new 'medium' band (560-749) is a phone layout and must keep
+      // answering null here.
+      var list = wbIsColumnMode(wbm) ? bsNavList() : null;
       var i = list ? bsNavIndex(list, d) : -1;
       if (i < 0 || list.length < 2) { nav.hidden = true; return; }
       nav.hidden = false;
@@ -16202,10 +16482,10 @@ FILTER_JS_TEMPLATE = r"""
       // F1: below 520px the same #wb-left is the bottom drawer. It is live
       // only while the drawer is up, so a phone that never taps the ⭐ pill
       // still builds nothing and renders not one .wb-row.
-      if (m === 'phone') {
+      if (!wbIsColumnMode(m)) {
         return document.body.classList.contains('wb-fav-open');
       }
-      return m === 'split' || m === 'mid' || m === 'wide';
+      return true;
     }
     function wbReadRowH() {
       var h = 0;
@@ -17938,8 +18218,8 @@ FILTER_JS_TEMPLATE = r"""
     // M-027: two hosts for the SAME #ff-sheet-content element — the bottom
     // sheet (phone / split) and the anchored non-modal popover (mid / wide).
     // openFilterUI/closeFilterUI route by mode; openFilterSheet /
-    // closeFilterSheet stay as aliases because #ff-fab, uiRegister and the
-    // avatar menu all reference them by the old names.
+    // closeFilterSheet stay as aliases because #ff-fab and the avatar menu
+    // reference them by the old names.
     // opts.focus  = selector to focus once the panel is up (the top bar's
     //               region button uses it to land on #ff-region)
     // opts.anchor = element the popover should hang under
@@ -18009,11 +18289,14 @@ FILTER_JS_TEMPLATE = r"""
           wbSetTab('results');
         }
       }
-      uiDrop('filter');                  // M-015: no-op unless something old
     }
     function openFilterSheet()  { openFilterUI(); }
     function closeFilterSheet() { closeFilterUI(); }
-    uiRegister('filter', closeFilterSheet);   // M-015
+    // M-3.2-01: no uiRegister('filter') / uiDrop('filter'). Nothing has
+    // pushed the 'filter' kind since W-7 (2.3.0) folded the filter panel into
+    // the left column — on a phone the drawer's uiRegister('favdrawer') owns
+    // the back key, on mid / wide nothing is overlaid at all. A closer that
+    // can never be reached is a false lead about who owns Back.
     // W-7 (2.3.0): "is the filter panel on screen right now". The tab being
     // selected is not enough — on a phone the whole column is a closed
     // drawer, and on mid/wide it can be collapsed to the rail.
@@ -18110,11 +18393,23 @@ FILTER_JS_TEMPLATE = r"""
     // downgrade; 1100-1279 now runs mid, which auto-collapses.
     // A-2 (2.3.0): split is dead. The Fold's 60%-width inner screen (591px)
     // ran it, and the permanent bottom panel ate half of an already narrow
-    // window for a list the user had not asked for. Both thresholds are 750
-    // now, which makes wbModeFor()'s split branch unreachable — the code is
-    // kept because #wb-left's split rules and the drag handle are still in
-    // the cascade and deleting them is a separate, riskier change.
-    var WB_BP_SPLIT = 750, WB_BP_MID = 750, WB_BP_WIDE = 1280;
+    // window for a list the user had not asked for.
+    // M-3.2-01: the unreachable `split` branch is gone from wbModeFor() (and
+    // with it WB_BP_SPLIT). #wb-left's `body.wb-split` rules and
+    // #wb-split-handle stay in the cascade — CLAUDE.md files deleting them
+    // as its own, riskier change — so wbApplyMode() still clears the class.
+    //
+    // THESE FOUR NUMBERS ARE THE ONLY BREAKPOINTS ON THE PAGE. Every CSS
+    // width query has to be one of them (scripts/verify_build.py's
+    // check_breakpoints asserts it; a `max-width` query spells the boundary
+    // one pixel down, e.g. 559/560, 749/750):
+    //   compact  w < 560     iPhone 402, Fold cover 416/475
+    //   medium   560-749     Fold inner at 60% split (591), small tablets
+    //   mid      750-1279    Fold inner 816/932, narrow desktop windows
+    //   wide     w >= 1280   desktop
+    // 560 is the one genuinely new line (GW §2.2): 591px used to be neither
+    // `max-width: 480` nor `min-width: 700`, so nothing owned it.
+    var WB_BP_MEDIUM = 560, WB_BP_MID = 750, WB_BP_WIDE = 1280;
     var wbCur = '';                  // '' until the first wbApplyMode()
     var wbSplitPct = 45;             // split-mode panel height, % of viewport
     var wbTopEl      = document.getElementById('wb-top');
@@ -18127,10 +18422,14 @@ FILTER_JS_TEMPLATE = r"""
     var wbSplitHandle= document.getElementById('wb-split-handle');
     var wbFilterAnchor = null;
 
+    // M-3.2-01: 'medium' is a phone layout with room to breathe, NOT a
+    // column mode — wbIsPhoneLike() answers true for it, and every test that
+    // used to read `=== 'phone'` now asks "is this one of the two column
+    // modes?" instead, so adding this band changed no behaviour at 560-749.
     function wbModeFor(w) {
-      if (w >= WB_BP_WIDE)  return 'wide';
-      if (w >= WB_BP_MID)   return 'mid';
-      if (w >= WB_BP_SPLIT) return 'split';
+      if (w >= WB_BP_WIDE)   return 'wide';
+      if (w >= WB_BP_MID)    return 'mid';
+      if (w >= WB_BP_MEDIUM) return 'medium';
       return 'phone';
     }
     function wbMode() { return wbCur || 'phone'; }
@@ -18138,6 +18437,9 @@ FILTER_JS_TEMPLATE = r"""
     // "not the two column modes" so the pre-init '' state is phone-like —
     // a click that somehow lands before initMap finishes takes the old path.
     function wbIsPhoneLike() { return !(wbCur === 'mid' || wbCur === 'wide'); }
+    // The same question about a mode string that is not necessarily wbCur
+    // (a wb:mode event detail, window.__wbMode() from another closure).
+    function wbIsColumnMode(m) { return m === 'mid' || m === 'wide'; }
     function wbDetailMode()  { return wbCur === 'mid' || wbCur === 'wide'; }
     function wbDetailOpen()  { return document.body.classList.contains('wb-detail-open'); }
     // W-3: wide-only. The body class IS the state — wbLoadListView() puts it
@@ -18284,9 +18586,15 @@ FILTER_JS_TEMPLATE = r"""
       var changed = (m !== wbCur);
       wbCur = m;
       var cl = document.body.classList;
+      // M-3.2-01: wbModeFor() can no longer answer 'split', so this line only
+      // ever clears the class — kept deliberately, because a page restored
+      // from a pre-2.3.0 service-worker cache can have left it on the body.
       cl.toggle('wb-split', m === 'split');
       cl.toggle('wb-mid',   m === 'mid');
       cl.toggle('wb-wide',  m === 'wide');
+      // No CSS reads .wb-medium yet; M-3.2-04 hangs the centred search
+      // capsule and the chip row off it.
+      cl.toggle('wb-medium', m === 'medium');
       if (changed) {
         // A9: bsActive is untouched and #bs-content moves as a live node, so
         // the open card survives the rotation without a repaint; #wb-list is
@@ -18756,7 +19064,7 @@ FILTER_JS_TEMPLATE = r"""
       if (x) x.addEventListener('click', function() { closeFavDrawer(); });
     }
     function openFavDrawer() {
-      if (!wbLeftEl || wbMode() !== 'phone' || favDrawerOpen()) return;
+      if (!wbLeftEl || !wbIsPhoneLike() || favDrawerOpen()) return;
       // Both dock to the bottom of a phone: whatever is there now yields.
       if (ffIsOpen()) closeFilterUI();
       if (bsActive) closeSheet();
@@ -18866,7 +19174,7 @@ FILTER_JS_TEMPLATE = r"""
     // so the list and collections listeners have already reacted.
     document.addEventListener('wb:mode', function(ev) {
       var m = (ev && ev.detail && ev.detail.mode) || wbMode();
-      if (m !== 'phone' && favDrawerOpen()) closeFavDrawer(true);
+      if (wbIsColumnMode(m) && favDrawerOpen()) closeFavDrawer(true);
     });
 
     // ---- W-6: no more entry pill -----------------------------------------
@@ -20271,7 +20579,7 @@ FILTER_JS_TEMPLATE = r"""
       try { chosen = localStorage.getItem(LANG_KEY); } catch (_) { chosen = '1'; }
       if (chosen) return;
       var m = wbMode();
-      if (m !== 'phone' && m !== 'split') return;
+      if (wbIsColumnMode(m)) return;
       langGateUp = true;
       // navigator.language is a hint for which button to outline, and
       // nothing else — it never reaches activeLang. (M-103's lesson in a
@@ -21586,36 +21894,49 @@ def main(argv: list[str] | None = None) -> None:
         .replace("__ALL_VERSIONED_URLS__", json.dumps(all_versioned_urls)),
     )
     print(f"  sw.js:            build {build_version}")
+    # ---- assembly order = final cascade order. Do not reshuffle. ----------
+    # M-3.2-01 froze this list: every block below goes into the SAME
+    # `components` layer, so which one wins a tie is still decided by the
+    # order of these calls, exactly as it was before layers existed. The
+    # comments on the individual lines name the ties that are load-bearing.
+    # Adding a block? Append it, or put it where its comment says why.
+    # DESIGN_TOKENS_CSS is first because it carries the @layer statement that
+    # fixes the layer order for the whole document.
+    m.get_root().header.add_child(folium.Element(DESIGN_TOKENS_CSS))
     m.get_root().header.add_child(folium.Element(HEAD_BRANDING))
-    m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
-    m.get_root().header.add_child(folium.Element(MOBILE_UX_ASSETS))
-    m.get_root().html.add_child(folium.Element(BOTTOM_SHEET_HTML))
-    m.get_root().html.add_child(folium.Element(MAP_FAB_HTML))
-    m.get_root().html.add_child(folium.Element(SEARCH_BOX_HTML))
-    m.get_root().html.add_child(folium.Element(BOOKMARKS_MODAL_HTML))
-    m.get_root().html.add_child(folium.Element(FAV_LIST_MODAL_HTML))  # M-031 / E2
-    m.get_root().html.add_child(folium.Element(HELP_POPOVER_HTML))
+    m.get_root().header.add_child(folium.Element(css_layer(LOCATE_ASSETS)))
+    m.get_root().header.add_child(folium.Element(css_layer(MOBILE_UX_ASSETS)))
+    m.get_root().html.add_child(folium.Element(BOTTOM_SHEET_HTML))  # markup only
+    m.get_root().html.add_child(folium.Element(css_layer(MAP_FAB_HTML)))
+    m.get_root().html.add_child(folium.Element(css_layer(SEARCH_BOX_HTML)))
+    m.get_root().html.add_child(folium.Element(css_layer(BOOKMARKS_MODAL_HTML)))
+    m.get_root().html.add_child(
+        folium.Element(css_layer(FAV_LIST_MODAL_HTML)))  # M-031 / E2
+    m.get_root().html.add_child(folium.Element(css_layer(HELP_POPOVER_HTML)))
     # M-066 / M-109 / M-110 / M-119: intro bar, legend, about, install helper.
     # Anywhere in <body> works for the markup; the position matters only for
     # the cluster-colour override inside it, which has to land after folium's
-    # <head> <link> to MarkerCluster.Default.css.
-    m.get_root().html.add_child(folium.Element(build_about_html(all_rows)))
+    # <head> <link> to MarkerCluster.Default.css. M-3.2-01: that override is
+    # also @layer-exempt, because a layered rule loses to an unlayered vendor
+    # one however specific it is.
+    m.get_root().html.add_child(
+        folium.Element(css_layer(build_about_html(all_rows))))
     # M-033/M-034/M-028/M-089: sync banners, toasts, empty-state cards.
     # Added after the search box so its CSS (avatar badge, #ff-count.is-zero)
     # wins the tie against the earlier blocks it decorates.
-    m.get_root().html.add_child(folium.Element(SYNC_UI_HTML))
-    m.get_root().html.add_child(folium.Element(panel_html))
+    m.get_root().html.add_child(folium.Element(css_layer(SYNC_UI_HTML)))
+    m.get_root().html.add_child(folium.Element(css_layer(panel_html)))
     # M-027: after panel_html so the `body.wb-*` offset rules outrank the
     # #ff-sheet / #ff-fab / #bs-sheet blocks they reposition.
-    m.get_root().html.add_child(folium.Element(WORKBENCH_HTML))
+    m.get_root().html.add_child(folium.Element(css_layer(WORKBENCH_HTML)))
     # M-027 / B1: result-list styling, right after the shell it fills.
-    m.get_root().html.add_child(folium.Element(RESULT_LIST_HTML))
+    m.get_root().html.add_child(folium.Element(css_layer(RESULT_LIST_HTML)))
     # M-031 / E1-E2-E8-E9: the collections tab, after the .wb-row rules it reuses.
-    m.get_root().html.add_child(folium.Element(FAV_TAB_HTML))
+    m.get_root().html.add_child(folium.Element(css_layer(FAV_TAB_HTML)))
     # M-031 / F1: the phone drawer. Last of the shell blocks on purpose — its
     # `body.wb-fav-open` rules have to outrank the `body.wb-split` ones in
     # WORKBENCH_HTML, which have identical specificity.
-    m.get_root().html.add_child(folium.Element(PHONE_DRAWER_HTML))
+    m.get_root().html.add_child(folium.Element(css_layer(PHONE_DRAWER_HTML)))
     m.get_root().html.add_child(folium.Element(filter_js))
     # M-162: the crossOrigin escape hatch. Self-contained and independent of
     # initMap — it polls for folium's map object the same way — so a boot

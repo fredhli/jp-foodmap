@@ -631,6 +631,95 @@ def check_subcollections() -> None:
     ok("subcollections", f"all {len(SUBCOLLECTION_CONTRACTS)} E2 invariants hold")
 
 
+# M-3.2-01 / GW P3-P4. The page used to carry two disagreeing breakpoint
+# systems: seven CSS width thresholds (360/480/699/700/749/900/1100) against
+# the JS's two (WB_BP_MID 750, WB_BP_WIDE 1280). 700-749 got tablet CSS on a
+# layout the JS was running as a phone, 1100-1279 got desktop CSS on a
+# collapsed mid column, and 591px (the Fold's inner screen at 60%) belonged
+# to neither branch. One set of numbers now, asserted here rather than in a
+# comment nobody re-reads.
+#
+# A `max-width` query spells its boundary one pixel down, so 559 stands for
+# the 560 breakpoint and 749 for 750 — the check accepts n or n+1.
+BREAKPOINTS = {560, 750, 1280}
+# Narrow fallbacks, not layout decisions: they may only hide a third line of
+# text or drop a label, never move a panel. Kept out of BREAKPOINTS so a new
+# rule can't quietly grow one into a fourth layout.
+BREAKPOINT_FALLBACKS = {319, 360}
+# Content-driven exceptions, each pinned to the exact number of rules allowed
+# to use it. Growing one of these is a deliberate act, not a typo.
+BREAKPOINT_EXCEPTIONS = {
+    900: (1, "#wb-brand's wordmark (A-1, 2.3.0): mid is two columns from "
+             "750px, but the wordmark only fits from 900"),
+}
+# The JS half of the same contract.
+BREAKPOINT_JS_VARS = {"WB_BP_MEDIUM": 560, "WB_BP_MID": 750, "WB_BP_WIDE": 1280}
+
+
+def check_breakpoints() -> None:
+    if not MAP_HTML.exists():
+        fail("breakpoints", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+
+    # Only @media preludes. @container queries (the detail card measures its
+    # own host, M-111) and prose inside CSS comments are deliberately out.
+    widths: dict[int, int] = {}
+    for prelude in re.findall(r"@media([^{]*)\{", html):
+        for value in re.findall(r"\((?:min|max)-width:\s*([0-9]+)px\)", prelude):
+            widths[int(value)] = widths.get(int(value), 0) + 1
+
+    allowed = BREAKPOINTS | BREAKPOINT_FALLBACKS
+    problems = []
+    for value, count in sorted(widths.items()):
+        if value in allowed or (value + 1) in allowed:
+            continue
+        if value in BREAKPOINT_EXCEPTIONS:
+            limit, why = BREAKPOINT_EXCEPTIONS[value]
+            if count > limit:
+                problems.append(
+                    f"{value}px is used by {count} rules, but only {limit} is "
+                    f"allowed ({why})"
+                )
+            continue
+        problems.append(
+            f"{value}px is not one of the page's breakpoints "
+            f"{sorted(allowed)} (used by {count} rule(s))"
+        )
+
+    for name, expected in BREAKPOINT_JS_VARS.items():
+        found = re.search(rf"\b{name}\s*=\s*([0-9]+)", html)
+        if not found:
+            problems.append(f"{name} is gone from the page's JS")
+        elif int(found.group(1)) != expected:
+            problems.append(
+                f"{name} is {found.group(1)}, not {expected} — the CSS media "
+                f"queries and wbModeFor() have to answer at the same pixel"
+            )
+        elif expected not in widths and (expected - 1) not in widths:
+            problems.append(
+                f"{name} = {expected} has no matching CSS media query; a JS-only "
+                f"breakpoint means the layout and the mode string disagree"
+            )
+    # The declaration, not the name: map.py's comment explains why the split
+    # branch went away and naming it there must stay legal.
+    if re.search(r"\bWB_BP_SPLIT\s*=", html):
+        problems.append(
+            "WB_BP_SPLIT is back — split mode was retired in 2.3.0 and its "
+            "wbModeFor() branch was unreachable"
+        )
+
+    if problems:
+        fail("breakpoints", "; ".join(problems))
+        return
+    ok(
+        "breakpoints",
+        f"{len(widths)} CSS width threshold(s) {sorted(widths)} all resolve to "
+        f"{sorted(allowed)} (+{sorted(BREAKPOINT_EXCEPTIONS)} by exception), "
+        f"JS agrees",
+    )
+
+
 def check_service_worker() -> None:
     if not SW_JS.exists():
         fail("sw", f"{SW_JS} does not exist — run map.py first")
@@ -910,6 +999,7 @@ def main(argv: list[str] | None = None) -> int:
         check_restaurant_fields()    # M-023 / B1
         check_localstorage_keys()
         check_subcollections()       # M-031 / E2
+        check_breakpoints()          # M-3.2-01 / GW P3-P4
         check_service_worker()
         check_manifest_identity()    # M-145
         check_about_stamps()         # M-119
