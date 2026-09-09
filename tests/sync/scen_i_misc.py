@@ -67,7 +67,7 @@ def i1_keepalive(br):
                  and any(x.get('keepalive') for x in early)
                  and set((kv or {}).get('favorites') or []) == {U[0], U[3]}
                  and r['kv_writes_total'] == 1
-                 and not ui['fabPending'] and not r['page_errors'])
+                 and not ui['pushPending'] and not r['page_errors'])
     ctx.close()
     return r
 
@@ -133,7 +133,7 @@ def i4_dirty_keeps_pulling(br):
     dirty_while_failing = a.evaluate("JSON.parse(localStorage.getItem('omakase_state_cache_v2')).dirty")
     W.STATE.put_fail = False
     a.evaluate('window.__mcVisChange()')
-    a.wait_for_function('!window.__mcUI().fabPending', timeout=7500)
+    a.wait_for_function('!window.__mcUI().pushPending', timeout=7500)
     ui3 = a.evaluate('window.__mcUI()')
     kv = W.STATE.blob()
     r = {'id': 'I4', 'name': 'dirty device with a failing push still receives',
@@ -145,9 +145,9 @@ def i4_dirty_keeps_pulling(br):
          'page_errors': list(a.mc_errors)}
     r['pass'] = (ui1['fav'] == 2 and ui2['fav'] == 3 and ui3['fav'] == 3
                  and set((kv or {}).get('favorites') or []) == {U[0], U[3], U[9]}
-                 and dirty_while_failing is True and ui2['fabPending']
+                 and dirty_while_failing is True and ui2['pushPending']
                  and all(y['t'] - x['t'] >= 4900 for x, y in zip(failing_puts, failing_puts[1:]))
-                 and not ui3['fabPending'] and not r['page_errors'])
+                 and not ui3['pushPending'] and not r['page_errors'])
     ctx.close()
     return r
 
@@ -197,7 +197,7 @@ def i5_server_413(br):
     cache = a.evaluate("JSON.parse(localStorage.getItem('omakase_state_cache_v2'))")
     W.STATE.put_status = None
     a.evaluate('u => window.__mcTapFav(u)', U[0])
-    a.wait_for_function('!window.__mcUI().fabPending', timeout=7500)
+    a.wait_for_function('!window.__mcUI().pushPending', timeout=7500)
     kv = W.STATE.blob()
     r = {'id': 'I5b', 'name': 'server 413 blocks same content while GET and later edit work',
          'first_put_statuses': [x.get('status') for x in first_puts],

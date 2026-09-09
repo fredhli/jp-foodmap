@@ -193,12 +193,24 @@ def shown_count(page) -> int:
 # buttons; 3.2.0 is back to the 2.3.0 overlay drawer, opened from the
 # bottom-left segmented pill (#wb-seg, M-3.2-03), whose segments carry the
 # same data-ux-tab attribute.
+# M-3.2-06: a card has two close buttons and only one of them is on screen
+# at a time — `#bs-close` in the phone card's head row, `.rst-close` inside
+# the content for the desktop detail column. Clicking the hidden one times
+# out, so pick by what is actually visible rather than by viewport width.
+def close_detail(page) -> None:
+    head = page.locator("#bs-close")
+    if head.count() and head.is_visible():
+        head.click()
+    else:
+        page.locator("#bs-content .rst-close").first.click()
+    page.wait_for_timeout(200)
+
+
 # 'map' means "close whatever is open and show the map".
 def phone_tab(page, name: str) -> None:
     if name == "map":
         if page.locator("#bs-sheet.bs-open").count():
-            page.locator("#bs-content .rst-close").first.click()
-            page.wait_for_timeout(150)
+            close_detail(page)
         if page.locator("body.wb-fav-open").count():
             page.locator("#wb-fav-close").click()
         return
@@ -209,6 +221,5 @@ def phone_tab(page, name: str) -> None:
         page.locator("#wb-tab-" + name).click()
         return
     if page.locator("#bs-sheet.bs-open").count():
-        page.locator("#bs-content .rst-close").first.click()
-        page.wait_for_timeout(150)
+        close_detail(page)
     page.locator('#wb-seg [data-ux-tab="' + name + '"]').click()

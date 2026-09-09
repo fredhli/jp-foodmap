@@ -54,9 +54,9 @@ def h1(br):
     r = {'id': 'H1', 'name': 'sign out in one tab, keep using the other',
          'B_told': '另一个窗口' in ui_b0['status'],
          'B_edit_uploaded': n_puts() > n_before,
-         'B_status_text': ui['status'], 'B_fab_red_local_only': ui['fabNeedsSync'],
+         'B_status_text': ui['status'], 'B_badge_local_only': ui['localOnly'],
          'page_errors': list(b.mc_errors), 'timeline': tl}
-    r['pass'] = (r['B_told'] and not r['B_edit_uploaded'] and r['B_fab_red_local_only']
+    r['pass'] = (r['B_told'] and not r['B_edit_uploaded'] and r['B_badge_local_only']
                  and not r['page_errors'])
     ctx.close()
     return r

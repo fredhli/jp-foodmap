@@ -5754,7 +5754,17 @@ MOBILE_UX_ASSETS = """
      width hint but nothing beat `height:320px`, and CSS aspect-ratio only
      computes a side when the other one is auto — so the box was a
      107×320 column and object-fit:cover showed ~11% of the photo. */
-  .rst-photos img { width: 100%; height: auto; aspect-ratio: 4 / 3;
+  /* M-3.2-11: height is 100% of the box, not `auto` + aspect-ratio. With
+     `height: auto` the height comes from the intrinsic ratio, and WebKit
+     takes that from the width/height ATTRIBUTES while the bytes are still
+     missing or blocked — so on iOS a 640x640 placeholder rendered a 1:1
+     image inside the 4:3 tile and the bottom quarter was clipped off by
+     the box's overflow:hidden, a different crop from the one Chromium
+     showed. Pinning both sides to the box leaves object-fit:cover as the
+     only thing deciding the crop and the two engines agree. Pre-existing
+     (identical CSS in 2.3.0 and 3.1.2); the iPhone smoke rows this
+     milestone added on WebKit are what surfaced it. */
+  .rst-photos img { width: 100%; height: 100%; aspect-ratio: 4 / 3;
                     object-fit: cover;
                     border-radius: 6px; display: block; background: #f3f4f6; }
   /* Loading shimmer — a translated gradient strip (transform-only, stays

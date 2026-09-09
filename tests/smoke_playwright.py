@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Cross-viewport smoke test for the built page (M-056).
 
-    uv run python tests/smoke_playwright.py
+    uv run python tests/smoke_playwright.py                    # the Chromium rows
+    uv run python tests/smoke_playwright.py --browser webkit   # the iPhone rows
     uv run python tests/smoke_playwright.py --viewport fold-outer
     uv run python tests/smoke_playwright.py --screenshots <dir>
 
@@ -14,13 +15,20 @@ Twelve things, on each of the viewports the site is actually used at:
   filter    changing one filter changes the visible count
   account   the avatar menu opens and scrolls
   lang      (W-9) first visit below 700px asks which language, once
-  phone-nav (3.2 / M-3.2-02) below 750px the visible drawer entry reaches
-              each real panel, restores focus after a detail, keeps the
-              filter content in one host, and the drawer leaves map beside it
+  seg-pill  (3.2 / M-3.2-02+03) below 750px the floating segmented pill is
+            the drawer's only entry: three reachable segments that never
+            meet the FAB column, each opening the drawer on its own tab,
+            the current one closing it again, one filter host, detail
+            return with focus, and the map still painted beside the drawer
   chrome    (W-10) the intro bar lines up with the search input
   workbench (W-1/2/3) mid + wide: the rail with both counts, the
             auto-collapsing detail column, and the left-column collapse
             (mid AND wide as of 2.3.0)
+
+Every viewport declares the engine it is measured on and only runs under
+that one (M-3.2-11): an iPhone row is a WebKit row, and Chromium is never
+allowed to stand in for it. `--browser` picks the engine, and the default
+run is the Chromium half; the gate is both halves.
 
 A console error that is not on the offline allowlist (Google Identity's 403,
 the third-party hosts this run blocks) fails the viewport. Serves docs/ over
@@ -56,28 +64,37 @@ from lib_browser import (  # noqa: E402
 # 520-699 "split" mode (a permanent bottom panel over the map) is
 # unreachable. Everything below 750px — the Fold's inner screen in portrait
 # (616), the same screen at 60% width (591), the cover screen (416) and every
-# phone — is the phone layout with the four-destination bottom navigation.
+# phone — is the phone layout, which as of 3.2.0 means the overlay drawer
+# under the floating segmented pill.
+#
+# M-3.2-11: every row also names the engine it is measured on, and the runner
+# refuses to run it under any other. The iPhone rows are WebKit rows because
+# that is the engine those devices actually ship; a Chromium pass on 402x874
+# proves nothing about iOS Safari. The Fold and desktop rows are Chromium.
 VIEWPORTS = {
-    "fold-outer": {"width": 416, "height": 657, "mobile": True},
-    "fold-inner": {"width": 616, "height": 816, "mobile": True},
+    "fold-outer": {"width": 416, "height": 657, "mobile": True, "browser": "chromium"},
+    "fold-inner": {"width": 616, "height": 816, "mobile": True, "browser": "chromium"},
     # A-2: the Fold's inner screen in a 60%-width split window. Was 'split';
     # is phone from 2.3.0 on. Kept as its own row because it is the narrowest
     # window the multi-window shell can hand the page and still be usable.
-    "fold-inner-60": {"width": 591, "height": 689, "mobile": True},
-    "fold-actual-outer": {"width": 475, "height": 751, "mobile": True},
+    "fold-inner-60": {"width": 591, "height": 689, "mobile": True, "browser": "chromium"},
+    "fold-actual-outer": {"width": 475, "height": 751, "mobile": True, "browser": "chromium"},
     # M-027: the mid layout (top bar + left column + icon rail) exists between
     # 750 and 1279px, and the Fold's inner screen in landscape lives there.
-    "fold-inner-landscape": {"width": 816, "height": 616, "mobile": True},
-    "fold-actual-inner": {"width": 932, "height": 704, "mobile": True},
-    "iphone-small": {"width": 375, "height": 667, "mobile": True},
-    "iphone": {"width": 393, "height": 852, "mobile": True},
-    "iphone-large": {"width": 430, "height": 932, "mobile": True},
+    "fold-inner-landscape": {"width": 816, "height": 616, "mobile": True, "browser": "chromium"},
+    "fold-actual-inner": {"width": 932, "height": 704, "mobile": True, "browser": "chromium"},
+    "iphone-small": {"width": 375, "height": 667, "mobile": True, "browser": "webkit"},
+    "iphone": {"width": 393, "height": 852, "mobile": True, "browser": "webkit"},
+    "iphone-large": {"width": 430, "height": 932, "mobile": True, "browser": "webkit"},
+    # M-3.2-11: the iPhone 17 Pro CSS viewport, which is what the 3.2.0 phone
+    # work was designed and measured against (ux-phone's iphone402 row).
+    "iphone-17pro": {"width": 402, "height": 874, "mobile": True, "browser": "webkit"},
     # W-2: the wide threshold moved 1100 -> 1280, so a 1000px window that used
     # to be one resize away from the old boundary is now solidly mid. A
     # non-touch mid viewport is its own layout (the rail, the collapsed detail
     # column) and nothing else in this table covers it.
-    "desktop-mid": {"width": 1000, "height": 800, "mobile": False},
-    "desktop": {"width": 1440, "height": 900, "mobile": False},
+    "desktop-mid": {"width": 1000, "height": 800, "mobile": False, "browser": "chromium"},
+    "desktop": {"width": 1440, "height": 900, "mobile": False, "browser": "chromium"},
 }
 
 # A restaurant that is in every build of the corpus; the local search index
@@ -192,9 +209,22 @@ def check_card(page, name):
         "    && c.textContent.trim().length > 0; }",
         timeout=20000,
     )
-    txt = page.eval_on_selector("#bs-content", "el => el.textContent.trim().slice(0, 40)")
-    if not txt:
+    if not page.eval_on_selector("#bs-content", "el => el.textContent.trim()"):
         raise AssertionError("detail sheet opened empty")
+    # M-3.2-11: "filled" is not "loaded". The first marker tap of a page load
+    # paints a name + rating placeholder that says 加载中… while the 6.4 MB
+    # popups payload is still on the wire, and repaints when it lands.
+    # Chromium usually won that race and WebKit does not, so adding the
+    # iPhone rows turned this into four "the open card has no .rst-photos
+    # thumbnails" failures that were really "the card had not arrived yet".
+    page.wait_for_function(
+        "() => { const c = document.getElementById('bs-content');"
+        "  return c && !/加载中/.test(c.textContent); }",
+        timeout=90000)
+    if page.evaluate("() => /加载失败/.test("
+                     "document.getElementById('bs-content').textContent)"):
+        raise AssertionError("the detail payload failed to load for this card")
+    txt = page.eval_on_selector("#bs-content", "el => el.textContent.trim().slice(0, 40)")
     photos = _photo_geometry(page)
     # .bs-open starts the 250ms entrance transition. Wait for the action dock
     # to finish entering before measuring actual user reachability.
@@ -448,14 +478,27 @@ def check_lang(page, name):
     return "asked once, answered, gone"
 
 
-def check_phone_nav(page, name):
-    """3.2 (M-3.2-02): the 2.3.0 overlay drawer is back under a visible entry.
+def check_segmented_pill(page, name):
+    """3.2 (M-3.2-02 / M-3.2-03): the floating pill is the drawer's entry.
 
-    3.1.x docked a four-button bar to the bottom and turned the drawer into a
-    full page over a hidden map; both are gone. This check clicks the entry
-    a user sees (PHONE_ENTRY), verifies each destination, the one filter
-    host, detail return and focus — and that the map stays painted beside
-    the open drawer.
+    3.1.x docked a four-button `#phone-nav` bar to the bottom and turned the
+    drawer into a full page over a hidden map. Both are gone; the entry is
+    now `#wb-seg`, a 44px glass pill in the bottom-left corner with three
+    segments. What is asserted here, all of it through what a user can
+    actually touch:
+
+      * `#phone-nav` and `#ss-drawer-btn` are gone from the DOM, and nothing
+        phone-only leaks into the column layouts;
+      * all three segments are reachable 44px targets that hit-test to
+        themselves — and the pill as a whole never overlaps the right-hand
+        FAB column (SPEC §4: "the three segments are tappable and do not
+        overlap the FAB stack");
+      * each segment opens the drawer on its own tab, the pill goes away
+        under the open drawer (it would otherwise read as a second layer),
+        and `#wb-fav-close` brings the map back;
+      * the filter panel has exactly one host and no competing modal;
+      * a detail opened from a result row returns to that row with focus;
+      * the map stays painted beside the open drawer (3.1.x hid it).
     """
     phone = page.evaluate("() => !/wb-(mid|wide)/.test(document.body.className)")
     if not phone:
@@ -470,17 +513,36 @@ def check_phone_nav(page, name):
     phone_tab(page, "map")
     page.wait_for_timeout(300)
     state = page.evaluate("""(sels) => {
-      const gone = !document.getElementById('phone-nav');
+      const gone = !document.getElementById('phone-nav') && !document.getElementById('ss-drawer-btn');
+      const R = el => { const r = el.getBoundingClientRect();
+        return {l:r.left, t:r.top, r:r.right, b:r.bottom, w:r.width, h:r.height}; };
+      const pill = document.getElementById('wb-seg');
+      const stack = document.querySelector('.map-fab-stack');
       const entries = sels.map(s => { const e=document.querySelector(s); if(!e) return null;
         const r=e.getBoundingClientRect(), t=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
         return {sel:s,w:r.width,h:r.height,inView:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,
                 hit:t===e||e.contains(t)}; });
-      return {gone, entries};
+      return {gone, entries, pill: pill && R(pill), stack: stack && R(stack),
+              segments: pill ? pill.querySelectorAll('[data-ux-tab]').length : 0};
     }""", PHONE_ENTRY)
     if not state["gone"]:
-        raise AssertionError("the 3.1 bottom bar is still in the DOM")
-    if any(e is None or e["h"] < 44 or e["w"] < 44 or not e["inView"] or not e["hit"] for e in state["entries"]):
-        raise AssertionError(f"a phone entry is unreachable: {state}")
+        raise AssertionError("the 3.1 bottom bar / drawer button is still in the DOM")
+    if state["segments"] != 3:
+        raise AssertionError(f"#wb-seg carries {state['segments']} segments, expected 3")
+    # 44px is the touch minimum; the segments are laid out in a row, so each
+    # one only has to be 44 tall — but the pill itself must be 44 both ways.
+    if any(e is None or e["h"] < 44 or e["w"] < 28 or not e["inView"] or not e["hit"]
+           for e in state["entries"]):
+        raise AssertionError(f"a pill segment is unreachable: {state['entries']}")
+    if state["pill"]["h"] < 44:
+        raise AssertionError(f"the pill is under 44px tall: {state['pill']}")
+    # SPEC §4: the pill and the FAB column share the bottom of the screen and
+    # must not intersect. 3.1.x's #ff-fab did (the audit's fold416 shots).
+    if state["stack"]:
+        p, s = state["pill"], state["stack"]
+        if p["r"] > s["l"] and p["l"] < s["r"] and p["b"] > s["t"] and p["t"] < s["b"]:
+            raise AssertionError(
+                f"the segmented pill overlaps the FAB stack: pill={p}, stack={s}")
 
     def go(tab):
         phone_tab(page, tab)
@@ -502,6 +564,21 @@ def check_phone_nav(page, name):
     go("results")
     if not page.locator("#wb-list").is_visible():
         raise AssertionError("Results did not expose the restaurant list")
+    # M-3.2-03: with the drawer up the pill is hidden — it sat next to the
+    # drawer's own tab row and read as a second, competing layer. Close and
+    # re-open through the pill to prove the round trip.
+    if page.locator("#wb-seg").is_visible():
+        raise AssertionError("the pill is still on screen under the open drawer")
+    page.locator("#wb-fav-close").click()
+    page.wait_for_timeout(350)
+    if page.evaluate("() => document.body.classList.contains('wb-fav-open')"):
+        raise AssertionError("the drawer's close button left it open")
+    if not page.locator("#wb-seg").is_visible():
+        raise AssertionError("the pill did not come back with the map")
+    page.locator('#wb-seg [data-ux-tab="results"]').click()
+    page.wait_for_timeout(350)
+    if not page.evaluate("() => document.body.classList.contains('wb-fav-open')"):
+        raise AssertionError("the results segment did not re-open the drawer")
     go("filter")
     filtered = page.evaluate("""() => ({panel:document.getElementById('ff-sheet-content').offsetParent!==null,
       host:document.getElementById('ff-sheet-content').parentElement.id,
@@ -534,7 +611,8 @@ def check_phone_nav(page, name):
     go("map")
     if page.evaluate("() => document.body.classList.contains('wb-fav-open')"):
         raise AssertionError("closing the drawer left it open")
-    return "drawer entry reachable, 3 tabs, one filter host, detail source/focus restored, map painted"
+    return ("3 pill segments reachable and clear of the FAB stack, 3 tabs, "
+            "one filter host, detail source/focus restored, map painted")
 
 
 def check_chrome(page, name):
@@ -825,12 +903,12 @@ CHECKS = [
     ("save", check_save),
     ("filter", check_filter),
     ("account", check_account),
-    ("phone-nav", check_phone_nav),     # 3.1 four primary destinations
-    ("chrome", check_chrome),           # W-10 / 3.1 nav clearance
+    ("seg-pill", check_segmented_pill), # M-3.2-02/03 the drawer's one entry
+    ("chrome", check_chrome),           # W-10 / 3.2 chip-row clearance
     ("workbench", check_workbench),     # W-1 / W-2 / W-3
     ("filter-copy", check_filter_copy), # W-8 / W-11 / W-12
     ("goto-zoom", check_goto_zoom),     # W-5
-    ("marker-actions", check_marker_actions),  # 3.1 primary action dock
+    ("marker-actions", check_marker_actions),  # M-3.2-06 #bs-foot action dock
 ]
 
 
@@ -840,18 +918,36 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--viewport", action="append", choices=sorted(VIEWPORTS),
                     help="run only this viewport (repeatable)")
+    ap.add_argument("--browser", choices=("chromium", "webkit"), default="chromium",
+                    help="engine to run. Each viewport declares the one it is "
+                         "measured on; the iPhone rows are WebKit-only and are "
+                         "skipped under Chromium rather than faked by it.")
     ap.add_argument("--screenshots", type=Path, default=None,
                     help="write one PNG per viewport into this directory")
     ap.add_argument("--headed", action="store_true")
     args = ap.parse_args(argv)
 
-    names = args.viewport or list(VIEWPORTS)
+    asked = args.viewport or list(VIEWPORTS)
+    # M-3.2-11: never let one engine stand in for another. An explicit
+    # --viewport for the wrong engine is an error (the caller meant something
+    # this run cannot honour); the default sweep just skips the other half.
+    wrong = [n for n in asked if VIEWPORTS[n]["browser"] != args.browser]
+    if args.viewport and wrong:
+        print("these viewports are measured on a different engine: "
+              + ", ".join(f"{n} ({VIEWPORTS[n]['browser']})" for n in wrong))
+        return 2
+    names = [n for n in asked if VIEWPORTS[n]["browser"] == args.browser]
+    if not names:
+        print(f"smoke: no {args.browser} viewports selected")
+        return 1
+    for n in wrong:
+        print(f"[{n}] skipped here — it is a {VIEWPORTS[n]['browser']} row")
     if args.screenshots:
         args.screenshots.mkdir(parents=True, exist_ok=True)
 
     n_fail = 0
     with serve_docs(8926) as base, sync_playwright() as p:
-        browser = p.chromium.launch(headless=not args.headed)
+        browser = getattr(p, args.browser).launch(headless=not args.headed)
         for name in names:
             vp = VIEWPORTS[name]
             print(f"\n[{name}] {vp['width']}x{vp['height']}")
@@ -895,7 +991,7 @@ def main(argv: list[str] | None = None) -> int:
                 ctx.close()
         browser.close()
 
-    print(f"\nsmoke: {len(names) - n_fail}/{len(names)} viewports passed")
+    print(f"\nsmoke[{args.browser}]: {len(names) - n_fail}/{len(names)} viewports passed")
     return 1 if n_fail else 0
 
 

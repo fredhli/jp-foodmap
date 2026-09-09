@@ -99,6 +99,17 @@ def case(br, mode):
     # Everything closed (browser quit / Android killed Chrome), reopened.
     c = L.open_tab(ctx, 'C')
     c.wait_for_timeout(L.PUSH_WAIT + 1500)
+    # M-3.2-11: G3 was intermittently red on a warm machine. The recovery it
+    # measures is a chain — A's keepalive PUT (or, if that was lost with the
+    # tab, C's boot-time merge) then C's own debounced push — and a single
+    # fixed sleep scores a slow-but-correct chain as a lost favourite. Give
+    # it a deadline instead of a stopwatch: still red if the entry never
+    # arrives, no longer red because the entry arrived 300 ms late. Nothing
+    # about what is asserted changes, and no probe pushes the page along.
+    for _ in range(16):
+        if expected <= set((W.STATE.blob() or {}).get('favorites') or []):
+            break
+        c.wait_for_timeout(500)
     kv = W.STATE.blob()
     ui_c = c.evaluate('window.__mcUI()')
     errors += c.mc_errors

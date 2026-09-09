@@ -65,6 +65,36 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
             page.wait_for_timeout(300)
             record(page,prefix+'-home')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), 'page overflows'
+            # M-3.2-11: the map-level chrome 3.1.x's #ux-context card and
+            # #ux-region / #ux-nearby header buttons were replaced by. Three
+            # facts, each of which used to be asserted against a deleted
+            # element: the pill is the drawer's entry and carries the live
+            # result count; it never runs into the FAB column; and the chip
+            # row names the region the results come from.
+            if w<750:
+                chrome=page.evaluate("""()=>{const p=document.getElementById('wb-seg'),
+                  chips=document.getElementById('ss-chips'),region=document.getElementById('ux-region'),
+                  fabs=document.querySelector('.map-fab-stack');
+                  const r=p.getBoundingClientRect(),f=fabs.getBoundingClientRect();
+                  const digits=s=>(s||'').replace(/[^0-9]/g,'');
+                  return {segs:p.querySelectorAll('[data-ux-tab]').length,
+                    pillText:((p.querySelector('.ws-count')||{}).textContent||'').trim(),
+                    shownCount:digits((document.querySelector('.ff-count')||{}).textContent),
+                    hitsFabs:r.right>f.left&&r.left<f.right&&r.bottom>f.top&&r.top<f.bottom,
+                    chipsShown:!!chips&&chips.getClientRects().length>0,
+                    regionText:(region.querySelector('.ss-chip-t')||{}).textContent,
+                    nearbyHidden:document.getElementById('ux-nearby').hidden}}""")
+                assert chrome['segs']==3, chrome
+                assert not chrome['hitsFabs'], chrome
+                assert chrome['chipsShown'] and chrome['regionText']=='全部地区', chrome
+                assert chrome['nearbyHidden'], chrome
+                # Below 420px wsPaintCount() shortens 8069 to 8.1k so the pill
+                # cannot grow into the FAB column, so accept either form.
+                shown=int(chrome['shownCount'])
+                if chrome['pillText'].endswith('k'):
+                    assert abs(float(chrome['pillText'][:-1])*1000-shown)<100, chrome
+                else:
+                    assert chrome['pillText']==str(shown), chrome
             def tab(name):
                 if w<750: lib_browser.phone_tab(page,name)
                 else: page.locator('#wb-tab-'+name).click()

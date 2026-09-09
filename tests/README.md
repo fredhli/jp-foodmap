@@ -15,7 +15,7 @@ were all defended by nothing but a careful reader.
 | `tests/sync/` | the browser-side sync state machine against a fake Worker | Playwright Chromium |
 | `tests/smoke_playwright.py` | the built page on phone, Fold and desktop viewports, console clean | a build in `docs/`, Playwright Chromium |
 | `tests/feature_retention_playwright.py` | functional access paths for features outside the 3.1 UX demo | a build in `docs/`, Playwright Chromium or WebKit |
-| `tests/ux/` | 3.1 planning, navigation, detail return and short-viewport regressions | a build in `docs/`, Playwright WebKit or Chromium |
+| `tests/ux/` | planning, navigation, detail return, short-viewport regressions, and the 3.2.0 map-visibility thresholds | a build in `docs/`, Playwright WebKit **and** Chromium |
 | `tests/reliability/` | browser fault injection, resource deadlines, and the documented KV stale-read limit | a build in `docs/`; Node, with Playwright found from the project venv when needed |
 
 And one checker that is not a test suite but belongs to the same gate:
@@ -36,10 +36,13 @@ uv run python scripts/verify_build.py
 # 3. suites
 uv run python tests/pipeline/run.py
 uv run python tests/compat/run.py
-uv run python tests/smoke_playwright.py
+uv run python tests/smoke_playwright.py                    # the Chromium viewports
+uv run python tests/smoke_playwright.py --browser webkit   # the iPhone viewports
 uv run python tests/feature_retention_playwright.py
 .venv-wsl/bin/python tests/ux/run.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux
+.venv-wsl/bin/python tests/ux/run.py --docs docs --browser chromium --output /tmp/jpfoodmap-ux-cr
 .venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux-supplement
+.venv-wsl/bin/python tests/ux/visibility.py --output /tmp/jpfoodmap-visibility
 node tests/reliability/browser.mjs --built
 node tests/reliability/resource-deadlines.mjs
 node tests/reliability/kv-eventual.mjs
@@ -106,18 +109,32 @@ Add a fixture whenever you change how a stored shape is read. Keep the
 ## `tests/smoke_playwright.py` — the built page
 
 ```bash
-uv run python tests/smoke_playwright.py
+uv run python tests/smoke_playwright.py                    # the 8 Chromium rows
+uv run python tests/smoke_playwright.py --browser webkit   # the 4 iPhone rows
 uv run python tests/smoke_playwright.py --viewport fold-outer
 uv run python tests/smoke_playwright.py --screenshots /tmp/shots
 ```
 
-Eleven viewports retain the older Fold samples (416×657, 616×816, 591×689,
+Twelve viewports retain the older Fold samples (416×657, 616×816, 591×689,
 816×616), add the measured 3.1 Fold geometries (475×751, 932×704), cover
-iPhone widths 375, 393 and 430, and keep desktop 1000 and 1440. The phone
-checks click the visible Map / Results / Saved / Filters navigation, verify
-the one filter host, detail return and focus, and require Save / Maps to be
-reachable from both the first and a later marker detail. A console error that
-is not on the offline allowlist fails that viewport.
+iPhone widths 375, 393, 402 and 430, and keep desktop 1000 and 1440.
+
+**Every viewport declares the engine it is measured on and only runs under
+that one** (M-3.2-11). The four iPhone rows — 402×874 included, the width
+the 3.2.0 phone layout was designed against — are WebKit rows, because a
+Chromium pass on those dimensions says nothing about iOS Safari; everything
+else is Chromium. So the gate is two runs, and `--viewport` naming a row
+from the other engine exits 2 rather than quietly running it on the wrong
+one.
+
+The phone checks (`seg-pill`) click the floating segmented pill that
+replaced 3.1.x's `#phone-nav` bar: three reachable 44px segments that never
+intersect the FAB column, each opening the overlay drawer on its own tab,
+the pill standing down under the open drawer, one filter host, detail
+return with focus, and the map still painted beside the drawer. The card
+checks require Save / Maps to be reachable in `#bs-foot` from both the
+first and a later marker detail. A console error that is not on the offline
+allowlist fails that viewport.
 
 ## `tests/feature_retention_playwright.py` — features outside the UX demo
 
@@ -138,6 +155,47 @@ It also checks access to all four map layers, custom bookmarks and attractions,
 sharing, Tabelog, and account backup/import/privacy controls. Those latter
 checks cover entry points, not full external-service operations. Interactions
 use isolated browser state and every external HTTPS request is blocked.
+
+## `tests/ux/` — flows, history and the 3.2.0 visibility thresholds
+
+```bash
+.venv-wsl/bin/python tests/ux/run.py --docs docs --browser webkit --output /tmp/ux-wk
+.venv-wsl/bin/python tests/ux/run.py --docs docs --browser chromium --output /tmp/ux-cr
+.venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/ux-sup
+.venv-wsl/bin/python tests/ux/review_regressions.py --docs docs --browser webkit --output /tmp/ux-rr
+.venv-wsl/bin/python tests/ux/visibility.py --output /tmp/ux-vis
+```
+
+`run.py` walks the planning route on eight widths: pick a region, sort,
+open a result, come back to the same scroll position and focused row, open
+a Saved row, switch to nearby through the locate FAB and back through
+`#ux-restore-plan`, and it now also pins the phone chrome that replaced
+3.1.x's header buttons — the three-segment pill clear of the FAB column and
+carrying the live count, and the `#ss-chips` row naming the region.
+`review_regressions.py` covers place navigation, closed-detail focus and
+the nearby-sort copy. `supplement.py` covers keyboard, resize and the
+first-visit context menu.
+
+`visibility.py` (M-3.2-11) is the executable form of the release's
+acceptance numbers. It is the audit script
+`audit_outputs/3.2.0-plan/ux-phone/run_flows.py` reduced to its pixel
+sampler and pointed at 3.2.0's selectors — **use this, not that**: the
+audit script still drives the deleted `#phone-nav` and needs two versions
+of the site running on two ports. What it gates, per state and viewport:
+
+| state | 402×874 (WebKit) | 475×751 | 591×689 |
+|---|---|---|---|
+| home (intro bar up) | map ≥ 78% | ≥ 78% | recorded |
+| drawer open | ≥ 10% | recorded | ≥ 30% |
+| detail open | ≥ 18% | ≥ 18% | ≥ 18% |
+
+plus: no page-level horizontal overflow in any state, none of the strings
+on the audit's truncation list (`table_E.md` — price ceilings, the booking
+verdict, distances, the landmark count) clipped, and no full-width comma or
+semicolon anywhere in the shipped EN / JA translation tables. A drawer
+state counts the scrim as visible: the overlay drawer leaves the map
+painted and legible behind `.18` of black, which is the whole point of
+going back to it, while an opaque panel scores zero either way.
 
 The history regression suite checks two-step source returns, close actions,
 rapid reopen, and layout changes against the built page:

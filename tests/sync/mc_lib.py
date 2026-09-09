@@ -219,15 +219,36 @@ DRIVER = r"""
 
   // What THIS tab currently believes, read off the live UI counters that
   // updateFavCount()/updateBlackCount() drive from the in-memory sets.
-  window.__mcUI = () => ({
-    fav: +(document.getElementById('ff-fav-count') || {}).textContent || 0,
-    black: +(document.getElementById('ff-black-count') || {}).textContent || 0,
-    status: (document.getElementById('ff-sync-status') || {}).textContent || '',
-    fabNeedsSync: !!(document.getElementById('ff-fab') || {classList: {contains: () => false}})
-                    .classList.contains('needs-sync'),
-    fabPending: !!(document.getElementById('ff-fab') || {classList: {contains: () => false}})
-                    .classList.contains('needs-sync-pending'),
-  });
+  //
+  // M-3.2-11: the unsynced state used to be painted on #ff-fab, as
+  // .needs-sync (red: local only) / .needs-sync-pending (blue: signed in,
+  // push not landed). M-3.2-03 replaced that FAB with the segmented pill,
+  // which deliberately does not pulse, and moved the whole signal to the
+  // avatar badge #ss-avatar-dot: shown while the browser holds state the
+  // cloud has not confirmed, .is-pending (blue) when that is a push in
+  // flight rather than a signed-out device. The names below keep the
+  // meanings, not the elements:
+  //   dirtyBadge   the badge is up at all  (old .needs-sync OR pending)
+  //   localOnly    up and NOT pending      (old .needs-sync)
+  //   pushPending  signed in, push not yet confirmed
+  // pushPending is derived rather than read off .is-pending because the
+  // badge drops that class while the last attempt is in error, and every
+  // caller here means "this tab still owes the cloud a write".
+  window.__mcUI = () => {
+    const dot = document.getElementById('ss-avatar-dot');
+    const up = !!dot && !dot.hidden;
+    const signedIn = (() => { try {
+      return !!JSON.parse(localStorage.getItem('tabelog.auth') || 'null'); }
+      catch (e) { return false; } })();
+    return {
+      fav: +(document.getElementById('ff-fav-count') || {}).textContent || 0,
+      black: +(document.getElementById('ff-black-count') || {}).textContent || 0,
+      status: (document.getElementById('ff-sync-status') || {}).textContent || '',
+      dirtyBadge: up,
+      localOnly: up && !signedIn,
+      pushPending: up && signedIn,
+    };
+  };
 
   window.__mcVisChange = () => document.dispatchEvent(new Event('visibilitychange'));
   // Pretend the tab went to the background: visibilityState reads 'hidden'
