@@ -13,6 +13,26 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-09-09
+
+Hotfix. Base-map tiles go back to 1x everywhere.
+
+### Changed
+
+- The CARTO tile URL no longer carries Leaflet's `{r}` placeholder, so a
+  high-DPR screen requests the 256px tile again instead of `@2x`. 3.2.0
+  turned `@2x` on together with the Positron switch; on the Z Fold 8 inner
+  screen (932×704 CSS px, DPR ≈ 2.6, ~150 tiles in the DOM at
+  `keepBuffer: 4`) a drag with either rail layer showing became sluggish
+  enough to be unusable, and 3.2.0 is the only release in which the tile
+  pixel budget was four times larger. This release removes that one
+  variable; the measured answer (was it the tiles, the transit canvas
+  repaint on `moveend`, or both) and a per-layer policy belong to 3.2.2.
+- Service worker tile cache budget is back to ≈ 13 MB for 400 entries.
+  Cached `@2x` tiles from 3.2.0 age out of `tabelog-tiles-v2` through the
+  existing LRU; no cache rename.
+
+
 ## [3.2.0] - 2026-09-09
 
 The phone layout goes back to being map-first. 2.3.0 shipped an overlay

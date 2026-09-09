@@ -2312,7 +2312,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -22073,7 +22073,7 @@ def main(argv: list[str] | None = None) -> None:
         )
     carto_tile_url = (
         "https://{s}.basemaps.cartocdn.com/rastertiles/light_all/"
-        f"{{z}}/{{x}}/{{y}}{{r}}.png?key={quote(carto_api_key, safe='')}"
+        f"{{z}}/{{x}}/{{y}}.png?key={quote(carto_api_key, safe='')}"
     )
 
     with CSV_PATH.open(encoding="utf-8-sig", newline="") as f:
