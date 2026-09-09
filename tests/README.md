@@ -44,6 +44,7 @@ uv run python tests/feature_retention_playwright.py
 .venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux-supplement
 .venv-wsl/bin/python tests/ux/visibility.py --output /tmp/jpfoodmap-visibility
 .venv-wsl/bin/python tests/ux/tiles.py                      # and --browser webkit
+.venv-wsl/bin/python tests/ux/pinch.py                      # and --browser webkit
 node tests/reliability/browser.mjs --built
 node tests/reliability/resource-deadlines.mjs
 node tests/reliability/kv-eventual.mjs
@@ -165,6 +166,7 @@ use isolated browser state and every external HTTPS request is blocked.
 .venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/ux-sup
 .venv-wsl/bin/python tests/ux/review_regressions.py --docs docs --browser webkit --output /tmp/ux-rr
 .venv-wsl/bin/python tests/ux/visibility.py --output /tmp/ux-vis
+.venv-wsl/bin/python tests/ux/pinch.py --json /tmp/ux-pinch.json
 ```
 
 `run.py` walks the planning route on eight widths: pick a region, sort,
@@ -197,6 +199,30 @@ semicolon anywhere in the shipped EN / JA translation tables. A drawer
 state counts the scrim as visible: the overlay drawer leaves the map
 painted and legible behind `.18` of black, which is the whole point of
 going back to it, while an opaque panel scores zero either way.
+
+`pinch.py` (3.2.3) is the page-zoom gate. It answers one question — can a
+two-finger spread scale the document instead of the map — on 932×704 and
+475×751 at DPR 2.625, with the main thread throttled 4×/6× around each
+gesture. What it can and cannot measure matters: headless Chromium delivers
+a synthesized pinch to the page (Leaflet zooms from it, which is how the map
+case is asserted) but never applies *browser* pinch zoom, so
+`visualViewport.scale` reads 1 even on a build that allows zoom; it is
+recorded as a tripwire, not as the proof. The proof is what Chrome consults
+before it starts a pinch: the `<meta viewport>` string, and the effective
+`touch-action` at the gesture point — the intersection walked from
+`elementFromPoint` up to `<html>`, which is exactly why the map still
+pinches (`.leaflet-container` is `touch-action: none`, so the browser stays
+out and Leaflet drives it). For iOS it dispatches a cancelable
+`gesturestart` at each surface and asserts something cancels it before the
+document; WebKit is the only engine that fires those for real, and
+Playwright cannot synthesize a pinch in it, so `--browser webkit` runs that
+subset. Eight moments are covered: the first painted frame (an rAF probe
+installed before any page script), the window where the UI is up and the map
+is not (`L.map` is poisoned so the container is never created), the
+first-visit language gate, the home chrome, the map at `minZoom` and at
+Tokyo z13, the result list, the detail card, and desktop ctrl+wheel at
+1440×900. `--label before` records without asserting, which is how the
+3.2.2 column of `audit_outputs/3.2.3/REPORT.md` was produced.
 
 The history regression suite checks two-step source returns, close actions,
 rapid reopen, and layout changes against the built page:

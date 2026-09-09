@@ -86,11 +86,19 @@ object SiteWebView {
         // being loaded in place or dropped — but a page may not open windows unprompted.
         s.setSupportMultipleWindows(true)
         s.javaScriptCanOpenWindowsAutomatically = false
-        // Pinch-zoom as in Chrome (Leaflet eats the pinch over the map itself); never the
-        // +/- overlay buttons, which would sit on top of the site's own FAB stack.
-        s.builtInZoomControls = true
+        // Page-level zoom is off entirely as of 3.2.3. The WebView must never scale the
+        // document: a pinch that got past Leaflet used to blow up the whole layout — the
+        // sidebar and the chrome along with the map — and there is no gesture that puts it
+        // back reliably. Zooming the map is Leaflet's job, inside the page, and the site
+        // now refuses page zoom on its side too (meta viewport + touch-action). The
+        // accessibility path for "everything is too small" is the app's own text-size
+        // setting, which drives textZoom and is untouched by this. displayZoomControls
+        // stays false so the +/- overlay can never appear over the site's FAB stack.
+        s.setSupportZoom(false)
+        s.builtInZoomControls = false
         s.displayZoomControls = false
-        // Respect the page's <meta viewport> (width=device-width, viewport-fit=cover) and do
+        // Respect the page's <meta viewport> (width=device-width, user-scalable=no,
+        // viewport-fit=cover — the site's own half of the line above) and do
         // not zoom out to "fit": CSS px must equal dp, or the site's 480/700/1100 breakpoints
         // fire at the wrong widths on the Fold (STANDARDS §2.1).
         s.useWideViewPort = true

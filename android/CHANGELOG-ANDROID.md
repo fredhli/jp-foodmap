@@ -1,3 +1,8 @@
+## 3.2.3 · 2026-09-09 · `versionCode 30203`
+
+- 与网站 3.2.3 同步：**关闭页面级缩放**。WebView 侧 `setSupportZoom(false)` + `builtInZoomControls=false`（`displayZoomControls` 保持 false），文档整体再也不会被捏合放大——此前捏合会把侧栏和整套壳一起放大，且没有可靠的复原手势；网站侧同时用 meta viewport 与 `touch-action` 把捏合挡在页面这一层。验收项 STANDARDS §2.7 已按新行为改写。
+- 地图缩放与字号均不受影响：地图上的捏合仍由页面内的 Leaflet 处理；设置页的「字号」（`textZoom`，跟随系统或 90/95/100/115/130）照旧生效，仍是把界面放大的正路。
+
 ## 3.2.0 · 2026-09-09 · `versionCode 30200`
 
 - 与网站 3.2.0 同步：手机端恢复地图优先的层级模型（底栏移除、分段胶囊 + 覆盖抽屉、chip 行、找附近并入定位 FAB），详情卡页脚统一，桌面三栏清理，视觉走 token 与玻璃控件层，底图换成 CARTO Positron 并在高 DPR 屏取 @2x。

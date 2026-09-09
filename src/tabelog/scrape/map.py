@@ -2312,7 +2312,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.2.2"
+APP_VERSION = "3.2.3"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -2623,11 +2623,6 @@ LOCATE_ASSETS = """
 """
 
 
-# Page-level zoom lock + iOS Safari bounce kill. The viewport meta folium
-# emits already has user-scalable=no, but iOS Safari has ignored that
-# since iOS 10 for accessibility, so we need event listeners too.
-# Leaflet uses raw touch events for its own map gestures, not iOS gesture*
-# events, so blocking gesture* on the document does NOT break map pinch.
 MAP_FAB_HTML = """
 <style>
   /* Floating layer-control replacement (Google-Maps-style pills, bottom-right).
@@ -5321,36 +5316,40 @@ MOBILE_UX_ASSETS = """
 </style>
 <script>
 (function() {
-  // M-018 / M-143: page zoom is the user's, not ours. These guards used to
-  // sit on `document` — which (a) blocked browser zoom over the whole page,
-  // not just the map, and (b) made every wheel event on the page wait for a
-  // non-passive listener before the browser could scroll. They now bind to
-  // the Leaflet container only, so the map keeps its pinch/ctrl+wheel
-  // behaviour while the rest of the document scrolls passively and zooms
-  // normally. The keyboard ctrl +/-/0 interception is gone entirely: there
-  // is no map-vs-page ambiguity for a keystroke, so it was pure a11y tax.
-  // (The viewport meta stopped pinning the scale too — see main().)
-  function bindZoomGuards(el) {
-    // iOS Safari pinch over the map. Leaflet drives its own touch zoom from
-    // raw touch events and never listens for gesture*, so preventing these
-    // stops the *page* zooming while the map still pinches.
-    el.addEventListener('gesturestart',  function(e){ e.preventDefault(); });
-    el.addEventListener('gesturechange', function(e){ e.preventDefault(); });
-    el.addEventListener('gestureend',    function(e){ e.preventDefault(); });
-    // Desktop ctrl/cmd + wheel — this is also what a macOS trackpad pinch
-    // sends, so it has to stay. Leaflet's wheel zoom doesn't use ctrlKey.
-    el.addEventListener('wheel', function(e){
+  // 3.2.3: Safari has ignored `user-scalable=no` since iOS 10, so the
+  // viewport meta main() writes covers Chrome and the WebView but not iOS —
+  // these are what stop the page zooming there. Back on `document` after
+  // M-018 moved them to the Leaflet container, and in the capture phase, for
+  // the two reasons the container binding could not cover: they are live
+  // from the first frame, three quarters of a megabyte of page before
+  // folium's map script runs, and they cover every surface that is not the
+  // map (the language gate, the intro bar, the search pill, the segmented
+  // pill, the FAB stack, the drawer, the detail card). Leaflet never listens
+  // for gesture* — it drives its own touch zoom from raw touch events — so
+  // pinching the map still zooms the map.
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(function(type) {
+    document.addEventListener(type, function(e) { e.preventDefault(); },
+                              { capture: true, passive: false });
+  });
+
+  // Desktop ctrl/cmd + wheel — also what a macOS trackpad pinch sends —
+  // stays on the Leaflet container. This one is deliberately NOT on the
+  // document: a non-passive wheel listener there makes every scroll on the
+  // page wait for JS before the browser may move anything, which is the one
+  // half of M-018 that was about performance rather than accessibility.
+  // Leaflet's own wheel zoom doesn't look at ctrlKey.
+  function bindWheelGuard(el) {
+    el.addEventListener('wheel', function(e) {
       if (e.ctrlKey || e.metaKey) e.preventDefault();
     }, { passive: false });
   }
 
-  // iOS double-tap zoom on the UI chrome is handled by CSS
-  // `touch-action: manipulation` (style block below) instead of the old
-  // 350ms touchend-preventDefault hack. preventDefault on touchend also
-  // suppressed the synthesized click, so the second of any two fast taps
-  // outside the map (rapid checkbox toggles, 全选 then 全清, double-tap
-  // on a star) silently did nothing. The map is unaffected either way:
-  // Leaflet sets touch-action on .leaflet-container itself and the
+  // Double-tap zoom is handled by CSS `touch-action` (style block below)
+  // instead of the old 350ms touchend-preventDefault hack. preventDefault on
+  // touchend also suppressed the synthesized click, so the second of any two
+  // fast taps outside the map (rapid checkbox toggles, 全选 then 全清,
+  // double-tap on a star) silently did nothing. The map is unaffected either
+  // way: Leaflet sets touch-action on .leaflet-container itself and the
   // ancestor intersection can only further restrict, never loosen.
 
   // The container is created by folium's own script at the end of <body>,
@@ -5358,17 +5357,23 @@ MOBILE_UX_ASSETS = """
   var tries = 0;
   (function waitForMap() {
     var el = document.querySelector('.leaflet-container');
-    if (el) { bindZoomGuards(el); return; }
+    if (el) { bindWheelGuard(el); return; }
     if (++tries > 150) return;
     setTimeout(waitForMap, 100);
   })();
 })();
 </script>
 <style>
-  /* Kills double-tap-to-zoom (and the legacy 300ms click delay) on all UI
-     chrome without eating fast second taps. Pinch stays governed by the
-     gesture handlers above; Leaflet overrides this on its own container. */
-  html, body { touch-action: manipulation; }
+  /* 3.2.3: `manipulation` was pan + pinch-zoom without double-tap, so the
+     page still zoomed under two fingers; `pan-x pan-y` keeps the panning and
+     drops both. This is the layer Chrome and the Android WebView act on, and
+     the only one that is live from the very first frame — it is plain CSS in
+     the head, so it needs no script and no Leaflet. Fast second taps are
+     still fine: nothing here preventDefaults touchend, which is what used to
+     eat them. Leaflet declares `touch-action: none` on its own container and
+     the ancestor intersection can only further restrict, never loosen, so
+     the map's pinch is untouched. */
+  html, body { touch-action: pan-x pan-y; }
   /* Bottom-sheet popup replacement. The markup lives near </body>; the
      filter JS controls open/close. Default Leaflet popups got cut off at
      mobile viewport edges; this sheet always docks to the bottom and
@@ -5904,9 +5909,13 @@ MOBILE_UX_ASSETS = """
   /* W-4: full-screen photo viewer. Opened by a thumbnail tap, registered on
      the ui stack (uiRegister/uiPush) so Android's back gesture closes it
      before the card. object-fit:contain — this surface exists to show the
-     whole picture; `touch-action` is inherited `manipulation`, so the
-     browser's own pinch-zoom works here (the map's gesture guards are bound
-     to .leaflet-container only and this overlay sits above it). */
+     whole picture. Until 3.2.3 it also leaned on the browser's own
+     pinch-zoom to magnify a dish; page zoom is off site-wide now, and no
+     per-element touch-action can hand it back — the effective value is the
+     intersection with `html, body`. Losing it here is the one place the
+     3.2.3 trade-off costs something a user would notice, and the fix, if it
+     is ever wanted, is a zoom control on this overlay rather than a hole in
+     the page-zoom policy. */
   #ph-lb {
     position: fixed; inset: 0; z-index: var(--z-lightbox);   /* above every sheet/modal */
     background: rgba(0, 0, 0, 0.92);
@@ -11378,10 +11387,9 @@ FILTER_JS_TEMPLATE = r"""
     // Tab, i.e. "look at this photo" left the app. #ph-lb keeps it in the
     // page, shows the 640 rect (Tabelog's largest — 800/1200 both 404)
     // object-fit:contain, and rides the ui stack so the system back gesture
-    // and Escape close it before the card underneath. No zoom UI of its own:
-    // touch-action stays the inherited `manipulation`, so the browser's own
-    // pinch-zoom works here (the map's gesture guards are bound to
-    // .leaflet-container, which this overlay covers).
+    // and Escape close it before the card underneath. No zoom UI of its own,
+    // and since 3.2.3 no browser pinch-zoom to fall back on either — the
+    // photo is shown at the size it fits and that is all.
     var phLb    = document.getElementById('ph-lb');
     var phLbImg = document.getElementById('ph-lb-img');
     var phLbX   = document.getElementById('ph-lb-x');
@@ -22920,21 +22928,35 @@ def main(argv: list[str] | None = None) -> None:
     # Let installed iOS/Android web apps use the full screen while exposing
     # safe-area insets to the fixed controls and bottom sheets.
     #
-    # M-018: folium's default viewport string also carries
-    # `maximum-scale=1.0, user-scalable=no`, and this replacement used to
-    # keep both. Blocking page zoom is an accessibility violation on its own,
-    # and it bites hardest here because the site is used as an installed PWA
-    # — no address bar, no ⋮ menu, so a user who needs bigger text has no way
-    # back. Both are dropped; the map's own pinch/ctrl+wheel handling now
-    # lives on .leaflet-container (MOBILE_UX_ASSETS), and the 16px input
-    # rules were freed from the 480px breakpoint first (M-081) so iOS focus
-    # zoom can't kick in as a side effect.
+    # 3.2.3 reverses M-018 / M-143. Those dropped folium's
+    # `maximum-scale=1.0, user-scalable=no` on the grounds that page zoom
+    # belongs to the user, and left the map's pinch handling on
+    # .leaflet-container alone. In the Android shell that reads as a bug: a
+    # two-finger spread anywhere the map is not — and, in the first seconds
+    # of a cold start, anywhere at all, because the container does not exist
+    # yet — scales the whole document, sidebar and all, and the way back is a
+    # gesture nobody performs on purpose. The owner's call: page zoom is off
+    # everywhere. The cost is real and accepted — an installed PWA has no
+    # address bar and no ⋮ menu, so the web build now has no zoom of its own;
+    # the Android shell keeps its text-size setting (textZoom), which this
+    # does not touch, and the 16px input rules (M-081) already keep iOS focus
+    # zoom out of it.
+    #
+    # This tag is one of four layers, because no single one covers every
+    # engine: Safari has ignored `user-scalable=no` since iOS 10, so the
+    # document-level `gesture*` guards in MOBILE_UX_ASSETS are what stop it
+    # there; `touch-action` in the same block is what stops Chrome and the
+    # WebView from the first frame, before any script has run; and the shell
+    # sets `setSupportZoom(false)` so the WebView never scales the document
+    # even if a future page forgets. Leaflet sets `touch-action: none` on its
+    # own container, so the map's pinch is untouched by all of it.
     VIEWPORT_FROM = "initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    VIEWPORT_TO = "initial-scale=1.0, viewport-fit=cover"
+    VIEWPORT_TO = ("initial-scale=1.0, maximum-scale=1.0, user-scalable=no, "
+                   "viewport-fit=cover")
     viewport_hits = saved_html.count(VIEWPORT_FROM)
     if viewport_hits == 1:
         saved_html = saved_html.replace(VIEWPORT_FROM, VIEWPORT_TO)
-        print("  viewport: dropped user-scalable=no, added viewport-fit=cover")
+        print("  viewport: page zoom pinned off, added viewport-fit=cover")
     else:
         print(f"  WARNING: expected one viewport meta tag, found {viewport_hits}")
 

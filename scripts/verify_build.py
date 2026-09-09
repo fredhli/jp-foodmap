@@ -31,6 +31,12 @@ Why each check exists (all from the 2026-09-05 audit):
   manifest        id / start_url / scope are the install identity (M-145).
                   Changing `id` orphans every home-screen icon already out
                   there and makes a re-install a second, separate app.
+  page zoom       3.2.3 turns page-level zoom off in three places in the page
+                  (the viewport meta, `touch-action` on html/body, and
+                  document-level gesture guards for iOS, which ignores the
+                  meta). Any one of them coming back on its own leaves the
+                  shell zooming the sidebar again, and the wheel guard has to
+                  stay off the document or every scroll waits on JS.
   about           the 关于本站 sheet must carry the real APP_VERSION and
                   DATA_SCRAPED_AT, not an unsubstituted placeholder (M-119).
   i18n            missing EN/JA translation counts must not grow past the
@@ -81,7 +87,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "3.2.2"
+EXPECTED_APP_VERSION = "3.2.3"
 
 # map.py is the single source of both build-time facts the About sheet states.
 # Parsed as text rather than imported: importing map.py runs the whole render
@@ -720,6 +726,57 @@ def check_breakpoints() -> None:
     )
 
 
+def check_page_zoom() -> None:
+    """3.2.3: the four-layer "page zoom is off" contract, minus the layer that
+    lives in the Android shell. Each of the three is load-bearing on a
+    different engine, so each is asserted separately."""
+    if not MAP_HTML.exists():
+        fail("page zoom", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    problems = []
+
+    metas = re.findall(r'<meta\s+name="viewport"\s+content="([^"]*)"', html)
+    if len(metas) != 1:
+        problems.append(f"expected one viewport meta, found {len(metas)}")
+    else:
+        content = " ".join(metas[0].split())
+        for token in ("width=device-width", "initial-scale=1.0",
+                      "maximum-scale=1.0", "user-scalable=no",
+                      "viewport-fit=cover"):
+            if token not in content:
+                problems.append(f"viewport meta is missing {token!r} — {content!r}")
+
+    # Chrome and the Android WebView act on this one, and it is the only
+    # layer that is live before any script has run.
+    if not re.search(r"html,\s*body\s*\{[^}]*touch-action:\s*pan-x pan-y", html):
+        problems.append("html, body no longer declare touch-action: pan-x pan-y")
+    if re.search(r"html,\s*body\s*\{[^}]*touch-action:\s*(auto|manipulation)", html):
+        problems.append("html, body are back to a touch-action that allows "
+                        "pinch-zoom")
+
+    # iOS has ignored user-scalable=no since iOS 10; these are what stop it,
+    # and they have to be on the document to cover the pre-Leaflet window.
+    for event in ("gesturestart", "gesturechange", "gestureend"):
+        if event not in html:
+            problems.append(f"the {event} guard is gone")
+    if "document.addEventListener(type" not in html:
+        problems.append("the gesture guards are no longer bound on document — "
+                        "a container binding cannot cover the first seconds of "
+                        "a cold start, or any surface that is not the map")
+    if re.search(r"document\.addEventListener\(\s*['\"]wheel", html):
+        problems.append("a wheel listener moved onto the document; non-passive "
+                        "wheel there makes every scroll on the page wait for JS "
+                        "(M-018)")
+
+    if problems:
+        fail("page zoom", "; ".join(problems))
+        return
+    ok("page zoom",
+       "viewport pins the scale, html/body are touch-action: pan-x pan-y, the "
+       "three gesture guards are on document, the wheel guard is not")
+
+
 def check_service_worker() -> None:
     if not SW_JS.exists():
         fail("sw", f"{SW_JS} does not exist — run map.py first")
@@ -1000,6 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
         check_localstorage_keys()
         check_subcollections()       # M-031 / E2
         check_breakpoints()          # M-3.2-01 / GW P3-P4
+        check_page_zoom()            # 3.2.3
         check_service_worker()
         check_manifest_identity()    # M-145
         check_about_stamps()         # M-119

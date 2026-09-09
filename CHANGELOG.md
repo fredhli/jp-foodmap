@@ -13,6 +13,90 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-09-09
+
+Page-level zoom is off. In the Android shell a two-finger spread scaled the
+whole document — sidebar, result list, card and all — instead of the map, and
+in the first seconds after launch it did that everywhere, because the only
+thing standing in its way was bound to a Leaflet container that did not exist
+yet.
+
+### Changed
+
+- **Page zoom is off on the web and in the shell, in four layers**, because no
+  single one covers every engine:
+  1. the `<meta viewport>` main() rewrites is back to
+     `maximum-scale=1.0, user-scalable=no` (plus `viewport-fit=cover`) — the
+     only layer the Android WebView reads;
+  2. `html, body` drop from `touch-action: manipulation` to `pan-x pan-y`.
+     `manipulation` was pan **and** pinch-zoom without double-tap, which is
+     why the page still zoomed under two fingers. This is the layer that is
+     live from the first painted frame: plain CSS in the head, no script, no
+     Leaflet;
+  3. the iOS `gesturestart` / `gesturechange` / `gestureend` guards move from
+     `.leaflet-container` back onto `document`, in the capture phase. Safari
+     has ignored `user-scalable=no` since iOS 10, so these are what stop it
+     there — and on `document` they cover both the pre-Leaflet window and
+     every surface that is not the map;
+  4. the shell's WebView calls `setSupportZoom(false)` and
+     `builtInZoomControls = false` (Android `versionName 3.2.3` /
+     `versionCode 30203`), so it never scales the document even if a future
+     page forgets.
+- **The map's own pinch is untouched.** Leaflet declares `touch-action: none`
+  on its container and drives its touch zoom from raw touch events, never from
+  `gesture*`; an ancestor's `touch-action` can only further restrict a
+  descendant, never loosen it, so nothing above the map reaches it.
+- The ctrl/cmd + wheel guard deliberately **stays** on `.leaflet-container`.
+  A non-passive `wheel` listener on the document makes every scroll on the
+  page wait for JS before the browser may move anything — the half of M-018
+  that was about performance rather than accessibility, and still true.
+- This **reverses M-018 / M-143**, which dropped the same viewport tokens on
+  the grounds that page zoom belongs to the user. The cost is real and was
+  accepted deliberately: an installed PWA has no address bar and no ⋮ menu, so
+  the web build now has no page zoom of its own. The Android shell's text-size
+  setting (`textZoom`, 90–130 or "follow system") is untouched and is the way
+  back; the 16px input rules from M-081 already keep iOS focus zoom out of it.
+  `docs/404.html` and `docs/privacy.html` are hand-written pages with no map
+  and keep their own zoomable viewport.
+- **Known cost:** the full-screen photo viewer (`#ph-lb`) had no zoom UI of its
+  own because it leaned on the browser's pinch, and there is no way to hand
+  that back to one element — the effective `touch-action` is the intersection
+  with `html, body`. A photo is now shown at the size it fits. If that turns
+  out to matter, the fix is a zoom control on that overlay, not a hole in the
+  policy.
+
+### Added
+
+- **`tests/ux/pinch.py`** — the gate for all of the above, on 932×704 and
+  475×751 at DPR 2.625 with the main thread throttled 4×/6× around each
+  gesture. It is explicit about what it can measure: headless Chromium
+  delivers a synthesized pinch (Leaflet zooms from it) but never applies
+  *browser* pinch zoom, so `visualViewport.scale` reads 1 even on a build that
+  allows zoom and is recorded as a tripwire, not as proof. The proof is what
+  Chrome consults before starting a pinch — the viewport string, and the
+  effective `touch-action` walked from `elementFromPoint` up to `<html>` — plus
+  a cancelable `gesturestart` dispatched at each surface for the iOS path.
+  Eight moments: the first painted frame (an rAF probe installed before any
+  page script), the window where the UI is up and the map is not (`L.map` is
+  poisoned so the container is never created), the first-visit language gate,
+  the home chrome, the map at `minZoom` and at Tokyo z13, the result list, the
+  card, and desktop ctrl+wheel at 1440×900.
+- **`scripts/verify_build.py` gained a `page zoom` check** (13 checks now): the
+  viewport tokens, `html, body { touch-action: pan-x pan-y }`, the three
+  gesture guards bound on `document`, and no `wheel` listener on the document.
+
+### Verified
+
+Before (3.2.2) and after, same script, `audit_outputs/3.2.3/REPORT.md`:
+
+| | 3.2.2 | 3.2.3 |
+|---|---|---|
+| Chromium — surfaces where the browser may still pinch-zoom | 13 | 0 |
+| Chromium — `gesturestart` not prevented | 22 | 0 |
+| WebKit — `gesturestart` not prevented | 10 | 0 |
+| map zoom from a pinch on the map (minZoom, z13) | 0→1, 13→14 | unchanged |
+| desktop ctrl+wheel: map / left column | 6→9, 9→9 | unchanged |
+
 ## [3.2.2] - 2026-09-09
 
 Panning with a rail layer on. 3.2.1 removed `@2x` because it was the one

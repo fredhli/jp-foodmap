@@ -56,7 +56,7 @@
 | 2.4 | **字号**：`textZoom = 系统 fontScale × 100`（「跟随系统」，默认），或固定 90/95/100/115/130（设置页）。WebView 默认**不**跟随系统字号，壳必须乘进去。 | `adb shell settings put system font_scale 1.3` → 诊断 `textZoom=130`；设置页选 100 → `textZoom=100`；恢复 `font_scale 1.0`。 |
 | 2.5 | **键盘**：WebView Chromium ≥144 自己收缩 visual viewport（`imeMode=WEBVIEW`）；旧版走壳的原生 padding。 | 诊断 `imeMode=WEBVIEW`（模拟器 WebView 145、真机 151）；搜索框获焦时截图，输入框在键盘之上。 |
 | 2.6 | 网站 smoke 视口（416×657 / 616×816 / 816×616）与本机实测（475×751 / 932×704 / 704×932）**不一致**，APP 验收以实测为准；是否把 smoke 视口改成实测值是网站侧决定（不在本次范围）。 | 记录在 `docs/PLAN.md` §决策；不阻塞。 |
-| 2.7 | **页面缩放**：与 Chrome 一致——地图上的捏合由 Leaflet 消费，页面其它区域允许捏合（网站已放开 `user-scalable`）；不显示 ± 缩放按钮。 | `builtInZoomControls=true`、`displayZoomControls=false`；真机手测。 |
+| 2.7 | **页面缩放**：3.2.3 起**整页缩放全关**——捏合永远不会放大文档（此前会把侧栏连同整个壳一起放大）；地图上的捏合仍由页面内的 Leaflet 消费，网站侧也用 meta viewport + `touch-action` 挡住；放大界面走 §2.4 的字号（`textZoom`）。不显示 ± 缩放按钮。 | `setSupportZoom(false)`、`builtInZoomControls=false`、`displayZoomControls=false`；真机手测：地图上捏合只缩放地图，侧栏/顶栏上捏合无反应。 |
 
 ---
 
