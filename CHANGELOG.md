@@ -13,6 +13,183 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-09
+
+The phone layout goes back to being map-first. 2.3.0 shipped an overlay
+drawer over a full-bleed map; 3.1.x replaced it with a persistent text
+bottom bar and a stack of separate controls, which cost map area and made
+"where am I in this app" ambiguous. 3.2.0 restores 2.3.0's hierarchy model
+and keeps every journey 3.1.x added on top of it (source-aware back,
+scroll/focus restore, find-nearby's planning context, filter convergence,
+toast serialization). The visuals move onto tokens and a single glass
+control layer, and the basemap becomes CARTO Positron.
+
+Plan and decisions: `audit_outputs/3.2.0-plan/00-总工程师计划.md` (§2 D1–D8),
+spec `audit_outputs/3.2.0-plan/UIUX-SPEC-3.2.0.md`, evidence under
+`audit_outputs/3.2.0-plan/{ux-phone,ux-desktop,groundwork-4.0,design-research}/REPORT.md`.
+Per-milestone logs, measurements and screenshots:
+`audit_outputs/3.2.0-impl/M-3.2-01.md` … `M-3.2-R1.md`; the side-by-side
+design gallery is `audit_outputs/3.2.0-impl/review/index.html` and the
+reviewer entry point is `audit_outputs/3.2.0-impl/index.html`.
+
+### Changed
+
+- **Phone hierarchy: one map, one overlay drawer (M-3.2-02).** The map is
+  full-bleed again; Results / Saved / Filters open as an overlay drawer over
+  it instead of a route change. `PHONE_DRAWER_HTML` was rewritten and the
+  whole `--phone-nav-h` family of "lift everything above the bar" rules is
+  gone with it.
+- **A floating segmented pill replaces `#ff-fab` and the hamburger
+  (M-3.2-03).** `#wb-seg` sits bottom-left with three segments (结果 /
+  收藏 / 筛选), each carrying its own count, and it stays clear of the FAB
+  column via the live `--fab-w` published by `syncSheetOffset()`.
+- **Search capsule back to its 2.3.0 width, plus a chip row (M-3.2-04).**
+  The 3.1.x full-width phone override is gone: 402 → 386px capsule with a
+  312px input (it was ≈129px in 3.1.2). The floating `#ux-context` bar is
+  replaced by `#ss-chips` — area / nearby / back-to-plan — reusing the
+  existing `#ux-region` / `#ux-nearby` / `#ux-restore-plan` ids and their
+  handlers.
+- **Find-nearby is the locate FAB (M-3.2-05).** One control instead of two;
+  the `window.confirm()` that used to gate it became an undoable toast, and
+  a fix outside Japan now rolls the map back to the plan instead of flying
+  off the corpus.
+- **Detail card: a 44px head row and one glass footer (M-3.2-06).** The
+  source-return link moved into `#bs-head`; `#ux-detail-actions` and the
+  in-body `.rst-actions-bar` were replaced by a single sticky `#bs-foot`
+  that the desktop detail column shares.
+- **One CTA in the filter footer, one line in the Saved header
+  (M-3.2-07).** `#ux-filter-done` lost its explanatory paragraph, and
+  `#ux-saved-scope` is gone — `#fv-sum` says it once.
+- **Desktop columns tidied and a glass top bar over a full-bleed map
+  (M-3.2-09).** The map now runs under `#wb-top` on mid/wide; the header
+  carries its glass on `#wb-top::before`. The left column head reads as two
+  counts (符合筛选 / 屏幕内), the detail column gets the shared footer.
+- **Shorter copy, whole-sentence i18n keys (M-3.2-08).** `localizeText()`
+  normalizes punctuation per language, so no full-width `，` / `；` reaches
+  the EN/JA build output. Long strings became whole-sentence keys instead
+  of fragments concatenated around Chinese punctuation.
+- **Visual tokens and one glass layer (M-3.2-01, R1).** CSS cascade layers,
+  named z-index tokens, radius/transition/elevation tokens, and a single
+  breakpoint set (560 / 750 / 1280, with 319 / 360 / 900 as exceptions)
+  enforced by `verify_build.py`'s `breakpoints` check. Glass
+  (`backdrop-filter`) is applied only to controls floating over the map,
+  falls back to opaque white under `@supports not` and
+  `prefers-reduced-transparency`, and is switched off during map movement
+  via `body.map-moving`.
+- **Basemap: CARTO Voyager → Positron, @2x on high-DPR screens
+  (M-3.2-12).** `carto_tile_url` in `map.py` `main()` now points at
+  `rastertiles/light_all` and carries `{r}` after `{y}`, so Leaflet requests
+  `@2x` wherever `devicePixelRatio > 1`. Positron's quieter ground lifts the
+  contrast of markers and of the glass control layer. The service-worker
+  tile cache keeps its name (`tabelog-tiles-v2`) and its 400-entry LRU; the
+  old Voyager tiles age out on their own. Budget for that cache is now
+  ≈13 MB at 1x / ≈40 MB at @2x. Side-by-side:
+  `audit_outputs/3.2.0-impl/review/basemap-compare.png`.
+- **Android shell 3.2.0 / `versionCode 30200`.** No native change — the
+  shell loads the live page; the bump only keeps the APK label in step
+  (`android/CHANGELOG-ANDROID.md`).
+
+### Fixed
+
+- **Glass on a container broke a fixed descendant (M-3.2-09).**
+  `backdrop-filter` makes an element the containing block for its
+  `position: fixed` descendants, and `wbRelocate()` moves `#ss-box`
+  (with `#ss-list`) into `#wb-top`: the search dropdown collapsed from
+  320×656 to 320×1 on both engines. The filter moved to `#wb-top::before`.
+- **A stale toast could sit on top of the FAB column for ~20 s
+  (M-3.2-10).** Toasts are serialized through one queue; a plain
+  informational toast never preempts one that carries an action, and the
+  action toasts themselves are last-writer-wins so an "undo" always points
+  at the step the user just took.
+- **`window.confirm()` on find-nearby (M-3.2-05).** Replaced by an
+  action toast with 撤销, which is also what the geolocation-failure and
+  out-of-Japan paths now use.
+- **The signed-out "this device only" hint is one-shot (M-3.2-10).** It
+  reuses the existing `tabelog.syncHintDismissed` key; no new key.
+- **Focus ring no longer lands on a `<select>` when a panel opens
+  (M-3.2-10)**, and `focusFirstIn()` skips form fields.
+- **Photo placeholder no longer leaves a blank band (M-3.2-06/R1)** — a
+  failed `<img>` used to hide the whole button while keeping its box.
+- **`#bs-foot`'s border and shadow were being eaten by `.glass-reg`
+  (M-3.2-09)** — restored through the `overrides` layer.
+
+### Removed
+
+- The phone text bottom bar (`#phone-nav`) and every rule that offset the
+  FAB stack, the attribution, `#sync-stack`, `#ss-list` and `#bs-sheet`
+  above it.
+- `#ff-fab` (and its `.needs-sync` breathing animation), the hamburger
+  drawer button, the floating `#ux-context` bar and `#ux-context-note`,
+  `#ux-detail-actions`, `.rst-actions-bar` (with `gmapsQ` / `gmapsUrl` /
+  `gmapsBtn` / `shareBtn`), `#ux-saved-scope`, and the filter footer's
+  explanatory paragraph.
+- Six i18n keys that no longer appear anywhere on the page. The other
+  unused keys were deliberately left in place so the untranslated-run
+  baseline does not move.
+
+### Tests
+
+- `tests/ux/visibility.py` is new: the map-visibility, truncation and
+  full-width-punctuation probes from the audit script
+  `audit_outputs/3.2.0-plan/ux-phone/run_flows.py` became a standing gate.
+  **Do not run `run_flows.py`** — its selectors still point at the deleted
+  `#phone-nav`; `tests/ux/README.md` says so.
+- `tests/smoke_playwright.py` runs the iPhone 402×874 rows on WebKit
+  (`"browser": "webkit"` in `VIEWPORTS`); Fold and desktop rows stay on
+  Chromium.
+- `scripts/verify_build.py` keeps 11 checks / 17 assertions; the
+  untranslated baseline is unchanged at EN 477 / JA 477.
+- `tests/sync` `H1` / `I4` / `I5b` were traced to probes reading the
+  deleted `#ff-fab .needs-sync`, not to a regression; `G3` was given an
+  8 s deadline poll instead of a fixed sleep.
+
+### Known gaps — carried to 4.0.0
+
+Collected from the milestone logs' 遗留 sections; none of these blocks the
+release, and each names where the decision lives.
+
+- **Cascade layers are declared but mostly empty.** `reset` / `base` /
+  `layout` / `surfaces` / `overrides` hold little or nothing, and the
+  `vendor` layer is empty because putting the four Leaflet `<link>`s into it
+  needs `@import url(...) layer(vendor)`, which changes load ordering and
+  bypasses the preload scanner. Move one block at a time when CSS is
+  externalized in 4.0.0.
+- **`#sync-stack` was not lowered below the FAB layer** — it makes room
+  horizontally (`padding-right: calc(12px + var(--fab-w))`) instead,
+  because lowering it would also put toasts under the detail card. Lowering
+  it properly means moving the toast queue out of `#sync-stack` first.
+- **700–749px now gets the full-width sheet** rather than 3.1.x's centred
+  card. That is a direct consequence of the unified breakpoint set; keeping
+  the centred card would need a new `min-width: 700` breakpoint, which the
+  `breakpoints` check would reject.
+- **`prefers-reduced-transparency` and the look of the glass are unverified
+  on hardware.** Playwright emulates neither, and WebKit's software
+  renderer does not composite `backdrop-filter` at all. On the device
+  checklist.
+- **`html`/`body` still have `overflow-x: visible`**; the off-canvas
+  `#wb-detail` is clipped by the inner shell.
+- **402px detail state shows 19.9% of the map** vs 23.4% in 2.3.0 — inside
+  the 18% floor, still 3.5pp short.
+- **Two Chinese words for the same act on different screens**: the detail
+  card's ⋯ menu says 隐藏这间店 while the Saved page's bulk action says
+  弃用. Unifying the Chinese would drag JA to 非表示 and break the M-106
+  four-word table, so it stays a known inconsistency.
+- **Back does not consume a level for a toast, and a `?r=` deep link's
+  first Back does not leave the site** — both are pre-existing behaviors
+  that conflict with the wording in SPEC §E5; the spec text needs the edit,
+  not the code.
+- **Token coverage is partial**: roughly 30 filter-panel radii, ~12
+  transitions, `#ff-region`'s 6px radius, `#wb-left-collapse`'s 8px and
+  `#layers-pop`'s 14px font are still literals.
+- **`l10nPunct`'s EN branch also converts `（）` to ASCII parentheses** for
+  every string that passes through `localizeText`. No side effect was found
+  across 200 sampled records, but it is a global behavior change.
+- **The 628-entry `TEXT_TRAD_MAP` has not had a full s2twp over-conversion
+  audit** — only the strings touched this release were checked.
+- **EN/JA typography at 402px was not measured end to end** — only zh-CN
+  runs the layout gate; the full-width-punctuation scan does cover all
+  three languages.
+
 ## [3.1.2] - 2026-09-08
 
 Website-only sync hotfix. The Android shell stays at `versionName 3.1.1` /

@@ -145,15 +145,23 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
             if w<750: tab('results')   # M-3.2-05: locating leaves the map up; the sort control lives in the drawer
             page.locator('#wb-sort').select_option(sort);page.wait_for_timeout(150)
             if w<750: lib_browser.phone_tab(page,'map')   # and the chip row is under the drawer
-            note=page.locator('#ux-nearby').text_content()
+            # M-3.2-R1 (SPEC C1): >=750 hides the nearby chip and lets the
+            # top bar's region button BE the pressed nearby state, so the
+            # two never claim the same screen. Read whichever one is live.
+            pressed='#ux-nearby' if w<750 else '#wb-region-btn'
+            note=page.locator(pressed).text_content()
             save(page,f'{args.browser}-{w}-nearby-{sort}')
-            check(page.locator('#ux-nearby').is_visible() and page.locator('#ux-nearby').get_attribute('aria-pressed')=='true','nearby chip not pressed')
+            if w<750:
+                check(page.locator('#ux-nearby').is_visible() and page.locator('#ux-nearby').get_attribute('aria-pressed')=='true','nearby chip not pressed')
+            else:
+                check(page.locator('#ux-nearby').is_visible() is False,'nearby chip should be hidden on mid/wide')
+                check(page.locator('#wb-region-btn').is_visible() and 'on' in (page.locator('#wb-region-btn').get_attribute('class') or ''),'top bar region button not in nearby state')
             check(('按距离' in note)==(sort=='distance'),'nearby sort copy disagrees')
             if sort!='distance':check(('评分' if sort=='rating' else '价位') in note,'current sort absent from copy')
         if w<750: tab('results')
         page.locator('#wb-sort').select_option('rating');page.reload();lib_browser.wait_ready(page)
         check(page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned,'planning coordinates changed on reload')
-        check('按距离' not in page.locator('#ux-nearby').text_content(),'reload falsely claims distance sorting')
+        check('按距离' not in page.locator('#ux-nearby' if w<750 else '#wb-region-btn').text_content(),'reload falsely claims distance sorting')
         save(page,f'{args.browser}-{w}-nearby-reload-rating')
         check(page.locator('#ux-restore-plan').is_visible(),'return plan action lost')
         page.locator('#ux-restore-plan').click();page.wait_for_timeout(300)
