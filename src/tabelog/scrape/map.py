@@ -6010,14 +6010,19 @@ SYNC_UI_HTML = """
      already reserves the same gutter), so the toast simply stops short of
      it. Dropping the stack UNDER the FABs instead would have hidden every
      toast behind an open restaurant card, which is the thing --z-toast >
-     --z-sheet exists to prevent. */
+     --z-sheet exists to prevent.
+     M-3.2-10: the reserved gutter is --fab-w + 20px, not + 12px. The column
+     is inset 14px from the edge, so 12px left the banner's right edge 2px
+     inside the locate button — the centre still took the tap, but the card
+     visibly clipped the button. 20px is what .leaflet-control-attribution
+     already reserves for the same column, so the two now line up. */
   #sync-stack {
     position: fixed;
     left: 0; right: 0;
     bottom: calc(76px + env(safe-area-inset-bottom));
     z-index: var(--z-toast);
     display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 0 calc(12px + var(--fab-w, 0px)) 0 12px;
+    padding: 0 calc(20px + var(--fab-w, 0px)) 0 12px;
     pointer-events: none;
   }
   #sync-stack > * {
@@ -9344,13 +9349,29 @@ FILTER_JS_TEMPLATE = r"""
       }
       return out;
     }
+    // M-3.2-10: when the caller did not name a target, land on something the
+    // keyboard cannot accidentally change. In 2.3.0 the drawer's first
+    // focusable was the results pane's sort <select>: every open parked a
+    // focus ring on it, and the next arrow key silently re-sorted the list.
+    // M-3.2-02/03 put #wb-fav-close in front of it, which fixes today's
+    // symptom by accident — this makes it a rule, so the next pane that
+    // starts with a field does not bring the ring back. An explicit
+    // focusSel (#bm-name, #fl-name) still wins; a pane made only of fields
+    // still gets its first field rather than nothing.
+    var FORM_FIELD_TAGS = {select: 1, input: 1, textarea: 1};
     function focusFirstIn(el, focusSel) {
       var target = null;
       if (focusSel) {
         try { target = el.querySelector(focusSel) || document.querySelector(focusSel); }
         catch (_) { target = null; }
       }
-      if (!target) target = focusablesIn(el)[0] || null;
+      if (!target) {
+        var cand = focusablesIn(el);
+        for (var i = 0; i < cand.length; i++) {
+          if (!FORM_FIELD_TAGS[cand[i].tagName.toLowerCase()]) { target = cand[i]; break; }
+        }
+        if (!target) target = cand[0] || null;
+      }
       if (target) { try { target.focus(); } catch (_) {} }
       return target;
     }
@@ -13575,28 +13596,50 @@ FILTER_JS_TEMPLATE = r"""
     function announce(text) { if (srEl) srEl.textContent = text; }
 
     // ---- transient toasts / snackbars -------------------------------------
-    function showToast(text, opts) {
-      opts = opts || {};
-      if (!stackEl) return null;
+    // M-3.2-10: exactly one toast is on screen at a time. Until now every
+    // call appended another card to #sync-stack, so one tap that saved a
+    // restaurant AND flipped an anonymous browser into "unsynced" put two
+    // dark banners plus #sync-hint over the FAB column at once (the
+    // ux-phone audit's s11-after-close shot). Two rules, no new element:
+    //   * a plain informational toast never covers an actionable one — it
+    //     waits behind it, so a status line cannot take away the Undo /
+    //     Sign-in affordance the user is reaching for;
+    //   * anything else replaces what is on screen. A plain toast replaces
+    //     a plain toast, and a new actionable toast replaces the previous
+    //     one because the user has just done something else: the older
+    //     Undo now refers to a step they have already moved past, and
+    //     queueing them would put a 20 s column of stale banners back over
+    //     the FABs — the very thing this milestone removes. SPEC G reads
+    //     "an actionable toast is not preempted by later ones", which is
+    //     kept for the case that motivated it (the anonymous Sign-in
+    //     nudge landing on top of an Undo) but not for a second action.
+    // The queue is capped: a burst keeps the newest, drops the stalest
+    // pending entry. Callers keep the old contract — a {close} handle that
+    // works whether the toast is showing or still waiting.
+    var TOAST_QUEUE_MAX = 2;
+    var toastQueue = [], toastActive = null;
+    function toastRender(job) {
       var el = document.createElement('div');
       el.className = 'sync-toast';
       var msg = document.createElement('span');
       msg.className = 'sync-toast-msg';
-      msg.textContent = text;
+      msg.textContent = job.text;
       el.appendChild(msg);
       var timer = null;
       function dismiss() {
         if (timer) { clearTimeout(timer); timer = null; }
         if (el.parentNode) el.parentNode.removeChild(el);
+        if (toastActive && toastActive.job === job) { toastActive = null; toastPump(); }
       }
-      if (opts.actionLabel) {
+      job.dismiss = dismiss;
+      if (job.opts.actionLabel) {
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'sync-btn';
-        btn.textContent = opts.actionLabel;
+        btn.textContent = job.opts.actionLabel;
         btn.addEventListener('click', function() {
           dismiss();
-          if (opts.onAction) opts.onAction();
+          if (job.opts.onAction) job.opts.onAction();
         });
         el.appendChild(btn);
       }
@@ -13604,9 +13647,47 @@ FILTER_JS_TEMPLATE = r"""
       // #sync-stack isn't one of the four observed containers, so a bookmark
       // name carrying an emoji has to be swapped here (CLAUDE.md).
       try { emojify(el); } catch (_) {}
+      timer = setTimeout(dismiss, job.opts.ms || 6000);
+      toastActive = {job: job, el: el};
+    }
+    function toastPump() {
+      if (toastActive || !stackEl) return;
+      while (toastQueue.length) {
+        var job = toastQueue.shift();
+        if (job.cancelled) continue;
+        toastRender(job);
+        return;
+      }
+    }
+    function showToast(text, opts) {
+      opts = opts || {};
+      if (!stackEl) return null;
+      var job = {text: text, opts: opts, cancelled: false, dismiss: null};
+      // M-089's live region fires at call time, not at render time: the
+      // action happened now, and a screen-reader user must not hear about it
+      // five seconds later just because a card is queued in front of it.
       announce(text);
-      timer = setTimeout(dismiss, opts.ms || 6000);
-      return {close: dismiss};
+      job.handle = {close: function() {
+        if (job.cancelled) return;
+        job.cancelled = true;
+        if (job.dismiss) job.dismiss();
+      }};
+      if (!toastActive) { toastQueue.push(job); toastPump(); return job.handle; }
+      if (opts.actionLabel || !toastActive.job.opts.actionLabel) {
+        // Cut the current one short. Queue the newcomer at the head first:
+        // dismiss() pumps, and the head is what it will pick up.
+        var d = toastActive.job.dismiss;
+        toastActive.job.cancelled = true;
+        toastQueue.unshift(job);
+        if (d) { d(); } else { toastActive = null; toastPump(); }
+        return job.handle;
+      }
+      toastQueue.push(job);
+      while (toastQueue.length > TOAST_QUEUE_MAX) {
+        var dropped = toastQueue.shift();
+        dropped.cancelled = true;
+      }
+      return job.handle;
     }
 
     // ---- M-034: failures get a banner, successes stay quiet ---------------
@@ -13654,10 +13735,20 @@ FILTER_JS_TEMPLATE = r"""
       catch (_) { return false; }
     }
     var hintSuppressUntil = 0, hintRetryTimer = null;
+    // M-3.2-10: the banner is a one-shot. It used to come back on every load
+    // for as long as the browser held local-only state and the user had not
+    // pressed its OK button — a permanent third row under the toasts.
+    // `hintShown` keeps it on screen for the load that earned it (the key
+    // is persisted the moment it appears, and hintDismissed() would
+    // otherwise hide it again on the very next render); `hintClosed` is the
+    // in-session dismissal.
+    // No new key: this is the existing tabelog.syncHintDismissed.
+    var hintShown = false, hintClosed = false;
     var hintMsgEl = document.getElementById('sync-hint-msg');
     function renderSyncHint() {
       if (!hintEl) return;
-      var want = syncStatus.dirty && !syncStatus.signedIn && !hintDismissed();
+      var want = syncStatus.dirty && !syncStatus.signedIn && !hintClosed
+                 && (hintShown || !hintDismissed());
       // Don't stack the banner on top of the toast that just said the same
       // thing — let the toast finish, then show it.
       if (want && Date.now() < hintSuppressUntil) {
@@ -13674,6 +13765,10 @@ FILTER_JS_TEMPLATE = r"""
       // enough to be worth losing, and a durability caveat when the browser
       // refused to make this origin persistent.
       if (want && hintMsgEl) hintMsgEl.textContent = localOnlyHintText();
+      if (want && !hintShown) {
+        hintShown = true;
+        try { localStorage.setItem(SYNC_HINT_KEY, '1'); } catch (_) {}
+      }
     }
 
     // ---- M-013 / GAP-2-13: is local state actually durable? ---------------
@@ -13808,11 +13903,13 @@ FILTER_JS_TEMPLATE = r"""
     });
     var hintOkEl = document.getElementById('sync-hint-ok');
     if (hintOkEl) hintOkEl.addEventListener('click', function() {
+      hintClosed = true;
       try { localStorage.setItem(SYNC_HINT_KEY, '1'); } catch (_) {}
       if (hintEl) hintEl.hidden = true;
     });
     var hintSigninEl = document.getElementById('sync-hint-signin');
     if (hintSigninEl) hintSigninEl.addEventListener('click', function() {
+      hintClosed = true;
       if (hintEl) hintEl.hidden = true;
       try { openAvatarMenu(); } catch (_) {}
     });
@@ -20933,8 +21030,18 @@ FILTER_JS_TEMPLATE = r"""
       var obWaited = 0;
       setTimeout(function show() {
         if (obBusy() || obIsStandalone() || obInstalled) return;
+        // M-3.2-10: #sync-stack always *has* children — #sync-hint,
+        // #sw-update and #net-offline are permanent, hidden rows — so the
+        // drain check never fired and the snackbar simply waited out its
+        // 9 s budget every time. Count what is actually on screen.
         var stack = document.getElementById('sync-stack');
-        if (stack && stack.children.length && obWaited < 9000) {
+        var busyRows = 0;
+        if (stack) {
+          for (var si = 0; si < stack.children.length; si++) {
+            if (!stack.children[si].hidden) busyRows++;
+          }
+        }
+        if (busyRows && obWaited < 9000) {
           obWaited += 700;
           setTimeout(show, 700);
           return;
