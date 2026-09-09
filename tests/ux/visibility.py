@@ -37,6 +37,13 @@ comparable with its table:
 
 402x874 is measured on WebKit and nothing else: it is an iPhone, and a
 Chromium pass on those dimensions is not evidence about iOS Safari.
+
+M-3.2-R1: every viewport runs once per UI language (zh-CN, en, ja). The
+intro bar is the one piece of home-screen chrome whose height depends on
+the language — a 53-character English sentence folded it to three rows and
+took 475x751 home to 77.0% while the Chinese run read 83.4% — so a single
+language gate was blind to exactly the row most likely to break. The
+language is part of the screenshot name and of every results.json record.
 """
 from __future__ import annotations
 
@@ -62,6 +69,10 @@ VIEWPORTS = {
     'fold591':   dict(w=591, h=689, browser='chromium', dpr=2,
                       home=None, drawer=0.30, detail=0.18),
 }
+
+# The three UI languages the gate runs in. zh-TW is derived from zh-CN by
+# to_trad() at build time and is the same length, so it is not a fourth run.
+LANGS = ('zh-CN', 'en', 'ja')
 
 # Strings the audit caught clipped at a phone width (ux-phone/table_E.md).
 # Every one of them is a whole fact the user needs — a price ceiling, a
@@ -230,31 +241,32 @@ def check_punctuation(docs: Path) -> list[str]:
     return bad
 
 
-def measure(page, out_dir: Path, vp: str, state: str, records: list) -> dict:
+def measure(page, out_dir: Path, vp: str, lang: str, state: str,
+            records: list) -> dict:
     page.wait_for_timeout(450)
     m = page.evaluate(METRICS_JS)
-    m.update(vp=vp, state=state)
+    m.update(vp=vp, lang=lang, state=state)
     m['mapReachable'] = round((m['mapVisible'] or 0) + (m['mapDimmed'] or 0), 3)
     m['watched'] = [e for e in m['truncated'] if watched(e)]
-    page.screenshot(path=str(out_dir / f'{vp}-{state}.png'))
+    page.screenshot(path=str(out_dir / f'{vp}-{lang}-{state}.png'))
     records.append(m)
-    print(f"  {vp:9s} {state:8s} map={m['mapReachable']:.0%} "
+    print(f"  {vp:9s} {lang:5s} {state:8s} map={m['mapReachable']:.0%} "
           f"(solid {m['mapVisible']:.0%}) overflow={m['pageOverflow']} "
           f"clipped={len(m['watched'])}", flush=True)
     return m
 
 
-def run_viewport(browser, base, vp: str, cfg: dict, out_dir: Path,
+def run_viewport(browser, base, vp: str, cfg: dict, lang: str, out_dir: Path,
                  records: list, failures: list) -> None:
     ctx = browser.new_context(
         viewport={'width': cfg['w'], 'height': cfg['h']},
         device_scale_factor=cfg['dpr'], is_mobile=True, has_touch=True,
-        service_workers='block', locale='zh-CN')
+        service_workers='block', locale=lang)
     ctx.set_default_timeout(15000)
     # A language, so the first-visit chooser does not own the screen — but
     # deliberately NOT tabelog.seenIntro: the plan's 78% home baseline was
     # measured with the intro bar up.
-    ctx.add_init_script("localStorage.setItem('tabelog.lang','zh-CN')")
+    ctx.add_init_script("localStorage.setItem('tabelog.lang',%r)" % lang)
     page = ctx.new_page()
     errors: list[str] = []
     page.on('pageerror', lambda e: errors.append(str(e)))
@@ -262,19 +274,21 @@ def run_viewport(browser, base, vp: str, cfg: dict, out_dir: Path,
     lib_browser.boot(page, base)
     page.wait_for_timeout(700)
 
+    tag = f'{vp} {lang}'
+
     def gate(state: str, floor):
-        m = measure(page, out_dir, vp, state, records)
+        m = measure(page, out_dir, vp, lang, state, records)
         if floor is not None and m['mapReachable'] < floor:
             failures.append(
-                f'{vp} {state}: map is {m["mapReachable"]:.1%} of the screen, '
+                f'{tag} {state}: map is {m["mapReachable"]:.1%} of the screen, '
                 f'floor is {floor:.0%}')
         if m['pageOverflow']:
             failures.append(
-                f'{vp} {state}: the page scrolls sideways '
+                f'{tag} {state}: the page scrolls sideways '
                 f'({m["scrollWidth"]}px in a {m["innerWidth"]}px window); '
                 f'{m["overflowing"][:3]}')
         for e in m['watched']:
-            failures.append(f'{vp} {state}: {e["el"]} is clipped '
+            failures.append(f'{tag} {state}: {e["el"]} is clipped '
                             f'({e["scrollW"]} into {e["clientW"]}px)')
         return m
 
@@ -303,7 +317,7 @@ def run_viewport(browser, base, vp: str, cfg: dict, out_dir: Path,
     gate('layers', None)
 
     if errors:
-        failures.append(f'{vp}: page errors {errors[:3]}')
+        failures.append(f'{tag}: page errors {errors[:3]}')
     ctx.close()
 
 
@@ -314,7 +328,10 @@ def main(argv=None) -> int:
     ap.add_argument('--docs', type=Path, default=ROOT / 'docs')
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--only', help='comma-separated viewport names')
+    ap.add_argument('--langs', default=','.join(LANGS),
+                    help='comma-separated UI languages (default: all three)')
     args = ap.parse_args(argv)
+    langs = [l for l in args.langs.split(',') if l]
     args.output.mkdir(parents=True, exist_ok=True)
     lib_browser.DOCS = args.docs.resolve()
 
@@ -336,13 +353,15 @@ def main(argv=None) -> int:
                 continue
             browser = getattr(p, engine).launch()
             for vp, cfg in rows.items():
-                print(f'[{vp}] {cfg["w"]}x{cfg["h"]} on {engine}')
-                try:
-                    run_viewport(browser, base, vp, cfg, args.output,
-                                 records, failures)
-                except Exception as exc:  # keep measuring the other viewports
-                    failures.append(f'{vp}: {exc!r}')
-                    print(f'  !! {vp} failed: {exc!r}'[:400], flush=True)
+                for lang in langs:
+                    print(f'[{vp} {lang}] {cfg["w"]}x{cfg["h"]} on {engine}')
+                    try:
+                        run_viewport(browser, base, vp, cfg, lang, args.output,
+                                     records, failures)
+                    except Exception as exc:  # keep measuring the others
+                        failures.append(f'{vp} {lang}: {exc!r}')
+                        print(f'  !! {vp} {lang} failed: {exc!r}'[:400],
+                              flush=True)
             browser.close()
 
     (args.output / 'results.json').write_text(

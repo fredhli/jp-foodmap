@@ -131,6 +131,15 @@ _TRAD_FIXUPS: tuple[tuple[str, str], ...] = (
     # note. Taiwan writes 局部 here; the four-character phrase is bounded
     # enough that it cannot fire inside the Tabelog policy corpus.
     ("區域性補採", "局部補採"),
+    # M-3.2-R1 (checker C-02): more proper nouns s2twp bends — 里 in a
+    # Japanese place name is the place name, not "inside"; 岳 in a mountain
+    # name is written 岳 in Taiwan too. And the genre label 面类 is noodles,
+    # which Taiwan writes 麵類 (s2twp left it as 面類 while converting 拉麵).
+    ("首裡城", "首里城"),
+    ("吉野裡", "吉野里"),
+    ("裡歴史公園", "里歴史公園"),
+    ("谷川嶽", "谷川岳"),
+    ("面類", "麵類"),
 )
 
 
@@ -1943,6 +1952,13 @@ def build_filter_panel_html(
     flex: 1 1 auto; min-width: 0; text-align: right; line-height: 1.35;
   }}
   #ff-sheet-content #ff-sheet-title {{ flex-shrink: 0; white-space: nowrap; }}
+  /* M-3.2-R1 (review F-06): since W-7 the panel always lives in #wb-left,
+     whose head already carries the tab name and the close control — so the
+     panel's own title and × were a second title and a second × one row
+     down. Only the counts sentence stays, left-aligned. */
+  #wb-left #ff-sheet-content #ff-sheet-title,
+  #wb-left #ff-sheet-content .ff-close {{ display: none; }}
+  #wb-left #ff-sheet-content .ff-head-sum {{ text-align: left; }}
   #ff-sheet-content .ff-close {{
     display: inline-flex; align-items: center; justify-content: center;
     width: 44px; height: 44px; margin: 0 -8px 0 4px;
@@ -2066,9 +2082,9 @@ def build_filter_panel_html(
   #ff-foreign-show {{
     display: inline-flex; align-items: center;
     min-height: 32px; padding: 0 12px; flex-shrink: 0;
-    border: 1px solid #f59e0b; border-radius: 999px;
-    background: #fff; color: #92400e;
-    font-family: inherit; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--fg-2);
+    font-family: inherit; font-size: 13px; font-weight: 600;
     cursor: pointer;
   }}
   @media (pointer: coarse) {{
@@ -2434,7 +2450,7 @@ DESIGN_TOKENS_CSS = """
        content surface. The 1px inner highlight is not decoration: about 60%
        of the "glass" read comes from it rather than from the blur
        (design-research REPORT §2.3). */
-    --glass-tint-thin: rgba(255, 255, 255, 0.72);
+    --glass-tint-thin: rgba(255, 255, 255, 0.80);   /* M-3.2-R1 F-10: .72 ghosted map labels through a chip */
     --glass-tint-reg: rgba(255, 255, 255, 0.84);
     --glass-blur-thin: blur(16px) saturate(160%);
     --glass-blur-reg: blur(20px) saturate(170%);
@@ -2636,7 +2652,7 @@ MAP_FAB_HTML = """
     z-index: var(--z-float);
     display: flex; flex-direction: column; gap: 8px;
     pointer-events: none;
-    transition: bottom 0.25s ease-out;
+    transition: bottom var(--dur-3) var(--ease-out);
   }
   /* AUTO-05: OSM / CARTO attribution has to stay visible — on 28 of the
      tested viewports the detail card buried it completely. It rides on
@@ -2652,34 +2668,54 @@ MAP_FAB_HTML = """
     margin-bottom: var(--attr-h, 0px) !important;
     margin-right: calc(var(--fab-w, 0px) + 20px) !important;
     max-width: calc(100vw - var(--fab-w, 0px) - 44px);
-    transition: margin-bottom 0.25s ease-out;
+    transition: margin-bottom var(--dur-3) var(--ease-out);
   }
   @media (prefers-reduced-motion: reduce) {
     .map-fab-stack, .leaflet-control-attribution { transition: none; }
   }
   .map-fab {
     pointer-events: auto;
-    background: #fff; color: #374151;
-    border: 1px solid #d1d5db;
-    border-radius: 999px;
+    /* M-3.2-R1 (SPEC D.2, review F-02): the thin glass as tokens — the
+       .active / .locating / .show-all states below stay solid. */
+    background: var(--glass-tint-thin); color: var(--fg-2);
+    -webkit-backdrop-filter: var(--glass-blur-thin);
+    backdrop-filter: var(--glass-blur-thin);
+    border: 0.5px solid var(--glass-hairline);
+    border-radius: var(--r-pill);
     min-height: 44px;            /* F2 / M-078 */
     padding: 8px 14px;
     font-size: 13px; font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: var(--el-2), var(--glass-inner-hi);
     display: inline-flex; align-items: center; gap: 6px;
     user-select: none;
-    transition: background 0.15s ease-out, box-shadow 0.15s ease-out,
-                color 0.15s ease-out, border-color 0.15s ease-out;
+    transition: background var(--dur-1) var(--ease-std),
+                box-shadow var(--dur-1) var(--ease-std),
+                color var(--dur-1) var(--ease-std),
+                border-color var(--dur-1) var(--ease-std);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     line-height: 1;
+  }
+  @supports not ((backdrop-filter: blur(1px))
+                 or (-webkit-backdrop-filter: blur(1px))) {
+    .map-fab { background: var(--glass-fallback); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .map-fab {
+      background: var(--glass-fallback);
+      -webkit-backdrop-filter: none; backdrop-filter: none;
+      border-color: var(--border-2);
+    }
+  }
+  body.map-moving .map-fab {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
   }
   /* M-160: pointer-gated. This stack is where a stuck hover hurt most — the
      tinted "hovered" pill reads exactly like the blue .active "layer is on"
      pill, so after a tap the user could not tell which layers were live. */
   @media (hover: hover) and (pointer: fine) {
-    .map-fab:hover { background: #f9fafb;
-                     box-shadow: 0 4px 10px rgba(0,0,0,0.18); }
+    .map-fab:hover { background: var(--bg-elev);
+                     box-shadow: var(--el-3), var(--glass-inner-hi); }
   }
   .map-fab.active { background: #2563eb; color: #fff;
                     border-color: #2563eb; }
@@ -2889,8 +2925,8 @@ MAP_FAB_HTML = """
     box-sizing: border-box;
     background: #fff;
     border: 1px solid #e5e7eb;
-    border-radius: 14px;
-    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    border-radius: var(--r-md);
+    box-shadow: var(--el-3);
     padding: 6px;
     pointer-events: auto;
     overflow-y: auto;
@@ -2926,8 +2962,9 @@ MAP_FAB_HTML = """
   #layers-pop .map-fab {
     width: 100%; height: auto; min-height: 44px;   /* F2 / M-078 */
     margin: 0; padding: 7px 10px;
-    border: 0; border-radius: 10px;
+    border: 0; border-radius: var(--r-sm);
     background: transparent; color: #374151;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
     box-shadow: none;
     display: flex; align-items: center; justify-content: flex-start;
     gap: 10px;
@@ -3128,18 +3165,55 @@ SEARCH_BOX_HTML = """
     /* F2 / M-078: the primary control on every viewport, so it gets the
        44px minimum outright rather than a padded-out hit area. */
     min-height: 44px;
-    background: #fff; border: 1px solid #d1d5db; border-radius: 999px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    transition: box-shadow 0.15s ease-out;
+    /* M-3.2-R1 (SPEC D.2, review F-01): the thin glass, written as tokens
+       rather than the .glass-thin utility because the utilities layer would
+       outrank the state rules below (focus / has-text / busy go opaque). */
+    background: var(--glass-tint-thin);
+    -webkit-backdrop-filter: var(--glass-blur-thin);
+    backdrop-filter: var(--glass-blur-thin);
+    border: 0.5px solid var(--glass-hairline); border-radius: var(--r-pill);
+    box-shadow: var(--el-2), var(--glass-inner-hi);
+    transition: background var(--dur-1) var(--ease-std),
+                box-shadow var(--dur-1) var(--ease-std);
+  }
+  /* Typing, searching or focused: solid white so the text sits on a plain
+     ground, and the focus ring is the one 2px accent outline (F-16: the
+     #93c5fd border + darker shadow made a double ring). */
+  #ss-input-wrap:focus-within, #ss-input-wrap.has-text,
+  #ss-input-wrap.searching, #ss-input-wrap.busy {
+    background: var(--bg-elev);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    border-color: var(--border-2);
   }
   /* H6 / M-084: the focus ring moved off the <input> and onto the wrapper,
      so the whole pill lights up instead of a rectangle inside a rounded
      box — and the ring no longer depends on the input keeping outline:none
      with nothing to replace it. */
   #ss-input-wrap:focus-within {
-    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
-    border-color: #93c5fd;
-    outline: 2px solid #2563eb; outline-offset: 2px;
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  /* The three glass disciplines (SPEC D.1) for the two capsule controls. */
+  @supports not ((backdrop-filter: blur(1px))
+                 or (-webkit-backdrop-filter: blur(1px))) {
+    #ss-input-wrap, #ss-avatar { background: var(--glass-fallback); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    #ss-input-wrap, #ss-avatar {
+      background: var(--glass-fallback);
+      -webkit-backdrop-filter: none; backdrop-filter: none;
+      border-color: var(--border-2);
+    }
+  }
+  body.map-moving #ss-input-wrap, body.map-moving #ss-avatar {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  /* On the column layouts both sit ON the frosted top bar: glass never
+     stacks on glass, so there they are solid white with a plain border. */
+  body.wb-mid #ss-input-wrap, body.wb-wide #ss-input-wrap,
+  body.wb-mid #ss-avatar, body.wb-wide #ss-avatar {
+    background: var(--bg-elev);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    border: 1px solid var(--border-2); box-shadow: none;
   }
   /* Suppressed only inside a wrapper that is guaranteed to be drawing one. */
   #ss-input-wrap:focus-within #ss-input { outline: none; }
@@ -3196,12 +3270,10 @@ SEARCH_BOX_HTML = """
   .ss-chip::after { content: ''; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
   .ss-chip[hidden] { display: none; }
   .ss-chip .ss-chip-t { overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
-  .ss-chip .ss-chip-caret { font-size: 11px; color: var(--fg-3); }
   .ss-chip img.emoji-img { width: 14px; height: 14px; }
   /* Pressed = nearby mode. This chip never wears .glass-thin (the utility
      layer would win the background), so it is the one opaque chip. */
   .ss-chip.on { background: var(--accent); color: #fff; border: 0.5px solid var(--accent); box-shadow: var(--el-1); }
-  .ss-chip.on .ss-chip-caret { color: rgba(255,255,255,.8); }
   .ss-chip:disabled { color: var(--fg-3); cursor: wait; }
   .ss-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
@@ -3258,14 +3330,19 @@ SEARCH_BOX_HTML = """
   #ss-list {
     margin-top: 6px;
     background: #fff;
-    border: 1px solid #d1d5db; border-radius: 10px;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.16);
+    border: 1px solid #d1d5db; border-radius: var(--r-md);
+    box-shadow: var(--el-3);
     overflow: hidden;
     display: none;
     /* Cap at ~6 rows + 2 section headers; scroll inside when there are
        more matches. Hard-clamped to viewport on small screens so we
        never overflow the mobile bottom edge. */
-    max-height: min(360px, 70dvh);
+    /* M-3.2-R1 (checker B-3, SPEC E6): 40dvh, not 70 — with the capsule
+       band above it the list must stop short of half the screen on the
+       Fold's 751px outer display (was 360px = 44.7% map, floor 50%; 42dvh
+       measured 49.9%, so 40). */
+    max-height: min(360px, 40vh);
+    max-height: min(360px, 40dvh);
     overflow-y: auto;
     /* M-170: keep an overscrolling flick inside the list instead of
        chaining it into a map pan. */
@@ -3434,12 +3511,15 @@ SEARCH_BOX_HTML = """
     position: relative;             /* F2: anchor for the ::after hit area */
     flex-shrink: 0;
     width: 36px; height: 36px;
-    padding: 0; border: 1px solid #d1d5db; border-radius: 50%;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    padding: 0; border: 0.5px solid var(--glass-hairline); border-radius: 50%;
+    background: var(--glass-tint-thin);
+    -webkit-backdrop-filter: var(--glass-blur-thin);
+    backdrop-filter: var(--glass-blur-thin);
+    box-shadow: var(--el-2), var(--glass-inner-hi);
     cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: box-shadow 0.15s ease-out;
+    transition: box-shadow var(--dur-1) var(--ease-std);
   }
   /* F2 / M-078: 36px visual, 44px touch target. The round crop moved from
      the button to the <img> so the button is no longer overflow:hidden and
@@ -3449,7 +3529,7 @@ SEARCH_BOX_HTML = """
   }
   #ss-avatar:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
-    #ss-avatar:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.22); }
+    #ss-avatar:hover { box-shadow: var(--el-3), var(--glass-inner-hi); }
   }
   #ss-avatar img { width: 100%; height: 100%; object-fit: cover; display: block;
                    border-radius: 50%; }
@@ -3472,8 +3552,8 @@ SEARCH_BOX_HTML = """
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     background: #fff;
-    border: 1px solid #e5e7eb; border-radius: 12px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.20);
+    border: 1px solid #e5e7eb; border-radius: var(--r-md);
+    box-shadow: var(--el-3);
     padding: 8px;
     font-size: 13px; color: #1f2937;
     display: none;
@@ -3665,7 +3745,7 @@ SEARCH_BOX_HTML = """
        is the pressed STATE only (M-3.2-05); the entry is #fab-locate. -->
   <div id="ss-chips" role="group" aria-label="找店范围">
     <button id="ux-region" class="ss-chip glass-thin" type="button">
-      <span aria-hidden="true">📍</span><span class="ss-chip-t">全部地区</span><span class="ss-chip-caret" aria-hidden="true">▾</span>
+      <span aria-hidden="true">📍</span><span class="ss-chip-t">全部地区</span>
     </button>
     <button id="ux-nearby" class="ss-chip on" type="button" aria-pressed="true" hidden>
       <span aria-hidden="true">◎</span><span class="ss-chip-t">找附近</span>
@@ -3868,12 +3948,20 @@ ONBOARD_HTML = """
        wrapped onto a third row of its own on a 416px outer screen. W-10 grew
        the × to a 44px target, so the reserve grew with it (3px offset + 44). */
     padding: 8px 48px 8px 10px;
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    /* M-3.2-R1 (review F-11, SPEC D.1 card): --r-md + --el-2 like every
+       other card; the buttons inside follow the concentric rule at --r-sm. */
+    background: var(--bg-elev); border: 1px solid var(--border-1);
+    border-radius: var(--r-md);
+    box-shadow: var(--el-2);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 13px; color: #1f2937; line-height: 1.4;
   }
   #intro-bar[hidden] { display: none; }
+  /* M-3.2-R1 (checker A/F-03, F-05): with the detail column open on mid /
+     wide the bar sat on the remaining map and took it under SPEC C's 50%
+     (932: 47.0%). A phone's card covers it; the columns hide it. */
+  body.wb-mid.ux-detail-open #intro-bar,
+  body.wb-wide.ux-detail-open #intro-bar { display: none; }
   /* On mid / wide the search box has been re-parented into #wb-top, so the
      bar hangs off the top bar and spans only the map column. */
   body.wb-mid #intro-bar, body.wb-wide #intro-bar {
@@ -3893,7 +3981,13 @@ ONBOARD_HTML = """
      rule above: same specificity, so source order decides. */
   @media (max-width: 559px) {
     #intro-bar { right: calc(var(--chrome-inset) + 44px); }
-    #intro-bar .ib-txt { flex-basis: 120px; }
+  }
+  /* M-3.2-R1 (checker A/F-01, review F-11): below the column layouts the
+     sentence takes a row of its own and the two buttons share the next
+     one — two rows in every language, instead of one row in Chinese and
+     an L-shaped three in EN / JA (475: 58px zh vs 104px en). */
+  @media (max-width: 749px) {
+    #intro-bar .ib-txt { flex: 1 1 100%; }
   }
   /* A-2 (2.3.0): the phone layout reaches 749px now. Above the compact
      breakpoint #ss-box is a CENTRED clamp() box rather than the full-bleed
@@ -3912,17 +4006,17 @@ ONBOARD_HTML = """
   }
   #intro-bar .ib-act {
     flex: 0 0 auto;
-    min-height: 34px; padding: 5px 11px;
-    border: 1px solid #d1d5db; border-radius: 999px;
-    background: #f9fafb; color: #1d4ed8; cursor: pointer;
-    font: inherit; font-size: 12px;
+    min-height: 36px; padding: 5px 11px;
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--accent-strong); cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600;
     -webkit-tap-highlight-color: transparent;
   }
   @media (hover: none) and (pointer: coarse) {   /* F2: touch target */
     #intro-bar .ib-act { min-height: 40px; }
   }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
-    #intro-bar .ib-act:hover { background: #eef2ff; }
+    #intro-bar .ib-act:hover { background: var(--bg-subtle); }
   }
   #intro-bar .ib-x {
     position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
@@ -4403,7 +4497,7 @@ PHONE_DRAWER_HTML = """
     border-radius: 0 var(--r-lg) 0 0;
   }
   body.wb-fav-open .wb-tabs { flex-wrap: wrap; }
-  body.wb-fav-open .wb-tab { min-height: 44px; font-size: 15px; }
+  body.wb-fav-open .wb-tab { min-height: 44px; }
   /* W-9 (2.3.0): iOS measured the two count sentences at a fixed ~319px
      whatever the column was actually doing, and that width is what pushed
      the collections tab's tool row past the drawer's right edge. Nothing
@@ -4434,10 +4528,11 @@ PHONE_DRAWER_HTML = """
      the user is about to leave. .glass-thin comes from the utilities layer,
      which outranks this one, so the 1px separator is drawn as a
      pseudo-element rather than as a border the utility would overwrite. */
+  /* M-3.2-R1 (review F-09 / chief 7): no glass — it sits on the drawer's
+     opaque body, not on the map. Plain white, plain separator. */
   #ux-filter-done { display: none; position: relative; flex: 0 0 auto;
-    padding: 8px 12px; }
-  #ux-filter-done::before { content: ''; position: absolute; left: 0; right: 0;
-    top: 0; height: 1px; background: var(--border-1); }
+    padding: 8px 12px; background: var(--bg-elev);
+    border-top: 1px solid var(--border-1); }
   #ux-filter-done.on { display: block; }
   #ux-filter-results { width: 100%; min-height: 40px; border: 0;
     border-radius: var(--r-md); background: var(--accent); color: #fff;
@@ -5302,13 +5397,16 @@ MOBILE_UX_ASSETS = """
     max-height: min(75vh, calc(100vh - 132px));
     max-height: min(75dvh, calc(100dvh - 132px));
     background: #fff;
-    border-radius: 12px 12px 0 0;   /* G8: overlay radius */
-    box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
+    /* M-3.2-R1 (review F-04): the same shell tokens as the drawer. */
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--el-3);
     transform: translateY(100%);
-    transition: transform 0.25s ease-out;
+    transition: transform var(--dur-3) var(--ease-out);
     display: flex; flex-direction: column;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    padding-bottom: env(safe-area-inset-bottom);
+    /* The safe-area inset moved onto #bs-foot (review F-09: the footer is
+       absolute now, so the content really does scroll under its glass). */
+    padding-bottom: 0;
   }
   #bs-sheet.bs-open { transform: translateY(0); }
   /* Tablet: cap width and center; still bottom-anchored. The explicit
@@ -5321,7 +5419,7 @@ MOBILE_UX_ASSETS = """
     #bs-sheet { width: min(680px, calc(100vw - 32px));
                 max-height: min(80vh, calc(100vh - 132px));
                 max-height: min(80dvh, calc(100dvh - 132px));
-                border-radius: 12px 12px 0 0; }   /* G8 */
+                border-radius: var(--r-lg) var(--r-lg) 0 0; }
   }
   /* Desktop: roomier sheet so the 2-column popup layout has space. */
   @media (min-width: 1280px) {
@@ -5391,6 +5489,20 @@ MOBILE_UX_ASSETS = """
     box-shadow: 0 -4px 12px rgba(16, 24, 40, 0.06), var(--glass-inner-hi);
   }
   #bs-foot:empty { display: none; }
+  /* M-3.2-R1 (review F-09): on a phone the footer is a flex SIBLING of
+     #bs-content, so its blur only ever sampled the sheet's own white. Pin
+     it over the bottom of the sheet and give the content the same height
+     back as padding, so the last rows really slide under the glass. Child
+     combinator: in the column layouts #bs-foot lives in #wb-detail-body
+     (DESKTOP_POLISH_CSS keeps it in flow and opaque there). */
+  #bs-sheet > #bs-foot {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+    border-radius: 0;
+  }
+  #bs-sheet > #bs-content {
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
+  }
   #bs-foot .bs-foot-btn {
     flex: 1 1 auto; min-width: 0; min-height: 44px;
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -5436,7 +5548,7 @@ MOBILE_UX_ASSETS = """
   #bs-more-menu > button {
     min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm);
     background: none; color: var(--fg-2); text-align: left; cursor: pointer;
-    font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.3;
+    font-family: inherit; font-size: 15px; font-weight: 500; line-height: 1.3;
   }
   #bs-more-menu > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (hover: hover) and (pointer: fine) {
@@ -5592,7 +5704,7 @@ MOBILE_UX_ASSETS = """
   /* D1: subtitle line — cuisine bucket · nearest station · walking minutes.
      Everything a "is this even the right kind of place" glance needs, on
      one row directly under the name. */
-  .rst-sub { color: #4b5563; font-size: 12.5px; line-height: 1.5;
+  .rst-sub { color: #4b5563; font-size: 13px; line-height: 1.5;
              margin: 0 0 10px; display: flex; flex-wrap: wrap;
              gap: 2px 10px; align-items: baseline; }
   .rst-sub .rst-sub-sep { color: #9ca3af; }
@@ -5607,15 +5719,15 @@ MOBILE_UX_ASSETS = """
   .rst-tile { box-sizing: border-box; min-height: 44px; min-width: 0;
               display: flex; flex-direction: column; justify-content: center;
               gap: 2px; padding: 5px 8px;
-              border: 1px solid #e5e7eb; border-radius: 10px;   /* G8 card */
+              border: 1px solid #e5e7eb; border-radius: var(--r-md);
               background: #f9fafb; }
-  .rst-tile-k { font-size: 11.5px; color: #6b7280; line-height: 1.25; }
+  .rst-tile-k { font-size: 11px; color: #6b7280; line-height: 1.25; }
   .rst-tile-v { font-size: 15px; font-weight: 700; color: #1f2937;
                 line-height: 1.25; overflow-wrap: anywhere;
                 font-variant-numeric: tabular-nums; }
   /* D2: "上限" is the qualifier, not the number — it rides along at label
      weight so the bucket stays the thing you read. */
-  .rst-tile-u { font-size: 11.5px; font-weight: 500; color: #6b7280;
+  .rst-tile-u { font-size: 11px; font-weight: 500; color: #6b7280;
                 white-space: nowrap; }
   /* Three tiles across a 384px (wide) or 340px (mid) detail column leaves
      ~85px of text per tile, so the headline steps down rather than breaking
@@ -5679,13 +5791,13 @@ MOBILE_UX_ASSETS = """
   .rst-list-chip img { height: 14px; width: 14px; flex-shrink: 0; }
   .rst-list-chip.rst-list-on { background: #fef3c7; border-color: #facc15;
                                color: #92400e; }
-  .rst-list-chip.rst-list-new { background: #eff6ff; border-color: #bfdbfe;
-                                color: #1d4ed8; }
+  .rst-list-chip.rst-list-new { background: var(--bg-elev); border-color: var(--border-2);
+                                color: var(--accent); }
   .rst-list-chip:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     .rst-list-chip:hover { background: #f3f4f6; }
     .rst-list-chip.rst-list-on:hover { background: #fde68a; }
-    .rst-list-chip.rst-list-new:hover { background: #dbeafe; }
+    .rst-list-chip.rst-list-new:hover { background: var(--bg-subtle); }
   }
   @media (pointer: coarse) {   /* G6 / M-078: 44px hit area */
     .rst-list-chip::after {
@@ -5746,7 +5858,7 @@ MOBILE_UX_ASSETS = """
      measure), so a square box threw away a third of every picture, and the
      row of three is *shorter* at 4/3 than it was at 1/1. */
   .rst-photos .rst-ph { display: block; min-width: 0; position: relative;
-                  overflow: hidden; border-radius: 6px;
+                  overflow: hidden; border-radius: var(--r-sm);
                   width: 100%; padding: 0; border: 0; cursor: pointer;
                   aspect-ratio: 4 / 3; background: #f3f4f6; }
   /* height:auto is the actual bug fix (W-4). The <img> carries width/height
@@ -5766,7 +5878,7 @@ MOBILE_UX_ASSETS = """
      milestone added on WebKit are what surfaced it. */
   .rst-photos img { width: 100%; height: 100%; aspect-ratio: 4 / 3;
                     object-fit: cover;
-                    border-radius: 6px; display: block; background: #f3f4f6; }
+                    border-radius: var(--r-sm); display: block; background: #f3f4f6; }
   /* Loading shimmer — a translated gradient strip (transform-only, stays
      on the compositor). The img's inline onload adds .ld to the box,
      which removes the strip so nothing keeps animating under the photo. */
@@ -6042,10 +6154,10 @@ SYNC_UI_HTML = """
   .sync-toast, #sync-hint {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     background: #111827; color: #f9fafb;
     font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+    box-shadow: var(--el-3);
   }
   .sync-toast-msg, #sync-hint-msg { flex: 1; min-width: 0; }
   .sync-toast img.emoji-img, #sync-hint img.emoji-img {
@@ -6233,7 +6345,7 @@ SYNC_UI_HTML = """
   <!-- M-033: the sync warning used to be a title= on the filter FAB, which
        no touch device can ever show. Its own banner, its own dismissal. -->
   <div id="sync-hint" hidden>
-    <span id="sync-hint-msg">收藏只存在这台设备。登录后可在其它设备看到。</span>
+    <span id="sync-hint-msg">收藏只存在这台设备 · 登录后可跨设备同步</span>
     <span id="sync-hint-btns">
       <button id="sync-hint-signin" class="sync-btn primary" type="button">登录</button>
       <button id="sync-hint-ok" class="sync-btn" type="button">知道了</button>
@@ -6395,7 +6507,7 @@ WORKBENCH_HTML = """
     bottom: var(--wb-bottom) !important;
     width: auto !important;
     height: auto !important;
-    transition: left 0.18s ease-out, right 0.18s ease-out;
+    transition: left var(--dur-3) var(--ease-out), right var(--dur-3) var(--ease-out);
   }
   body.wb-mid   .folium-map,
   body.wb-wide  .folium-map {
@@ -6406,7 +6518,7 @@ WORKBENCH_HTML = """
     bottom: var(--wb-bottom) !important;
     width: auto !important;
     height: auto !important;
-    transition: left 0.18s ease-out, right 0.18s ease-out;
+    transition: left var(--dur-3) var(--ease-out), right var(--dur-3) var(--ease-out);
   }
   /* Leaflet's own top corners are empty on this page (zoomControl is off and
      .leaflet-control-locate is display:none — the FAB stack replaced both),
@@ -6480,7 +6592,7 @@ WORKBENCH_HTML = """
   body.wb-mid #wb-top, body.wb-wide #wb-top { display: flex; }
   #wb-brand {
     display: inline-flex; align-items: center; gap: 7px;
-    flex-shrink: 0; font-weight: 700; font-size: 14px; color: #111827;
+    flex-shrink: 0; font-weight: 700; font-size: 15px; color: #111827;
     user-select: none;
   }
   #wb-brand img.emoji-img { width: 18px; height: 18px; }
@@ -6534,6 +6646,11 @@ WORKBENCH_HTML = """
   #wb-region-label { max-width: 8em; overflow: hidden;
                      text-overflow: ellipsis; white-space: nowrap; }
   body.wb-mid #wb-region-btn { max-width: 132px; }
+  /* M-3.2-R1 (review F-15, SPEC C1 minimal): in nearby mode the top bar's
+     region button IS the pressed nearby state, so the chip row keeps only
+     the way back. */
+  .wb-top-btn.on { border-color: var(--accent); color: var(--accent); }
+  body.wb-mid #ux-nearby, body.wb-wide #ux-nearby { display: none; }
   .wb-filter-n { color: #2563eb; font-variant-numeric: tabular-nums; }
   .wb-filter-n:empty { display: none; }
   /* W-9: the language chip and the popover it anchors. The wrapper is the
@@ -6541,6 +6658,7 @@ WORKBENCH_HTML = """
      tracks the chip through every top-bar width without any JS. */
   #wb-lang-wrap { position: relative; flex-shrink: 0; display: flex;
                   align-items: center; }
+  #wb-lang .wb-lang-ic { display: block; flex: 0 0 auto; color: var(--fg-3); }
   /* mid has 325px of search box to protect at 704px wide — same treatment
      the sync chip already gets: keep the glyph, drop the word. */
   body.wb-mid #wb-lang .wb-lang-t { display: none; }
@@ -6595,7 +6713,7 @@ WORKBENCH_HTML = """
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 13px; color: #111827;
     overflow: hidden;
-    transition: transform 0.2s ease-out;
+    transition: transform var(--dur-3) var(--ease-out);
   }
   #wb-left.no-anim { transition: none !important; }
   @media (prefers-reduced-motion: reduce) { #wb-left { transition: none; } }
@@ -6636,8 +6754,13 @@ WORKBENCH_HTML = """
   .wb-tabs { display: flex; align-items: center; gap: 6px; }
   .wb-tab {
     border: none; background: none; cursor: pointer;
-    padding: 8px; border-radius: 6px;
-    font: 700 14px/1 inherit; color: #6b7280;
+    padding: 8px; border-radius: var(--r-sm);
+    /* M-3.2-R1 (review F-03): `font: 700 14px/1 inherit` was an invalid
+       shorthand (a keyword cannot ride inside it), so the browser dropped
+       the whole declaration and the tabs were 13px / 400 in both versions.
+       Longhands, at SPEC D.2's 15 / 600. */
+    font-family: inherit; font-weight: 600; font-size: 15px; line-height: 1;
+    color: #6b7280;
     -webkit-tap-highlight-color: transparent;
   }
   .wb-tab.on { color: #111827; box-shadow: inset 0 -2px 0 #2563eb; }
@@ -6676,7 +6799,7 @@ WORKBENCH_HTML = """
     padding: 1px 9px; box-sizing: border-box;
     border: 1px solid var(--border-1); border-radius: var(--r-pill);
     background: var(--bg-subtle); color: var(--fg-3);
-    font-size: 11.5px; line-height: 1.6; white-space: nowrap;
+    font-size: 11px; line-height: 1.6; white-space: nowrap;
   }
   .wb-inview-pill .ff-inview { color: var(--fg-2); font-weight: 700;
                                font-variant-numeric: tabular-nums; }
@@ -6793,6 +6916,9 @@ WORKBENCH_HTML = """
   }
   body.wb-mid #bs-foot .rst-gmaps img,
   body.wb-wide #bs-foot .rst-gmaps img { width: 19px; height: 19px; }
+  /* M-3.2-R1 (C-01): the JA saved state, star + 6 kana, measures 128px in
+     the mid column's 126px slot at 10px side padding; 8px gives it 4. */
+  body.wb-mid #bs-foot .ff-fav-btn { padding: 0 8px; }
   .wb-empty { margin: 0; padding: 28px 20px; text-align: center;
               font-size: 13px; line-height: 1.6; color: #9ca3af; }
   body.wb-detail-open .wb-empty { display: none; }
@@ -6953,7 +7079,7 @@ WORKBENCH_HTML = """
   <div id="wb-lang-wrap">
     <button id="wb-lang" class="wb-top-btn" type="button"
             aria-haspopup="true" aria-expanded="false" aria-controls="wb-lang-pop">
-      <span aria-hidden="true">🌐</span><span class="wb-lang-t"></span>
+      <svg class="wb-lang-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="wb-lang-t"></span>
     </button>
     <div id="wb-lang-pop" role="menu" hidden></div>
   </div>
@@ -7011,7 +7137,7 @@ WORKBENCH_HTML = """
        out again, so every listener, every id lookup and the
        startDynamicObservers() MutationObserver survive untouched. -->
   <div id="wb-filter-host" role="tabpanel" aria-labelledby="wb-tab-filter"></div>
-  <div id="ux-filter-done" class="glass-thin">
+  <div id="ux-filter-done">
     <button id="ux-filter-results" type="button">查看结果</button>
   </div>
 </aside>
@@ -7102,22 +7228,22 @@ RESULT_LIST_HTML = """
     flex: 0 1 auto; min-width: 0; max-width: 62%;
     min-height: 32px; padding: 0 6px;
     box-sizing: border-box;
-    border: 1px solid #d1d5db; border-radius: 6px;
-    background: #fff; color: #374151;
-    font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--fg-2);
+    font: 600 13px/1.2 var(--font-ui);
     cursor: pointer;
   }
   .wb-tool-btn {
     flex: 0 0 auto;
     min-height: 32px; padding: 0 10px;
     box-sizing: border-box;
-    border: 1px solid #d1d5db; border-radius: 6px;
-    background: #fff; color: #374151;
-    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--fg-2);
+    font: 600 13px/1 var(--font-ui);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   #wb-select-btn { margin-left: auto; }
-  .wb-tool-btn.on { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+  .wb-tool-btn.on { background: var(--bg-elev); border-color: var(--accent); color: var(--accent); }
   @media (hover: hover) and (pointer: fine) {   /* M-160 */
     .wb-tool-btn:hover { background: #f3f4f6; }
   }
@@ -7263,9 +7389,11 @@ RESULT_LIST_HTML = """
     flex: 0 0 auto; margin-left: auto;
     min-height: 32px; padding: 0 10px;
     box-sizing: border-box;
-    border: 1px solid #93c5fd; border-radius: 6px;
-    background: #eff6ff; color: #1d4ed8;
-    font: 600 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    /* M-3.2-R1 (review F-07, SPEC D.2): the secondary button — white,
+       --border-2, --r-sm; the pale-blue family is gone. */
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--bg-elev); color: var(--accent);
+    font: 600 13px/1 var(--font-ui);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   @media (pointer: coarse) { .wb-foot-btn { min-height: 44px; } }
@@ -7326,10 +7454,18 @@ FAV_TAB_HTML = """
   .fv-tools .fv-tool-ic {
     flex: 0 0 auto; width: 32px; padding: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 15px; line-height: 1;
+    gap: 5px; font-size: 15px; line-height: 1;
   }
   @media (pointer: coarse) { .fv-tools .fv-tool-ic { width: 44px; } }
   .fv-tools .fv-tool-ic svg { display: block; }
+  /* M-3.2-R1 (review F-20 / chief 5): the words come back from 560px up —
+     the drawer is 380px wide there and the desktop column wider still, so
+     only the four phone widths need the glyph-only row M-3.2-07 built. */
+  .fv-tools .fv-tool-t { display: none; font-size: 13px; }
+  @media (min-width: 560px) {
+    .fv-tools .fv-tool-ic { width: auto; padding: 0 10px; }
+    .fv-tools .fv-tool-t { display: inline; }
+  }
   #fv-select { margin-left: auto; }
   #fv-group {
     flex: 1 1 auto; min-width: 0; max-width: 60%;
@@ -9578,6 +9714,38 @@ FILTER_JS_TEMPLATE = r"""
         return this.fitBounds(bounds, noAnim(options));
       };
     }
+    // M-3.2-R1 (chief 2 on M-3.2-09's full-bleed map): on mid / wide the
+    // map runs under the frosted #wb-top, so the bar's 48/56px band is
+    // inside map.getBounds() and at the top of every centred view. The
+    // three helpers take it back out: wbVisibleBounds() for anything that
+    // counts "on screen", wbTopPadding() for fitBounds / panInside, and
+    // wbCentreFor() for a flyTo / setView target, which lands the point in
+    // the middle of the map the user can actually see. All three answer
+    // "nothing to subtract" on a phone, where the bar does not exist.
+    function wbTopBandPx() {
+      var cl = document.body.classList;
+      if (!cl.contains('wb-mid') && !cl.contains('wb-wide')) return 0;
+      var bar = document.getElementById('wb-top');
+      var h = bar ? bar.getBoundingClientRect().height : 0;
+      return (h > 0 && h < 200) ? Math.round(h) : 0;
+    }
+    function wbVisibleBounds() {
+      var band = wbTopBandPx();
+      var size = map.getSize();
+      if (!band || band >= size.y) return map.getBounds();
+      return L.latLngBounds(map.containerPointToLatLng([0, band]),
+                            map.containerPointToLatLng([size.x, size.y]));
+    }
+    function wbTopPadding(px) {
+      return {paddingTopLeft: [px, px + wbTopBandPx()], paddingBottomRight: [px, px]};
+    }
+    function wbCentreFor(latlng, zoom) {
+      var band = wbTopBandPx();
+      if (!band) return latlng;
+      var z = (typeof zoom === 'number') ? zoom : map.getZoom();
+      var p = map.project(L.latLng(latlng), z);
+      return map.unproject(L.point(p.x, p.y - band / 2), z);
+    }
 
     // Late-bound emoji observer for Leaflet popups: search-result temp
     // marker and the right-click "加入收藏" popup both inject HTML into
@@ -10538,8 +10706,11 @@ FILTER_JS_TEMPLATE = r"""
     // The raw value survives in title= for anyone who wants it.
     function priceTile(keyHtml, upper) {
       var b = bucketOfUpper(upper);
+      // M-3.2-R1 (review F-19): the short bucket the result rows use, so the
+      // tile reads "¥20k+" instead of a long form with a qualifier; the exact
+      // ceiling stays in the title.
       var val = b
-        ? escapeHtml(b[1]) + '<span class="rst-tile-u"> 上限</span>'
+        ? ((typeof WB_BUCKET_SHORT !== 'undefined' && WB_BUCKET_SHORT[b[0]]) || escapeHtml(b[1]))
         : 'NA';
       var ttl = (upper === null || upper === undefined || upper === '')
         ? '' : ' title="¥' + escapeHtml(String(upper)) + '"';
@@ -12269,7 +12440,7 @@ FILTER_JS_TEMPLATE = r"""
       var inViewportCount = null;
       if (!locQN && !wholeIsLoc &&
           map.getZoom() >= VIEWPORT_BIAS_ZOOM && candidates.length > 0) {
-        var b = map.getBounds().pad(0.1);
+        var b = wbVisibleBounds().pad(0.1);
         var W = b.getWest(), E = b.getEast(),
             S = b.getSouth(), N = b.getNorth();
         var inRows = [], outRows = [];
@@ -12933,7 +13104,7 @@ FILTER_JS_TEMPLATE = r"""
       // asked for. setView lands instantly, so there is no flight to wait on
       // and the card opens in the same tick.
       if (opts.animate === false) {
-        try { map.setView(latlng, targetZoom, {animate: false}); } catch (_) {}
+        try { map.setView(wbCentreFor(latlng, targetZoom), targetZoom, {animate: false}); } catch (_) {}
         reveal();
         return;
       }
@@ -12973,7 +13144,7 @@ FILTER_JS_TEMPLATE = r"""
         if (near) reveal();
         else if (pinnedRow === d) pinnedRow = null;   // interrupted — release the reaper pin
       }, 3000);
-      map.flyTo(latlng, targetZoom, {duration: 0.8});
+      map.flyTo(wbCentreFor(latlng, targetZoom), targetZoom, {duration: 0.8});
     }
     // Search-box wrapper: put the chosen name in the box, drop the temp
     // marker, then hand over to the shared flight above. Peek, because the
@@ -13024,12 +13195,13 @@ FILTER_JS_TEMPLATE = r"""
       var flown = false;
       if (bb && bb[0] < bb[1] && bb[2] < bb[3]) {
         try {
-          map.flyToBounds([[bb[0], bb[2]], [bb[1], bb[3]]],
-                          {maxZoom: zoom, padding: [28, 28], duration: 0.8});
+          var padOpts = wbTopPadding(28);
+          padOpts.maxZoom = zoom; padOpts.duration = 0.8;
+          map.flyToBounds([[bb[0], bb[2]], [bb[1], bb[3]]], padOpts);
           flown = true;
         } catch (_) { flown = false; }
       }
-      if (!flown) map.flyTo(latlng, zoom, {duration: 0.8});
+      if (!flown) map.flyTo(wbCentreFor(latlng, zoom), zoom, {duration: 0.8});
       ssRemoveTempMarker();
       var iconHtml =
         '<div style="position:relative;transform:translate(-50%,-100%);' +
@@ -13797,23 +13969,13 @@ FILTER_JS_TEMPLATE = r"""
     var persistAskedThisLoad = false;
     var storageEstimate = null;
     function l10nDot() { return activeLang === 'en' ? '. ' : '。'; }
+    // M-3.2-R1 (review F-12): one sentence. The banner used to grow to
+    // four — a count, the caveat, the durability warning, the private-window
+    // warning — and folded to three lines at 475px, the heaviest dark block
+    // on the page. The count and the durability detail still live in the
+    // account panel (renderStorageInfo).
     function localOnlyHintText() {
-      var n = 0;
-      try { n = state.fav.size; } catch (_) {}
-      var out;
-      if (n >= FAV_LOCAL_WARN_AT) {
-        out = localizeText('收藏已有') + ' ' + n + ' ' + localizeText('家店')
-            + l10nDot() + localizeText('只存在这台设备')
-            + l10nDot() + localizeText('登录后可跨设备同步');
-      } else {
-        out = localizeText('收藏只存在这台设备')
-            + l10nDot() + localizeText('登录后可在其它设备看到');
-      }
-      if (persistGranted === false) {
-        out += l10nDot() + localizeText('浏览器清理时可能删除本地收藏')
-             + l10nDot() + localizeText('无痕窗口关闭即失');
-      }
-      return out + (activeLang === 'en' ? '.' : '。');
+      return localizeText('收藏只存在这台设备') + ' · ' + localizeText('登录后可跨设备同步');
     }
     function refreshPersisted() {
       try {
@@ -15357,7 +15519,10 @@ FILTER_JS_TEMPLATE = r"""
       // ends on ⭐; standing in the city with a nearby search running, it
       // ends on Directions. uxPlanning is non-null exactly while the nearby
       // mode holds a planning context to return to (M-3.2-05).
-      var nearby = (typeof uxPlanning !== 'undefined') && !!uxPlanning;
+      // M-3.2-R1 (review F-05, SPEC C3): only on a phone. In the column
+      // layouts the Directions control is a 44px icon (see DESKTOP_POLISH),
+      // and a wordless blue square is not a primary button — Save keeps it.
+      var nearby = (typeof uxPlanning !== 'undefined') && !!uxPlanning && wbIsPhoneLike();
       var mapsUrl = 'https://www.google.com/maps/search/?api=1&query='
         + encodeURIComponent(d.lat + ',' + d.lon)
         + (d.gpid ? '&query_place_id=' + encodeURIComponent(d.gpid) : '');
@@ -15653,7 +15818,7 @@ FILTER_JS_TEMPLATE = r"""
       // the map is already inset, so all that is needed is keeping the pin
       // inside the (smaller) map box.
       if (wbDetailMode()) {
-        try { map.panInside([d.lat, d.lon], {padding: [48, 48]}); } catch (_) {}
+        try { map.panInside([d.lat, d.lon], wbTopPadding(48)); } catch (_) {}
         return;
       }
       var container = map.getContainer();
@@ -16103,7 +16268,7 @@ FILTER_JS_TEMPLATE = r"""
     var pinnedRow = null;
 
     function visibleRows() {
-      var b = map.getBounds().pad(0.25);
+      var b = wbVisibleBounds().pad(0.25);
       var W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
       var gx0 = Math.floor(W / GRID), gx1 = Math.floor(E / GRID);
       var gy0 = Math.floor(S / GRID), gy1 = Math.floor(N / GRID);
@@ -16422,7 +16587,11 @@ FILTER_JS_TEMPLATE = r"""
                           : ((PREFS && PREFS[i]) ? PREFS[i].n : data.length);
       setCountText('ff-total', n);
       if (regionSumEl) regionSumEl.textContent = (i == null) ? '' : named;
-      if (wbRegionLabel) wbRegionLabel.textContent = named;
+      // M-3.2-R1 (F-15): while nearby mode owns the button, uxPaintContext()
+      // writes it; it repaints after this on every scope change.
+      var wbRegionBtn = document.getElementById('wb-region-btn');
+      if (wbRegionLabel && !(wbRegionBtn && wbRegionBtn.classList.contains('on')))
+        wbRegionLabel.textContent = named;
     }
 
     // C2 / M-114: the shortcut chips are a view of the slider, not a
@@ -16677,8 +16846,9 @@ FILTER_JS_TEMPLATE = r"""
     var lastMatchTotal = 0;
     function zoomToAllMatches() {
       if (!matchBounds) return;
-      map.flyToBounds(matchBounds, {maxZoom: 14, padding: [40, 40],
-                                    duration: 0.9});
+      var mbOpts = wbTopPadding(40);
+      mbOpts.maxZoom = 14; mbOpts.duration = 0.9;
+      map.flyToBounds(matchBounds, mbOpts);
     }
     // M-022: "隐藏非日本料理" is on by default and silently removes ~1/6 of
     // the corpus — the audit's "27% is hidden by default" claim turned out
@@ -18325,7 +18495,8 @@ FILTER_JS_TEMPLATE = r"""
             '</select>' +
             '<button id="fv-new" class="wb-tool-btn fv-tool-ic" type="button"' +
               ' title="' + escAttr(favT('新建子收藏夹')) + '"' +
-              ' aria-label="' + escAttr(favT('新建子收藏夹')) + '">＋</button>' +
+              ' aria-label="' + escAttr(favT('新建子收藏夹')) + '">＋<span class="fv-tool-t">' +
+              escAttr(favT('新建')) + '</span></button>' +
             '<button id="fv-copy" class="wb-tool-btn fv-tool-ic" type="button"' +
               ' title="' + escAttr(favT('复制清单文本')) + '"' +
               ' aria-label="' + escAttr(favT('复制清单文本')) + '">' +
@@ -18334,7 +18505,7 @@ FILTER_JS_TEMPLATE = r"""
               ' stroke-linejoin="round" aria-hidden="true">' +
               '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
               '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' +
-              '</svg></button>' +
+              '</svg><span class="fv-tool-t">' + escAttr(favT('复制')) + '</span></button>' +
             '<button id="fv-select" class="wb-tool-btn" type="button"' +
               ' aria-pressed="false">' + escAttr(favT('选择')) + '</button>' +
           '</div>' +
@@ -18438,8 +18609,8 @@ FILTER_JS_TEMPLATE = r"""
         var info = favRefInfo(ref);
         if (info && info.bm && typeof info.bm.lat === 'number') {
           uxShowTab('map');
-          map.flyTo([info.bm.lat, info.bm.lon],
-                    Math.max(map.getZoom(), MARKER_MIN_ZOOM));   // W-5: was a bare 15
+          var bmZoom = Math.max(map.getZoom(), MARKER_MIN_ZOOM);   // W-5: was a bare 15
+          map.flyTo(wbCentreFor([info.bm.lat, info.bm.lon], bmZoom), bmZoom);
         }
       });
       favEls.body.addEventListener('scroll', favCloseMenu, {passive: true});
@@ -19380,6 +19551,9 @@ FILTER_JS_TEMPLATE = r"""
       var near = document.getElementById('ux-nearby');
       var restore = document.getElementById('ux-restore-plan');
       function txt(el, t) { var n = el && el.querySelector('.ss-chip-t'); if (n && n.textContent !== t) n.textContent = t; }
+      var nearbyOn = !!uxNearbyActive && !uxNearbyPending;
+      var nearbyLabel = localizeText('附近') + ' · '
+        + (wbList.sort === 'distance' ? localizeText('按距离') : wbSortLabel(wbList.sort));
       if (region) {
         var selectedRegion = filterState && filterState.region != null ? prefName(filterState.region) : '';
         var regionLabel = selectedRegion || localizeText('全部地区');
@@ -19388,14 +19562,26 @@ FILTER_JS_TEMPLATE = r"""
         region.setAttribute('aria-label', regionAria);
         region.title = regionAria;
       }
-      var nearbyOn = !!uxNearbyActive && !uxNearbyPending;
+      // M-3.2-R1 (review F-15, SPEC C1): on mid / wide the chip row's nearby
+      // chip is hidden and the top bar's region button reads as the pressed
+      // nearby state instead, so "All areas" and "Nearby" never share a
+      // screen. syncRegionUi() repaints the label on a region change and
+      // calls back here, so the two never fight.
+      var topRegion = document.getElementById('wb-region-btn');
+      var topLabel = document.getElementById('wb-region-label');
+      if (topRegion && topLabel) {
+        var topNearby = nearbyOn && !wbIsPhoneLike();
+        topRegion.classList.toggle('on', topNearby);
+        if (topNearby) topLabel.textContent = nearbyLabel;
+        else if (typeof syncRegionUi === 'function' && topRegion.getAttribute('data-ux-nearby') === '1') syncRegionUi();
+        topRegion.setAttribute('data-ux-nearby', topNearby ? '1' : '0');
+      }
       if (near) {
         // M-3.2-05: the chip is the pressed STATE of nearby mode (tap =
         // re-locate); the entry is the locate FAB. Hidden otherwise.
         near.hidden = !nearbyOn;
         near.setAttribute('aria-pressed', nearbyOn ? 'true' : 'false');
-        if (nearbyOn) txt(near, localizeText('附近') + ' · '
-          + (wbList.sort === 'distance' ? localizeText('按距离') : wbSortLabel(wbList.sort)));
+        if (nearbyOn) txt(near, nearbyLabel);
       }
       if (locateFab) locateFab.classList.toggle('pending', !!uxNearbyPending);
       if (restore) {
@@ -19418,9 +19604,30 @@ FILTER_JS_TEMPLATE = r"""
     }
     // Same box scripts/verify_build.py asserts every published row is in.
     var JAPAN_BBOX = {latMin: 20.0, latMax: 46.2, lonMin: 122.5, lonMax: 154.5};
+    // M-3.2-R1 (checker B-2): the rectangle alone also holds Jeju, the whole
+    // Korean east coast, Ulleungdo, Vladivostok and the south of Sakhalin —
+    // a fix in Seoul switched the page to all-regions-by-distance and flew
+    // to an empty map. West of these longitudes there is only sea and other
+    // countries, so the west edge steps east with latitude:
+    //   < 32.5   122.5  Yonaguni 122.9, Okinawa, Amami, the Danjo islands
+    //   >= 32.5  128.0  the Goto islands 128.6 (Jeju stops at 126.95)
+    //   >= 33.5  128.9  Tsushima 129.17-129.5 / Iki (Geoje stops at 128.7)
+    //   >= 34.8  130.0  Hagi 131.4, Shimane, Oki (Busan-Pohang stop at 129.6)
+    //   >= 37.0  132.0  Noto, Sado (Ulleungdo 130.9 is Korean)
+    //   >= 42.0  139.0  Okushiri 139.4 / Hokkaido (Vladivostok is 131.9)
+    //   >= 45.6  nothing: Soya is 45.52, Etorofu 45.5; the rest is Sakhalin
+    // and the northern Kurils. Land inside the box but west of the edge does
+    // not exist, so no published row can ever be turned away by this.
+    var JAPAN_WEST_EDGE = [[32.5, 128.0], [33.5, 128.9], [34.8, 130.0],
+                           [37.0, 132.0], [42.0, 139.0], [45.6, 999]];
     function uxInJapan(ll) {
-      return !!ll && ll.lat >= JAPAN_BBOX.latMin && ll.lat <= JAPAN_BBOX.latMax
-                  && ll.lng >= JAPAN_BBOX.lonMin && ll.lng <= JAPAN_BBOX.lonMax;
+      if (!ll || !(ll.lat >= JAPAN_BBOX.latMin && ll.lat <= JAPAN_BBOX.latMax
+                   && ll.lng >= JAPAN_BBOX.lonMin && ll.lng <= JAPAN_BBOX.lonMax)) return false;
+      var west = JAPAN_BBOX.lonMin;
+      for (var i = 0; i < JAPAN_WEST_EDGE.length; i++) {
+        if (ll.lat >= JAPAN_WEST_EDGE[i][0]) west = JAPAN_WEST_EDGE[i][1];
+      }
+      return ll.lng >= west;
     }
     // M-3.2-05: the locate FAB's job (SPEC B.5). No confirm() — the switch
     // to all regions + distance sort is announced by a 6s toast whose Undo
@@ -19447,20 +19654,35 @@ FILTER_JS_TEMPLATE = r"""
       locateCtl.start();
     }
     window.__uxFindNearby = uxFindNearby;
+    // M-3.2-R1 (checker B-1): put the map back where the planning context
+    // left it, even mid-flight. The old sequence was map.stop() + setView():
+    // stop() snaps a fractional zoom to an integer with an animated zoom,
+    // and while that CSS transition runs setView({animate:false}) is
+    // swallowed (_tryAnimatedZoom returns true on _animatingZoom) — the
+    // transition's end handler then finished the move to the user's fix,
+    // so an Undo inside ~1.2s left the list on Osaka and the map on Tokyo.
+    // setView() cancels an in-flight flyTo on its own (_stop()); the one
+    // case that still needs help is a zoom animation that was genuinely
+    // running, hence the once('zoomend') re-apply.
+    function uxSnapView(center, zoom) {
+      map.setView(center, zoom, {animate: false});
+      if (map._animatingZoom) {
+        map.once('zoomend', function() { map.setView(center, zoom, {animate: false}); });
+      }
+    }
     function uxRestorePlanning() {
       if (!uxPlanning) return;
       var previous = uxPlanning;
       uxPlanning = null; uxNearbyActive = false; uxNearbyPending = false;
       clearTimeout(uxNearbyTimer);
       if (locateCtl) locateCtl.stop();
-      map.stop();
       regionSel.value = previous.region == null ? '' : String(previous.region);
       wbList.sort = previous.sort;
       if (wbEls && wbEls.sort) wbEls.sort.value = previous.sort;
       apply(); wbScheduleSort(); wbSaveListView();
       // M-3.2-04: the drawer is not forced open — the chip is a map-level
       // control and the user is looking at the map.
-      map.setView(previous.center, previous.zoom, {animate: false});
+      uxSnapView(previous.center, previous.zoom);
       uxPaintContext();
     }
     // The return route outlives a toast and survives a page reload in the existing preference key.
@@ -19531,8 +19753,7 @@ FILTER_JS_TEMPLATE = r"""
         if (uxNearbyPending && !uxInJapan(e.latlng)) {
           var plan = uxRequestedPlan;
           try { locateCtl.stop(); } catch (_) {}
-          map.stop();
-          if (plan && plan.center) map.setView(plan.center, plan.zoom, {animate: false});
+          if (plan && plan.center) uxSnapView(plan.center, plan.zoom);
           uxLocationFailed('地图只覆盖日本');
           return;
         }
