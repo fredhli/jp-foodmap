@@ -2312,7 +2312,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.2.1"
+APP_VERSION = "3.2.2"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -8109,6 +8109,58 @@ TILE_CORS_FALLBACK_JS = r"""
 """
 
 
+# M-3.2.1-01: the base tiles drop to 1x whenever a rail layer is drawing.
+#
+# The CARTO URL carries Leaflet's {r} placeholder, so a DPR>1 screen asks for
+# @2x: one 512x512 PNG, ~100KB on the wire and four times the pixels to
+# decode and composite. On the Fold's 932x704 inner screen at DPR 2.6 that is
+# ~150 tiles in the DOM at keepBuffer 4, and transit-layer.js repaints its
+# whole canvas on every moveend on top of it. Together they are what makes a
+# drag stutter; separately neither is fatal.
+#
+# So: while either rail bucket is on, ask for the plain 256px tile instead.
+# The map is a backdrop for the rail lines in that mode and nobody is reading
+# the basemap's 4pt labels, and it takes three quarters of the tile pixel
+# budget away in one move. Both buckets off and @2x comes back.
+#
+# This has to be installed before folium's own map <script> constructs the
+# TileLayer, and it reads the two FAB storage keys itself so that a user who
+# left a rail layer on gets 1x on the very first tile of a cold start rather
+# than a full screen of @2x followed by a redraw.
+#
+# The body is Leaflet 1.9.3's own TileLayer.getTileUrl with one expression
+# changed; everything else (subdomain, tms, -y, the options merge) is copied
+# verbatim so a future option keeps working.
+TILE_DPR_SWITCH_JS = r"""
+<script>
+(function() {
+  if (typeof L === 'undefined' || !L.TileLayer || !L.Util) return;
+  var hi = true;
+  try {
+    hi = !(localStorage.getItem('tabelog.showTransitLong') === '1'
+        || localStorage.getItem('tabelog.showTransitCity') === '1');
+  } catch (_) {}
+  window.__tilesHiDpi = hi;
+  L.TileLayer.prototype.getTileUrl = function(coords) {
+    var data = {
+      r: (L.Browser.retina && window.__tilesHiDpi !== false) ? '@2x' : '',
+      s: this._getSubdomain(coords),
+      x: coords.x,
+      y: coords.y,
+      z: this._getZoomForUrl()
+    };
+    if (this._map && !this._map.options.crs.infinite) {
+      var invertedY = this._globalTileRange.max.y - coords.y;
+      if (this.options.tms) { data['y'] = invertedY; }
+      data['-y'] = invertedY;
+    }
+    return L.Util.template(this._url, L.Util.extend(data, this.options));
+  };
+})();
+</script>
+"""
+
+
 FILTER_JS_TEMPLATE = r"""
 <script>
 (function() {
@@ -9984,6 +10036,34 @@ FILTER_JS_TEMPLATE = r"""
     // re-load cost flipping them); the layer is removed only when both are
     // off. setVisibleBuckets handles intra-layer culling.
     var transitBuckets = { long: false, city: false };
+    // M-3.2.1-01: the base tile layer, found the way TILE_CORS_FALLBACK_JS
+    // finds it — folium holds the only reference and never exports it.
+    var baseTileLayer = null;
+    function findBaseTileLayer() {
+      if (baseTileLayer) return baseTileLayer;
+      try {
+        map.eachLayer(function(l) {
+          if (!baseTileLayer && l instanceof L.TileLayer && l._url) baseTileLayer = l;
+        });
+      } catch (_) {}
+      return baseTileLayer;
+    }
+    // Rail layer on -> plain 256px tiles; both off -> @2x again. The flag is
+    // read by the getTileUrl override installed before folium's map script.
+    function setTilesHiDpi(hi) {
+      hi = !!hi;
+      if (window.__tilesHiDpi === hi) return;
+      window.__tilesHiDpi = hi;
+      if (!L.Browser.retina) return;      // 1x either way, nothing to swap
+      // Down to 1x is the point of the switch, so make the tiles already on
+      // screen follow immediately: redraw() re-requests them at the new URL.
+      // Back up to @2x is left lazy — a pan or zoom replaces them soon enough
+      // and a gesture-free toggle should not refetch a screenful for looks.
+      if (!hi) {
+        var layer = findBaseTileLayer();
+        if (layer) { try { layer.redraw(); } catch (_) {} }
+      }
+    }
     function applyTransitBucket(btn, key, on) {
       if (!btn) return;
       transitBuckets[key] = on;
@@ -9995,8 +10075,9 @@ FILTER_JS_TEMPLATE = r"""
         // so it can't be left running on a dark FAB.
         if (!on) btn.classList.remove('loading');
       }
-      if (!transitLayer) return;
       var anyOn = transitBuckets.long || transitBuckets.city;
+      setTilesHiDpi(!anyOn);
+      if (!transitLayer) return;
       if (anyOn) {
         transitLayer.setVisibleBuckets({ long: transitBuckets.long, city: transitBuckets.city });
         if (!map.hasLayer(transitLayer)) map.addLayer(transitLayer);
@@ -10025,6 +10106,15 @@ FILTER_JS_TEMPLATE = r"""
         try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch (e) {}
       });
     }
+    // M-3.2.1-01: seed both buckets before either FAB is wired. wireTransitFab
+    // reads the same keys and applies the same values, so this changes no
+    // state — it only stops the first applyTransitBucket from computing anyOn
+    // against a bucket that has not been read yet, which would flip the tile
+    // resolution twice and cost a redraw on every boot with 市内 on alone.
+    try {
+      transitBuckets.long = localStorage.getItem('tabelog.showTransitLong') === '1';
+      transitBuckets.city = localStorage.getItem('tabelog.showTransitCity') === '1';
+    } catch (_) {}
     wireTransitFab('fab-transit-long', 'long', 'tabelog.showTransitLong', false);
     wireTransitFab('fab-transit-city', 'city', 'tabelog.showTransitCity', false);
 
@@ -22071,9 +22161,14 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(
             "CARTO_BASEMAP_API_KEY is not set. Add it to the project-root .env file."
         )
+    # {r} is back after the 3.2.1 hotfix pulled it, and this time it is under
+    # a switch: TILE_DPR_SWITCH_JS resolves it to '@2x' or '' per page state,
+    # so a high-DPR screen gets the sharp tile only while no rail layer is
+    # drawing over it. With {r} absent the placeholder simply never expands
+    # and every device is pinned to 1x, which is what 3.2.1 shipped.
     carto_tile_url = (
         "https://{s}.basemaps.cartocdn.com/rastertiles/light_all/"
-        f"{{z}}/{{x}}/{{y}}.png?key={quote(carto_api_key, safe='')}"
+        f"{{z}}/{{x}}/{{y}}{{r}}.png?key={quote(carto_api_key, safe='')}"
     )
 
     with CSV_PATH.open(encoding="utf-8-sig", newline="") as f:
@@ -22166,9 +22261,17 @@ def main(argv: list[str] | None = None) -> None:
         # firing intermediate requests. Matches Google/Apple Maps default
         # behaviour and cuts baseband radio time on mobile.
         update_when_zooming=False,
-        # Keep 4 rings of off-screen tiles in the DOM (default 2) so a
-        # short pan back over already-seen ground doesn't re-fetch.
-        keep_buffer=4,
+        # Back to Leaflet's default of 2 rings. The 4 rings were meant to
+        # save a re-fetch on a short pan back, and measurement says they
+        # never did: twelve consecutive 400px drags at 932x704 (eight out,
+        # four back) issue exactly 53 tile requests at either setting, and a
+        # 900px drag straight out and straight back leaves 0% of the
+        # viewport uncovered on the return leg at either setting. What the
+        # extra two rings do buy is 38 tiles held in the DOM instead of 28
+        # (20 vs 28 in the out-and-back test) — 38 MB of texture instead of
+        # 28 MB once the tiles are @2x, on a device whose whole origin quota
+        # is a couple of hundred MB.
+        keep_buffer=2,
         # M-162: render as `crossOrigin: "anonymous"` (folium 0.20 camelCases
         # **kwargs through parse_options). Without it the tile <img> issues a
         # no-cors request, the service worker can only ever store the opaque
@@ -22684,6 +22787,10 @@ def main(argv: list[str] | None = None) -> None:
     m.get_root().header.add_child(folium.Element(HEAD_BRANDING))
     m.get_root().header.add_child(folium.Element(css_layer(LOCATE_ASSETS)))
     m.get_root().header.add_child(folium.Element(css_layer(MOBILE_UX_ASSETS)))
+    # M-3.2.1-01: first of the body children, which is the first place in the
+    # document where Leaflet is loaded and folium's map <script> has not run
+    # yet — exactly the window in which getTileUrl can still be replaced.
+    m.get_root().html.add_child(folium.Element(TILE_DPR_SWITCH_JS))
     m.get_root().html.add_child(folium.Element(BOTTOM_SHEET_HTML))  # markup only
     m.get_root().html.add_child(folium.Element(css_layer(MAP_FAB_HTML)))
     m.get_root().html.add_child(folium.Element(css_layer(SEARCH_BOX_HTML)))

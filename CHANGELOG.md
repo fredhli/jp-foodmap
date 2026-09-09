@@ -13,6 +13,66 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-09-09
+
+Panning with a rail layer on. 3.2.1 removed `@2x` because it was the one
+variable 3.2.0 had changed; measurement says it was the wrong suspect, and
+names the right one.
+
+### Fixed
+
+- **The rail overlay's canvas is painted at one device pixel per CSS pixel.**
+  Leaflet 1.9.3 hardcodes a 2x backing store on a hidpi screen, so on the
+  Fold's 932×704 inner screen at DPR 2.625 the overlay carried a 1836×2112
+  (3.9 megapixel) surface that is cleared, restroked and recomposited around
+  every pan. Measured with both rail buckets on, nine ten-segment drags per
+  cell under a 4× CPU throttle: 342.9 ms of main thread per drag before,
+  282.0 ms after at Tokyo z13, and 325.4 → 257.1 ms at Kyoto z12; on the
+  475×751 outer screen 226.2 → 194.4 and 285.3 → 238.2. Time from `moveend`
+  to a steady frame at 932/Tokyo: 167.7 → 132.7 ms. Only the lines soften —
+  station dots and their labels are SVG/DOM, not on this canvas.
+- The regression came in with **3.2.0**, not with `@2x`: 2.3.0 measures
+  301.8 ms and 3.1.2 310.0 ms in the same cell where 3.2.1 measures 342.9.
+  The cause is M-3.2-09's full-bleed map — at 932×704 the same view now
+  attaches 628 rail polylines instead of 455 (+38%), on a proportionally
+  larger canvas. `docs/transit-layer.js`'s drawing path is byte-identical
+  from 2.3.0 through 3.2.1. All four A/B cells are now below 2.3.0.
+
+### Changed
+
+- **`@2x` tiles are back, under a switch.** `{r}` returns to the CARTO URL
+  and `L.TileLayer.prototype.getTileUrl` resolves it against
+  `window.__tilesHiDpi`: a hidpi screen gets the sharp tile only while
+  neither rail bucket is on. The initial value is read from
+  `tabelog.showTransitLong` / `tabelog.showTransitCity` before folium's map
+  script runs, so a cold start with a rail layer already on never requests an
+  `@2x` tile; switching a bucket on redraws the base layer so the tiles
+  already up follow, switching the last one off lets new tiles replace them
+  lazily. With no rail layer, `@2x` costs 1–5 ms per drag and is worth
+  having; with one on it costs 53 ms on both the 932×704 and 402×874
+  viewports. No new storage key — the two existing FAB keys drive it.
+- **`keepBuffer` 4 → 2** (Leaflet's default). Twelve consecutive 400 px
+  drags issue exactly the same 53 tile requests at either setting, and a
+  900 px pan straight out and straight back leaves 0% of the viewport
+  uncovered on the return leg at either setting; what the extra two rings
+  did buy was 38 tiles held in the DOM instead of 28 — 38 MB of texture
+  instead of 28 MB once tiles are `@2x`.
+- The service worker's tile cache is unchanged: 1x and `@2x` are different
+  URLs and age out of `tabelog-tiles-v2` through the existing LRU.
+
+### Notes
+
+- Exonerated with numbers, and left alone: `body.map-moving` (+3 style
+  recalcs and +3.5 ms per drag for the whole 3.2.0 chrome, and turning the
+  gate off measured no faster); the glass elements (4 of them, 9,000 px²
+  total at 932×704, all computing `backdrop-filter: none` during a gesture);
+  the transit layer's `moveend` scheduling (13–19 ms of script per drag once
+  the canvas is 1x). The full attribution, the four-version A/B and the CPU
+  profiles are in `audit_outputs/3.2.2/AB-REPORT.md`.
+- `tests/ux/tiles.py` is new: it asserts the tile switch on a DPR 2 screen in
+  both directions and on a cold start.
+- The Android shell is unchanged — it loads the live page.
+
 ## [3.2.1] - 2026-09-09
 
 Hotfix. Base-map tiles go back to 1x everywhere.

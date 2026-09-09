@@ -208,6 +208,39 @@
   // expressed as "never go finer than this" without a pile of if/else.
   var LOD_RANK = { low: 0, mid: 1, high: 2 };
 
+  // M-3.2.2-02: the line canvas is painted at one device pixel per CSS
+  // pixel, where stock Leaflet always doubles it on a hidpi screen.
+  //
+  // Measured at 932x704 CSS px / DPR 2.625 with a 4x CPU throttle, long-haul
+  // bucket on, ~320 lines in view, five 10-segment drags: 310 ms of main
+  // thread per drag with the 2x canvas, 246 ms with this one, against 203 ms
+  // with no rail layer on the map at all. Breaking that 107 ms down, 68 ms is
+  // the mere presence of the backing store (an empty canvas of the same size
+  // costs 271 ms) and only 39 ms is the stroking — so it is the 3.9-megapixel
+  // surface that gets composited on every frame of a pan, not the line count,
+  // and quartering it takes 60% of the layer's whole cost away.
+  //
+  // Only the lines soften. Station dots are circleMarkers on a plain
+  // layerGroup and the map runs preferCanvas:false, so they and their labels
+  // are SVG/DOM and untouched; and map.py already drops the base map to 1x
+  // tiles whenever either rail bucket is on, so the whole map is at one
+  // device pixel in this mode rather than half of it being sharp.
+  //
+  // Leaflet 1.9.3's Canvas._update reads the module-level Browser.retina —
+  // not devicePixelRatio, not an option — so flipping that flag around the
+  // one call is the only seam. Synchronous, and restored in a finally.
+  var LoResCanvas = L.Canvas.extend({
+    _update: function() {
+      var retina = L.Browser.retina;
+      L.Browser.retina = false;
+      try {
+        L.Canvas.prototype._update.call(this);
+      } finally {
+        L.Browser.retina = retina;
+      }
+    }
+  });
+
   L.TransitLayer = L.Layer.extend({
     options: {
       // Legacy single-file mode. Used iff lodUrls is not set.
@@ -277,7 +310,7 @@
       // canvas is insertion order, so the importance tiers are preserved
       // by (re)attaching polylines sorted whenever membership changes;
       // hover hit-testing is done in coordinate space (no hit canvas).
-      this._rLines = L.canvas({ padding: this.options.padding }).addTo(map);
+      this._rLines = new LoResCanvas({ padding: this.options.padding }).addTo(map);
       this._stationsLayer = L.layerGroup().addTo(map);
       this._scheduleRedrawBound = this._scheduleRedraw.bind(this);
       map.on('moveend', this._scheduleRedrawBound);

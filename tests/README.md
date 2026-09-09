@@ -15,7 +15,7 @@ were all defended by nothing but a careful reader.
 | `tests/sync/` | the browser-side sync state machine against a fake Worker | Playwright Chromium |
 | `tests/smoke_playwright.py` | the built page on phone, Fold and desktop viewports, console clean | a build in `docs/`, Playwright Chromium |
 | `tests/feature_retention_playwright.py` | functional access paths for features outside the 3.1 UX demo | a build in `docs/`, Playwright Chromium or WebKit |
-| `tests/ux/` | planning, navigation, detail return, short-viewport regressions, and the 3.2.0 map-visibility thresholds | a build in `docs/`, Playwright WebKit **and** Chromium |
+| `tests/ux/` | planning, navigation, detail return, short-viewport regressions, the 3.2.0 map-visibility thresholds, and the 3.2.2 tile-resolution switch | a build in `docs/`, Playwright WebKit **and** Chromium |
 | `tests/reliability/` | browser fault injection, resource deadlines, and the documented KV stale-read limit | a build in `docs/`; Node, with Playwright found from the project venv when needed |
 
 And one checker that is not a test suite but belongs to the same gate:
@@ -43,6 +43,7 @@ uv run python tests/feature_retention_playwright.py
 .venv-wsl/bin/python tests/ux/run.py --docs docs --browser chromium --output /tmp/jpfoodmap-ux-cr
 .venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux-supplement
 .venv-wsl/bin/python tests/ux/visibility.py --output /tmp/jpfoodmap-visibility
+.venv-wsl/bin/python tests/ux/tiles.py                      # and --browser webkit
 node tests/reliability/browser.mjs --built
 node tests/reliability/resource-deadlines.mjs
 node tests/reliability/kv-eventual.mjs
