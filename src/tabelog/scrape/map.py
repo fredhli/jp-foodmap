@@ -75,9 +75,12 @@ from tabelog.paths import (
 )
 from tabelog.scrape.map_data import (
     DEFAULT_OFF_GENRES,
+    GENERIC_GENRE_TOKENS,
     GENRE_CATEGORIES,
     GENRE_EMOJI,
     MEAL_GROUPS,
+    genre_tokens,
+    unwrap_genre,
 )
 from tabelog.scrape.search_norm import build_han_variants, canon_str
 
@@ -1377,7 +1380,8 @@ def geocode(
 
 
 _GENRE_TO_CAT = {tok: cat for cat, toks in GENRE_CATEGORIES.items() for tok in toks}
-_GENRE_SPLIT_RE = re.compile(r"[、,，]")
+# The tokenizer (genre_tokens / unwrap_genre) lives in map_data.py since 3.2.4
+# so the top-up gate in audit_main_meal_coverage.py shares it.
 
 
 # M-095: Tabelog genre strings are ordered by the restaurant's own listing,
@@ -1386,16 +1390,7 @@ _GENRE_SPLIT_RE = re.compile(r"[、,，]")
 # tokens all live in the 其他 bucket, so taking them first threw away the
 # only informative token on the row. They're skipped on the first pass and
 # only accepted if nothing else matches.
-_GENERIC_TOKENS = frozenset(
-    {"その他", "レストラン", "ビュッフェ", "ファミレス", "ホテル", "売店"}
-)
-
-
-def genre_tokens(genre_str: str) -> list[str]:
-    """Split a Tabelog genre string into its trimmed tokens."""
-    if not genre_str:
-        return []
-    return [t.strip() for t in _GENRE_SPLIT_RE.split(genre_str) if t.strip()]
+_GENERIC_TOKENS = GENERIC_GENRE_TOKENS
 
 
 def categorize_genre(genre_str: str) -> list[str]:
@@ -2312,7 +2307,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.2.3"
+APP_VERSION = "3.2.4"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -21953,7 +21948,7 @@ def popup_data(row: dict) -> list:
     photos = [row.get(f"photo{i}_url") for i in (1, 2, 3)]
     photos = [p for p in photos if p]
     return [
-        row.get("genre") or "",
+        unwrap_genre(row.get("genre") or ""),
         _empty_to_none(row.get("dinner_upper")),
         _empty_to_none(row.get("lunch_upper")),
         row.get("seat_count") or "",
@@ -22347,11 +22342,7 @@ def main(argv: list[str] | None = None) -> None:
             cat_counts[cat] = cat_counts.get(cat, 0) + 1
         # Track tokens that fell through to "其他" so we notice when Tabelog
         # adds a new genre label that deserves its own bucket.
-        for tok in (
-            t.strip()
-            for t in _GENRE_SPLIT_RE.split(row.get("genre") or "")
-            if t.strip()
-        ):
+        for tok in genre_tokens(row.get("genre") or ""):
             if tok not in _GENRE_TO_CAT:
                 unmapped_tokens.add(tok)
         awards = parse_awards(row.get("awards") or "")

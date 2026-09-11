@@ -3,6 +3,8 @@ Tourist anchors used to live here as ATTRACTIONS (loaded from
 data/attractions.csv); they now live in data/favorites_builtin.json
 and render through the bookmarks layer."""
 
+import re
+
 
 # Maps Tabelog's JP genre tokens to 20 broad cuisine categories. Dict order
 # drives filter dropdown order. Single-tag: each restaurant lands in exactly
@@ -249,6 +251,40 @@ GENRE_CATEGORIES = {
 # section headers in the filter panel ("正餐", "早餐/咖啡/甜品", ...).
 # Foreign-cuisine buckets (DEFAULT_OFF_GENRES) sit under a separate
 # "隐藏外国料理" toggle, so they intentionally don't appear here.
+# ---- Genre tokenizer (shared by map.py and the top-up gate) ----
+# M-095: container words that say nothing about the food. categorize_genre
+# skips them on its first pass so "レストラン、フレンチ" lands in 法餐, not 其他.
+GENERIC_GENRE_TOKENS = frozenset(
+    {"その他", "レストラン", "ビュッフェ", "ファミレス", "ホテル", "売店"}
+)
+_GENRE_SPLIT_RE = re.compile(r"[、,，]")
+# Tabelog's category-filtered list pages (rstLst/RC/... — what scrape_topup
+# --tokyo walks) render every genre as 容器词(菜系): "レストラン(焼肉)、
+# レストラン(ホルモン)" where the plain list says "焼肉、ホルモン". The 2026-09
+# Tokyo top-up stored 443 rows that way and every one of them fell through to
+# 其他, because the whole "レストラン(焼肉)" was looked up as one token.
+_GENRE_WRAP_RE = re.compile(
+    r"(?:%s)\s*[（(]([^()（）]+)[）)]"
+    % "|".join(re.escape(t) for t in sorted(GENERIC_GENRE_TOKENS))
+)
+
+
+def unwrap_genre(genre_str: str) -> str:
+    """Strip the 容器词(菜系) wrapper so a row categorizes and displays the
+    same way whichever list page it was scraped from. A string without the
+    pattern comes back byte-identical."""
+    if not genre_str:
+        return ""
+    return _GENRE_WRAP_RE.sub(lambda m: m.group(1).strip(), genre_str)
+
+
+def genre_tokens(genre_str: str) -> list[str]:
+    """Split a Tabelog genre string into its trimmed tokens, wrapper removed."""
+    if not genre_str:
+        return []
+    return [t.strip() for t in _GENRE_SPLIT_RE.split(unwrap_genre(genre_str)) if t.strip()]
+
+
 MEAL_GROUPS = {
     "正餐": [
         "寿司·海鲜",

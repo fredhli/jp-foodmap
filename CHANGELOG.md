@@ -13,6 +13,24 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [3.2.4] - 2026-09-11
+
+### Fixed
+
+- **Genre wrapper from Tabelog's filtered list pages.** The 443 Tokyo rows
+  the 2026-09 top-up scraped from `rstLst/RC/…` carry their genre as
+  `レストラン(焼肉)、レストラン(ホルモン)` where the plain list says
+  `焼肉、ホルモン`; the whole `レストラン(焼肉)` was looked up as one token, so
+  every one of them fell into 其他 and drew the generic marker, and the
+  top-up's main-meal gate (which mirrors the categorizer) let all of them
+  through as 正餐. The tokenizer now lives in `map_data.py` (`genre_tokens`
+  / `unwrap_genre`), strips the 容器词(菜系) wrapper before matching, and is
+  shared by `map.py` and `audit_main_meal_coverage.py`; the popup genre line
+  shows the unwrapped text. Rows without the pattern are byte-identical. On
+  the current corpus the 443 rows spread over 20 buckets (189 are foreign
+  cuisines, hidden by default like every other foreign row); no token is left
+  unmapped. The CSV is not rewritten. Android shell unchanged (3.2.3).
+
 ## [3.2.3] - 2026-09-09
 
 Page-level zoom is off. In the Android shell a two-finger spread scaled the
