@@ -1,0 +1,440 @@
+/* ==========================================================================
+   Japan Foodmap 4.0.0 demo — css/overlays.css
+   Owner: overlays module agent. Search (capsule / active head / suggestions),
+   layers popover, forms (bookmark / collection / member picker), account &
+   data panel, region picker, sort menu, place menu, share, help, lightbox,
+   system notices. Selectors are prefixed .ov-* or one of the module's root
+   ids (#search-root / #overlay-root / #modal-root / #notice-root).
+   Numbers come from css/tokens.css; shared components from css/base.css.
+   ========================================================================== */
+
+/* ---- roots & layers ------------------------------------------------------ */
+/* Anchored popovers position themselves in viewport coordinates and the
+   LAYER-02 placement maths already measures against U, so this layer stays on
+   the layout viewport; only the modal layer (below) is re-based on U. */
+#overlay-root { position: absolute; inset: 0; z-index: var(--z-popover); pointer-events: none; }
+#overlay-root > * { pointer-events: auto; }
+/* INTEGRATION: the modal layer is laid out on the USABLE rect U, not on the
+   layout viewport. `inset: 0` put `.ov-modal--sheet { bottom: 0 }` behind the
+   software keyboard, so a form's 保存 button was unreachable while typing —
+   which is exactly the case tests/ux/run.py's synthetic-keyboard journey
+   protects. U already tracks visualViewport (core layout.measure), so the
+   sheet now sits on the keyboard's top edge and the centred dialog centres in
+   what is left. */
+#modal-root { position: absolute; top: var(--U-top); left: var(--U-left); width: var(--U-w); height: var(--U-h); z-index: var(--z-modal); pointer-events: none; }
+#modal-root > * { pointer-events: auto; }
+#notice-root { position: absolute; left: 0; right: 0; top: calc(var(--U-top) + var(--topbar-h)); z-index: var(--z-toast); display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4) 0; pointer-events: none; }
+#notice-root > * { pointer-events: auto; }
+#search-root { display: block; }
+/* INTEGRATION (overlays coreRequest #4): in the top bar #search-root is a flex item
+   whose basis is its content, so the capsule shrank to ~230px on a 1920 screen.
+   Give the root the field's own target width and let the field fill it. */
+#topbar-search > #search-root { width: min(560px, 100%); min-width: 0; }
+#topbar-search > #search-root > * { width: 100%; }
+
+/* ==========================================================================
+   1. Search — narrow capsule + chips, mid/wide top field, active state
+   ========================================================================== */
+.ov-caprow { display: flex; align-items: center; gap: var(--sp-2); }
+.ov-capsule {
+  display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0;
+  min-height: 56px; padding: 0 var(--sp-4); border-radius: var(--r-pill);
+  color: var(--ink-secondary); font-size: var(--t-input-narrow-size); line-height: var(--t-input-narrow-line);
+  text-align: left;
+}
+.ov-capsule .ic { color: var(--ink-secondary); flex: none; }
+.ov-capsule .ov-cap-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-capsule .ov-cap-text.is-query { color: var(--ink); font-weight: 500; }
+.ov-avatar {
+  position: relative; width: 48px; height: 48px; flex: none; border-radius: 50%;
+  display: grid; place-content: center; color: var(--ink-secondary);
+}
+.ov-avatar .ic { width: 26px; height: 26px; }
+.ov-avatar .ov-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--rating); border: 2px solid var(--surface); }
+.ov-avatar.is-in { background: var(--accent); color: #fff; font-weight: 700; }
+.ov-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.ov-chips .chip { box-shadow: var(--shadow-control); border-color: transparent; }
+.ov-chips .chip .ic { color: var(--ink-secondary); }
+.ov-chip-pin { margin-right: -2px; }
+
+/* mid / wide: field in #topbar-search, chips in #topbar-right */
+.ov-topfield {
+  display: flex; align-items: center; gap: 10px; width: min(560px, 100%);
+  min-height: var(--touch-min); padding: 0 var(--sp-4); border-radius: var(--r-pill);
+  border: 1px solid var(--control-hairline); background: var(--surface-subtle);
+  color: var(--ink-secondary); font-size: var(--t-input-column-size); line-height: var(--t-input-column-line);
+  text-align: left;
+}
+.ov-topfield:hover { border-color: var(--control-border); background: var(--surface); }
+.ov-topfield .ov-cap-text.is-query { color: var(--ink); font-weight: 500; }
+#topbar-right .ov-chip { min-height: var(--touch-min); }
+#topbar-right .ov-avatar { width: var(--touch-min); height: var(--touch-min); box-shadow: none; border: 1px solid var(--control-hairline); }
+#topbar-right .ov-avatar .ic { width: 22px; height: 22px; }
+
+/* active search --------------------------------------------------------- */
+.ov-search-full {
+  position: fixed; left: var(--U-left); top: var(--U-top);
+  width: var(--U-w); height: var(--U-h);
+  display: flex; flex-direction: column; background: var(--surface);
+}
+.ov-shead { flex: none; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--separator); }
+.ov-sfield {
+  display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 auto; min-width: 0;
+  min-height: var(--touch-min); padding: 0 var(--sp-2) 0 var(--sp-3);
+  border: 1px solid var(--accent); border-radius: var(--r-pill); background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ov-sfield > .ic { color: var(--ink-secondary); flex: none; }
+.ov-sinput {
+  flex: 1 1 auto; min-width: 0; border: 0; background: none; outline: none; padding: 0;
+  font-size: var(--t-input-narrow-size); line-height: var(--t-input-narrow-line); color: var(--ink);
+  -webkit-appearance: none; appearance: none;
+}
+.ov-sinput::-webkit-search-cancel-button { display: none; }
+.ov-sinput::placeholder { color: var(--ink-secondary); opacity: 1; }
+.ov-sclear { width: 36px; height: 36px; flex: none; }
+.ov-sugs { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding-bottom: var(--sp-4); }
+.ov-sug-gt {
+  position: sticky; top: 0; z-index: 1; background: var(--surface-subtle); color: var(--ink-secondary);
+  padding: 6px var(--pad-panel-narrow); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); font-weight: 600;
+}
+.ov-sug {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%;
+  min-height: var(--search-row-min); padding: var(--sp-2) var(--pad-panel-narrow);
+  cursor: pointer; border-bottom: 1px solid var(--separator);
+}
+.ov-sug:last-child { border-bottom: 0; }
+.ov-sug:hover { background: var(--surface-subtle); }
+.ov-sug.is-active { background: var(--accent-soft); }
+.ov-sug-ic { width: 28px; flex: none; display: grid; place-content: center; color: var(--ink-secondary); }
+.ov-sug-ic .emj { width: 22px; height: 22px; }
+.ov-sug-main { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.ov-sug-name { font-size: var(--t-list-name-narrow-size); line-height: var(--t-list-name-narrow-line); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-sug-sub { color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-sug-meta { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
+.ov-sug-empty { padding: var(--sp-5) var(--pad-panel-narrow); color: var(--ink-secondary); text-align: center; }
+.ov-sug-count { color: var(--accent-strong); font-weight: 700; font-variant-numeric: tabular-nums; background: var(--accent-soft); border-radius: var(--r-pill); padding: 2px 10px; font-size: var(--t-badge-size); }
+
+/* mid: suggestions take the left region; wide: dropdown under the field */
+.ov-search-panel {
+  position: fixed; display: flex; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--separator); border-radius: var(--r-button); box-shadow: var(--shadow-panel); overflow: hidden;
+}
+.ov-search-panel .ov-sugs { padding-bottom: 0; }
+.ov-search-panel .ov-sug-gt { padding-inline: var(--pad-panel-mid); }
+.ov-search-panel .ov-sug { padding-inline: var(--pad-panel-mid); }
+.ov-search-panel .ov-sug-name { font-size: var(--t-list-name-column-size); line-height: var(--t-list-name-column-line); }
+
+/* ==========================================================================
+   2. Popovers (non-modal, no scrim) — layers / menus / pickers / account
+   ========================================================================== */
+.ov-pop {
+  position: absolute; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--separator);
+  border-radius: var(--r-button); box-shadow: var(--shadow-panel); overflow: hidden;
+  max-width: calc(var(--U-w) - 24px);
+}
+.ov-pop-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  min-height: var(--layers-header-min); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--separator);
+}
+.ov-pop-head.is-plain { border-bottom: 0; }
+.ov-pop-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2); }
+.ov-pop-body.is-flush { padding: var(--sp-1) 0; }
+.ov-pop-foot { flex: none; border-top: 1px solid var(--separator); padding: var(--sp-2); }
+.ov-menu { min-width: 216px; }
+.ov-menu .menu-row { min-height: var(--touch-min); }
+
+/* narrow bottom panel variant (account / region picker on phones) */
+.ov-pop--bottom {
+  left: var(--U-left); right: auto; width: var(--U-w); bottom: var(--vv-occ); top: auto;
+  max-width: none; border-radius: var(--r-panel) var(--r-panel) 0 0;
+  border-left: 0; border-right: 0; border-bottom: 0;
+}
+.ov-pop--bottom .ov-grip { flex: none; }
+
+/* layers ---------------------------------------------------------------- */
+.ov-layer-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  min-height: var(--layers-row-min); padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-compact); cursor: pointer;
+}
+.ov-layer-row:hover { background: var(--surface-subtle); }
+.ov-layer-row > .ic { color: var(--ink-secondary); flex: none; }
+.ov-layer-main { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.ov-layer-title { font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 600; }
+.ov-layer-sub { color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); overflow-wrap: anywhere; }
+.ov-layer-state { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
+.ov-layer-err { color: var(--danger); font-size: var(--t-secondary-size); font-weight: 600; }
+.ov-spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--separator); border-top-color: var(--accent); animation: ovSpin .8s linear infinite; }
+@keyframes ovSpin { to { transform: rotate(360deg); } }
+.ov-layer-row.is-disabled { opacity: .5; cursor: default; }
+.ov-pop--full {
+  left: var(--U-left); top: var(--U-top); width: var(--U-w); height: var(--U-h);
+  max-width: none; border-radius: 0; border: 0;
+}
+
+/* account --------------------------------------------------------------- */
+.ov-acc { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-2) var(--sp-4) var(--sp-5); }
+.ov-acc-sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.ov-acc-h { font-size: var(--t-group-title-size); line-height: var(--t-group-title-line); font-weight: 600; }
+.ov-google {
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-3);
+  width: 100%; min-height: var(--primary-action-min); padding: 0 var(--sp-4);
+  border: 1px solid var(--control-hairline); border-radius: var(--r-button); background: var(--surface);
+  color: var(--ink); font-size: var(--t-body-size); font-weight: 600; box-shadow: var(--shadow-control);
+}
+.ov-google:hover { background: var(--surface-subtle); }
+.ov-g { width: 22px; height: 22px; flex: none; }
+.ov-bullets { display: grid; gap: 6px; margin: 0; }
+.ov-bullets li { position: relative; padding-left: 18px; color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: var(--t-long-body-line); }
+.ov-bullets li::before { content: ""; position: absolute; left: 4px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--control-border); }
+.ov-acc-note { text-align: center; color: var(--ink-secondary); font-size: var(--t-secondary-size); }
+.ov-card { border: 1px solid var(--separator); border-radius: var(--r-button); overflow: hidden; background: var(--surface); }
+.ov-card .menu-row { border-radius: 0; min-height: 48px; justify-content: space-between; }
+.ov-card .menu-row + .menu-row { border-top: 1px solid var(--separator); }
+.ov-card .menu-row .ov-row-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--sp-3); }
+.ov-langseg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+/* base.css resets buttons to text-align:inherit (menu rows want to stay left), so a
+   label that should sit in the middle of its own button has to say so. grid +
+   place-items centres both axes, which also holds for 日本語 at 130%. */
+.ov-langseg > button { min-height: var(--touch-min); display: grid; place-items: center;
+  padding-inline: var(--sp-1); border-radius: var(--r-button); border: 1px solid var(--control-hairline);
+  background: var(--surface-subtle); color: var(--ink); font-weight: 600; font-size: var(--t-control-size); }
+.ov-langseg > button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ov-acc-user { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--separator); border-radius: var(--r-button); }
+.ov-acc-user .ov-avatar { box-shadow: none; }
+.ov-acc-user .ov-acc-mail { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.ov-acc-user .ov-acc-mail b { font-size: var(--t-control-size); overflow: hidden; text-overflow: ellipsis; }
+.ov-sync { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-secondary); font-size: var(--t-secondary-size); }
+.ov-sync .ov-sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #16A34A; flex: none; }
+.ov-sync.is-local .ov-sync-dot { background: var(--control-border); }
+.ov-state-line { color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: var(--t-long-body-line); overflow-wrap: anywhere; }
+.ov-danger-hint { color: var(--danger); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); }
+
+/* region picker / lists -------------------------------------------------- */
+.ov-search-inline { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--separator); flex: none; }
+.ov-rg-head { padding: var(--sp-2) var(--sp-3) 4px; color: var(--ink-secondary); font-size: var(--t-secondary-size); font-weight: 600; }
+.ov-rg-row { display: flex; align-items: center; gap: var(--sp-3); width: 100%; min-height: var(--touch-min); padding: 0 var(--sp-3); border-radius: var(--r-compact); }
+.ov-rg-row:hover { background: var(--surface-subtle); }
+.ov-rg-row[aria-checked="true"] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.ov-rg-row .ov-rg-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-rg-row .ov-rg-n { color: var(--ink-secondary); font-variant-numeric: tabular-nums; font-size: var(--t-secondary-size); }
+.ov-rg-row[aria-checked="true"] .ov-rg-n { color: var(--accent-strong); }
+
+/* ==========================================================================
+   3. Modals — bookmark form / collection form / import / lightbox
+   ========================================================================== */
+/* fixed, not absolute: #modal-root is now sized to U, and the scrim has to
+   cover the whole screen (the keyboard strip included). */
+.ov-scrim { position: fixed; inset: 0; background: var(--scrim); animation: fadeIn var(--m-standard) var(--e-standard) both; }
+.ov-modal {
+  position: absolute; display: flex; flex-direction: column; background: var(--surface);
+  box-shadow: var(--shadow-panel); overflow: hidden;
+}
+.ov-modal--dialog {
+  /* centred with auto margins — a transform would be wiped by .scale-in's end frame */
+  inset: 0; margin: auto; height: -moz-fit-content; height: fit-content;
+  width: min(var(--form-max-w), calc(var(--U-w) - 48px));
+  max-height: calc(var(--U-h) - 48px); border-radius: var(--r-panel);
+}
+.ov-modal--sheet {
+  left: 0; width: 100%; bottom: 0;
+  max-height: calc(var(--U-h) - 24px); border-radius: var(--r-panel) var(--r-panel) 0 0;
+}
+.ov-modal-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 52px; padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--pad-panel-narrow); }
+.ov-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--pad-panel-narrow) var(--sp-4); }
+.ov-modal-foot { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-3) var(--pad-panel-narrow); border-top: 1px solid var(--separator); background: var(--surface); }
+.ov-modal-foot .btn { min-height: var(--primary-action-min); }
+.ov-modal-foot.is-single { grid-template-columns: minmax(0, 1fr); }
+
+/* form fields ----------------------------------------------------------- */
+.ov-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-field); }
+.ov-frow { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: var(--sp-3); }
+.ov-frow > .field-label { padding-top: 0; }
+.ov-frow--stack { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.ov-coord {
+  display: flex; align-items: center; gap: var(--sp-2); min-height: var(--touch-min);
+  padding: 0 var(--sp-2) 0 var(--sp-3); border-radius: var(--r-button);
+  background: var(--surface-subtle); border: 1px solid var(--separator);
+}
+.ov-coord .ov-coord-v { flex: 1 1 auto; min-width: 0; font-variant-numeric: tabular-nums; color: var(--ink-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-seg2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-2); }
+.ov-seg2 > button { min-height: var(--touch-min); border-radius: var(--r-button); border: 1px solid var(--control-hairline); background: var(--surface-subtle); color: var(--ink); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.ov-seg2 > button[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ov-seg2 > button[aria-checked="true"] .ic { color: #fff; }
+.ov-seg2 .ic { color: var(--ink-secondary); }
+.ov-emoji-field { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--touch-min); padding: 0 var(--sp-2) 0 var(--sp-3); border: 1px solid var(--control-border); border-radius: var(--r-button); background: var(--surface); }
+.ov-emoji-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ov-emoji-field[aria-invalid="true"] { border-color: var(--danger); }
+.ov-emoji-input { flex: 1 1 auto; min-width: 0; border: 0; outline: none; background: none; padding: 0; font-size: 1.25rem; line-height: 1.5; }
+.ov-emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: var(--sp-2); min-width: 0; }
+.ov-emoji-chip {
+  display: grid; place-content: center; min-height: var(--touch-min); height: 52px;
+  border: 1px solid var(--control-hairline); border-radius: var(--r-button); background: var(--surface);
+  transition: border-color var(--m-micro) var(--e-out), background-color var(--m-micro) var(--e-out);
+}
+.ov-emoji-chip:hover { background: var(--surface-subtle); }
+.ov-emoji-chip[aria-pressed="true"] { border-color: var(--accent); border-width: 2px; background: var(--accent-soft); }
+.ov-emoji-chip .emj { width: 26px; height: 26px; }
+.ov-emoji-chip .emj-text { font-size: 22px; }
+.ov-emoji-more { grid-column: span 2; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 52px; border-radius: var(--r-button); background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; font-size: var(--t-control-size); }
+.ov-inline-add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: var(--touch-min); border-radius: var(--r-button); background: var(--surface-subtle); color: var(--accent-strong); font-weight: 600; font-size: var(--t-control-size); }
+.ov-inline-add:hover { background: var(--accent-soft); }
+.ov-sub { color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); }
+
+/* emoji picker sub-layer */
+.ov-sublayer { position: absolute; inset: 0; background: var(--surface); display: flex; flex-direction: column; z-index: 2; }
+
+/* member picker ---------------------------------------------------------- */
+.ov-mp-row { display: flex; align-items: center; gap: var(--sp-3); width: 100%; min-height: var(--touch-min); padding: var(--sp-1) var(--sp-3); border-radius: var(--r-compact); }
+.ov-mp-row:hover { background: var(--surface-subtle); }
+.ov-mp-row .ov-mp-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-mp-row .ov-mp-n { color: var(--ink-secondary); font-size: var(--t-secondary-size); font-variant-numeric: tabular-nums; }
+
+/* import ---------------------------------------------------------------- */
+.ov-import-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-3) 0; }
+.ov-import-stat { background: var(--surface-subtle); border-radius: var(--r-button); padding: var(--sp-3); text-align: center; }
+.ov-import-stat b { display: block; font-size: var(--t-panel-title-size); line-height: var(--t-panel-title-line); font-variant-numeric: tabular-nums; }
+.ov-import-stat span { color: var(--ink-secondary); font-size: var(--t-secondary-size); }
+.ov-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* lightbox --------------------------------------------------------------- */
+.ov-lb-back { position: absolute; inset: 0; background: rgba(6, 9, 22, .985); z-index: var(--z-lightbox); animation: fadeIn var(--m-standard) var(--e-standard) both; }
+.ov-lb { position: absolute; inset: 0; z-index: var(--z-lightbox); display: flex; flex-direction: column; }
+.ov-lb-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: #fff; }
+.ov-lb-head .icon-btn { color: #fff; }
+.ov-lb-head .icon-btn:hover { background: rgba(255, 255, 255, .14); }
+.ov-lb-stage { flex: 1 1 auto; min-height: 0; position: relative; display: grid; place-items: center; padding: 0 var(--sp-2) var(--sp-4); }
+.ov-lb-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-photo); }
+.ov-lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; background: rgba(255, 255, 255, .16); color: #fff; display: grid; place-content: center; }
+.ov-lb-nav:hover { background: rgba(255, 255, 255, .28); }
+.ov-lb-prev { left: var(--sp-3); }
+.ov-lb-next { right: var(--sp-3); }
+.ov-lb-cap { color: #E8ECF6; font-size: var(--t-secondary-size); text-align: center; padding: var(--sp-2) var(--sp-4) 0; }
+.ov-lb-miss { color: #E8ECF6; text-align: center; padding: var(--sp-5); }
+
+/* ==========================================================================
+   4. Notices (FEEDBACK-02)
+   ========================================================================== */
+.ov-notice {
+  display: flex; align-items: center; gap: var(--sp-2); max-width: min(560px, 100%);
+  min-height: 40px; padding: 6px var(--sp-3); border-radius: var(--r-pill);
+  background: var(--surface); box-shadow: var(--shadow-panel); border: 1px solid var(--separator);
+  font-size: var(--t-control-size); line-height: var(--t-control-line);
+  animation: riseIn var(--m-standard) var(--e-standard) both;
+}
+.ov-notice .ov-notice-text { flex: 1 1 auto; min-width: 0; }
+.ov-notice .ic { flex: none; color: var(--ink-secondary); }
+.ov-notice--warn { background: #FFF6E5; border-color: #F0DCB4; }
+.ov-notice--warn .ic { color: #9A6400; }
+.ov-notice--danger { background: #FFF3F4; border-color: #F3CBD1; color: var(--danger); }
+.ov-notice--danger .ic { color: var(--danger); }
+.ov-notice .btn { min-height: 36px; padding: 0 var(--sp-3); }
+.ov-notice .icon-btn { width: 36px; height: 36px; }
+
+/* ==========================================================================
+   5. Shared bits
+   ========================================================================== */
+.ov-legend-row { display: flex; align-items: center; gap: var(--sp-3); min-height: 32px; }
+.ov-legend-row .ov-legend-label { flex: 1 1 auto; min-width: 0; font-size: var(--t-secondary-size); }
+.ov-legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 6px var(--sp-3); }
+.ov-legend-emoji { display: flex; align-items: center; gap: 6px; font-size: var(--t-secondary-size); color: var(--ink-secondary); }
+.ov-legend-emoji .emj { width: 18px; height: 18px; }
+.ov-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--separator); background: var(--surface-subtle); font-size: var(--t-badge-size); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ov-kbd-row { display: flex; align-items: center; gap: var(--sp-3); min-height: 36px; }
+.ov-kbd-row .ov-kbd-desc { flex: 1 1 auto; font-size: var(--t-secondary-size); }
+.ov-help-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+.ov-help-h { font-size: var(--t-control-size); font-weight: 700; }
+.ov-mark { color: var(--accent-strong); font-weight: 700; }
+
+/* place menu ------------------------------------------------------------- */
+.ov-place-head { padding: var(--sp-3) var(--sp-3) 0; display: grid; gap: 2px; }
+.ov-place-name { font-size: var(--t-group-title-size); line-height: var(--t-group-title-line); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-scrim, .ov-notice { animation: none; }
+  .ov-spin { animation-duration: 2.4s; }
+}
+
+/* top-bar active search field sits inline in #topbar-search */
+.ov-shead--top { border-bottom: 0; padding: 0; width: min(560px, 100%); }
+.ov-shead--top .icon-btn { flex: none; }
+
+/* ==========================================================================
+   6. 4.0.0 production additions (overlays agent)
+   Everything below exists because the demo either faked the feature or did
+   not have it: the real Google button host, the sync state colours, the
+   install / first-run surfaces, the import picks, the collection picker
+   inside the pin form, and the emoji-picker-element host.
+   ========================================================================== */
+
+/* the real GIS renderButton lands here (never One Tap) ------------------- */
+.ov-gsi { display: flex; justify-content: center; min-height: 44px; }
+.ov-gsi > div { max-width: 100%; }
+.ov-acc-msg { margin-top: var(--sp-2); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); color: var(--ink-secondary); }
+
+/* sync state: the dot is the state, the text says it in words ------------ */
+.ov-sync.is-busy .ov-sync-dot { background: var(--accent); }
+.ov-sync.is-err  .ov-sync-dot { background: var(--danger); }
+.ov-sync.is-err  { color: var(--danger); }
+.ov-acc-user .ov-sync + .btn { margin-left: var(--sp-2); }
+
+/* notices: the install offer and its second line ------------------------- */
+.ov-notice--offer { background: var(--surface); border-color: var(--accent-soft); }
+.ov-notice--offer .ic { color: var(--accent-strong); }
+.ov-notice .ov-notice-sub { display: block; color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); }
+.ov-notice { flex-wrap: wrap; }
+
+/* install steps ---------------------------------------------------------- */
+.ov-steps { margin: 0; padding-left: 1.25em; display: grid; gap: 4px; font-size: var(--t-body-size); line-height: var(--t-body-line); }
+.ov-steps li { list-style: decimal; }
+
+/* import: which categories, and how many of each -------------------------- */
+.ov-imp-picks { display: grid; gap: 2px; margin-top: var(--sp-3); }
+.ov-imp-pick {
+  display: flex; align-items: center; gap: var(--sp-3);
+  min-height: var(--touch-min); padding: 0 var(--sp-2);
+  border-radius: var(--r-compact); font-size: var(--t-body-size); cursor: pointer;
+}
+.ov-imp-pick:hover { background: var(--surface-subtle); }
+.ov-imp-pick > span:first-of-type { flex: 1 1 auto; min-width: 0; }
+.ov-imp-pick .num { color: var(--ink-secondary); font-variant-numeric: tabular-nums; }
+
+/* pick the collections a new pin joins (E11 / M-031) ---------------------- */
+.ov-pick-lists { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-pick-list {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: var(--touch-min); padding: 0 12px;
+  border: 1px solid var(--control-border); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--ink-secondary);
+  font-size: var(--t-secondary-size); cursor: pointer; max-width: 100%;
+}
+.ov-pick-list > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-pick-list[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+
+/* emoji-picker-element (Shadow DOM — tokens are consumed through vars) ---- */
+.ov-picker-host { margin-bottom: var(--sp-3); }
+.ov-picker-host emoji-picker {
+  width: 100%; height: min(300px, 42vh); display: block;
+  --background: var(--surface);
+  --border-color: var(--separator);
+  --border-radius: var(--r-compact);
+  --emoji-size: 1.15rem;
+  --num-columns: 8;
+}
+
+/* first-run language gate (W-9) ------------------------------------------ */
+.ov-langgate { max-width: min(360px, calc(100vw - 32px)); }
+.ov-lg-opts { display: grid; gap: var(--sp-2); }
+.ov-lg-opts .btn { width: 100%; min-height: var(--primary-action-min); justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-langgate { animation: none; }
+}
+
+/* two-step sign-out confirmation (account panel) */
+.ov-signout-confirm { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--hairline); }
+.ov-signout-btns { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.ov-signout-btns .btn { flex: 1 1 auto; min-width: 0; }

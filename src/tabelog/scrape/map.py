@@ -22,6 +22,7 @@ import math
 import os
 import re
 import shutil    # M-020: scratch dir cleanup for the atomic index.html write
+import subprocess  # 4.0.0: node --check over the inlined UI scripts
 import sys
 import tempfile  # M-020: render folium's HTML outside the Dropbox tree
 import time
@@ -194,6 +195,18 @@ _APPROX_STRINGS_LITERAL_RE = re.compile(r"var APPROX_STRINGS\s*=\s*[^;]+;")
 # fails to match).
 _CJK_RUN_RE_LITERAL_RE = re.compile(r"/\[㐀-鿿豈-﫿\]\+/g")
 
+# 4.0.0 generalises the line above. A JS character class that spans a CJK
+# block spells its own boundaries in the source: overlays.js's
+# /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/ contributes the runs
+# '㐀', '鿿豈' and '﫿' to the punch list — three demands to translate the
+# edges of a Unicode range. The guard is deliberately narrow: a bracketed
+# group with no newline and no closing bracket inside, and only when it
+# actually contains a CJK-to-CJK range. Prose does not look like that, and a
+# CJK range inside square brackets is never text a reader sees.
+_CJK_CLASS_RANGE_RE = re.compile(
+    r"\[[^\]\n]{0,120}?[㐀-鿿豈-﫿]-[㐀-鿿豈-﫿][^\]\n]{0,120}?\]"
+)
+
 # W-12b (1)(2)(9)(10): the four whole-sentence count templates (COUNT_TPL /
 # FAV_TPL / FOOT_TPL / FOOT_BTN_TPL, next to l10nTpl in FILTER_JS_TEMPLATE).
 # Same situation as PREF_GROUPS and APPROX_STRINGS: all four languages are
@@ -208,14 +221,26 @@ _COUNT_TPL_LITERAL_RE = re.compile(
 )
 
 
+# 4.0.0: the UI translation table (ui/i18n/ui-strings.json → en / ja / tw) and
+# map_data.MEAL_GROUPS ride into the page as one-line literals. Their values
+# are translations and their keys are translated by t(), so neither is a run
+# the runtime localizer has to handle. Both end in a sentinel comment because
+# an English value may legitimately contain ';'.
+_UI_I18N_LITERAL_RE = re.compile(r"window\.UI_I18N_TABLES\s*=[^\n]*?/\*__UI_I18N_END__\*/")
+_MEAL_GROUPS_LITERAL_RE = re.compile(r"window\.MEAL_GROUPS\s*=[^\n]*?/\*__MEAL_GROUPS_END__\*/")
+
+
 def _scan_cjk_runs(html: str) -> set[str]:
     scanned = _HAN_VARIANTS_LITERAL_RE.sub("", html)
+    scanned = _UI_I18N_LITERAL_RE.sub("", scanned)  # 4.0.0
+    scanned = _MEAL_GROUPS_LITERAL_RE.sub("", scanned)  # 4.0.0
     scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
     scanned = _PREFS_LITERAL_RE.sub("", scanned)  # M-023
     scanned = _PREF_GROUPS_LITERAL_RE.sub("", scanned)  # M-023 (C1)
     scanned = _APPROX_STRINGS_LITERAL_RE.sub("", scanned)  # W-12③
     scanned = _COUNT_TPL_LITERAL_RE.sub("", scanned)  # W-12b (1)(2)(9)(10)
     scanned = _CJK_RUN_RE_LITERAL_RE.sub("", scanned)
+    scanned = _CJK_CLASS_RANGE_RE.sub("", scanned)  # 4.0.0
     return set(_CJK_RUN_RE.findall(scanned))
 
 
@@ -232,7 +257,9 @@ def build_text_trad_map(html: str) -> dict[str, str]:
     return out
 
 
-def build_text_en_map(html: str) -> tuple[dict[str, str], list[str]]:
+def build_text_en_map(
+    html: str, covered: set[str] | None = None
+) -> tuple[dict[str, str], list[str]]:
     """Intersect the hand-curated data/i18n/en.json with the CJK runs
     that actually appear on the page. Returns (map, missing) where
     missing is the sorted list of runs the page needs but en.json
@@ -244,11 +271,16 @@ def build_text_en_map(html: str) -> tuple[dict[str, str], list[str]]:
     en = {k: v for k, v in raw.items() if not k.startswith("__")}
     runs = _scan_cjk_runs(html)
     out = {run: en[run] for run in runs if run in en}
-    missing = sorted(r for r in runs if r not in en)
+    # 4.0.0: a run that only occurs inside a ui/i18n/ui-strings.json key is
+    # translated whole-string by t(); it is not missing, it is not this table's.
+    covered = covered or set()
+    missing = sorted(r for r in runs if r not in en and r not in covered)
     return out, missing
 
 
-def build_text_ja_map(html: str) -> tuple[dict[str, str], list[str]]:
+def build_text_ja_map(
+    html: str, covered: set[str] | None = None
+) -> tuple[dict[str, str], list[str]]:
     """Same shape as build_text_en_map but reads data/i18n/ja.json. JA
     translations are mostly natural Japanese forms (東京タワー, ラーメン,
     お気に入り). Reservation policy strings are intentionally not in this
@@ -259,7 +291,8 @@ def build_text_ja_map(html: str) -> tuple[dict[str, str], list[str]]:
     ja = {k: v for k, v in raw.items() if not k.startswith("__")}
     runs = _scan_cjk_runs(html)
     out = {run: ja[run] for run in runs if run in ja}
-    missing = sorted(r for r in runs if r not in ja)
+    covered = covered or set()
+    missing = sorted(r for r in runs if r not in ja and r not in covered)
     return out, missing
 
 
@@ -2307,7 +2340,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "3.2.4"
+APP_VERSION = "4.0.0"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -8162,6 +8195,161 @@ TILE_DPR_SWITCH_JS = r"""
   };
 })();
 </script>
+"""
+
+
+# ---------------------------------------------------------------------------
+# 4.0.0: the presentation layer moved out of this file into src/tabelog/ui/
+# (see its README.md). map.py still owns the build: it reads those files,
+# substitutes the same placeholders FILTER_JS_TEMPLATE used, and inlines them
+# into the page, so the single-file deployment and the service worker's
+# atomic-install contract are unchanged. FILTER_JS_TEMPLATE and the legacy
+# HTML/CSS constants below are kept intact and are what
+# audit_outputs/4.0.0-impl/tools/extract_business.py slices business.js from;
+# they are only ADDED to the page when TABELOG_LEGACY_UI=1 (rollback switch).
+UI_40 = os.environ.get("TABELOG_LEGACY_UI", "").strip() != "1"
+UI_DIR = PROJECT_ROOT / "src" / "tabelog" / "ui"
+UI_CSS_ORDER = ["tokens", "base", "map", "containers", "list", "detail", "filters", "overlays"]
+UI_JS_ORDER = ["business", "core", "adapter", "map", "containers", "list", "detail", "filters", "overlays"]
+UI_I18N_JSON = UI_DIR / "i18n" / "ui-strings.json"
+
+
+def read_ui(rel: str) -> str:
+    """One UI source file, checked for the two ways an inlined file can end
+    the element it is inlined into. `</script>` inside a JS string literal and
+    `</style>` inside a CSS string both terminate the tag in the HTML parser
+    long before the JS/CSS parser ever sees them, and the rest of the page
+    becomes text. The fix at the call site is to split the literal
+    ('<\\/script>' or '<' + '/script>'); failing the build is how anyone finds
+    out. The check is deliberately case-insensitive and tolerates whitespace
+    the way the HTML spec's script-end matcher does."""
+    path = UI_DIR / rel
+    if not path.exists():
+        raise SystemExit(f"4.0.0 UI source missing: {path}")
+    text = path.read_text(encoding="utf-8").lstrip("﻿")
+    closer = r"</\s*style" if rel.endswith(".css") else r"</\s*script"
+    hit = re.search(closer, text, re.I)
+    if hit:
+        line = text.count("\n", 0, hit.start()) + 1
+        raise SystemExit(
+            f"4.0.0 UI source {rel}:{line} contains a literal "
+            f"{hit.group(0)!r} — it is inlined into docs/index.html and that "
+            f"ends the tag. Split the literal (e.g. '<\\/script>')."
+        )
+    return text
+
+
+def ui_js_syntax_report(bundles: dict[str, str]) -> list[str]:
+    """`node --check` over each filled UI script. A module agent shipping a
+    syntax error would otherwise produce a page that parses as HTML, saves
+    fine, passes every verify_build check that greps text — and renders
+    nothing. Reported as a warning rather than a hard failure so a build can
+    still be produced while the six modules land in parallel; the integration
+    gate is `verify_build.py` plus a real browser boot."""
+    node = shutil.which("node")
+    if not node:
+        return []
+    problems: list[str] = []
+    tmp = Path(tempfile.mkdtemp(prefix="tabelog-uijs-"))
+    try:
+        for name, src in bundles.items():
+            f = tmp / f"{name}.js"
+            f.write_text(src, encoding="utf-8")
+            res = subprocess.run(
+                [node, "--check", str(f)], capture_output=True, text=True
+            )
+            if res.returncode != 0:
+                first = (res.stderr or res.stdout).strip().splitlines()
+                detail = " / ".join(x.strip() for x in first[:4] if x.strip())
+                problems.append(f"{name}.js: {detail}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return problems
+
+
+def load_ui_i18n() -> tuple[dict[str, dict[str, str]], set[str], list[str]]:
+    """ui/i18n/ui-strings.json → ({en, ja, tw}, covered_runs, half_translated).
+
+    tw is generated here with to_trad() (OpenCC s2twp + _TRAD_FIXUPS), never
+    hand-written. covered_runs are the CJK runs of every key — the runs the
+    module copy translates whole-string, which the second-pass punch list
+    must not count as missing. That exemption is the reason the third return
+    value exists: a key with an `en` but no `ja` would silently drop its runs
+    out of the JA punch list *and* render Chinese to a Japanese reader, i.e.
+    exactly the regression the i18n gate exists to catch. Those keys are
+    reported and their runs are NOT counted as covered for the missing side,
+    so the ordinary data/i18n punch list picks them up."""
+    tables: dict[str, dict[str, str]] = {"en": {}, "ja": {}, "tw": {}}
+    covered: set[str] = set()
+    half: list[str] = []
+    if not UI_I18N_JSON.exists():
+        return tables, covered, half
+    raw = json.loads(UI_I18N_JSON.read_text(encoding="utf-8"))
+    for key, val in raw.items():
+        if key.startswith("__") or not isinstance(val, dict):
+            continue
+        has_en, has_ja = bool(val.get("en")), bool(val.get("ja"))
+        if has_en:
+            tables["en"][key] = val["en"]
+        if has_ja:
+            tables["ja"][key] = val["ja"]
+        tw = to_trad(key)
+        if tw != key:
+            tables["tw"][key] = tw
+        # The exemption is stricter than the table. An `en` byte-identical to
+        # a Simplified key is a filled-in blank, not a translation, and it
+        # would otherwise buy the key its place on `covered` — the one way an
+        # untranslated string can reach an English reader with the gate
+        # green. (A `ja` equal to its key is normal: 保存, 百名店 and 新宿 are
+        # the same word in both languages.) The entry still goes into the
+        # table; only the exemption is withheld. A key with no CJK at all
+        # ('≥ {n}') exempts nothing either way, so it is never reported.
+        if has_en and has_ja and val["en"] != key:
+            covered.update(_CJK_RUN_RE.findall(key))
+        elif _CJK_RUN_RE.search(key):
+            half.append(key)
+    return tables, covered, sorted(half)
+
+
+def check_i18n_key_parity() -> list[str]:
+    """data/i18n/en.json and ja.json must keep identical key sets (CLAUDE.md).
+    Reported at build time because the gate's punch list is page-driven: a key
+    present in en.json alone only shows up once a page actually uses it, which
+    can be several releases later."""
+    problems: list[str] = []
+    try:
+        en = json.loads(I18N_EN_JSON.read_text(encoding="utf-8"))
+        ja = json.loads(I18N_JA_JSON.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 — a broken table is a build warning
+        return [f"could not read data/i18n: {exc}"]
+    ken = {k for k in en if not k.startswith("__")}
+    kja = {k for k in ja if not k.startswith("__")}
+    for label, extra in (("en.json", ken - kja), ("ja.json", kja - ken)):
+        if extra:
+            shown = ", ".join(sorted(extra)[:6])
+            more = f" (+{len(extra) - 6} more)" if len(extra) > 6 else ""
+            problems.append(f"{len(extra)} key(s) only in {label}: {shown}{more}")
+    return problems
+
+
+# 3.2.3's page-zoom lockdown, lifted VERBATIM out of MOBILE_UX_ASSETS so the
+# 4.0 page carries the same three in-page layers (the viewport meta is the
+# fourth, written by main()): the document-level gesture* guards + the
+# .leaflet-container wheel guard (the <script>), and `html, body {
+# touch-action: pan-x pan-y }` plus the light-only / tap-highlight / text-size
+# rules (the <style>). scripts/verify_build.py `page zoom` asserts all of it.
+def _page_zoom_lock() -> str:
+    m = re.search(r"<script>.*?</script>", MOBILE_UX_ASSETS, re.S)
+    if not m or "gesturestart" not in m.group(0):
+        raise SystemExit("MOBILE_UX_ASSETS lost its gesture-guard script")
+    return m.group(0) + """
+<style>
+  html { color-scheme: only light; }
+  html { -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  html, body { overscroll-behavior: none; }
+  html, body { touch-action: pan-x pan-y; }
+</style>
 """
 
 
@@ -22667,20 +22855,84 @@ def main(argv: list[str] | None = None) -> None:
         f"  known_locs:       {len(known_locs)} tokens, "
         f"{len(known_locs_json.encode('utf-8')):,} bytes"
     )
-    filter_js = (
-        FILTER_JS_TEMPLATE.replace("__DEFAULT_OFF_GENRES__", default_off_json)
-        .replace("__BOOKMARKS__", bookmarks_json)
-        .replace("__FAVORITES_BUILTIN__", favorites_builtin_json)
-        .replace("__BUCKET_COLORS__", bucket_colors_json)
-        .replace("__GENRE_EMOJI__", genre_emoji_json)
-        .replace("__PREFS__", prefs_json)  # M-023
-        .replace("__PRICE_BUCKETS__", price_buckets_json)  # D2
-        .replace("__EMOJI_MANIFEST__", emoji_manifest_json)
-        .replace("__HAN_VARIANTS__", han_variants_json)
-        .replace("__KNOWN_LOCS__", known_locs_json)
-        .replace("__GOOGLE_CLIENT_ID__", GOOGLE_CLIENT_ID)
-        .replace("__HELP_COPY__", build_help_copy_json())
-    )
+    def _fill_placeholders(tpl: str) -> str:
+        return (
+            tpl.replace("__DEFAULT_OFF_GENRES__", default_off_json)
+            .replace("__BOOKMARKS__", bookmarks_json)
+            .replace("__FAVORITES_BUILTIN__", favorites_builtin_json)
+            .replace("__BUCKET_COLORS__", bucket_colors_json)
+            .replace("__GENRE_EMOJI__", genre_emoji_json)
+            .replace("__PREFS__", prefs_json)  # M-023
+            .replace("__PRICE_BUCKETS__", price_buckets_json)  # D2
+            .replace("__EMOJI_MANIFEST__", emoji_manifest_json)
+            .replace("__HAN_VARIANTS__", han_variants_json)
+            .replace("__KNOWN_LOCS__", known_locs_json)
+            .replace("__GOOGLE_CLIENT_ID__", GOOGLE_CLIENT_ID)
+            .replace("__HELP_COPY__", build_help_copy_json())
+        )
+
+    filter_js = _fill_placeholders(FILTER_JS_TEMPLATE)
+    # 4.0.0: the UI bundle. One <style> per css file, one <script> per js
+    # file, the shell as-is; the same placeholder chain over every script.
+    ui_i18n_tables, ui_i18n_covered, ui_i18n_half = load_ui_i18n()
+    for problem in check_i18n_key_parity():
+        print(f"  WARNING data/i18n key sets disagree: {problem}")
+    if ui_i18n_half:
+        shown = ", ".join(ui_i18n_half[:6])
+        more = f" (+{len(ui_i18n_half) - 6} more)" if len(ui_i18n_half) > 6 else ""
+        print(
+            f"  WARNING ui-strings.json: {len(ui_i18n_half)} key(s) miss en or ja "
+            f"— {shown}{more}"
+        )
+    ui_head_css = ""
+    ui_body = ""
+    if UI_40:
+        ui_head_css = "".join(
+            f"<style>\n{read_ui(f'css/{name}.css')}\n</style>\n" for name in UI_CSS_ORDER
+        )
+        latest = latest_scrape_date(all_rows) or "暂无逐条记录"
+        shell = (
+            read_ui("shell.html")
+            .replace("__APP_VERSION__", APP_VERSION)
+            .replace("__DATA_SCRAPED_AT__", DATA_SCRAPED_AT)
+            .replace("__LATEST_SCRAPE__", _html.escape(latest))
+        )
+        ui_data = (
+            "<script>"
+            "window.MEAL_GROUPS = "
+            + json.dumps(MEAL_GROUPS, ensure_ascii=False, separators=(",", ":"))
+            + ";/*__MEAL_GROUPS_END__*/\n"
+            "window.UI_I18N_TABLES = "
+            + json.dumps(ui_i18n_tables, ensure_ascii=False, separators=(",", ":"))
+            + ";/*__UI_I18N_END__*/"
+            "</script>\n"
+        )
+        ui_js_filled = {
+            name: _fill_placeholders(read_ui(f"js/{name}.js")) for name in UI_JS_ORDER
+        }
+        ui_scripts = "".join(
+            f"<script>\n{ui_js_filled[name]}\n</script>\n" for name in UI_JS_ORDER
+        )
+        ui_body = shell + "\n" + ui_data + ui_scripts
+        # Per-file bytes, so a module that suddenly doubles is visible in the
+        # build log rather than only in the page's transfer size.
+        css_sizes = {n: len(read_ui(f"css/{n}.css").encode()) for n in UI_CSS_ORDER}
+        js_sizes = {n: len(s.encode()) for n, s in ui_js_filled.items()}
+        print(
+            "  ui css:           "
+            + "  ".join(f"{n} {v // 1024}k" for n, v in css_sizes.items())
+        )
+        print(
+            "  ui js:            "
+            + "  ".join(f"{n} {v // 1024}k" for n, v in js_sizes.items())
+        )
+        for problem in ui_js_syntax_report(ui_js_filled):
+            print(f"  WARNING ui js does not parse: {problem}")
+        print(
+            f"  ui bundle (4.0.0): {len(UI_CSS_ORDER)} css + {len(UI_JS_ORDER)} js, "
+            f"i18n table en {len(ui_i18n_tables['en'])} / ja {len(ui_i18n_tables['ja'])} "
+            f"/ tw {len(ui_i18n_tables['tw'])}, {len(ui_i18n_covered)} covered runs"
+        )
     # Content hashes for the runtime-fetched payloads. The page requests
     # them as  <path>?v=<hash>  and the SW keeps a persistent cache keyed by
     # those URLs — an unchanged file survives every deploy with zero
@@ -22782,6 +23034,44 @@ def main(argv: list[str] | None = None) -> None:
     # Adding a block? Append it, or put it where its comment says why.
     # DESIGN_TOKENS_CSS is first because it carries the @layer statement that
     # fixes the layer order for the whole document.
+    if UI_40:
+        # 4.0.0 cascade: no @layer (the demo CSS is unlayered and wins ties
+        # against vendor CSS by source order, as in the demo). Head: branding,
+        # the locate plugin + transit-layer.js, the 3.2.3 zoom lockdown, then
+        # tokens → base → module CSS. Body: the DPR switch first (same window
+        # as before), the shell, the bundle, the CORS fallback, then the boot.
+        m.get_root().header.add_child(folium.Element(HEAD_BRANDING))
+        m.get_root().header.add_child(folium.Element(LOCATE_ASSETS))
+        m.get_root().header.add_child(folium.Element(_page_zoom_lock()))
+        m.get_root().header.add_child(folium.Element(ui_head_css))
+        m.get_root().html.add_child(folium.Element(TILE_DPR_SWITCH_JS))
+        m.get_root().html.add_child(folium.Element(ui_body))
+        m.get_root().html.add_child(folium.Element(TILE_CORS_FALLBACK_JS))
+        m.get_root().html.add_child(folium.Element("<script>Adapter.start();</script>"))
+    else:
+        _assemble_legacy_page(m, panel_html, filter_js, all_rows)
+
+    # M-020: folium writes with a plain open('w'), and the old code then
+    # rewrote the same path a second time after the post-processing passes —
+    # two truncation windows over the file Cloudflare Pages actually serves.
+    # Render into a scratch file outside the repo (docs/ and data/ are both
+    # inside the Dropbox tree, whose watcher can hold a fresh file open long
+    # enough to make the cleanup unlink fail on WSL/DrvFs) and replace
+    # docs/index.html exactly once, atomically, at the end.
+    scratch_dir = Path(tempfile.mkdtemp(prefix="tabelog-build-"))
+    html_scratch = scratch_dir / "index.html"
+    try:
+        m.save(str(html_scratch))
+        saved_html = html_scratch.read_text(encoding="utf-8")
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
+    saved_html = _postprocess_page(saved_html, data_vers, ui_i18n_covered, core_rows,
+                                   popups_map, build_version, all_rows, failed)
+
+
+def _assemble_legacy_page(m, panel_html: str, filter_js: str, all_rows: list[dict]) -> None:
+    """The 3.2.x page (TABELOG_LEGACY_UI=1). Kept verbatim as the rollback
+    path and as the reference the 4.0 modules were ported from."""
     m.get_root().header.add_child(folium.Element(DESIGN_TOKENS_CSS))
     m.get_root().header.add_child(folium.Element(HEAD_BRANDING))
     m.get_root().header.add_child(folium.Element(css_layer(LOCATE_ASSETS)))
@@ -22831,21 +23121,22 @@ def main(argv: list[str] | None = None) -> None:
     # failure anywhere else can't take the basemap down with it.
     m.get_root().html.add_child(folium.Element(TILE_CORS_FALLBACK_JS))
 
-    # M-020: folium writes with a plain open('w'), and the old code then
-    # rewrote the same path a second time after the post-processing passes —
-    # two truncation windows over the file Cloudflare Pages actually serves.
-    # Render into a scratch file outside the repo (docs/ and data/ are both
-    # inside the Dropbox tree, whose watcher can hold a fresh file open long
-    # enough to make the cleanup unlink fail on WSL/DrvFs) and replace
-    # docs/index.html exactly once, atomically, at the end.
-    scratch_dir = Path(tempfile.mkdtemp(prefix="tabelog-build-"))
-    html_scratch = scratch_dir / "index.html"
-    try:
-        m.save(str(html_scratch))
-        saved_html = html_scratch.read_text(encoding="utf-8")
-    finally:
-        shutil.rmtree(scratch_dir, ignore_errors=True)
 
+def _postprocess_page(
+    saved_html: str,
+    data_vers: dict[str, str],
+    ui_i18n_covered: set[str],
+    core_rows: list[dict],
+    popups_map: dict,
+    build_version: str,
+    all_rows: list[dict],
+    failed: list[dict],
+) -> str:
+    """Every pass over the rendered HTML: dead-dep strip, vendor rewrite, the
+    viewport / lang / Leaflet-font patches, ?v= stamping, the saved-view
+    restore, the second-pass i18n maps, the atomic write and the build
+    report. Unchanged from 3.2.x apart from taking its inputs as arguments
+    (4.0.0 split main() so the two page assemblies could share it)."""
     # Folium's base template unconditionally injects jQuery, Bootstrap,
     # FontAwesome, and Leaflet.awesome-markers into <head>. This page uses
     # none of them — markers are hand-built divIcons, the UI is plain CSS,
@@ -23048,11 +23339,11 @@ def main(argv: list[str] | None = None) -> None:
     text_trad_map_json = json.dumps(
         text_trad_map, ensure_ascii=False, separators=(",", ":")
     )
-    text_en_map, missing_en = build_text_en_map(saved_html)
+    text_en_map, missing_en = build_text_en_map(saved_html, ui_i18n_covered)
     text_en_map_json = json.dumps(
         text_en_map, ensure_ascii=False, separators=(",", ":")
     )
-    text_ja_map, missing_ja = build_text_ja_map(saved_html)
+    text_ja_map, missing_ja = build_text_ja_map(saved_html, ui_i18n_covered)
     text_ja_map_json = json.dumps(
         text_ja_map, ensure_ascii=False, separators=(",", ":")
     )
@@ -23061,6 +23352,28 @@ def main(argv: list[str] | None = None) -> None:
         .replace("__TEXT_EN_MAP__", text_en_map_json)
         .replace("__TEXT_JA_MAP__", text_ja_map_json)
     )
+    # 4.0.0: nothing on the page may still be a placeholder. In 3.2.x the
+    # substitution chain and the one template it applied to lived twenty lines
+    # apart; now it runs over ten separate source files that six people edit,
+    # and a token that survives is not a cosmetic defect — `var PREFS =
+    # __PREFS__;` is a syntax error that takes the whole bundle down. Hard
+    # failure, before the write, so docs/index.html is never the broken one.
+    # The sentinel comments that end the two one-line literals are the
+    # deliberate exception, and so is documentation naming a token.
+    _PLACEHOLDER_SENTINELS = {"__MEAL_GROUPS_END__", "__UI_I18N_END__"}
+    _stranded = sorted(
+        tok
+        for tok in set(re.findall(r"__[A-Z][A-Z0-9_]{2,}__", saved_html))
+        if tok not in _PLACEHOLDER_SENTINELS
+        and not re.search(rf"//[^\n]*{tok}|/\*[^*]*{tok}", saved_html)
+    )
+    if _stranded:
+        raise SystemExit(
+            "unsubstituted placeholder(s) in the rendered page: "
+            + ", ".join(_stranded)
+            + " — add them to _fill_placeholders() (or to the shell's own "
+            "replace chain) before this ships"
+        )
     atomic_write_text(OUT_HTML, saved_html)  # M-020: the only write to docs/index.html
     print(f"\nMap written to {OUT_HTML}")
     print(f"  {len(core_rows)} restaurants in payload (fetched at runtime)")
@@ -23119,6 +23432,7 @@ def main(argv: list[str] | None = None) -> None:
         indent=2,
     )
     print(f"  build report:     {BUILD_REPORT_JSON}")
+    return saved_html
 
 
 if __name__ == "__main__":

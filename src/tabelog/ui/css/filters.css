@@ -1,0 +1,222 @@
+/* ==========================================================================
+   Japan Foodmap 4.0.0 demo — css/filters.css
+   Owner: filters module. Everything here is prefixed .ft-* or scoped to
+   #filters-root / #filters-foot. Numbers come from css/tokens.css; shared
+   components (.opt-row, .checkbox, .switch, .slider, .chip, .btn, .price-dot)
+   come from css/base.css and are never redefined here — only positioned.
+
+   Composition: VIS-05 (24px between blocks, 12px title→first control, one
+   cuisine frame, 44px targets including the child rows) and VIS-06 (award
+   rows keep their own colour family in both states).
+   ========================================================================== */
+
+/* ---- form shell ---------------------------------------------------------- */
+#filters-root { display: block; }
+.ft-form {
+  padding: var(--sp-3) var(--pad-panel-narrow) 0;
+  color: var(--ink);
+}
+html[data-mode="mid"] .ft-form { padding-left: var(--pad-panel-mid); padding-right: var(--pad-panel-mid); }
+html[data-mode="wide"] .ft-form { padding-left: var(--pad-panel-wide); padding-right: var(--pad-panel-wide); }
+
+/* end of one block → next block's title: 24px (VIS-05) */
+.ft-sec + .ft-sec,
+.ft-sec + .ft-reset { margin-top: var(--c-filter-section-gap); }
+.ft-tail { height: var(--sp-5); }
+
+/* ---- section head: icon + title, then the value / links ------------------ */
+/* the head wraps instead of pushing 全选 / 全清 out of the column when the
+   translation is long and the text is at 130% (EN + Fold inner rail) */
+.ft-head {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  min-height: 28px;
+  margin-bottom: var(--c-filter-heading-gap);            /* 12px title → first control */
+}
+.ft-title { display: inline-flex; align-items: center; gap: var(--sp-2); flex: 0 1 auto; min-width: 0; }
+.ft-title .ic { color: var(--ink-secondary); }           /* neutral line icon, never a coloured emoji */
+.ft-head-value { margin-left: auto; font-size: var(--t-group-title-size); line-height: var(--t-group-title-line); font-weight: 700; }
+.ft-head-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+.ft-head-sum { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-head-sum + .ft-collapse { margin-left: 0; }
+.ft-collapse { width: 32px; height: 32px; flex: none; color: var(--ink-secondary); position: relative; }
+.ft-collapse::after { content: ""; position: absolute; inset: -6px; }
+
+/* quiet text links (全选 / 全清 / 一起显示): 14px visual, 44px target */
+.ft-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--touch-min); padding: 0 6px; margin-block: -11px;
+  color: var(--accent-strong);
+  font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 600;
+  border-radius: var(--r-compact);
+  transition: color var(--m-micro) var(--e-out), background-color var(--m-micro) var(--e-out);
+}
+.ft-link:hover:not(:disabled) { background: var(--accent-soft); }
+.ft-link:disabled { color: var(--ink-secondary); opacity: .55; cursor: default; }
+.ft-link-sep { color: var(--separator); font-size: var(--t-control-size); }
+
+/* "?" help: 24px circle, 44px target */
+.ft-help-btn {
+  position: relative; flex: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  display: inline-grid; place-content: center;
+  background: var(--surface-subtle); color: var(--ink-secondary);
+  border: 1px solid var(--control-hairline);
+  font-size: 12px; line-height: 1; font-weight: 700;
+}
+.ft-help-btn::after { content: ""; position: absolute; inset: -10px; }
+.ft-help-btn[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+.ft-help { margin: calc(-1 * var(--sp-1)) 0 var(--c-filter-heading-gap); }
+.ft-note { margin: calc(-1 * var(--sp-1)) 0 var(--sp-2); }
+
+/* ---- summary ------------------------------------------------------------- */
+.ft-sec-top { padding-bottom: var(--sp-4); border-bottom: 1px solid var(--separator); }
+.ft-summary { color: var(--ink); }
+.ft-summary b { font-weight: 700; }
+.ft-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.ft-chip { max-width: 100%; min-width: 0; }
+/* DEVICE PASS (§14.3, 200% text): .chip is white-space: nowrap, so at large text
+   scales the summary chip ran past the sheet's right edge and took its ✕ with
+   it — the "remove this filter" control left the screen. The label now ellipses
+   inside the chip; the ✕ keeps its own aria-label, which still carries the full
+   filter name for assistive tech. */
+.ft-chip .ft-chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the chip stays 36px per token; its ✕ carries a 44px hit area (§3.4) */
+.ft-chip .chip-x { flex: none; position: relative; }
+.ft-chip .chip-x::after { content: ""; position: absolute; inset: -10px; }
+
+/* ---- region -------------------------------------------------------------- */
+.ft-region { text-align: left; }
+.ft-region-val { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.ft-region-val .ic { color: var(--ink-secondary); }
+.ft-region-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-region-count { color: var(--ink-secondary); font-weight: 400; flex: none; }
+.ft-region > .ic:last-child { color: var(--ink-secondary); flex: none; }
+
+/* ---- rating -------------------------------------------------------------- */
+.ft-slider-wrap { display: block; }
+.ft-scale { display: flex; justify-content: space-between; margin-top: -6px; }
+/* five shortcuts on one row when they fit; they fold into fewer columns
+   instead of leaving one chip stretched across the width (130% / Fold rail) */
+/* DEVICE PASS: the track floor has to follow the text scale, not sit at a fixed
+   56px — .chip is white-space: nowrap, so at 130% / 200% (and in JA, where the
+   label is すべて rather than 全部) the pill's text ran past its own border.
+   max(56px, 3.6em) keeps the five-across row at 100% and folds to fewer, wider
+   columns exactly when the label stops fitting. */
+.ft-quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(56px, 3.6em), 1fr)); gap: var(--sp-2); margin-top: var(--sp-3); }
+.ft-quick .chip { justify-content: center; min-width: 0; padding-inline: var(--sp-2); }
+
+/* ---- option rows (price / awards) --------------------------------------- */
+.ft-rows { display: flex; flex-direction: column; gap: var(--c-filter-option-gap); }
+.ft-budget { border: 1px solid transparent; }
+.ft-budget .opt-count { margin-left: auto; }
+.ft-budget.is-on { background: var(--accent-soft); }
+
+/* ---- cuisine frame (one outer frame for every parent and child, §8.2) ---- */
+.ft-box {
+  border: 1px solid var(--separator); border-radius: var(--r-button);
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+  background: var(--surface);
+}
+.ft-box-bulk { display: flex; align-items: center; gap: var(--sp-2); }
+.ft-all-row { flex: 1 1 auto; min-width: 0; }
+.ft-grp { border-radius: var(--r-compact); }
+.ft-grp.is-on { background: var(--accent-soft); }
+.ft-grp-head { display: flex; align-items: center; gap: var(--sp-1); }
+.ft-grp-head .opt-row { flex: 1 1 auto; min-width: 0; }
+.ft-grp-head .opt-count { margin-left: auto; }
+.ft-grp-head .opt-row:hover { background: transparent; }
+.ft-grp-arrow { width: var(--touch-min); height: var(--touch-min); flex: none; color: var(--ink-secondary); }
+.ft-grp[data-open="true"] .ft-grp-arrow .ic { transform: rotate(180deg); }
+.ft-grp-arrow .ic { transition: transform var(--m-standard) var(--e-standard); }
+/* 240ms height transition without measuring: 1fr → 0fr */
+.ft-children { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--m-standard) var(--e-standard); }
+.ft-grp[data-open="false"] .ft-children { grid-template-rows: 0fr; }
+/* the rows keep their own boxes while the row track collapses, so hide them
+   for real once the 240ms transition is over (and immediately on the way in) */
+.ft-children-in { overflow: hidden; min-height: 0; visibility: visible; transition: visibility 0s; }
+.ft-grp[data-open="false"] .ft-children-in { visibility: hidden; transition: visibility 0s var(--m-standard); }
+.ft-cui .ft-emj { display: inline-flex; width: 16px; height: 16px; flex: none; }
+.ft-cui .ft-emj .emj { width: 16px; height: 16px; }
+.ft-cui .opt-count { margin-left: auto; }
+.ft-cui:hover { background: rgba(17, 26, 67, .035); }
+
+/* ---- awards (VIS-06: own colour family, selected and not) --------------- */
+.ft-awards .ft-award {
+  border: 1px solid var(--control-hairline); background: var(--surface);
+}
+.ft-award .ft-emj { display: inline-flex; width: 16px; height: 16px; flex: none; }
+.ft-award .ft-emj .emj { width: 16px; height: 16px; }
+.ft-award .opt-count { margin-left: auto; }
+.ft-awards .ft-award.is-on[data-award="gold"]   { background: var(--award-gold-surface);   border-color: var(--award-gold-border);   color: var(--award-gold-text); }
+.ft-awards .ft-award.is-on[data-award="silver"] { background: var(--award-silver-surface); border-color: var(--award-silver-border); color: var(--award-silver-text); }
+.ft-awards .ft-award.is-on[data-award="bronze"] { background: var(--award-bronze-surface); border-color: var(--award-bronze-border); color: var(--award-bronze-text); }
+.ft-awards .ft-award.is-on[data-award="hyaku"]  { background: var(--award-hyaku-surface);  border-color: var(--award-hyaku-border);  color: var(--award-hyaku-text); }
+.ft-awards .ft-award.is-on[data-award="hot"]    { background: var(--award-hot-surface);    border-color: var(--award-hot-border);    color: var(--award-hot-text); }
+.ft-awards .ft-award.is-on .opt-label { font-weight: 600; }
+.ft-awards .ft-award.is-on .opt-count { color: inherit; opacity: .85; }
+.ft-awards .ft-award.is-on:hover { filter: brightness(.985); }
+
+/* ---- other: switch rows -------------------------------------------------- */
+.ft-switches { gap: var(--sp-1); }
+.ft-sw-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  min-height: var(--touch-min); padding: var(--c-filter-outer-pad) var(--sp-2);
+  border-radius: var(--r-compact); cursor: pointer;
+}
+.ft-sw-row:hover { background: var(--surface-subtle); }
+.ft-sw-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.ft-sw-label { font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 500; }
+.ft-sw-sub { display: block; }
+.ft-sw-count { flex: none; }
+.ft-sw-group { display: block; }
+.ft-sw-extra {
+  margin: -2px 0 0; padding: 0 var(--sp-2) 0 var(--sp-2);
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1);
+}
+.ft-sw-extra .ft-link { padding-inline: 4px; }
+
+/* ---- reset --------------------------------------------------------------- */
+.ft-reset { display: flex; }
+.ft-reset-btn { width: 100%; }
+.ft-reset-btn .ic { width: 18px; height: 18px; }
+
+/* ---- fixed footer (FILTER-01) ------------------------------------------- */
+#filters-foot .ft-foot {
+  padding: var(--sp-2) var(--pad-panel-narrow) calc(var(--sp-3) + var(--safe-bottom));
+  background: var(--surface);
+}
+html[data-mode="mid"] #filters-foot .ft-foot { padding-left: var(--pad-panel-mid); padding-right: var(--pad-panel-mid); }
+html[data-mode="wide"] #filters-foot .ft-foot { padding-left: var(--pad-panel-wide); padding-right: var(--pad-panel-wide); }
+.ft-see { width: 100%; }
+.ft-see.is-updating { background: var(--accent); opacity: .82; }
+
+/* ---- narrow: a little more air between the quick chips at 130% ---------- */
+
+/* ---- region fallback panel (used only while overlays has no picker) -------
+   The 47 prefectures grouped into the six regional blocks, with the live counts the
+   button shows. Rendered inline inside the region section so the control is
+   never dead; overlays' sheet takes over as soon as it lands.               */
+.ft-region-panel {
+  margin-top: var(--sp-2); padding: var(--sp-2);
+  border: 1px solid var(--separator); border-radius: var(--r-button);
+  background: var(--surface); display: grid; gap: var(--sp-3);
+  max-height: 46vh; overflow-y: auto; overscroll-behavior: contain;
+}
+.ft-region-grp-t { margin: 0 0 var(--sp-1); }
+.ft-region-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 2px; }
+.ft-region-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  min-height: var(--touch-min); padding: 0 var(--sp-2); border-radius: var(--r-compact);
+  font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 500;
+  color: var(--ink); text-align: left; width: 100%;
+}
+.ft-region-opt:hover { background: var(--surface-subtle); }
+.ft-region-opt.is-on { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.ft-region-opt.is-all { border-bottom: 1px solid var(--separator); border-radius: var(--r-compact) var(--r-compact) 0 0; }
+.ft-region-opt-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-region-opt .opt-count { color: var(--ink-secondary); font-weight: 400; flex: none; }
+.ft-region-opt.is-on .opt-count { color: inherit; opacity: .8; }
+
+/* a restricted cuisine child reads as selected, like the budget rows do */
+.ft-cui.is-on { background: var(--accent-soft); }
+.ft-cui.is-on .opt-label { font-weight: 600; }

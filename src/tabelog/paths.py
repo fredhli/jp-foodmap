@@ -127,6 +127,12 @@ I18N_JA_JSON = I18N_DIR / "ja.json"
 # count, so "the corpus silently shrank by 20%" fails the build).
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 VERIFY_BASELINE_JSON = SCRIPTS_DIR / "verify_baseline.json"
+# 4.0.0: the front-end source tree map.py reads and inlines into
+# docs/index.html (shell.html + css/ + js/ + i18n/ui-strings.json). See its
+# README.md for the load order and the placeholder list. Not served directly —
+# the page is still one file.
+UI_DIR = PROJECT_ROOT / "src" / "tabelog" / "ui"
+UI_I18N_JSON = UI_DIR / "i18n" / "ui-strings.json"
 # M-056: the repo's test suites. tests/pipeline + tests/compat + the smoke
 # run live here; tests/worker and tests/sync are owned by the worker / sync
 # work. See tests/README.md.

@@ -1,0 +1,316 @@
+/* ==========================================================================
+   Japan Foodmap 4.0.0 demo — css/containers.css
+   Owner: containers module agent. Scope: the app chrome that holds every
+   other module — narrow bottom sheet (LAY-03/04/05), narrow top anchor,
+   mid/wide top bar, left column + 56px rail, detail column, candidate host.
+   Selectors: the container ids from CONTRACT.md §4 and the .ct-* prefix.
+   Every number is a token from css/tokens.css.
+   ========================================================================== */
+
+/* ==========================================================================
+   1. narrow top chrome (search anchor; contents rendered by overlays)
+   ========================================================================== */
+#narrow-top {
+  position: absolute;
+  left: var(--U-left); top: var(--U-top); width: var(--U-w);
+  z-index: var(--z-topbar);
+  padding: var(--sp-3) var(--sp-4) 0;
+  pointer-events: none;
+}
+#narrow-top > * { pointer-events: auto; }
+/* SEARCH-02: the search task owns the whole usable rect */
+html[data-mode="narrow"][data-search-active] #narrow-top {
+  height: var(--U-h);
+  padding: 0;
+}
+html:not([data-mode="narrow"]) #narrow-top { display: none; }
+
+/* ==========================================================================
+   2. narrow bottom sheet
+   ========================================================================== */
+#sheet {
+  position: absolute;
+  left: var(--U-left); width: var(--U-w); bottom: var(--vv-occ);
+  height: var(--sheet-h);
+  z-index: var(--z-panels);
+  background: var(--surface);
+  border-radius: var(--r-panel) var(--r-panel) 0 0;
+  box-shadow: var(--shadow-panel);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: height var(--m-sheet) var(--e-standard);
+  will-change: height;
+}
+#sheet[data-dragging] { transition: none; }
+#sheet[data-full] { border-radius: 0; }
+html:not([data-mode="narrow"]) #sheet { display: none; }
+/* SEARCH-02: sheet and its entry bar leave the screen and the focus order */
+html[data-mode="narrow"][data-search-active] #sheet { display: none; }
+
+/* --- drag handle: 26px row, ≥44px pointer target via the pseudo element --- */
+#sheet-handle {
+  flex: none; position: relative;
+  height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; cursor: grab;
+}
+#sheet-handle:active { cursor: grabbing; }
+#sheet-handle::before { content: ""; position: absolute; left: 0; right: 0; top: -10px; bottom: -8px; }
+#sheet-handle .handle { margin: 0; transition: background-color var(--m-micro) var(--e-out), width var(--m-micro) var(--e-out); }
+#sheet-handle:hover .handle, #sheet[data-dragging] .handle { background: var(--control-border); }
+#sheet-handle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; border-radius: var(--r-compact); }
+
+#sheet-head { flex: none; padding: 0 var(--pad-panel-narrow); }
+#sheet-body {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+#sheet-toast { flex: none; padding: 0 var(--pad-panel-narrow); }
+#sheet-toast:not(:empty) { padding-bottom: var(--sp-2); }
+#sheet-foot {
+  flex: none; background: var(--surface);
+  border-top: 1px solid var(--separator);
+  padding-bottom: var(--safe-bottom);
+}
+#sheet-foot:empty { border-top: 0; padding: 0; }
+html[data-sheet="collapsed"] #sheet-body,
+html[data-sheet="collapsed"] #sheet-toast,
+html[data-sheet="collapsed"] #sheet-foot { display: none; }
+
+/* --- header variant A: collapsed entry bar (A01) --- */
+.ct-entry { display: flex; align-items: center; gap: var(--sp-2); min-height: 54px; }
+.ct-segs {
+  display: flex; align-items: center; gap: var(--sp-2);
+  flex: 1 1 auto; min-width: 0;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.ct-segs::-webkit-scrollbar { display: none; }
+/* tight: the decorative icons and rules go before any word is cut */
+.ct-entry[data-tight] .ct-sep { display: none; }
+.ct-entry[data-tight] .ct-seg .ic { display: none; }
+.ct-entry[data-tight] .ct-segs { gap: var(--sp-4); }
+.ct-entry[data-scroll] .ct-segs {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+.ct-seg {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  min-height: var(--touch-min); padding: 0 var(--sp-1);
+  border-radius: var(--r-compact);
+  color: var(--ink);
+  font-size: var(--t-group-title-size); line-height: var(--t-group-title-line); font-weight: 600;
+  transition: background-color var(--m-micro) var(--e-out);
+}
+.ct-seg:hover { background: var(--surface-subtle); }
+.ct-seg > .ct-seg-label { white-space: nowrap; }
+.ct-seg .ic { color: var(--ink); }
+.ct-sep { width: 1px; height: 20px; background: var(--separator); flex: none; }
+.ct-entry-spacer { flex: 1 1 auto; min-width: var(--sp-1); }
+.ct-expand {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: var(--touch-min); height: var(--touch-min); border-radius: var(--r-pill);
+  background: var(--accent-soft); color: var(--accent-strong);
+  transition: background-color var(--m-micro) var(--e-out);
+}
+.ct-expand:hover { background: #DCEBFF; }
+
+/* --- header variant B: browse / filter tabs (A02 / A04 / A06) --- */
+.ct-tabs {
+  display: flex; align-items: center; gap: var(--sp-2);
+  min-height: 52px;
+  margin: 0 calc(-1 * var(--pad-panel-narrow));
+  padding: 0 var(--pad-panel-narrow);
+  border-bottom: 1px solid var(--separator);
+}
+/* the tab strip may scroll sideways, but a label is never cut in half */
+.ct-tabs .tabs, .ct-col-head .tabs {
+  flex: 1 1 auto; min-width: 0; align-items: stretch;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.ct-tabs .tabs::-webkit-scrollbar, .ct-col-head .tabs::-webkit-scrollbar { display: none; }
+.ct-tabs .tab, .ct-col-head .tab { flex: none; }
+.ct-tab-label { white-space: nowrap; }
+/* measured fallback (fitTabs): tighten before the strip has to scroll */
+.ct-tabs[data-tight] .tab, .ct-col-head[data-tight] .tab { padding: 0 6px; }
+.ct-tabs[data-tight] .tabs, .ct-col-head[data-tight] .tabs { gap: 2px; }
+.ct-tabs[data-tight] .ct-pill-text { display: none; }
+.ct-tabs[data-tight] .ct-pill { padding: 0; width: var(--touch-min); justify-content: center; }
+.ct-head-right { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+.ct-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: var(--touch-min); padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft); color: var(--accent-strong);
+  font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 600;
+  white-space: nowrap;
+  transition: background-color var(--m-micro) var(--e-out);
+}
+.ct-pill:hover { background: #DCEBFF; }
+
+/* --- header variant C: detail navigation row (H01) --- */
+.ct-nav { display: flex; align-items: center; gap: var(--sp-2); min-height: 48px; }
+.ct-back {
+  display: inline-flex; align-items: center; gap: 2px;
+  min-height: var(--touch-min); padding: 0 var(--sp-2) 0 0;
+  color: var(--accent-strong); font-weight: 600;
+  font-size: var(--t-control-size); line-height: var(--t-control-line);
+  flex: 0 1 auto; min-width: 0;
+  border-radius: var(--r-compact);
+  transition: background-color var(--m-micro) var(--e-out);
+}
+.ct-back:hover { background: var(--accent-soft); }
+.ct-back > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-nav-right { display: flex; align-items: center; gap: var(--sp-1); flex: none; margin-left: auto; }
+
+/* --- LAY-04 fallback 1: compact margins at H ≤ 419 --- */
+#sheet[data-compact] #sheet-head,
+#sheet[data-compact] #sheet-toast { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+#sheet[data-compact] .ct-tabs { margin: 0 calc(-1 * var(--sp-3)); padding: 0 var(--sp-3); min-height: 48px; }
+#sheet[data-compact] .ct-entry { min-height: 48px; }
+#sheet[data-compact] #sheet-handle { height: 18px; }
+
+/* ==========================================================================
+   3. mid / wide top bar
+   ========================================================================== */
+#topbar {
+  position: absolute;
+  left: var(--U-left); top: var(--U-top); width: var(--U-w);
+  min-height: var(--topbar-h);
+  z-index: var(--z-topbar);
+  background: var(--surface);
+  border-bottom: 1px solid var(--separator);
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+#topbar::-webkit-scrollbar { display: none; }
+#topbar[data-scroll] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+/* DEVICE PASS (§14.3, 200% text / LAY-04): brand and chips were both `flex:
+   none`, so the search field — the one control the bar exists for — was the only
+   thing that could shrink. At 200% on the Fold inner screen it was crushed to
+   67px and its placeholder set vertically over the map. The field now has a
+   floor, the brand gives way first (tagline, then wordmark, logo last), and if
+   that is still not enough the bar scrolls sideways instead of crushing anything.
+   `fitTopbar()` in containers.js sets the two data-tight steps by measurement. */
+#topbar-brand { flex: 0 1 auto; display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
+#topbar[data-tight] .ct-brand-tag { display: none; }
+#topbar[data-tight2] .ct-brand-text { display: none; }
+/* once the wordmark is gone the 36px logo is all that is left; stop shrinking it
+   to nothing and let the bar scroll instead — the logo is the only thing that
+   still says which app this is. */
+#topbar[data-tight2] #topbar-brand { flex: none; }
+.ct-logo {
+  width: 36px; height: 36px; border-radius: 50%; flex: none;
+  background: var(--rating); color: #fff;
+  display: grid; place-content: center;
+}
+.ct-logo .ic { width: 22px; height: 22px; }
+.ct-logo .emj { width: 22px; height: 22px; vertical-align: 0; }
+.ct-brand-text { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.ct-brand-name { display: block; font-size: 1.0625rem; line-height: 1.3; font-weight: 700; white-space: nowrap; }
+.ct-brand-tag { display: block; font-size: var(--t-secondary-size); line-height: 1.2; color: var(--ink-secondary); white-space: nowrap; }
+#topbar-search { flex: 1 1 auto; min-width: min(14em, 100%); display: flex; justify-content: center; }
+#topbar-right { flex: none; display: flex; align-items: center; gap: var(--sp-2); }
+
+/* ==========================================================================
+   4. mid / wide columns
+   ========================================================================== */
+#col-left, #col-detail {
+  position: absolute;
+  top: calc(var(--U-top) + var(--topbar-h)); bottom: var(--vv-occ);
+  z-index: var(--z-panels);
+  background: var(--surface);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: width var(--m-standard) var(--e-standard);
+}
+#col-left { left: var(--U-left); width: var(--col-left-w); border-right: 1px solid var(--separator); }
+#col-detail { right: 0; width: var(--col-detail-w); border-left: 1px solid var(--separator); }
+#col-detail[data-closed] { border-left: 0; }
+html[data-mode="narrow"] #col-left,
+html[data-mode="narrow"] #col-detail,
+html[data-mode="narrow"] #candidates-host { display: none; }
+
+#col-left-head, #col-detail-head { flex: none; }
+#col-left-head { padding: 0 var(--pad-panel-mid); border-bottom: 1px solid var(--separator); }
+#col-left-head:empty { border-bottom: 0; }
+#col-detail-head { padding: 0 var(--sp-3) 0 var(--pad-panel-mid); border-bottom: 1px solid var(--separator); }
+#col-detail-head:empty { border-bottom: 0; }
+#col-left-body, #col-detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#col-left-toast { flex: none; padding: 0 var(--pad-panel-mid); }
+#col-detail-toast { flex: none; padding: 0 var(--pad-panel-mid); }
+#col-left-toast:not(:empty), #col-detail-toast:not(:empty) { padding-bottom: var(--sp-2); }
+#col-left-foot, #col-detail-foot { flex: none; border-top: 1px solid var(--separator); padding-bottom: var(--safe-bottom); }
+#col-left-foot:empty, #col-detail-foot:empty { border-top: 0; padding: 0; }
+html[data-mode="wide"] #col-left-head, html[data-mode="wide"] #col-left-toast { padding-left: var(--pad-panel-wide); padding-right: var(--pad-panel-wide); }
+
+/* M3: the column content fades in 80ms after the width transition starts */
+#col-detail > *, #col-left > * { transition: opacity var(--m-standard) var(--e-standard) 80ms; }
+#col-detail[data-closed] > * { opacity: 0; transition-delay: 0ms; }
+
+/* --- 56px rail (A09) --- */
+#col-left-rail { display: none; }
+#col-left[data-rail] #col-left-head,
+#col-left[data-rail] #col-left-body,
+#col-left[data-rail] #col-left-toast,
+#col-left[data-rail] #col-left-foot { display: none; }
+#col-left[data-rail] #col-left-rail {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--sp-2); padding: var(--sp-3) 0;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+}
+.ct-rail-tabs { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+.ct-rail-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  width: 48px; min-height: 52px; padding: var(--sp-1) 0;
+  border-radius: var(--r-button);
+  color: var(--ink-secondary);
+  font-size: 11px; line-height: 14px; font-weight: 600; text-align: center;
+  transition: background-color var(--m-micro) var(--e-out), color var(--m-micro) var(--e-out);
+}
+.ct-rail-btn:hover { background: var(--surface-subtle); color: var(--ink); }
+.ct-rail-btn[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+.ct-rail-btn .ct-rail-count { font-size: 10px; line-height: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ct-rail-spacer { flex: 1 1 auto; min-height: var(--sp-2); }
+
+/* --- column head rows --- */
+.ct-col-head { display: flex; align-items: center; gap: var(--sp-2); min-height: 52px; }
+.ct-col-head .tabs { flex: 1 1 auto; min-width: 0; }
+.ct-detail-head { display: flex; align-items: center; gap: var(--sp-1); min-height: 52px; }
+.ct-pager { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.ct-pager-label {
+  font-size: var(--t-secondary-size); line-height: var(--t-secondary-line);
+  color: var(--ink-secondary); font-variant-numeric: tabular-nums; white-space: nowrap;
+  padding: 0 var(--sp-1);
+}
+.ct-detail-head .ct-back { flex: 0 1 auto; }
+.ct-detail-head .ct-close { margin-left: auto; }
+.ct-pager + .ct-close { margin-left: var(--sp-1); }
+
+/* ==========================================================================
+   5. Fold-inner candidate strip host (§10.4) — over the map, clear of the FAB
+   ========================================================================== */
+#candidates-host {
+  position: absolute;
+  left: calc(var(--U-left) + var(--col-left-w) + var(--sp-4));
+  right: calc(var(--col-detail-w) + var(--fab-w) + var(--sp-4) * 2);
+  bottom: calc(var(--sp-4) + var(--vv-occ));
+  z-index: var(--z-panels);
+  pointer-events: none;
+}
+#candidates-host > * { pointer-events: auto; }
+html[data-mode="wide"] #candidates-host { display: none; }
+
+/* the strip really has to scroll: fade its trailing edge so a clipped label
+   reads as "more to the side", never as a truncated word */
+.ct-tabs[data-scroll] .tabs, .ct-col-head[data-scroll] .tabs {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}

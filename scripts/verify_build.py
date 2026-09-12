@@ -87,7 +87,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "3.2.4"
+EXPECTED_APP_VERSION = "4.0.0"
 
 # map.py is the single source of both build-time facts the About sheet states.
 # Parsed as text rather than imported: importing map.py runs the whole render
@@ -637,29 +637,25 @@ def check_subcollections() -> None:
     ok("subcollections", f"all {len(SUBCOLLECTION_CONTRACTS)} E2 invariants hold")
 
 
-# M-3.2-01 / GW P3-P4. The page used to carry two disagreeing breakpoint
-# systems: seven CSS width thresholds (360/480/699/700/749/900/1100) against
-# the JS's two (WB_BP_MID 750, WB_BP_WIDE 1280). 700-749 got tablet CSS on a
-# layout the JS was running as a phone, 1100-1279 got desktop CSS on a
-# collapsed mid column, and 591px (the Fold's inner screen at 60%) belonged
-# to neither branch. One set of numbers now, asserted here rather than in a
-# comment nobody re-reads.
+# M-3.2-01 / GW P3-P4, re-based for 4.0.0 (DESIGN.md LAY-01). The page used
+# to carry two disagreeing breakpoint systems; 3.2.0 reduced them to one set
+# and this check has kept them from drifting apart since. 4.0.0's layout is
+# driven by a single pair of numbers in core.js (`narrowLt: 750, wideGte:
+# 1100`) that decide `html[data-mode]`; the CSS follows the attribute, so the
+# only width media query left is the 750 one. Anything else in an @media
+# prelude is a new layout decision nobody asked for.
 #
-# A `max-width` query spells its boundary one pixel down, so 559 stands for
-# the 560 breakpoint and 749 for 750 — the check accepts n or n+1.
-BREAKPOINTS = {560, 750, 1280}
-# Narrow fallbacks, not layout decisions: they may only hide a third line of
-# text or drop a label, never move a panel. Kept out of BREAKPOINTS so a new
-# rule can't quietly grow one into a fourth layout.
-BREAKPOINT_FALLBACKS = {319, 360}
+# A `max-width` query spells its boundary one pixel down, so 749 stands for
+# the 750 breakpoint — the check accepts n or n+1.
+BREAKPOINTS = {750, 1100}
+# Narrow fallbacks, not layout decisions: they may only shorten a label or
+# drop a third line, never move a panel.
+BREAKPOINT_FALLBACKS = {380}
 # Content-driven exceptions, each pinned to the exact number of rules allowed
 # to use it. Growing one of these is a deliberate act, not a typo.
-BREAKPOINT_EXCEPTIONS = {
-    900: (1, "#wb-brand's wordmark (A-1, 2.3.0): mid is two columns from "
-             "750px, but the wordmark only fits from 900"),
-}
-# The JS half of the same contract.
-BREAKPOINT_JS_VARS = {"WB_BP_MEDIUM": 560, "WB_BP_MID": 750, "WB_BP_WIDE": 1280}
+BREAKPOINT_EXCEPTIONS: dict[int, tuple[int, str]] = {}
+# The JS half of the same contract (core.js layout.CFG).
+BREAKPOINT_JS_VARS = {"narrowLt": 750, "wideGte": 1100}
 
 
 def check_breakpoints() -> None:
@@ -668,8 +664,8 @@ def check_breakpoints() -> None:
         return
     html = MAP_HTML.read_text(encoding="utf-8")
 
-    # Only @media preludes. @container queries (the detail card measures its
-    # own host, M-111) and prose inside CSS comments are deliberately out.
+    # Only @media preludes. @container queries and prose inside CSS comments
+    # are deliberately out.
     widths: dict[int, int] = {}
     for prelude in re.findall(r"@media([^{]*)\{", html):
         for value in re.findall(r"\((?:min|max)-width:\s*([0-9]+)px\)", prelude):
@@ -694,25 +690,24 @@ def check_breakpoints() -> None:
         )
 
     for name, expected in BREAKPOINT_JS_VARS.items():
-        found = re.search(rf"\b{name}\s*=\s*([0-9]+)", html)
+        found = re.search(rf"\b{name}:\s*([0-9]+)", html)
         if not found:
-            problems.append(f"{name} is gone from the page's JS")
+            problems.append(f"{name} is gone from the page's JS (core.js layout.CFG)")
         elif int(found.group(1)) != expected:
             problems.append(
-                f"{name} is {found.group(1)}, not {expected} — the CSS media "
-                f"queries and wbModeFor() have to answer at the same pixel"
+                f"{name} is {found.group(1)}, not {expected} — DESIGN.md LAY-01 "
+                f"fixes narrow < 750 <= mid < 1100 <= wide"
             )
-        elif expected not in widths and (expected - 1) not in widths:
-            problems.append(
-                f"{name} = {expected} has no matching CSS media query; a JS-only "
-                f"breakpoint means the layout and the mode string disagree"
-            )
-    # The declaration, not the name: map.py's comment explains why the split
-    # branch went away and naming it there must stay legal.
-    if re.search(r"\bWB_BP_SPLIT\s*=", html):
+    # The CSS has to follow the mode the JS decides, or the two disagree at
+    # the pixel: the attribute selectors are the mechanism.
+    for mode in ("narrow", "mid", "wide"):
+        if f'[data-mode="{mode}"]' not in html:
+            problems.append(f'no CSS rule keys off html[data-mode="{mode}"]')
+    # The retired 3.2.x layout state machine must not come back beside it.
+    if re.search(r"\bWB_BP_(?:SPLIT|MID|WIDE|MEDIUM)\s*=", html):
         problems.append(
-            "WB_BP_SPLIT is back — split mode was retired in 2.3.0 and its "
-            "wbModeFor() branch was unreachable"
+            "a WB_BP_* breakpoint is back — the 3.2.x workbench mode machine "
+            "was replaced by core.js layout.CFG in 4.0.0"
         )
 
     if problems:
@@ -721,8 +716,118 @@ def check_breakpoints() -> None:
     ok(
         "breakpoints",
         f"{len(widths)} CSS width threshold(s) {sorted(widths)} all resolve to "
-        f"{sorted(allowed)} (+{sorted(BREAKPOINT_EXCEPTIONS)} by exception), "
-        f"JS agrees",
+        f"{sorted(allowed)}, JS agrees on {BREAKPOINT_JS_VARS}",
+    )
+
+
+# 4.0.0. The front end left map.py for src/tabelog/ui/ — ten source files,
+# inlined in a fixed order into one page. Every failure mode below is silent:
+# the page still saves, still has the right byte count, still passes every
+# other check here, and renders a blank or half-wired app in the browser.
+#
+# shell.html §4 slots. A module renders into its own root and containers moves
+# the roots between hosts, so a missing id is not "one panel is gone" — it is
+# a module with nowhere to mount.
+UI_SHELL_SLOTS = [
+    "app", "map-root", "narrow-top", "topbar", "col-left", "col-detail",
+    "candidates-host", "sheet", "fab-root", "notice-root", "overlay-root",
+    "modal-root", "parking", "search-root", "list-root", "detail-root",
+    "filters-root", "candidates-root", "toast-root", "sr-live", "build-meta",
+]
+# Load order. business defines the API adapter binds; core defines App the
+# modules register on; adapter must run before any module and Adapter.start()
+# after all of them. Asserted by first-occurrence offset of one marker per
+# file, which is what "inlined in this order" reduces to in a single file.
+UI_LOAD_ORDER = [
+    ("business.js", "window.Business"),
+    ("core.js", "window.I18N = {}"),
+    ("adapter.js", "window.Adapter ="),
+    ("modules", "App.registerModule('map'"),
+    ("boot", "Adapter.start()"),
+]
+UI_MODULES = ["map", "containers", "list", "detail", "filters", "overlays"]
+
+
+def check_ui_bundle() -> None:
+    """4.0.0: the inlined UI bundle arrived whole, in order, substituted."""
+    if not MAP_HTML.exists():
+        fail("ui-bundle", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    problems: list[str] = []
+
+    missing = [s for s in UI_SHELL_SLOTS if f'id="{s}"' not in html]
+    if missing:
+        problems.append(f"shell.html slots missing from the page: {missing}")
+
+    where = {}
+    for label, marker in UI_LOAD_ORDER:
+        at = html.find(marker)
+        if at < 0:
+            problems.append(f"{label} is not in the page (no {marker!r})")
+        else:
+            where[label] = at
+    ordered = [label for label, _ in UI_LOAD_ORDER if label in where]
+    for a, b in zip(ordered, ordered[1:]):
+        if where[a] > where[b]:
+            problems.append(
+                f"load order is wrong: {b} is inlined before {a} — "
+                f"map.py's UI_JS_ORDER decides this"
+            )
+    # All six modules, each between adapter.js and the boot call. A module
+    # that registers after Adapter.start() misses its first render.
+    for name in UI_MODULES:
+        at = html.find(f"App.registerModule('{name}'")
+        if at < 0:
+            problems.append(f"module {name} never calls App.registerModule")
+        elif "adapter.js" in where and not (where["adapter.js"] < at < where.get("boot", at + 1)):
+            problems.append(f"module {name} registers outside adapter.js → Adapter.start()")
+
+    # An unsubstituted placeholder is a syntax error in whichever script it
+    # landed in. map.py fails the build on one; this is the second line of
+    # defence for a page built by an older map.py or edited by hand.
+    sentinels = {"__MEAL_GROUPS_END__", "__UI_I18N_END__"}
+    stranded = sorted(
+        tok for tok in set(re.findall(r"__[A-Z][A-Z0-9_]{2,}__", html))
+        if tok not in sentinels
+        and not re.search(rf"//[^\n]*{tok}|/\*[^*]*{tok}", html)
+    )
+    if stranded:
+        problems.append(f"unsubstituted placeholder(s): {stranded}")
+
+    # The build-time tables the modules read. Empty means the page renders
+    # Chinese to every reader, which the i18n check cannot see because it
+    # works off the punch list, not off whether the table arrived.
+    m = re.search(r"window\.UI_I18N_TABLES\s*=\s*(\{.*?\});/\*__UI_I18N_END__\*/", html)
+    if not m:
+        problems.append("window.UI_I18N_TABLES is not in the page")
+    else:
+        try:
+            tables = json.loads(m.group(1))
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"window.UI_I18N_TABLES is not valid JSON: {exc}")
+        else:
+            for lang in ("en", "ja", "tw"):
+                if not tables.get(lang):
+                    problems.append(f"UI_I18N_TABLES.{lang} is empty")
+            only_en = set(tables.get("en") or {}) - set(tables.get("ja") or {})
+            only_ja = set(tables.get("ja") or {}) - set(tables.get("en") or {})
+            if only_en or only_ja:
+                problems.append(
+                    f"{len(only_en)} UI key(s) have en but no ja and "
+                    f"{len(only_ja)} the reverse — every key needs both"
+                )
+    if "window.MEAL_GROUPS" not in html:
+        problems.append("window.MEAL_GROUPS is not in the page")
+
+    if problems:
+        fail("ui-bundle", "; ".join(problems))
+        return
+    ok(
+        "ui-bundle",
+        f"{len(UI_SHELL_SLOTS)} shell slots, load order "
+        f"{' → '.join(l for l, _ in UI_LOAD_ORDER)}, no stranded placeholders, "
+        f"UI i18n tables present",
     )
 
 
@@ -1057,6 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
         check_localstorage_keys()
         check_subcollections()       # M-031 / E2
         check_breakpoints()          # M-3.2-01 / GW P3-P4
+        check_ui_bundle()            # 4.0.0
         check_page_zoom()            # 3.2.3
         check_service_worker()
         check_manifest_identity()    # M-145

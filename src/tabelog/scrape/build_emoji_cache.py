@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - environment without Pillow
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tabelog.paths import DATA, DOCS_DIR, FAVORITES_BUILTIN_JSON  # noqa: E402
+from tabelog.paths import DATA, DOCS_DIR, FAVORITES_BUILTIN_JSON, UI_DIR  # noqa: E402
 from tabelog.scrape.map_data import GENRE_EMOJI  # noqa: E402
 
 EMOJI_DIR = DOCS_DIR / "emoji"
@@ -115,6 +115,14 @@ def collect_emojis() -> set[str]:
     i18n_dir = DATA / "i18n"
     if i18n_dir.exists():
         text_targets.extend(sorted(i18n_dir.glob("*.json")))
+    # 4.0.0: the front end moved out of map.py into src/tabelog/ui/. Every
+    # emoji a module writes lives in one of these files now, so without them
+    # this script would keep pre-caching only the 3.2.x set and every new
+    # glyph would fall through to the emojicdn runtime fetch on first render.
+    if UI_DIR.exists():
+        text_targets.append(UI_DIR / "shell.html")
+        for sub, pattern in (("css", "*.css"), ("js", "*.js"), ("i18n", "*.json")):
+            text_targets.extend(sorted((UI_DIR / sub).glob(pattern)))
 
     for path in text_targets:
         if not path.exists():
@@ -170,6 +178,31 @@ def download_missing(emojis: set[str]) -> tuple[dict[str, str], int, int, list[s
     return cached, dl, resampled, failed
 
 
+def carry_forward(stems: dict[str, str]) -> dict[str, str]:
+    """Union the freshly collected stems with the entries already in the
+    manifest whose PNG is still on disk.
+
+    A char drops out of collect_emojis() the moment the last text that
+    mentioned it changes — a re-scraped popups*.json, a reworded module
+    string. Without this the manifest would lose the entry while the PNG
+    stayed (files here are never deleted, M-060), and the page would start
+    paying an emojicdn round-trip for a glyph it already ships. Entries are
+    only carried, never invented: a stem whose file is gone is dropped."""
+    out = dict(stems)
+    if not MANIFEST.exists():
+        return out
+    try:
+        prior = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    except Exception:
+        return out
+    for char, stem in prior.items():
+        if char in out or not isinstance(stem, str):
+            continue
+        if (EMOJI_DIR / f"{stem}.png").exists():
+            out[char] = stem
+    return out
+
+
 def write_manifest(stems: dict[str, str]) -> None:
     """Map emoji char -> hex stem (no .png suffix). map.py inlines this
     so emojiImg() can decide local vs. CDN fallback per char. Changing a
@@ -198,9 +231,13 @@ def main() -> None:
         if (EMOJI_DIR / f"{s}.png").exists()
     )
     print(f"Manifest payload: {small_bytes:,} B across {len(cached)} files")
-    write_manifest(cached)
+    final = carry_forward(cached)
+    carried = len(final) - len(cached)
+    if carried:
+        print(f"Carried forward {carried} manifest entry/entries no longer collected")
+    write_manifest(final)
     rel = MANIFEST.relative_to(DOCS_DIR.parent)
-    print(f"Wrote manifest -> {rel} ({len(cached)} entries)")
+    print(f"Wrote manifest -> {rel} ({len(final)} entries)")
 
 
 if __name__ == "__main__":

@@ -80,13 +80,18 @@ LANGS = ('zh-CN', 'en', 'ja')
 # clip is a lost fact, not a cosmetic nit. The station-name rows in that
 # table are all fold816 / fold932, which are column layouts and out of
 # scope here.
+# 4.0.0: the same six things, under the class names that now carry them.
+#   #lp-n-builtin / .lp-sub  -> the layers popover's counts and sub-titles
+#   .wb-row-pr / .ux-distance -> the result row's price and distance
+#   .wb-row-net               -> the detail card's booking-policy line
+#   .rst-list-new             -> the collection chip on the detail card
 TRUNCATION_WATCH = (
-    '#lp-n-builtin',            # "219 built-in landmarks + 0 of your own"
-    '.lp-sub',                  # the layer sub-title that ran off the popover
-    '.wb-row-pr',               # "¥10,000 - 20,000 max"
-    '.wb-row-net',              # "No online booking link detected"
-    '.ux-distance',             # "152 m"
-    '.rst-list-new',            # the "+" chip on the detail card
+    '.ov-layer-sub',            # "219 built-in landmarks + 0 of your own"
+    '.ov-layer-title',          # the layer title that ran off the popover
+    '.price-text',              # "¥10,000 - 20,000 max"
+    '.dt-policy-text',          # "No online booking link detected"
+    '.ls-dist',                 # "152 m"
+    '.dt-list-chip',            # the collection chip on the detail card
 )
 
 # D6 / SPEC F: an EN or JA string must never carry a full-width comma or
@@ -184,8 +189,8 @@ METRICS_JS = r"""
     mapDimmed: total ? +(dim / total).toFixed(3) : null,
     overflowing, truncated,
     body: document.body.className,
-    sheetOpen: !!document.querySelector('#bs-sheet.bs-open'),
-    drawerOpen: document.body.classList.contains('wb-fav-open'),
+    sheetOpen: !!(window.App && App.state.selected.id),
+    drawerOpen: !!(window.App && App.state.sheet.state !== 'collapsed'),
   };
 }
 """
@@ -296,24 +301,29 @@ def run_viewport(browser, base, vp: str, cfg: dict, lang: str, out_dir: Path,
 
     # The drawer, opened the way a user opens it: the results segment of the
     # floating pill (M-3.2-03).
-    page.locator('#wb-seg [data-ux-tab="results"]').click()
-    page.wait_for_selector('#wb-list .wb-row')
+    # 3.2.x: the results segment of the floating #wb-seg pill. 4.0: the same
+    # segment, now in the bottom sheet's own entry bar.
+    page.locator('#sheet-head [data-ct="tab"][data-tab="results"]').click()
+    page.wait_for_selector('#list-root .ls-row[data-id]')
+    page.wait_for_timeout(500)
     gate('drawer', cfg['drawer'])
 
     # A detail card, opened from a result row so it carries the source-return
     # link and the full #bs-foot dock.
-    page.locator('#wb-list .wb-row').first.click()
-    page.wait_for_selector('#bs-sheet.bs-open')
-    page.wait_for_timeout(700)
+    page.evaluate("""()=>{document.querySelector('#list-root .ls-row[data-id] .ls-open')
+      .dispatchEvent(new MouseEvent('click',{bubbles:true}))}""")
+    page.wait_for_function('() => !!App.state.selected.id')
+    page.wait_for_timeout(900)
     gate('detail', cfg['detail'])
 
     # Back to the map, then the layers popover — the only place
     # #lp-n-builtin and .lp-sub are on screen, and both were on the audit's
     # clipped list at every phone width.
-    lib_browser.phone_tab(page, 'map')
-    page.wait_for_timeout(300)
-    page.locator('#fab-layers').click()
+    page.evaluate("""() => { App.act.closeDetail && App.act.closeDetail();
+      App.act.setSheet('collapsed'); }""")
     page.wait_for_timeout(400)
+    page.locator('[data-fab="layers"]').click()
+    page.wait_for_timeout(500)
     gate('layers', None)
 
     if errors:

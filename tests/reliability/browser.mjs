@@ -22,16 +22,28 @@ try {
 }
 const {chromium} = playwright;
 const root = process.cwd(), docs = path.join(root,'docs');
-const src = fs.readFileSync(path.join(root,'src/tabelog/scrape/map.py'),'utf8');
+// 4.0.0: the sync engine moved out of map.py's FILTER_JS_TEMPLATE and into
+// src/tabelog/ui/js/business.js verbatim; map.py now inlines that file. The
+// --built path (what tests/README documents) reads the built page either way;
+// this source splice is the "run against an edit you have not built yet" mode
+// and simply follows the code.
+const src = fs.readFileSync(path.join(root,'src/tabelog/ui/js/business.js'),'utf8');
 let html = fs.readFileSync(path.join(docs,'index.html'),'utf8');
 if (!process.argv.includes('--built')) {
   for (const [start,end] of [
     ['  function loadPopups()', '  // ===== Apple-style'],
     ['  function fetchAuthed(', '  // Bounded dependency wait.'],
-    ['    var pushInFlight = false,', '    // Flash the filter FAB'],
+    // 3.2.x closed this block at "// Flash the filter FAB"; the pill that
+    // pulsed went away in 4.0, so the block now ends where the sync-indicator
+    // section begins. (The stale anchor made the splice mode abort outright —
+    // it was only ever exercised with --built, which skips the splice.)
+    ['    var pushInFlight = false,', '    // M-3.2-03: the unsynced-changes signal is the avatar badge alone'],
     ['    function adoptDiskSyncBase()', '    // True for the single retry'],
     ['    var pullRetriedAfterSilent = false;', '    // M-027 / B4:'],
-    ['    function downloadBackup()', '    impModal.querySelector(\'.imp-confirm\')'],
+    // 3.2.x ended this block at the import modal's confirm wiring; 4.0's
+    // business layer ends the same block at importApply(), the seam where the
+    // DOM confirmation became the overlays module's job.
+    ['    function downloadBackup()', '    function importApply('],
     ['    function fallbackSilentGIS(cb)', '    // Boot-time restore'],
   ]) {
     const a=html.indexOf(start), b=html.indexOf(end,a), c=src.indexOf(start), d=src.indexOf(end,c);
@@ -42,18 +54,31 @@ if (!process.argv.includes('--built')) {
 const anchor='    function schedulePush() {';
 html=html.replace(anchor, `
 window.__reliability = {
- pull, push, toggleFav, normalizeImport, openImportModal, doImport, flushOnHide, loadPopups, downloadBackup, tryRestoreSession, reconcile,
+ pull, push, toggleFav, normalizeImport, flushOnHide, loadPopups, downloadBackup, tryRestoreSession, reconcile,
+ // 3.2.x: openImportModal(norm) parked the candidate in a module-level
+ // pendingImport and painted #imp-modal, then doImport() read the three
+ // checkboxes off that modal. 4.0 keeps the decision in the caller —
+ // importApply(norm, picks) — so the preview is the overlays module's. The
+ // two-call shape is preserved here so the tests below read unchanged, and
+ // "all three categories ticked" is what the old modal defaulted to.
+ openImportModal: function(n){ window.__pendingImport = n; },
+ doImport: function(picks){ return importApply(window.__pendingImport,
+   picks || {fav:true, black:true, bm:true}); },
  favoriteRefs: function(){return favBuildGroups().flatMap(function(g){return g.items.map(function(i){return i.ref;});});},
  auth: function(kind){ window.__authResult='waiting';
    (kind==='me' ? tryMe : function(cb){exchangeForSession('fake-token',cb);})(function(ok){window.__authResult=ok;}); },
  stop: function(){clearInterval(pollTimer);clearTimeout(pushTimer);},
+ retrySyncNow: retrySyncNow,
  bookmark: function(b){bookmarks.length=0;bookmarks.push(b);schedulePush();},
  editSnapshot: function(s){state.fav=new Set(s.favorites);state.black=new Set(s.blacklist);
    replaceBookmarksArray(s.bookmarks);schedulePush();},
  snapshot: function(){return {fav:Array.from(state.fav),black:Array.from(state.black),
    bookmarks:JSON.parse(JSON.stringify(bookmarks)),dirty,base:syncBase,pending:pendingWrite,
    pullInFlight,pushInFlight,retryAt,waitingForCloud,rejectedContent,
-   status:(document.getElementById('ff-sync-status')||{}).textContent||'',
+   retryVisible:!!(syncStatus&&syncStatus.retryVisible),
+   // 3.2.x read the #ff-sync-status element. 4.0 renders that line from
+   // syncStatus.text, which is the value the element was painted from.
+   status:(syncStatus&&syncStatus.text)||'',
    cache:localStorage.getItem(CACHE_KEY),bms:localStorage.getItem(BM_KEY)};}
 };
 `+anchor);
@@ -162,18 +187,23 @@ try {
   // once the engine is holding an uncertain write, and one click resolves it
   // without waiting out the dwell window.
   await test('manual retry appears only when stuck and unsticks the device',async p=>{
-    const btn='#ssm-retry-sync';
-    assert.equal(await p.evaluate(s=>document.querySelector(s).hidden,btn),true);
+    // 3.2.x: the 立即重试 row was #ssm-retry-sync, hidden/shown by the engine.
+    // 4.0 renders it from syncStatus.retryVisible (the account panel draws the
+    // button only when that is true) and the click calls retrySyncNow(). Same
+    // guarantee: invisible while healthy, offered once stuck, one press
+    // resolves it without waiting out the dwell.
+    const shown=()=>p.evaluate(()=>!!__reliability.snapshot().retryVisible);
+    assert.equal(await shown(),false);
     await p.evaluate(B=>{__net.mode='hang';__reliability.toggleFav(B);__reliability.push();},B);await pause(p);
     await p.clock.runFor(15100);await pause(p);
-    assert.equal(await p.evaluate(s=>document.querySelector(s).hidden,btn),false);
+    assert.equal(await shown(),true);
     await p.evaluate(()=>{__net.mode='ok';});
-    await p.evaluate(s=>document.querySelector(s).click(),btn);await pause(p);await pause(p);
+    await p.evaluate(()=>__reliability.retrySyncNow());await pause(p);await pause(p);
     const s=await snap(p);
     assert.equal(s.pending,null);assert.equal(s.dirty,false);assert.equal(s.waitingForCloud,false);
     assert.equal((await net(p)).filter(r=>r.method==='PUT').length,2);
     assert.deepEqual(new Set(await p.evaluate(()=>__net.remote.favorites)),new Set([A,B]));
-    assert.equal(await p.evaluate(s=>document.querySelector(s).hidden,btn),true);
+    assert.equal(await shown(),false);   // and it goes away again once healthy
   });
   await test('GET body and auth body deadline release callbacks',async p=>{
     await p.evaluate(()=>{__net.getHang=true;__reliability.pull(true);__net.authHang=true;__reliability.auth('me');});await pause(p);

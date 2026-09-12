@@ -1,0 +1,337 @@
+/* ==========================================================================
+   Japan Foodmap 4.0.0 demo — css/detail.css
+   Owner: detail module agent. Every number references a token from
+   css/tokens.css; shared components come from css/base.css.
+   Composition: VIS-03 (identity 8px rhythm → gallery 12 → summary 16 →
+   reading groups 24 / heading 12), VIS-06 (detail award role), DETAIL-01
+   (fixed action bar + width fallback), DETAIL-03 (gallery branches),
+   §10.4 (candidate strip).
+   ========================================================================== */
+
+/* ---- body shell ---------------------------------------------------------- */
+#detail-root .dt {
+  --dt-pad: var(--pad-detail-narrow);
+  padding: var(--c-detail-nav-to-identity) var(--dt-pad) var(--sp-5);
+}
+html[data-mode="mid"] #detail-root .dt { --dt-pad: var(--pad-panel-mid); }
+html[data-mode="wide"] #detail-root .dt { --dt-pad: var(--pad-panel-wide); }
+
+/* quiet notes above the identity group (DETAIL-02 live state) */
+.dt-quiet-note { margin-bottom: var(--sp-2); }
+.dt-hidden-note {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  margin-bottom: var(--sp-3); padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-subtle); border-radius: var(--r-compact);
+}
+.dt-hidden-note .ic { color: var(--ink-secondary); flex: none; }
+.dt-hidden-note .link-btn { margin-left: auto; min-height: var(--touch-min); }
+
+/* ---- identity (VIS-03: 8px inside the group) ----------------------------- */
+.dt-title-row { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.dt-title { flex: 1 1 auto; min-width: 0; }
+/* the 44px targets must not stretch the title row: VIS-03 keeps title→meta at 8px */
+.dt-more { flex: none; margin-block: -7px; }
+/* narrow: ⋯ / expand / close share the name row instead of a strip of their own */
+.dt-tools { flex: none; display: flex; align-items: center; gap: 2px; margin-right: -8px; }
+.dt-tools .icon-btn { margin-block: -7px; }
+.dt-meta {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--sp-2); margin-top: var(--c-detail-title-to-meta);
+}
+.dt-meta .rating { font-size: 1.0625rem; }
+.dt-genre { color: var(--ink-secondary); }
+.dt-sep { width: 1px; height: 1.15em; background: var(--control-border); opacity: .45; flex: none; }
+.dt-awards { margin-top: var(--c-detail-meta-to-awards); }
+
+/* ---- gallery (DETAIL-03) ------------------------------------------------- */
+.dt-gallery { margin-top: var(--c-detail-identity-to-gallery); position: relative; }
+
+/* narrow: one primary photo plus the edge of the next, snapping */
+.dt-gallery.is-strip {
+  display: flex; gap: var(--sp-2);
+  height: var(--gallery-h-narrow);
+  overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  margin-inline: calc(-1 * var(--dt-pad));
+  padding-inline: var(--dt-pad);
+  scroll-padding-inline: var(--dt-pad);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+}
+.dt-gallery.is-strip::-webkit-scrollbar { display: none; }
+.dt-gallery.is-strip .dt-photo { flex: 0 0 60%; height: 100%; scroll-snap-align: start; }
+.dt-gallery.is-strip .dt-photo:only-child { flex-basis: 100%; }
+
+/* W ≥ 750: one large (2/3) plus two small; 2 → main + aux; 1 → full width */
+.dt-gallery.is-grid { display: grid; gap: var(--sp-2); height: var(--gallery-h-column); }
+.dt-gallery.is-grid.n3 { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; }
+.dt-gallery.is-grid.n3 .dt-photo:first-child { grid-row: 1 / span 2; }
+.dt-gallery.is-grid.n3 .dt-photo:nth-child(n+4) { display: none; }
+.dt-gallery.is-grid.n2 { grid-template-columns: 2fr 1fr; }
+.dt-gallery.is-grid.n1 { grid-template-columns: 1fr; }
+.dt-gallery.is-grid .dt-photo { height: 100%; min-height: 0; }
+
+.dt-photo {
+  display: block; position: relative; padding: 0; min-width: 0;
+  border-radius: var(--r-photo); overflow: hidden;
+  background: var(--surface-subtle);
+}
+.dt-photo-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+.dt-photo.is-failed { display: grid; place-content: center; padding: var(--sp-2); text-align: center; }
+.dt-photo-failed { color: var(--ink-secondary); }
+
+.dt-gallery.is-empty { height: var(--gallery-h-narrow); }
+html:not([data-mode="narrow"]) .dt-gallery.is-empty { height: var(--gallery-h-column); }
+.dt-photo-empty { height: 100%; display: grid; justify-items: center; align-content: center; gap: 6px; }
+.dt-photo-empty .ic { color: var(--ink-secondary); }
+
+/* "see all photos" (A09 / A13): 36px visual, 44px target */
+.dt-gallery-all {
+  position: absolute; right: var(--sp-2); bottom: var(--sp-2);
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 0 var(--sp-3); border-radius: var(--r-compact);
+  background: rgba(17, 26, 67, .74); color: #fff;
+  font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 600;
+}
+.dt-gallery-all::after { content: ""; position: absolute; inset: -4px; }
+.dt-gallery-all:hover { background: rgba(17, 26, 67, .88); }
+
+/* ---- summary 2 : 1 (VIS-03) --------------------------------------------- */
+.dt-summary {
+  margin-top: var(--c-detail-gallery-to-summary);
+  display: grid; grid-template-columns: 2fr 1fr; gap: var(--c-detail-summary-gap);
+}
+.dt-summary.is-stacked { grid-template-columns: 1fr; }
+.dt-sum-budget { display: grid; grid-template-columns: 1fr 1fr; }
+.dt-summary.is-stacked-budget .dt-sum-budget { grid-template-columns: 1fr; }
+.dt-sum-budget .dt-sum-cell + .dt-sum-cell { border-left: 1px solid var(--separator); }
+.dt-summary.is-stacked-budget .dt-sum-budget .dt-sum-cell + .dt-sum-cell { border-left: 0; border-top: 1px solid var(--separator); }
+.dt-sum-book { background: var(--surface); border: 1px solid var(--separator); border-radius: var(--r-button); }
+/* 12px block / 8px inline keeps 无网订入口 on one line at 402px (VIS-03: the
+   pair never truncates; the stack fallback is for real pressure, not rounding) */
+.dt-sum-cell { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-2); min-width: 0; }
+.dt-sum-cell .ic { color: var(--ink-secondary); }
+.dt-sum-text { min-width: 0; }
+.dt-sum-label { white-space: nowrap; overflow: hidden; }
+.dt-sum-val {
+  font-size: var(--t-body-size); line-height: var(--t-body-line); font-weight: 600;
+  white-space: nowrap; overflow: hidden;
+}
+
+/* ---- reading groups ------------------------------------------------------ */
+.dt-sec { margin-top: var(--c-detail-reading-gap); }
+.dt-sec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.dt-sec-body { margin-top: var(--c-detail-heading-to-body); display: grid; gap: var(--sp-2); }
+.dt-row { display: grid; grid-template-columns: 16px 1fr; gap: var(--sp-3); align-items: start; }
+.dt-row .ic { margin-top: 4px; color: var(--ink-secondary); }
+.dt-row-text { min-width: 0; overflow-wrap: anywhere; }
+.dt-row-label { margin-right: var(--sp-2); }
+.dt-policy-text { margin-top: var(--sp-2); }
+.dt-policy-text.is-missing { color: var(--ink-secondary); }
+.dt-note { margin-top: var(--sp-1); }
+.dt-trans { flex: 0 0 auto; }
+.dt-trans > button { flex: 0 0 auto; padding: 0 var(--sp-3); font-weight: 600; }
+
+/* ---- status row (calibration is a status, not a button) ------------------ */
+.dt-status {
+  margin-top: var(--c-detail-reading-gap); padding-top: var(--sp-3);
+  border-top: 1px solid var(--separator);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--sp-3);
+}
+.dt-status-item {
+  display: inline-flex; align-items: center; gap: 6px; min-height: var(--touch-min);
+  font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 500;
+}
+.dt-status-item.is-ok { color: var(--ink-secondary); }
+.dt-status-item.is-ok .ic { color: #15803D; }
+.dt-status-item.is-link { color: var(--accent-strong); font-weight: 600; }
+.dt-status-item.is-link:hover { text-decoration: underline; }
+.dt-status .dt-sep { height: 20px; }
+
+/* ---- fixed action bar (DETAIL-01) --------------------------------------- */
+#detail-foot .dt-actions {
+  --dt-pad: var(--pad-detail-narrow);
+  display: grid; grid-template-columns: var(--action-cols); gap: var(--action-gap);
+  padding: var(--sp-2) var(--dt-pad) calc(var(--sp-3) + var(--safe-bottom));
+  background: var(--surface);
+}
+html[data-mode="mid"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-mid); }
+html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide); }
+#detail-foot .dt-actions.is-stack { grid-template-columns: 1fr; }
+#detail-foot .dt-actions.is-row { display: flex; flex-wrap: wrap; padding-top: var(--sp-3); }
+
+.dt-act { min-height: var(--primary-action-min); padding: var(--sp-1) var(--sp-2); min-width: 0; }
+.dt-act-label { max-width: 100%; overflow: hidden; white-space: nowrap; }
+.dt-act-label-wrap {
+  white-space: normal; text-align: center;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.dt-act-main { gap: var(--sp-2); }
+.dt-act-fav.is-on { color: var(--favorite); border-color: #F3C7CE; }
+.dt-act-fav.is-on .ic { fill: var(--favorite); stroke: var(--favorite); }
+.dt-gmaps { width: 22px; height: 22px; flex: none; border-radius: 4px; }
+/* single-column fallback: icon beside the label, order stays save / maps / tabelog */
+.dt-actions.is-stack .btn-stack { flex-direction: row; gap: var(--sp-2); }
+.dt-actions.is-stack .dt-act-label-wrap { -webkit-line-clamp: 2; text-align: left; }
+
+.dt-act-row { flex: 0 0 auto; min-height: var(--primary-action-min); padding: 0 var(--sp-2); white-space: nowrap; gap: var(--sp-2); }
+.dt-act-save { flex: 1 1 auto; }
+.dt-act-more { padding: 0; width: var(--primary-action-min); flex: none; }
+/* still wrapping after 分享 moved into ⋯ → a deliberate two-row block,
+   primary on its own line (DETAIL-01 keeps the three core actions visible) */
+#detail-foot .dt-actions.is-row.is-two-row { display: grid; grid-template-columns: 1fr 1fr var(--primary-action-min); }
+#detail-foot .dt-actions.is-two-row .dt-act-save { grid-column: 1 / -1; }
+#detail-foot .dt-actions.is-two-row .dt-act-row:not(.dt-act-more) { flex: none; width: 100%; }
+/* last DETAIL-01 step: one action per row. Reached on a narrow detail column at
+   130% / 200%, where two columns still cut "Google Maps". */
+#detail-foot .dt-actions.is-row.is-col { display: grid; grid-template-columns: minmax(0, 1fr); }
+#detail-foot .dt-actions.is-col .dt-act-save { grid-column: auto; }
+#detail-foot .dt-actions.is-col .dt-act-row { flex: none; width: 100%; }
+#detail-foot .dt-actions.is-col .dt-act-more { width: 100%; }
+
+/* ---- Fold-inner candidate strip (§10.4) --------------------------------- */
+#candidates-root .dt-cand--collapsed { padding: 0; }
+.dt-cand-reopen {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 44px;
+  padding: 0 var(--sp-3); border-radius: var(--r-button); background: none; border: 0;
+  font: inherit; font-weight: 600; color: var(--ink); cursor: pointer;
+}
+.dt-cand-reopen:hover { background: var(--surface-subtle); }
+.dt-cand-reopen-n { margin-left: auto; color: var(--ink-secondary); font-weight: 400; }
+.dt-cand-reopen .ic { color: var(--ink-secondary); }
+#candidates-root .dt-cand {
+  background: var(--surface); border-radius: var(--r-button);
+  box-shadow: var(--shadow-panel); padding: var(--sp-3);
+}
+.dt-cand-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 36px; }
+.dt-cand-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.dt-cand-title .ic { color: var(--ink-secondary); }
+.dt-cand-tools { display: flex; align-items: center; gap: var(--sp-2); }
+.dt-cand-tools .link-btn { gap: 2px; }
+.dt-cand-row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.dt-cand-nav { flex: none; border: 1px solid var(--control-hairline); }
+.dt-cand-track {
+  flex: 1 1 auto; min-width: 0; display: flex; gap: var(--sp-2);
+  overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; padding: 2px;
+}
+.dt-cand-track::-webkit-scrollbar { display: none; }
+.dt-cand-card {
+  flex: 0 0 10.5rem; display: grid; gap: 4px; padding-bottom: var(--sp-2);
+  border-radius: var(--r-compact); text-align: left; scroll-snap-align: start;
+  transition: box-shadow var(--m-micro) var(--e-out);
+}
+.dt-cand-card:hover { box-shadow: var(--shadow-control); }
+.dt-cand-card.is-on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dt-cand-img { width: 100%; height: 84px; object-fit: cover; border-radius: var(--r-compact); display: block; }
+.dt-cand-img.is-empty { display: grid; place-content: center; background: var(--surface-subtle); }
+.dt-cand-name { padding: 0 2px; }
+.dt-cand-meta { display: flex; align-items: center; gap: var(--sp-2); padding: 0 2px; font-size: var(--t-badge-size); }
+.dt-cand-meta .rating .ic { width: 13px; height: 13px; }
+
+/* ---- lightbox content (shell owned by overlays, z 70) -------------------- */
+#modal-root > .dt-lb { position: absolute; inset: 0; }
+.dt-lb {
+  position: relative; z-index: var(--z-lightbox);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: var(--sp-2); padding: var(--sp-4);
+}
+.dt-lb-fig { min-width: 0; display: grid; justify-items: center; gap: var(--sp-3); }
+/* INTEGRATION: max-width alone never upscales, so a 640px source sat tiny in the
+   middle of a 1920 screen (17_desktop). Drive it from the height and let the
+   width follow, still capped by the column. */
+.dt-lb-img {
+  height: 68vh; width: auto; max-width: 100%; max-height: 68vh;
+  border-radius: var(--r-photo); object-fit: contain;
+}
+.dt-lb-cap {
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-3); flex-wrap: wrap;
+  background: rgba(17, 26, 67, .74); color: #fff; padding: 6px var(--sp-3); border-radius: var(--r-compact);
+}
+.dt-lb-btn { color: #fff; background: rgba(17, 26, 67, .6); }
+.dt-lb-btn:hover { background: rgba(17, 26, 67, .85); }
+.dt-lb-close { position: absolute; right: var(--sp-4); top: var(--sp-4); }
+
+/* ==========================================================================
+   Production additions (4.0.0): the pieces the demo had no data for.
+   ========================================================================== */
+
+/* ---- Japanese source runs + the 翻译 button ------------------------------
+   Every value that comes straight off Tabelog is Japanese. It is marked
+   lang="ja" so the right font is picked, and the button is the 3.2.x
+   act.translateJa round-trip — pressed once it swaps the run in place and
+   turns into 原文.                                                          */
+.dt-ja-wrap { display: inline; }
+.dt-ja { overflow-wrap: anywhere; }
+.dt-tx-btn {
+  display: inline-flex; align-items: center; gap: 3px; vertical-align: baseline;
+  margin-left: 6px; padding: 2px 8px; border-radius: var(--r-pill);
+  border: 1px solid var(--control-hairline); background: var(--surface);
+  color: var(--ink-secondary); font-size: var(--t-secondary-size); line-height: 1.3;
+  font-weight: 600; position: relative;
+}
+/* DEVICE PASS: -10px left the 23px row at a 43px target, one short of 44. */
+.dt-tx-btn::after { content: ""; position: absolute; inset: -11px -4px; }
+.dt-tx-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+.dt-tx-btn:disabled { opacity: .55; }
+.dt-tx-btn .ic { width: 13px; height: 13px; }
+.dt-walk { margin-left: 2px; white-space: nowrap; }
+.dt-missing { font-weight: 500; }
+/* DEVICE PASS (§14.3): 28px visual, 44px pointer target. .link-btn's own
+   min-height is overridden here for the compact inline look, so the target
+   has to come back through a pseudo element like every other small control. */
+.dt-copy { position: relative; padding: 0 6px; min-height: 28px; font-size: var(--t-secondary-size); gap: 3px; }
+.dt-copy::after { content: ""; position: absolute; inset: -8px -4px; }
+.dt-copy .ic { width: 13px; height: 13px; }
+.dt-link { color: var(--accent-strong); font-weight: 600; }
+.dt-link:hover { text-decoration: underline; }
+
+/* the raw Tabelog genre line, under the rating / bucket / price row */
+.dt-genre-ja { margin-top: 4px; }
+
+/* ---- award ribbons (popups slot 8) --------------------------------------
+   The slug badges above carry the colour family; the ribbon is the only
+   record of the *year*, so it is rendered as shipped and only styled here.  */
+.dt-ribbons { display: flex; flex-wrap: wrap; gap: var(--c-award-detail-gap); margin-top: var(--sp-2); }
+.dt-ribbons .rst-ribbons { display: contents; }
+.dt-ribbons .rst-ribbon {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 8px;
+  border-radius: var(--r-pill); border: 1px solid var(--separator);
+  background: var(--surface-subtle); color: var(--ink-secondary);
+  font-size: var(--t-badge-size); line-height: 1; font-weight: 700; letter-spacing: .02em;
+}
+.dt-ribbons .rst-ribbon-gold   { color: var(--award-gold-text);   background: var(--award-gold-surface);   border-color: var(--award-gold-border); }
+.dt-ribbons .rst-ribbon-silver { color: var(--award-silver-text); background: var(--award-silver-surface); border-color: var(--award-silver-border); }
+.dt-ribbons .rst-ribbon-bronze { color: var(--award-bronze-text); background: var(--award-bronze-surface); border-color: var(--award-bronze-border); }
+.dt-ribbons [class*="rst-ribbon-hyaku"] { color: var(--award-hyaku-text); background: var(--award-hyaku-surface); border-color: var(--award-hyaku-border); }
+.dt-ribbons .rst-ribbon-hot    { color: var(--award-hot-text);    background: var(--award-hot-surface);    border-color: var(--award-hot-border); }
+
+/* ---- 原文 / 译文 provenance tag ----------------------------------------- */
+.dt-lang-tag { display: block; margin-top: var(--sp-2); }
+
+/* ---- collections -------------------------------------------------------- */
+.dt-list-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.dt-list-chip { max-width: 100%; gap: 4px; }
+.dt-list-chip .emj { width: 14px; height: 14px; }
+.dt-list-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-lists .link-btn { gap: 4px; }
+
+/* ---- 第 k / N 家 stepper -------------------------------------------------
+   containers draws this in #col-detail-head once it is up; this copy only
+   exists so the pager is reachable while it is not.                         */
+.dt-index {
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+}
+.dt-index-btn { width: 36px; height: 36px; color: var(--ink-secondary); }
+.dt-index-btn:disabled { opacity: .35; }
+.dt-index-pos { white-space: nowrap; }
+
+/* The Fold-inner strip host is narrow (it shares the map band with the FABs),
+   so the head must shrink by ellipsis rather than wrap its two labels into
+   two lines each. */
+.dt-cand-head { flex-wrap: nowrap; }
+.dt-cand-title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-cand-title .ic { flex: none; }
+.dt-cand-tools { flex: none; }
+.dt-cand-tools .link-btn { white-space: nowrap; padding-inline: 4px; }

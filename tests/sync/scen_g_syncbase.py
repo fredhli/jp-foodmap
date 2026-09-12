@@ -91,10 +91,10 @@ def case(br, mode):
             tl.append({'step': 'A favourites #6, tab closed 200ms later',
                        'kv': W.STATE.blob(), 'disk': d})
         errors += a.mc_errors
-        a.close()
+        L.close_tab(a)
         if b is not None:
             errors += b.mc_errors
-            b.close()
+            L.close_tab(b)
 
     # Everything closed (browser quit / Android killed Chrome), reopened.
     c = L.open_tab(ctx, 'C')

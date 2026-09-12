@@ -38,10 +38,12 @@ def h1(br):
     a = L.open_tab(ctx, 'A')
     b = L.open_tab(ctx, 'B')
     a.wait_for_timeout(800)
-    # The real sign-out path (account menu → confirm → signOut(): DELETE
-    # /api/session + wipe + reload), keeping local data.
-    a.on('dialog', lambda d: d.dismiss() if '同时清除' in d.message else d.accept())
-    a.evaluate("() => document.getElementById('ssm-signout').click()")
+    # The real sign-out path (account panel → confirm → signOut(): DELETE
+    # /api/session + wipe + reload), keeping local data. 3.2.x asked with two
+    # native confirm() dialogs; 4.0 asks in the account panel itself, with the
+    # two outcomes as separate buttons. Same two choices, same business call.
+    a.on('dialog', lambda d: d.accept())
+    L.sign_out(a, clear_local=False)
     a.wait_for_function("() => localStorage.getItem('tabelog.auth') === null", timeout=8000)
     b.wait_for_timeout(1500)
     ui_b0 = b.evaluate('window.__mcUI()')
@@ -161,7 +163,7 @@ def h4(br, accept_clear):
         else:
             d.accept()
     a.on('dialog', on_dialog)
-    a.evaluate("() => document.getElementById('ssm-signout').click()")
+    ask = L.sign_out(a, clear_local=accept_clear)
     a.wait_for_function("() => localStorage.getItem('tabelog.auth') === null", timeout=8000)
     a.wait_for_timeout(2500)   # reload + boot
     ls = a.evaluate("""() => ({auth: localStorage.getItem('tabelog.auth'),
@@ -171,14 +173,23 @@ def h4(br, accept_clear):
     tl.append({'step': 'after sign-out + reload', 'dialogs': seen, 'ls': ls})
     r = {'id': 'H4-' + ('clear' if accept_clear else 'keep'),
          'name': 'sign out ' + ('and clear this device' if accept_clear else 'keeping local data'),
-         'dialogs_seen': len(seen), 'ls_after': ls,
+         'dialogs_seen': len(seen), 'confirmation': ask, 'ls_after': ls,
          'page_errors': list(a.mc_errors), 'timeline': tl}
+    # 3.2.x asserted len(seen) == 2: the user was asked twice, by two native
+    # confirm() dialogs — "退出登录？" and then "同时清除本设备数据？". 4.0 asks
+    # the same two questions inside the account panel, so there are no dialogs
+    # to count. The guarantee being protected is unchanged and is now asserted
+    # directly: pressing 退出 only ARMS (nobody is signed out yet), and both
+    # outcomes plus a way out are offered as distinct, deliberate choices —
+    # so the destructive branch can never be reached by a single tap.
+    asked = (ask['armed_without_signing_out'] and ask['offers_keep']
+             and ask['offers_clear'] and ask['offers_cancel'])
     if accept_clear:
-        r['pass'] = (len(seen) == 2 and ls['auth'] is None and ls['cache'] is None
+        r['pass'] = (asked and ls['auth'] is None and ls['cache'] is None
                      and ls['base'] is None and 'bm-mine1' not in ls['bm']
                      and not r['page_errors'])
     else:
-        r['pass'] = (len(seen) == 2 and ls['auth'] is None and ls['cache'] is not None
+        r['pass'] = (asked and ls['auth'] is None and ls['cache'] is not None
                      and ls['base'] is not None and 'bm-mine1' in ls['bm']
                      and not r['page_errors'])
     ctx.close()

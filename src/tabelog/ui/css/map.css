@@ -1,0 +1,342 @@
+/* ==========================================================================
+   Japan Foodmap 4.0.0 demo — css/map.css
+   Owner: map module. Prefix: .mp-* (plus #map-root / #fab-root and the
+   Leaflet class names the plugin owns). Every number comes from
+   css/tokens.css; shared components (.price-tag, .glass, .count-badge,
+   .rating) come from css/base.css and are never redefined here.
+   Rules: VIS-02 §2.1, §3.1 materials, MAP-01/02/03 §6, LAY-04/05, ENV-02.
+   ========================================================================== */
+
+/* ---- container ----------------------------------------------------------- */
+/* #map-root IS the .leaflet-container element, so these are element rules */
+#map-root {
+  background: #EAF1F8;
+  font-family: inherit;
+  font-size: var(--t-secondary-size);
+  outline: none;
+}
+/* The demo falls back to raw OSM tiles when no CARTO key is supplied
+   (PLAN.md risk 1). OSM's palette — pink expressways, saturated land use, a
+   dense label set — competes with the cuisine markers, the price tags and the
+   rail overlay, which VIS-02 §2.1 asks the basemap not to do. Soften the tile
+   pane only (the overlay/marker panes are siblings and keep full colour), and
+   only while the fallback is what is painting: data-basemap="carto" is the
+   real light_all and gets no filter. */
+html[data-basemap="osm"] #map-root .leaflet-tile-pane {
+  filter: saturate(.22) brightness(1.07) contrast(.88);
+}
+#map-root .mp-pane-nohit { pointer-events: none; }
+#map-root .leaflet-marker-icon { background: none; border: 0; }
+/* a divIcon we position ourselves: 0×0 box, children overflow (no reflow cost) */
+#map-root .mp-mk-wrap { width: 0 !important; height: 0 !important; overflow: visible; }
+
+/* ---- attribution + scale: always inside the VISIBLE map rect (§6.4 / LAY-04)
+   narrow lifts by --sheet-h, mid/wide steps past the left column. ---------- */
+#map-root .leaflet-bottom.leaflet-left {
+  left: calc(var(--col-left-w) + var(--safe-left));
+  bottom: calc(var(--sheet-h) + var(--safe-bottom) + var(--vv-occ));
+  transition: bottom var(--m-sheet) var(--e-standard), left var(--m-standard) var(--e-standard);
+}
+#map-root .leaflet-control-attribution {
+  background: rgba(255, 255, 255, .82);
+  color: var(--ink-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 0 6px 0 0;
+  margin: 0;
+}
+#map-root .leaflet-control-attribution a { color: var(--accent-strong); }
+#map-root .leaflet-control-scale { margin: 0 0 2px 6px; }
+#map-root .leaflet-control-scale-line {
+  background: rgba(255, 255, 255, .8);
+  border: 1px solid var(--control-border);
+  border-top: 0;
+  color: var(--ink-secondary);
+  font-size: 11px;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: 0 0 3px 3px;
+}
+html[data-search-active] #map-root .leaflet-control-container { display: none; }
+
+/* ---- restaurant marker: 22px emoji in a 28px white disc + 22px price tag -- */
+.mp-mk {
+  position: absolute;
+  left: 0; top: 0;
+  transform: translate(-50%, -14px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-optical);
+  width: max-content;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mp-dot {
+  position: relative;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(17, 26, 67, .28), 0 0 0 1px rgba(17, 26, 67, .06);
+  display: grid; place-content: center;
+  transition: box-shadow var(--m-micro) var(--e-out);
+}
+.mp-dot .emj { width: var(--map-emoji); height: var(--map-emoji); }
+.mp-dot .emj-text { font-size: 18px; }
+/* MAP-02 §3: a tag may be nudged sideways to avoid a neighbour before it is
+   dropped; layoutTags() writes the offset it found. */
+.mp-mk .mp-tag { pointer-events: none; transform: translateX(var(--mp-tag-dx, 0px)); }
+.mp-mk.is-tagless .mp-tag { display: none; }
+.mp-mk:hover .mp-dot { box-shadow: 0 2px 8px rgba(17, 26, 67, .34), 0 0 0 1px rgba(17, 26, 67, .08); }
+/* saved: a small heart-coloured pip, never the price hue (MAP-01) */
+.mp-mk.is-fav .mp-dot::after {
+  content: "";
+  position: absolute; right: -1px; top: -1px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--favorite);
+  border: 2px solid var(--surface);
+}
+/* selected: a 2px accent ring that grows outwards; the emoji itself never scales */
+.mp-mk.is-selected .mp-dot::before {
+  content: "";
+  position: absolute; inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(255, 255, 255, .55);
+  animation: mpRing var(--m-micro) var(--e-out) both;
+}
+.mp-mk.is-selected .mp-dot { box-shadow: 0 2px 10px rgba(6, 104, 255, .35); }
+@keyframes mpRing { from { transform: scale(.9); opacity: 0; } to { transform: none; opacity: 1; } }
+#map-root .leaflet-marker-icon:focus-visible .mp-dot {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+/* offscreen probe used to measure the real tag text box (MAP-02 §2) */
+.mp-probe {
+  position: absolute; left: -9999px; top: 0;
+  visibility: hidden; pointer-events: none;
+}
+
+/* ---- clusters: translucent light-blue disc, real count (A01) -------------- */
+#map-root .mp-cluster-wrap { background: none; border: 0; }
+.mp-cluster {
+  display: grid; place-content: center;
+  border-radius: 50%;
+  background: rgba(6, 104, 255, .20);
+  border: 1px solid rgba(6, 104, 255, .28);
+  box-shadow: 0 0 0 5px rgba(6, 104, 255, .10), 0 0 0 11px rgba(6, 104, 255, .05);
+  color: var(--accent-strong);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--m-micro) var(--e-out);
+}
+.mp-cluster-s { font-size: 13px; }
+.mp-cluster-m { font-size: 14px; }
+.mp-cluster-l { font-size: 15px; }
+#map-root .mp-cluster-wrap:hover .mp-cluster { background: rgba(6, 104, 255, .28); }
+
+/* ---- landmarks (26px, one step above restaurants) and pins (24px) --------- */
+.mp-lm, .mp-pin {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -13px);
+  display: flex; flex-direction: column; align-items: center;
+  width: max-content; max-width: 132px;
+  cursor: pointer;
+}
+.mp-lm .emj, .mp-lm .emj-text { width: var(--landmark-icon); height: var(--landmark-icon); filter: drop-shadow(0 1px 2px rgba(17, 26, 67, .35)); }
+.mp-pin { transform: translate(-50%, -12px); }
+.mp-pin .emj, .mp-pin .emj-text { width: 24px; height: 24px; filter: drop-shadow(0 1px 2px rgba(17, 26, 67, .35)); }
+.mp-plate {
+  margin-top: 1px;
+  max-width: 132px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .88);
+  color: var(--ink);
+  font-size: 11px; line-height: 16px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* MAP-02 §5: the name plate is the lowest-priority label — dropped below z9 and
+   wherever it would cover one already placed. The emoji keeps the anchor. */
+.mp-lm.is-plateless .mp-plate, .mp-pin.is-plateless .mp-plate { display: none; }
+.mp-lm.is-hidden { opacity: .55; }
+.mp-lm.is-hidden .mp-plate { text-decoration: line-through; }
+.mp-pin.is-temp .mp-plate { background: var(--accent-soft); color: var(--accent-strong); }
+
+/* ---- stations (§6.5): white core, dark rim, light label with a thin halo -- */
+.mp-st {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 4px;
+  width: max-content;
+  pointer-events: none;
+}
+/* --st-r is the diameter map.js computes per station (line_count tier x zoom band,
+   the production radii). §6.5's 4px normal / 6px major are the z15 values. */
+.mp-st-dot {
+  width: var(--st-r, 8px); height: var(--st-r, 8px); flex: none;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px solid #6B7890;
+}
+.mp-st.is-major .mp-st-dot { border-width: 2px; border-color: #4A5468; }
+.mp-st.is-mega .mp-st-dot { border-width: 2.5px; border-color: #2B3550; }
+.mp-st-name {
+  font-size: 11px; line-height: 14px; font-weight: 500;
+  color: #4A5468;
+  white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff;
+}
+.mp-st.is-major .mp-st-name, .mp-st.is-mega .mp-st-name { font-size: 12px; font-weight: 600; color: var(--ink); }
+
+/* ---- rail overlay: station labels (§6.5) ---------------------------------
+   docs/transit-layer.js injects its own tooltip style AFTER this sheet (it is a
+   deferred script that appends to <head>), so these rules carry one extra class
+   of specificity on purpose. §6.5 asks for light text with a thin white halo
+   instead of the big white plates, which were burying the restaurant markers;
+   map.js additionally trims the "(N lines)" suffix off the permanent labels. */
+#map-root .leaflet-pane .leaflet-tooltip.transit-station-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0 1px;
+  color: #3A4358;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 1px 2px #fff;
+  white-space: nowrap;
+}
+#map-root .leaflet-pane .leaflet-tooltip.transit-station-label::before { display: none; }
+/* the hover line label keeps its dark pill — it is transient and needs contrast */
+#map-root .leaflet-pane .leaflet-tooltip.transit-line-label { font-size: 12px; }
+
+/* ---- my-location dot + accuracy ring (MAP-03) ---------------------------- */
+.mp-locate-dot {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -50%);
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(17, 26, 67, .35);
+}
+#map-root .mp-locate-acc { pointer-events: none; }
+
+/* ---- selected name bubble (A09 / A13) ------------------------------------
+   Lives in the popup pane so it rides the map transform; the side is picked
+   against the visible map rect, and it disappears when the map strip is
+   shorter than 210px (LAY-04 §1). ----------------------------------------- */
+/* Leaflet owns the anchor's inline transform; the card does its own offset */
+.mp-bubble-anchor { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.mp-bubble {
+  position: absolute;
+  left: 0; top: 0;
+  display: flex; align-items: center; gap: var(--sp-2);
+  width: max-content; max-width: 248px;
+  padding: 6px;
+  border-radius: var(--r-button);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+  z-index: 2;
+  transition: opacity var(--m-micro) var(--e-out);
+}
+.mp-bubble.is-above { transform: translate(calc(-50% + var(--mp-bubble-dx, 0px)), calc(-100% - 22px)); }
+.mp-bubble.is-below { transform: translate(calc(-50% + var(--mp-bubble-dx, 0px)), 42px); }
+.mp-bubble.is-right { transform: translate(24px, -50%); }
+.mp-bubble.is-left  { transform: translate(calc(-100% - 24px), -50%); }
+.mp-bubble.is-moving { opacity: .9; }
+.mp-bubble-photo {
+  width: 44px; height: 44px; flex: none;
+  border-radius: var(--r-compact);
+  object-fit: cover;
+  background: var(--surface-subtle);
+}
+.mp-bubble-photo-fallback { display: grid; place-content: center; }
+.mp-bubble-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mp-bubble-name {
+  font-size: var(--t-list-name-column-size);
+  line-height: var(--t-list-name-column-line);
+  font-weight: var(--t-list-name-column-weight);
+  color: var(--ink);
+  max-width: 176px;
+}
+.mp-bubble-meta {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--t-badge-size); line-height: var(--t-badge-line);
+}
+.mp-bubble-meta .rating { font-size: var(--t-control-size); }
+.mp-bubble-price { color: var(--ink-secondary); }
+
+/* ---- offline: no tile requests, a light grid + one quiet note ------------- */
+#map-root.is-offline .leaflet-tile-pane { display: none; }
+#map-root.is-offline {
+  background-color: var(--surface-subtle);
+  background-image:
+    linear-gradient(rgba(17, 26, 67, .07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 26, 67, .07) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.mp-offline-note {
+  position: absolute;
+  left: calc(var(--col-left-w) + (var(--U-w) - var(--col-left-w) - var(--col-detail-w)) / 2);
+  top: calc(var(--U-top) + var(--topbar-h) + (var(--U-h) - var(--topbar-h) - var(--sheet-h)) / 2);
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  max-width: min(280px, calc(var(--U-w) - 2 * var(--sp-5)));
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-button);
+  background: rgba(255, 255, 255, .92);
+  box-shadow: var(--shadow-control);
+  text-align: center;
+  pointer-events: none;
+}
+.mp-offline-title { font-size: var(--t-control-size); line-height: var(--t-control-line); font-weight: 600; color: var(--ink); }
+.mp-offline-sub { font-size: var(--t-secondary-size); line-height: var(--t-secondary-line); color: var(--ink-secondary); }
+
+/* ---- FAB group (MAP-03; LAYER-02 anchors the layers popover to the group) - */
+#fab-root {
+  position: absolute;
+  right: calc(var(--col-detail-w) + var(--sp-4) + var(--safe-right));
+  bottom: calc(var(--sheet-h) + var(--sp-4) + var(--safe-bottom) + var(--vv-occ));
+  z-index: var(--z-fab);
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: var(--sp-2);
+  transition: bottom var(--m-sheet) var(--e-standard), right var(--m-standard) var(--e-standard);
+}
+#fab-root.is-hidden { visibility: hidden; pointer-events: none; }
+.mp-fab {
+  position: relative;
+  width: var(--touch-min); height: var(--touch-min);
+  border-radius: 50%;
+  display: grid; place-content: center;
+  color: var(--ink);
+  transition: background-color var(--m-micro) var(--e-out), transform var(--m-micro) var(--e-out);
+}
+.mp-fab:hover { background: var(--surface); }
+.mp-fab:active { transform: scale(.96); }
+.mp-fab[aria-expanded="true"] { color: var(--accent-strong); }
+/* locate: pressed = 附近 mode is on; pending = a fix is being fetched (MAP-03) */
+.mp-fab.is-on { color: var(--accent-strong); }
+.mp-fab.is-pending { color: var(--accent-strong); }
+.mp-fab.is-pending::after {
+  content: "";
+  position: absolute; inset: 3px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: mpSpin 900ms linear infinite;
+}
+@keyframes mpSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .mp-fab.is-pending::after { animation-duration: 2.4s; } }
+/* the locate plugin's own control is suppressed in LOCATE_ASSETS; its fix marker
+   and accuracy ring are what the user sees, so keep them above the rail canvas */
+#map-root .leaflet-control-locate { display: none !important; }
+.mp-fab-badge { position: absolute; top: -2px; right: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  #fab-root, #map-root .leaflet-bottom.leaflet-left { transition: none; }
+}

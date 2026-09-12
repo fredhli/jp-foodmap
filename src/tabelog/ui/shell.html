@@ -1,0 +1,73 @@
+<!-- ==========================================================================
+     Japan Foodmap 4.0.0 — src/tabelog/ui/shell.html
+     The body skeleton: fixed DOM slots (CONTRACT.md §4). Inlined into
+     docs/index.html by map.py right after folium's own <body> content; the
+     .folium-map element folium creates is moved INTO #map-root by adapter.js
+     at boot, so every legacy hook that keys off `.folium-map` / window[mapId]
+     (TILE_DPR_SWITCH_JS, TILE_CORS_FALLBACK_JS, VIEW_RESTORE_SNIPPET) keeps
+     working. Do not add or remove ids here without updating CONTRACT §4.
+
+     Placeholders map.py fills: __APP_VERSION__ __DATA_SCRAPED_AT__
+     __LATEST_SCRAPE__ (the About sheet reads them off #build-meta).
+     ========================================================================== -->
+<div id="app">
+  <!-- z 0: the map (owner: map). folium's container is re-parented here. -->
+  <div id="map-root" aria-label="地图" role="region"></div>
+
+  <!-- z 20: top chrome — narrow search anchor, mid/wide top bar (owner: containers; contents by overlays) -->
+  <div id="narrow-top"></div>
+  <header id="topbar" hidden>
+    <div id="topbar-brand"></div>
+    <div id="topbar-search"></div>
+    <div id="topbar-right"></div>
+  </header>
+
+  <!-- z 10: mid/wide columns (owner: containers) -->
+  <aside id="col-left" aria-label="结果与筛选">
+    <div id="col-left-rail"></div>
+    <div id="col-left-head"></div>
+    <div id="col-left-body"></div>
+    <div id="col-left-toast"></div>
+    <div id="col-left-foot"></div>
+  </aside>
+  <aside id="col-detail" aria-label="餐厅详情">
+    <div id="col-detail-head"></div>
+    <div id="col-detail-body"></div>
+    <div id="col-detail-toast"></div>
+    <div id="col-detail-foot"></div>
+  </aside>
+  <div id="candidates-host"></div>
+
+  <!-- z 10: narrow bottom sheet (owner: containers) -->
+  <section id="sheet" aria-label="面板">
+    <div id="sheet-handle"></div>
+    <div id="sheet-head"></div>
+    <div id="sheet-body"></div>
+    <div id="sheet-toast"></div>
+    <div id="sheet-foot"></div>
+  </section>
+
+  <!-- z 30 / 40 / 50 / 60-70 -->
+  <div id="fab-root"></div>
+  <div id="notice-root"></div>
+  <div id="overlay-root"></div>
+  <div id="modal-root"></div>
+
+  <!-- persistent module roots; containers moves them between hosts, modules always render into their own root -->
+  <div id="parking" hidden>
+    <div id="search-root"></div>
+    <div id="list-root"></div>
+    <div id="list-foot"></div>
+    <div id="detail-root"></div>
+    <div id="detail-foot"></div>
+    <div id="filters-root"></div>
+    <div id="filters-foot"></div>
+    <div id="candidates-root"></div>
+    <div id="toast-root"></div>
+  </div>
+
+  <!-- the page's one aria-live region (M-089); Business.announce() writes here -->
+  <div id="sr-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <!-- build facts for the 关于本站 sheet (M-119); verify_build `about` asserts both stamps -->
+  <div id="build-meta" hidden data-app-version="v__APP_VERSION__" data-scraped-at="__DATA_SCRAPED_AT__" data-latest-scrape="__LATEST_SCRAPE__"></div>
+</div>

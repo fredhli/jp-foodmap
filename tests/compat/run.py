@@ -59,30 +59,77 @@ def eq(actual, expected, what: str) -> None:
 
 
 def open_filter_panel(page) -> None:
-    """The filter panel's inputs are in the DOM from boot but only laid out
-    once a host is open. M-027 gave it two hosts: the bottom sheet behind
-    #wb-seg's filter segment (<750px, M-3.2-03) and the top bar's 筛选
-    button (>=750px). Wait on #ff-sheet-content being laid out, which is
-    true in either."""
-    if page.eval_on_selector(
-            "#ff-sheet-content", "el => el.offsetParent !== null"):
-        return
-    opened = page.evaluate(
-        "() => { const b = Array.from(document.querySelectorAll('.wb-filter-btn'))"
-        "         .find(e => e.offsetParent !== null);"
-        "  if (b) { b.click(); return true; }"
-        "  const f = document.querySelector('#wb-seg [data-ux-tab=\"filter\"]');"
-        "  if (f) { f.click(); return true; }"
-        "  return false; }"
-    )
-    if not opened:
-        raise AssertionError("no way to open the filter panel on this viewport")
+    """4.0: the filter form is built by the `filters` module into #filters-root,
+    which containers moves into whichever host the current mode uses (the narrow
+    sheet, or the wide left column's 筛选 tab). 3.2.x waited on #ff-sheet-content
+    becoming laid out after clicking .wb-filter-btn / #wb-seg's filter segment;
+    the equivalent is act.setTab('filters') plus waiting for the form to be laid
+    out. Same guarantee: after this returns the filter controls are on screen and
+    their values reflect the restored state."""
+    page.evaluate("() => App.act.setTab('filters')")
     page.wait_for_function(
-        "() => { const c = document.getElementById('ff-sheet-content');"
-        "  return c && c.offsetParent !== null; }",
+        "() => { const r = document.getElementById('filters-root');"
+        "  return !!(r && r.offsetParent !== null"
+        "            && r.querySelector('[data-sw=\"bookableOnly\"]')); }",
         timeout=15000,
     )
-    page.wait_for_timeout(350)  # let the 0.25s slide-up settle
+    page.wait_for_timeout(350)  # let the sheet height transition settle
+
+
+def filters_state(page) -> dict:
+    """App.state.filters with the three Sets turned into sorted lists."""
+    return page.evaluate(
+        "() => { const f = App.state.filters;"
+        "  return Object.assign({}, f, {budgets: Array.from(f.budgets).sort(),"
+        "    cuisines: Array.from(f.cuisines).sort(),"
+        "    awards: Array.from(f.awards).sort()}); }"
+    )
+
+
+def fav_count(page) -> int:
+    """3.2.x read the #ff-fav-count badge. In 4.0 that number is the size of
+    App.state.user.fav, which the Saved tab's own count is rendered from."""
+    return int(page.evaluate("() => App.state.user.fav.size"))
+
+
+def import_file(page, path) -> None:
+    """3.2.x drove the hidden #ssm-import-file input behind 导入 in the avatar
+    menu. 4.0's equivalent is #ov-file, created by the overlays module at init
+    for exactly this reason; setting files on it runs the same
+    act.readImportFile -> preview path a real OS picker would."""
+    page.wait_for_selector("#ov-file", state="attached", timeout=15000)
+    page.set_input_files("#ov-file", str(path))
+    page.wait_for_function(
+        "() => App.state.overlay.kind === 'importDialog'", timeout=15000)
+
+
+def import_preview(page) -> dict:
+    """What the preview shows BEFORE the user confirms. 3.2.x read #imp-fav-n /
+    #imp-bm-n / #imp-note; 4.0 shows 文件含有 / 新增 / 跳过 plus a per-category
+    pick row carrying each category's own count."""
+    return page.evaluate(
+        "() => { const stats = [];"
+        "  document.querySelectorAll('#modal-root .ov-import-stat').forEach(el => {"
+        "    const b = el.querySelector('b');"
+        "    stats.push(parseInt((b ? b.textContent : '').replace(/[^0-9]/g, ''), 10) || 0); });"
+        "  const picks = {};"
+        "  document.querySelectorAll('#modal-root [data-ov=\"imp-pick\"]').forEach(i => {"
+        "    const row = i.closest('.ov-imp-pick');"
+        "    const n = row && row.querySelector('.num');"
+        "    picks[i.dataset.key] = n ? (parseInt(n.textContent.replace(/[^0-9]/g,''),10)||0) : 0; });"
+        "  const btn = document.querySelector('#modal-root [data-ov=\"import-confirm\"]');"
+        "  const err = document.querySelector('#modal-root .field-error');"
+        "  return {contains: stats[0], add: stats[1], skip: stats[2], picks: picks,"
+        "          confirmEnabled: !!(btn && !btn.disabled),"
+        "          error: err ? err.textContent : null}; }"
+    )
+
+
+def import_confirm(page) -> None:
+    page.eval_on_selector(
+        "#modal-root [data-ov='import-confirm']", "el => el.click()")
+    page.wait_for_function(
+        "() => App.state.overlay.kind !== 'importDialog'", timeout=15000)
 
 
 def load_fixture(name: str) -> dict[str, str]:
@@ -98,8 +145,14 @@ def t01_filter_state(page, base):
     derived into the bookableOnly checkbox, the unknown `book` key is ignored,
     and the corpus total is untouched."""
     eq(total_count(page), EXPECTED_TOTAL, "total restaurant count")
-    checked = page.eval_on_selector("#ff-bookable-only", "el => el.checked")
-    eq(checked, True, "legacy bookable:'yes' derived into bookableOnly")
+    # 3.2.x read #ff-bookable-only.checked. The 4.0 control is the switch
+    # [data-sw="bookableOnly"]; assert BOTH it and the state it renders, so a
+    # regression in the derivation and one in the rendering are both visible.
+    eq(filters_state(page)["bookableOnly"], True,
+       "legacy bookable:'yes' derived into bookableOnly")
+    open_filter_panel(page)
+    checked = page.eval_on_selector('[data-sw="bookableOnly"]', "el => el.checked")
+    eq(checked, True, "the derived value reaches the switch the user sees")
     if shown_count(page) <= 0:
         raise AssertionError("no restaurants shown after restoring old filter state")
 
@@ -109,18 +162,32 @@ def t01_filter_state(page, base):
     # the moment apply() runs, because this build persists the complement
     # (uncheckedGenres) instead. Assert both halves so a regression in either
     # direction is visible.
-    on = page.eval_on_selector_all(
-        "input[name=ff-genre]:checked", "els => els.map(e => e.value)"
-    )
-    eq(sorted(on), sorted(["寿司·海鲜", "烤肉·内脏", "烤鸡·串烧"]),
+    # 3.2.x: input[name=ff-genre]:checked. 4.0: the same set, read off
+    # App.state.filters.cuisines and off the checked [data-cuisine] boxes.
+    eq(sorted(filters_state(page)["cuisines"]),
+       sorted(["寿司·海鲜", "烤肉·内脏", "烤鸡·串烧"]),
        "legacy checked genre list restored verbatim")
+    on = page.eval_on_selector_all(
+        "[data-cui-cb]:checked", "els => els.map(e => e.dataset.cuiCb)")
+    eq(sorted(on), sorted(["寿司·海鲜", "烤肉·内脏", "烤鸡·串烧"]),
+       "and the same three boxes are ticked in the form")
     # Dispatch the click through the DOM rather than Playwright's pointer
     # path: the panel's nodes are re-created by the runtime emoji/i18n pass,
     # so the resolved handle can go stale mid-actionability-check and the
     # click never lands. We are asserting persistence here, not hit-testing.
-    open_filter_panel(page)
-    page.eval_on_selector("#ff-genre-all", "el => el.click()")
-    page.wait_for_timeout(300)
+    # 3.2.x clicked #ff-genre-all ("tick every cuisine"); the 4.0 control with
+    # that meaning is the 全选 checkbox at the top of the cuisine box (A05). An earlier 4.0 pass pointed this at
+    # 全清 because the adapter then read an empty set as "no restriction" —
+    # that reading is gone (the sets are literal now, 全清 really clears), so
+    # this goes back to the button the 3.2.x assertion was written against.
+    # The assertion below is unchanged and is the point: the persisted shape
+    # must be the complement (uncheckedGenres: []), so a cuisine bucket added
+    # in a later release arrives INCLUDED rather than silently hiding its
+    # restaurants.
+    page.eval_on_selector(
+        '[data-bulk-cb="cuisine"]',
+        "el => { el.checked = true; el.dispatchEvent(new Event('change', {bubbles:true})); }")
+    page.wait_for_timeout(400)
     saved = json.loads(page.evaluate(
         "() => localStorage.getItem('tabelog.filterState')"))
     if not isinstance(saved.get("uncheckedGenres"), list):
@@ -137,9 +204,7 @@ def t01_filter_state(page, base):
 def t02_dirty_cache(page, base):
     """Unsynced anonymous state: the three favorites survive and the dirty
     flag is NOT cleared at boot."""
-    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
-    n_fav = int("".join(c for c in fav_txt if c.isdigit()) or 0)
-    eq(n_fav, 3, "favorites count from the pre-2.0 cache")
+    eq(fav_count(page), 3, "favorites count from the pre-2.0 cache")
 
     raw = page.evaluate("() => localStorage.getItem('omakase_state_cache_v2')")
     cache = json.loads(raw)
@@ -164,13 +229,29 @@ def t03_hidden_builtin(page, base):
         "() => document.querySelectorAll('.bm-mk-attraction').length > 0",
         timeout=30000,
     )
-    hidden = page.eval_on_selector_all(".bm-mk-hidden", "els => els.length")
-    eq(hidden, 1, "exactly the one tombstoned built-in is marked hidden")
-    visible = page.evaluate(
-        "() => Array.from(document.querySelectorAll('.bm-mk-hidden'))"
-        "  .filter(e => e.offsetParent !== null).length"
-    )
-    eq(visible, 0, "the hidden built-in is not painted")
+    # 3.2.x painted every built-in and then hid the tombstoned one with CSS, so
+    # the test counted a `.bm-mk-hidden` element that was present but had no
+    # offsetParent. 4.0 filters it out of the layer instead (Data.visibleLandmarks
+    # honours layers.hiddenLandmarks), so the same guarantee — "the tombstone
+    # hides it, and it is hidden rather than deleted" — is asserted as:
+    #   (a) the id is in the hidden set,
+    #   (b) no marker for it is on the map by default,
+    #   (c) turning 也显示已隐藏的景点 on brings it back, struck through.
+    eq(page.evaluate("() => Data.hiddenLandmarkIds().has('fb-tokyo-tower')"), True,
+       "the tombstone is recognised as hiding that built-in")
+    eq(page.eval_on_selector_all(".bm-mk-hidden", "els => els.length"), 0,
+       "the hidden built-in is not painted")
+    shown_ids = page.evaluate(
+        "() => Data.visibleLandmarks(App.state.user, App.state.layers).map(l => l.id)")
+    if "fb-tokyo-tower" in shown_ids:
+        raise AssertionError("the tombstoned built-in is still in the visible set")
+    page.evaluate("() => App.act.setLayers({hiddenLandmarks: true})")
+    page.wait_for_timeout(400)
+    eq(page.eval_on_selector_all(".bm-mk-hidden", "els => els.length"), 1,
+       "with 也显示已隐藏的景点 on, exactly the one tombstoned built-in comes "
+       "back marked hidden — it was hidden, not deleted")
+    page.evaluate("() => App.act.setLayers({hiddenLandmarks: false})")
+    page.wait_for_timeout(300)
     # The personal pin in the same array still renders.
     pins = page.eval_on_selector_all(".bm-mk-bookmark", "els => els.length")
     if pins < 1:
@@ -208,19 +289,37 @@ def t05_filterstate_pre_region(page, base):
     no `region` key, plus an unknown key from a hypothetical future build."""
     eq(total_count(page), EXPECTED_TOTAL, "corpus total unaffected by the region filter")
     open_filter_panel(page)
-    sel = page.eval_on_selector("#ff-region", "el => el.value")
-    eq(sel, "", "a state without `region` selects 全部地区")
-    n_opts = page.eval_on_selector("#ff-region", "el => el.options.length")
+    # 3.2.x used a <select id="ff-region"> whose "" option was 全部地区 and whose
+    # option count proved all 47 prefectures were offered. 4.0 uses a button
+    # plus the overlays regionPicker; the same two facts are
+    # App.state.filters.region === None and Data.config.REGIONS.length === 47.
+    eq(filters_state(page)["region"], None,
+       "a state without `region` selects 全部地区")
+    eq(page.evaluate("() => Data.config.REGIONS.length"), 47,
+       "all 47 prefectures are offered")
+    page.evaluate("() => App.act.openOverlay('regionPicker')")
+    page.wait_for_timeout(300)
+    n_opts = page.eval_on_selector_all("[data-region]", "els => els.length")
     eq(n_opts, 48, "47 prefectures plus the 全部地区 row")
+    page.evaluate("() => App.act.closeOverlay('cancel')")
+    page.wait_for_timeout(200)
     if shown_count(page) <= 0:
         raise AssertionError("no restaurants shown after restoring pre-region state")
     # The rest of the old state still applies, so this is a real restore and
     # not a silent reset-to-defaults.
-    eq(page.eval_on_selector("#ff-rating", "el => el.value"), "3.6",
+    eq(page.eval_on_selector("#ft-rating", "el => el.value"), "3.6",
        "the rating from the old state survived")
-    # And an apply() rewrites the state WITH the new field, additively.
-    page.eval_on_selector("#ff-price-all", "el => el.click()")
-    page.wait_for_timeout(300)
+    eq(round(filters_state(page)["ratingMin"], 2), 3.6,
+       "and the state behind the slider agrees")
+    # And an apply() rewrites the state WITH the new field, additively. 3.2.x
+    # clicked #ff-price-all (tick every price tier). Under FILTER-01 every tier
+    # is already the default (the empty set), so that button is correctly
+    # disabled here — any real user apply() proves the same thing, so tick one
+    # price tier instead. What matters is the assertion below: the rewritten
+    # state carries `region`.
+    page.eval_on_selector(
+        '.ft-budget[data-budget] input[type=checkbox]', "el => el.click()")
+    page.wait_for_timeout(400)
     saved = json.loads(page.evaluate(
         "() => localStorage.getItem('tabelog.filterState')"))
     if "region" not in saved:
@@ -236,7 +335,7 @@ def t06_filterstate_bad_region(page, base):
     rather than throwing or emptying the map."""
     eq(total_count(page), EXPECTED_TOTAL, "corpus total unaffected")
     open_filter_panel(page)
-    eq(page.eval_on_selector("#ff-region", "el => el.value"), "",
+    eq(filters_state(page)["region"], None,
        "a non-integer region falls back to 全部地区")
     if shown_count(page) <= 0:
         raise AssertionError("a bad region value emptied the map")
@@ -247,7 +346,7 @@ def t06_filterstate_bad_region(page, base):
     )
     reload_and_wait(page)
     open_filter_panel(page)
-    eq(page.eval_on_selector("#ff-region", "el => el.value"), "",
+    eq(filters_state(page)["region"], None,
        "region 99 (out of 0..46) falls back to 全部地区")
     if shown_count(page) <= 0:
         raise AssertionError("an out-of-range region emptied the map")
@@ -266,10 +365,19 @@ def t07_bookmarks_with_meta(page, base):
     # 219 built-in landmarks + the one real personal pin. The three metadata
     # entries must produce no marker at all — renderBookmark's numeric-coord
     # guard is what stops them becoming pins at (undefined, undefined).
-    eq(page.eval_on_selector_all(".bm-mk", "els => els.length"), 220,
-       "marker count: 219 built-ins + 1 personal pin, metadata paints none")
-    eq(page.eval_on_selector_all(".bm-mk-hidden", "els => els.length"), 1,
+    # 3.2.x counted `.bm-mk` (every marker the bookmarks layer drew, hidden
+    # ones included). 4.0 leaves a hidden built-in out of the layer entirely,
+    # so the on-screen count is 218 built-ins + 1 pin; the invariant being
+    # protected — three metadata rows paint NO marker — is asserted as the
+    # difference between the rows in storage and the markers on the map.
+    eq(page.eval_on_selector_all(
+        ".bm-mk-attraction, .bm-mk-bookmark", "els => els.length"), 219,
+       "marker count: 218 shown built-ins + 1 personal pin, metadata paints none")
+    eq(page.evaluate("() => Data.hiddenLandmarkIds().size"), 1,
        "only the fb-* tombstone hides a built-in — 'meta' is not 'hidden'")
+    eq(page.evaluate(
+        "() => Data.pins(App.state.user.bookmarks).length"), 1,
+       "the three category:'meta' rows are not pins")
     eq(page.eval_on_selector_all(".bm-mk-bookmark", "els => els.length"), 1,
        "the ordinary personal pin still renders")
 
@@ -341,18 +449,16 @@ def t08_export_legacy(page, base):
     tmp = Path(tempfile.mkdtemp()) / "favorites.json"
     tmp.write_text(json.dumps(blob, ensure_ascii=False), encoding="utf-8")
 
-    # The file input is hidden behind 导入 in the avatar menu; set_input_files
+    # The file input is hidden behind 导入 in the account panel; set_input_files
     # drives it the same way the OS picker would.
-    page.set_input_files("#ssm-import-file", str(tmp))
-    page.wait_for_selector("#imp-modal.imp-open", timeout=15000)
-    fav_row = page.eval_on_selector("#imp-fav-n", "el => el.textContent")
-    if "3" not in fav_row:
-        raise AssertionError(f"legacy string array not counted: {fav_row!r}")
-    page.eval_on_selector("#imp-modal .imp-confirm", "el => el.click()")
-    page.wait_for_selector("#imp-modal.imp-open", state="hidden", timeout=15000)
+    import_file(page, tmp)
+    prev = import_preview(page)
+    # 3.2.x read the "N 家餐厅" row (#imp-fav-n). 4.0's preview carries the same
+    # number in the 收藏 pick row.
+    eq(prev["picks"]["fav"], 3, "legacy string array counted as 3 favorites")
+    import_confirm(page)
 
-    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
-    eq(int("".join(c for c in fav_txt if c.isdigit()) or 0), 3,
+    eq(fav_count(page), 3,
        "favorites imported from the legacy string-array export")
 
     # The in-memory / on-disk state is still a set of URL STRINGS. The KV
@@ -378,7 +484,9 @@ def t08_export_legacy(page, base):
         "    b.text().then(t => { window.__exported = t; });"
         "    return orig(b); }; }"
     )
-    page.eval_on_selector("#ssm-export", "el => el.click()")
+    # 3.2.x clicked #ssm-export in the avatar menu; 4.0's account panel calls
+    # act.exportBackup(), which is the same production path.
+    page.evaluate("() => App.act.exportBackup()")
     page.wait_for_function("() => window.__exported !== null", timeout=15000)
     exported = json.loads(page.evaluate("() => window.__exported"))
     eq(exported.get("schema"), 1,
@@ -399,14 +507,14 @@ def t08_export_legacy(page, base):
     # merge reports nothing new rather than duplicating or throwing.
     tmp2 = tmp.with_name("favorites-new.json")
     tmp2.write_text(json.dumps(exported, ensure_ascii=False), encoding="utf-8")
-    page.set_input_files("#ssm-import-file", str(tmp2))
-    page.wait_for_selector("#imp-modal.imp-open", timeout=15000)
-    eq(page.eval_on_selector("#imp-fav-n", "el => el.textContent").strip(),
-       "3 家餐厅", "the object export is counted the same as the string one")
-    page.eval_on_selector("#imp-modal .imp-confirm", "el => el.click()")
-    page.wait_for_selector("#imp-modal.imp-open", state="hidden", timeout=15000)
-    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
-    eq(int("".join(c for c in fav_txt if c.isdigit()) or 0), 3,
+    import_file(page, tmp2)
+    prev2 = import_preview(page)
+    eq(prev2["picks"]["fav"], 3,
+       "the object export is counted the same as the string one")
+    eq(prev2["add"], 0,
+       "everything is already there, so the preview offers nothing new")
+    import_confirm(page)
+    eq(fav_count(page), 3,
        "re-importing the object export adds nothing and loses nothing")
 
 
@@ -421,24 +529,23 @@ def t09_export_idless_pin(page, base):
     tmp = Path(tempfile.mkdtemp()) / "favorites.json"
     tmp.write_text(json.dumps(blob, ensure_ascii=False), encoding="utf-8")
 
-    page.set_input_files("#ssm-import-file", str(tmp))
     # 3.1.1 rejected this file outright: no modal, just "文件格式无法识别".
-    page.wait_for_selector("#imp-modal.imp-open", timeout=15000)
+    import_file(page, tmp)
+    prev = import_preview(page)
+    # 3.2.x: #imp-fav-n "2 家餐厅", #imp-bm-n "0 个景点 · 1 个书签", #imp-note
+    # carrying the skipped count. 4.0 shows the per-category counts in the pick
+    # rows and the skipped count as its own 跳过 stat.
+    eq(prev["picks"]["fav"], 2,
+       "the two readable favorites are counted, the bad URL is not")
+    eq(prev["picks"]["bm"], 1,
+       "the id-less pin survives, the bad-coordinate one does not")
+    eq(prev["skip"], 2,
+       "the skipped count is reported to the user BEFORE they confirm")
+    eq(prev["confirmEnabled"], True, "a partially-readable file is importable")
 
-    eq(page.eval_on_selector("#imp-fav-n", "el => el.textContent").strip(),
-       "2 家餐厅", "the two readable favorites are counted, the bad URL is not")
-    eq(page.eval_on_selector("#imp-bm-n", "el => el.textContent").strip(),
-       "0 个景点 · 1 个书签", "the id-less pin survives, the bad-coordinate one does not")
-    note = page.eval_on_selector("#imp-note", "el => el.textContent")
-    if "2" not in note:
-        raise AssertionError(f"skipped count not reported to the user: {note!r}")
+    import_confirm(page)
 
-    page.eval_on_selector("#imp-modal .imp-confirm", "el => el.click()")
-    page.wait_for_selector("#imp-modal.imp-open", state="hidden", timeout=15000)
-
-    fav_txt = page.eval_on_selector("#ff-fav-count", "el => el.textContent")
-    eq(int("".join(c for c in fav_txt if c.isdigit()) or 0), 2,
-       "the readable favorites imported")
+    eq(fav_count(page), 2, "the readable favorites imported")
     cache = json.loads(page.evaluate(
         "() => localStorage.getItem('omakase_state_cache_v2')"))
     if any("not-a-url" in u for u in (cache.get("fav") or [])):

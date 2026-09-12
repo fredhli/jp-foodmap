@@ -8,7 +8,7 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#fdf6e3",
+  "background_color": "#ffffff",
   "categories": ["food", "travel", "navigation"],
   "icons": [
     {

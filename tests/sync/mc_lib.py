@@ -154,27 +154,29 @@ DRIVER = r"""
     return el ? window[el.id] : null;
   };
 
-  // Right-click -> "⭐ 加入收藏" -> name -> save.  Same code path a user takes.
+  // Right-click -> 新建书签 -> name -> save. Same production path a user takes.
+  // 3.2.x drove #ff-add-bm / #bm-name / #bm-modal .bm-save; 4.0's place menu
+  // and bookmark form are the overlays module's, so the form is filled through
+  // its own markup and the write still goes through act.addPin -> Business.
   window.__mcAddBookmark = (name, lat, lon) => new Promise((res) => {
     const m = window.__mcMap();
     if (!m) return res('no-map');
     m.fire('contextmenu', {latlng: L.latLng(lat, lon)});
     setTimeout(() => {
-      const add = document.getElementById('ff-add-bm');
+      const add = document.querySelector('[data-ov="place-new"][data-cat="bookmark"]');
       if (!add) return res('no-add-btn');
       add.click();
       setTimeout(() => {
-        const n = document.getElementById('bm-name');
-        const e = document.getElementById('bm-emoji');
+        const n = document.getElementById('ov-name');
         if (!n) return res('no-modal');
         n.value = name;
-        if (e) e.value = '';
-        const save = document.querySelector('#bm-modal .bm-save');
+        n.dispatchEvent(new Event('input', {bubbles: true}));
+        const save = document.querySelector('[data-ov="save-bookmark"]');
         if (!save) return res('no-save');
         save.click();
-        setTimeout(() => res('ok'), 30);
-      }, 80);
-    }, 80);
+        setTimeout(() => res('ok'), 60);
+      }, 120);
+    }, 120);
   });
 
   // Hide a built-in landmark: click its marker, then the 隐藏 button in the popup.
@@ -194,16 +196,20 @@ DRIVER = r"""
     if (m) m.eachLayer(walk);
     return found;
   }
+  // 3.2.x: click the landmark marker, then #bm-hide in its Leaflet popup.
+  // 4.0: the same tap opens the overlays place menu carrying {kind:'landmark',
+  // bm}, whose 隐藏景点 row calls act.hideLandmark — the same business write.
   window.__mcHideBuiltin = (lat, lon) => new Promise((res) => {
     const target = findMarkerAt(lat, lon);
     if (!target) return res('marker-not-found');
-    target.fire('click');
+    target.fire('click', {latlng: L.latLng(lat, lon),
+                          containerPoint: L.point(10, 10)});
     setTimeout(() => {
-      const b = document.getElementById('bm-hide');
+      const b = document.querySelector('[data-ov="lm-hide"]');
       if (!b) return res('no-hide-btn');
       b.click();
-      setTimeout(() => res('ok'), 30);
-    }, 120);
+      setTimeout(() => res('ok'), 60);
+    }, 160);
   });
 
   window.__mcLS = () => {
@@ -234,19 +240,24 @@ DRIVER = r"""
   // pushPending is derived rather than read off .is-pending because the
   // badge drops that class while the last attempt is in error, and every
   // caller here means "this tab still owes the cloud a write".
+  // 4.0: the three counters and the badge were #ff-fav-count / #ff-black-count
+  // / #ff-sync-status / #ss-avatar-dot. All four are rendered from state now —
+  // App.state.user.fav/.black and App.state.sync.{text,dirty} — which is the
+  // same in-memory truth those elements were painted from, read at its source.
+  // The three derived names below keep their 3.2.x meanings exactly.
   window.__mcUI = () => {
-    const dot = document.getElementById('ss-avatar-dot');
-    const up = !!dot && !dot.hidden;
+    const st = window.App && App.state;
+    const dirty = !!(st && st.sync && st.sync.dirty);
     const signedIn = (() => { try {
       return !!JSON.parse(localStorage.getItem('tabelog.auth') || 'null'); }
       catch (e) { return false; } })();
     return {
-      fav: +(document.getElementById('ff-fav-count') || {}).textContent || 0,
-      black: +(document.getElementById('ff-black-count') || {}).textContent || 0,
-      status: (document.getElementById('ff-sync-status') || {}).textContent || '',
-      dirtyBadge: up,
-      localOnly: up && !signedIn,
-      pushPending: up && signedIn,
+      fav: st ? st.user.fav.size : 0,
+      black: st ? st.user.black.size : 0,
+      status: (st && st.sync && st.sync.text) || '',
+      dirtyBadge: dirty,
+      localOnly: dirty && !signedIn,
+      pushPending: dirty && signedIn,
     };
   };
 
@@ -338,11 +349,83 @@ def open_tab(ctx, name, timeout=60000):
     page.on('console', _console)
     page.add_init_script(f'window.__MC_TAB = {json.dumps(name)};')
     page.goto(SITE + '/', wait_until='domcontentloaded', timeout=timeout)
+    # 3.2.x waited on the map plus #ff-fav-count (i.e. the payload had been
+    # applied). 4.0's equivalent barrier is Adapter.ready, which is only set
+    # after Business.boot() parsed restaurants.json, Business.init() built the
+    # state and App.boot() ran every module's init and first render.
     page.wait_for_function(
         "() => window.__mcMap && window.__mcMap() && "
-        "document.getElementById('ff-fav-count') !== null", timeout=timeout)
+        "window.Adapter && window.Adapter.ready === true", timeout=timeout)
     page.wait_for_timeout(400)
     return page
+
+
+def close_tab(page):
+    """Close a tab the way a browser really does.
+
+    A real tab close fires `visibilitychange` -> hidden and THEN `pagehide`,
+    and the renderer stays alive long enough for a keepalive fetch issued in
+    those handlers to reach the wire. Playwright's bare page.close() fires
+    pagehide only and tears the renderer down immediately: the keepalive PUT
+    Business issues from flushOnHide got out in 1 run of 5, measured — a
+    harness artefact that says nothing about the page (driving the full
+    sequence is 5/5, and the flush itself was verified to run and to carry
+    keepalive:true either way).
+
+    Driving the real sequence is strictly MORE faithful to what the scenarios
+    are about: an edit made inside the 2.5 s push debounce must still reach the
+    cloud when the tab goes away."""
+    try:
+        page.evaluate('() => window.__mcGoHidden && window.__mcGoHidden()')
+        page.wait_for_timeout(120)
+    except Exception:
+        pass                      # already gone: nothing to flush
+    page.close()
+
+
+def sign_out(page, clear_local=False, timeout=15000):
+    """Sign out through the real UI.
+
+    3.2.x: click #ssm-signout, then answer two native confirm() dialogs — the
+    first "退出登录？", the second "同时清除本设备数据？". 4.0 asks the same two
+    questions inside the account panel (act.signOut(clearLocal) hands Business
+    an options object, which makes it skip its own confirm()), so the choice is
+    a button rather than a dialog. The business call and its consequences are
+    unchanged."""
+    page.evaluate("() => App.act.openOverlay('account')")
+    page.wait_for_selector('#ov-signout', timeout=timeout)
+    page.eval_on_selector('#ov-signout', 'el => el.click()')
+    # Step 1 must be a question, not the act: pressing 退出 arms the
+    # confirmation and signs nobody out.
+    page.wait_for_selector('[data-ov="signout-keep"]', timeout=timeout)
+    evidence = {
+        'armed_without_signing_out':
+            page.evaluate("() => localStorage.getItem('tabelog.auth') !== null"),
+        'offers_keep': page.locator('[data-ov="signout-keep"]').count() == 1,
+        'offers_clear': page.locator('[data-ov="signout-clear"]').count() == 1,
+        'offers_cancel': page.locator('[data-ov="signout-cancel"]').count() == 1,
+    }
+    sel = '[data-ov="signout-clear"]' if clear_local else '[data-ov="signout-keep"]'
+    page.eval_on_selector(sel, 'el => el.click()')
+    return evidence
+
+
+def do_import(page, path, timeout=15000):
+    """Drive a real backup import to completion.
+
+    3.2.x: set_input_files('#ssm-import-file') then click('#imp-modal
+    .imp-confirm'). 4.0 keeps exactly the same production path
+    (act.readImportFile -> preview -> act.applyImport); only the element ids
+    moved into the overlays module. #ov-file is created at overlays init, so it
+    is drivable before the account panel has ever been opened."""
+    page.wait_for_selector('#ov-file', state='attached', timeout=timeout)
+    page.set_input_files('#ov-file', str(path))
+    page.wait_for_function(
+        "() => App.state.overlay.kind === 'importDialog'", timeout=timeout)
+    page.eval_on_selector("#modal-root [data-ov='import-confirm']",
+                          "el => el.click()")
+    page.wait_for_function(
+        "() => App.state.overlay.kind !== 'importDialog'", timeout=timeout)
 
 
 # push debounce (map.py schedulePush) is 2.5 s; wait this long for a PUT to land

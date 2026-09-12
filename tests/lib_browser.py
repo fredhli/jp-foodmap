@@ -137,17 +137,23 @@ def seed_local_storage(page, entries: dict[str, str]) -> None:
     page.add_init_script(js)
 
 
-# Both counters carry an en-dash placeholder until the payload lands. .ff-total
-# is set as soon as restaurants.json parses; .ff-count only after the first
-# apply(), which is also when the favorites counter and the markers are in
-# their final state — so that is the barrier the tests wait on.
+# 4.0.0 barrier. 3.2.x waited on two filter-FAB counters: `.ff-total` (set as
+# soon as restaurants.json parsed) and `.ff-count` (set only after the first
+# apply(), which was also when the favorites counter and the markers reached
+# their final state). Both elements are gone with the old presentation layer.
+#
+# `window.Adapter.ready === true` is the same moment expressed against the new
+# architecture: Adapter.start() sets it only after Business.boot() has fetched
+# and parsed restaurants.json, Business.init() has built the state, App.boot()
+# has run every module's init and the first render has flushed — i.e. the
+# payload has landed AND the first filter pass has been applied. The extra
+# Data.restaurants check keeps the "the payload actually parsed" half explicit
+# rather than implied.
 READY_JS = (
-    "() => { const t = document.querySelector('.ff-total');"
-    "        const c = document.querySelector('.ff-count');"
-    "        const ok = el => el && el.textContent"
-    "          && el.textContent.trim() !== '\u2013'"
-    "          && el.textContent.trim() !== '';"
-    "        return ok(t) && ok(c); }"
+    "() => !!(window.Adapter && window.Adapter.ready === true"
+    "         && window.Data && Array.isArray(window.Data.restaurants)"
+    "         && window.Data.restaurants.length > 0"
+    "         && window.App && window.App.state && window.App.state.user)"
 )
 
 
@@ -156,8 +162,8 @@ def wait_ready(page, timeout_ms: int = 60000) -> None:
 
 
 def boot(page, base_url: str, timeout_ms: int = 60000) -> None:
-    """Load the map and wait until the payload has been applied (the counter
-    in the filter FAB stops showing the placeholder)."""
+    """Load the map and wait until the payload has been applied
+    (Adapter.ready — see READY_JS)."""
     page.goto(base_url + "/index.html", wait_until="domcontentloaded",
               timeout=timeout_ms)
     wait_ready(page, timeout_ms)
@@ -179,13 +185,18 @@ def reload_and_wait(page, timeout_ms: int = 60000) -> None:
 
 
 def total_count(page) -> int:
-    txt = page.eval_on_selector(".ff-total", "el => el.textContent")
-    return int("".join(ch for ch in txt if ch.isdigit()) or 0)
+    """Rows in the corpus. 3.2.x read the `.ff-total` counter in the filter FAB;
+    4.0 has no such element, and the number that counter displayed is
+    Data.restaurants.length — the same quantity, read at its source."""
+    return int(page.evaluate("() => Data.restaurants.length"))
 
 
 def shown_count(page) -> int:
-    txt = page.eval_on_selector(".ff-count", "el => el.textContent")
-    return int("".join(ch for ch in txt if ch.isdigit()) or 0)
+    """Rows passing the current filters. 3.2.x read `.ff-count`, which the page
+    wrote from the same apply() pass that decided which markers to draw. In 4.0
+    that quantity is Data.M(App.state) — the module-facing match set the map and
+    the result list both render from."""
+    return int(page.evaluate("() => Data.M(App.state).length"))
 
 
 # M-3.2-02: the phone (<750px) navigation entry, in one place so the suites

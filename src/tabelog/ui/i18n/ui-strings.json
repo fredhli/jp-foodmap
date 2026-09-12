@@ -1,0 +1,1667 @@
+{
+  "3.4 是当前收录范围下限，不是全站最低分": {
+    "en": "3.4 is the floor of what this map collects — not the lowest score on Tabelog.",
+    "ja": "3.4 はこの地図の収録範囲の下限です。食べログ全体の最低点ではありません。"
+  },
+  "Google 坐标已校准": {
+    "en": "Google-verified coordinates",
+    "ja": "Google 補正済み座標"
+  },
+  "Japan Foodmap 是一份个人的日本美食与旅行地图。": {
+    "en": "Japan Foodmap is a personal food and travel map of Japan.",
+    "ja": "Japan Foodmap は個人で作った日本のグルメ・旅行地図です。"
+  },
+  "Tabelog 预订": {
+    "en": "Tabelog booking",
+    "ja": "Tabelog予約"
+  },
+  "__doc__": "4.0.0 UI copy. Keys are the exact Simplified-Chinese strings the ui/js modules pass to t(); values give the English and Japanese renderings. zh-TW is generated at build time by map.py's to_trad() (OpenCC s2twp + _TRAD_FIXUPS), never hand-written here. map.py injects the whole table as __UI_I18N_TABLES__ and excludes the CJK runs of these keys from the 'missing EN/JA' punch list, because they are translated by this table rather than by the run-based TEXT_*_MAP. {n}-style placeholders are filled by t(key, params); never concatenate sentences. Keep en and ja filled for every key.",
+  "{label}，共 {n}": {
+    "en": "{label}, {n} total",
+    "ja": "{label}、全{n}件"
+  },
+  "{n} 家": {
+    "en": "{n} places",
+    "ja": "{n}件"
+  },
+  "{n} 家不在当前视野": {
+    "en": "{n} results are outside the map view",
+    "ja": "{n}件が地図の表示範囲外です"
+  },
+  "{n} 米": {
+    "en": "{n} m",
+    "ja": "{n} m"
+  },
+  "≥ {n}": {
+    "en": "≥ {n}",
+    "ja": "{n}以上"
+  },
+  "一起显示": {
+    "en": "Show them too",
+    "ja": "まとめて表示"
+  },
+  "上一家": {
+    "en": "Previous restaurant",
+    "ja": "前の店"
+  },
+  "上一张": {
+    "en": "Previous photo",
+    "ja": "前の写真"
+  },
+  "上一批": {
+    "en": "Previous restaurants",
+    "ja": "前の店"
+  },
+  "下一家": {
+    "en": "Next restaurant",
+    "ja": "次の店"
+  },
+  "下一张": {
+    "en": "Next photo",
+    "ja": "次の写真"
+  },
+  "下一批": {
+    "en": "More restaurants",
+    "ja": "次の店"
+  },
+  "不再提示": {
+    "en": "Don’t show again",
+    "ja": "今後表示しない"
+  },
+  "不登录也完全可用": {
+    "en": "Everything works signed out",
+    "ja": "ログインしなくても全機能が使えます"
+  },
+  "东京 {n} 家": {
+    "en": "{n} in Tokyo",
+    "ja": "東京 {n}件"
+  },
+  "中东·非洲": {
+    "en": "Middle Eastern & African",
+    "ja": "中東・アフリカ料理"
+  },
+  "中国·四国": {
+    "en": "Chugoku & Shikoku",
+    "ja": "中国・四国"
+  },
+  "中部": {
+    "en": "Chubu",
+    "ja": "中部"
+  },
+  "中餐、韩餐、西餐、南亚、中东等十类，独立于上面的菜系树": {
+    "en": "Ten buckets — Chinese, Korean, Western, South Asian, Middle Eastern … — kept out of the cuisine tree above",
+    "ja": "中華・韓国・西洋・南アジア・中東など10区分。上の料理ツリーとは別扱いです"
+  },
+  "乌冬·荞麦": {
+    "en": "Udon & soba",
+    "ja": "うどん・そば"
+  },
+  "九州·冲绳": {
+    "en": "Kyushu & Okinawa",
+    "ja": "九州・沖縄"
+  },
+  "也显示已隐藏的景点": {
+    "en": "Also show hidden landmarks",
+    "ja": "非表示の名所も表示"
+  },
+  "书签": {
+    "en": "Pins",
+    "ja": "ピン"
+  },
+  "书签与收藏夹": {
+    "en": "Pins & collections",
+    "ja": "ピンとコレクション"
+  },
+  "书签标记": {
+    "en": "Pin markers",
+    "ja": "ピンの表示"
+  },
+  "交通图层加载失败，请稍后再试": {
+    "en": "The transit layer failed to load — please try again later.",
+    "ja": "交通レイヤーを読み込めませんでした。後でもう一度お試しください。"
+  },
+  "人均午餐": {
+    "en": "Lunch / person",
+    "ja": "昼の予算"
+  },
+  "人均晚餐": {
+    "en": "Dinner / person",
+    "ja": "夜の予算"
+  },
+  "仅匹配收藏集合": {
+    "en": "Matches the Saved set only",
+    "ja": "お気に入りの集合だけに一致します"
+  },
+  "从此收藏夹移除": {
+    "en": "Remove from this collection",
+    "ja": "このコレクションから削除"
+  },
+  "价格从低到高": {
+    "en": "Price, low to high",
+    "ja": "価格が安い順"
+  },
+  "价格未知": {
+    "en": "Price unknown",
+    "ja": "価格不明"
+  },
+  "休息日": {
+    "en": "Closed on",
+    "ja": "定休日"
+  },
+  "伴手礼·点心": {
+    "en": "Gifts & sweets",
+    "ja": "土産・和菓子"
+  },
+  "位置与座位": {
+    "en": "Location & seating",
+    "ja": "場所と座席"
+  },
+  "使用 Google 账号登录": {
+    "en": "Sign in with Google",
+    "ja": "Google アカウントでログイン"
+  },
+  "例如：东京美食周末": {
+    "en": "e.g. Tokyo food weekend",
+    "ja": "例：東京グルメ週末"
+  },
+  "保存": {
+    "en": "Save",
+    "ja": "保存"
+  },
+  "保存失败，请重试": {
+    "en": "Could not save — please try again",
+    "ja": "保存できませんでした。もう一度お試しください"
+  },
+  "修改筛选": {
+    "en": "Change filters",
+    "ja": "絞り込みを変更"
+  },
+  "偏好": {
+    "en": "Preferences",
+    "ja": "設定"
+  },
+  "全清": {
+    "en": "Clear all",
+    "ja": "すべて解除"
+  },
+  "全选": {
+    "en": "Select all",
+    "ja": "すべて選択"
+  },
+  "全选可见": {
+    "en": "Select visible",
+    "ja": "表示中をすべて選択"
+  },
+  "全部": {
+    "en": "All",
+    "ja": "すべて"
+  },
+  "全部地区": {
+    "en": "All regions",
+    "ja": "すべての地域"
+  },
+  "全部菜系": {
+    "en": "All cuisines",
+    "ja": "すべての料理"
+  },
+  "关东": {
+    "en": "Kanto",
+    "ja": "関東"
+  },
+  "关东煮·锅物": {
+    "en": "Oden & hot pot",
+    "ja": "おでん・鍋"
+  },
+  "关于价格分档": {
+    "en": "About price tiers",
+    "ja": "価格区分について"
+  },
+  "关于本站": {
+    "en": "About",
+    "ja": "このサイトについて"
+  },
+  "关于评分下限": {
+    "en": "About the rating floor",
+    "ja": "評価の下限について"
+  },
+  "关闭": {
+    "en": "Close",
+    "ja": "閉じる"
+  },
+  "其中 {k} 家不在当前列表": {
+    "en": "{k} not in the current list",
+    "ja": "うち{k}件は現在のリスト外"
+  },
+  "其中 {k} 家不在当前结果": {
+    "en": "{k} not in the current results",
+    "ja": "うち{k}件は現在の結果外"
+  },
+  "其中 {n} 家可网订": {
+    "en": "{n} with online booking",
+    "ja": "うち{n}件はネット予約可"
+  },
+  "其他": {
+    "en": "Other",
+    "ja": "その他"
+  },
+  "其他西餐": {
+    "en": "Other Western",
+    "ja": "その他西洋料理"
+  },
+  "其它": {
+    "en": "Other",
+    "ja": "その他"
+  },
+  "内置 {n} · 自建 {m}": {
+    "en": "{n} built-in · {m} yours",
+    "ja": "既定 {n} · 自作 {m}"
+  },
+  "再次点击以确认删除": {
+    "en": "Tap again to confirm deletion",
+    "ja": "もう一度押すと削除します"
+  },
+  "分享": {
+    "en": "Share",
+    "ja": "共有"
+  },
+  "分享这家店": {
+    "en": "Share this restaurant",
+    "ja": "この店を共有"
+  },
+  "分组方式": {
+    "en": "Group by",
+    "ja": "グループ化"
+  },
+  "列表仍可浏览；也可以把它们显示在地图上": {
+    "en": "The list still works — or show them on the map",
+    "ja": "リストはそのまま閲覧できます。地図に表示することもできます"
+  },
+  "删除书签": {
+    "en": "Delete pin",
+    "ja": "ピンを削除"
+  },
+  "删除云端数据": {
+    "en": "Delete cloud data",
+    "ja": "クラウドのデータを削除"
+  },
+  "删除收藏夹": {
+    "en": "Delete collection",
+    "ja": "コレクションを削除"
+  },
+  "刷新本地状态": {
+    "en": "Refresh device status",
+    "ja": "この端末の状態を更新"
+  },
+  "加入收藏": {
+    "en": "Save to…",
+    "ja": "お気に入りに追加"
+  },
+  "加入收藏夹": {
+    "en": "Add to a collection",
+    "ja": "コレクションに追加"
+  },
+  "加载中…": {
+    "en": "Loading…",
+    "ja": "読み込み中…"
+  },
+  "加载失败": {
+    "en": "Failed",
+    "ja": "読み込み失敗"
+  },
+  "勾选后只看对应获奖店 · 多选取并集 · 不勾则不限制": {
+    "en": "Tick to see only award winners · several ticks are a union · none means no restriction",
+    "ja": "チェックした受賞店のみ表示 ・ 複数選択は和集合 ・ 未選択なら制限なし"
+  },
+  "北海道·东北": {
+    "en": "Hokkaido & Tohoku",
+    "ja": "北海道・東北"
+  },
+  "南亚·东南亚料理": {
+    "en": "South & Southeast Asian",
+    "ja": "南・東南アジア料理"
+  },
+  "占位": {
+    "en": "placeholder",
+    "ja": "プレースホルダー"
+  },
+  "原文": {
+    "en": "Japanese original",
+    "ja": "原文"
+  },
+  "原文与译文": {
+    "en": "Original and translation",
+    "ja": "原文と翻訳"
+  },
+  "原文加载失败": {
+    "en": "Could not load the Japanese original",
+    "ja": "原文を読み込めませんでした"
+  },
+  "去掉地点约束": {
+    "en": "Clear the place filter",
+    "ja": "エリア指定を解除"
+  },
+  "取消": {
+    "en": "Cancel",
+    "ja": "キャンセル"
+  },
+  "取消搜索": {
+    "en": "Cancel search",
+    "ja": "検索をやめる"
+  },
+  "取消收藏": {
+    "en": "Remove from Saved",
+    "ja": "お気に入りから外す"
+  },
+  "取消政策": {
+    "en": "Cancellation",
+    "ja": "キャンセル"
+  },
+  "只描述坐标来源，不代表谷歌认证餐厅品质": {
+    "en": "Describes where the coordinates came from — not a Google endorsement of the restaurant",
+    "ja": "座標の出どころを示すだけで、Google による店の評価ではありません"
+  },
+  "只看可网订": {
+    "en": "Bookable only",
+    "ja": "ネット予約可のみ"
+  },
+  "只看可网订的店": {
+    "en": "Online booking only",
+    "ja": "ネット予約可のみ"
+  },
+  "只看已收藏": {
+    "en": "Saved only",
+    "ja": "お気に入りのみ"
+  },
+  "只看谷歌地图校准过坐标的餐厅": {
+    "en": "Google-verified coordinates only",
+    "ja": "Google 補正済みの座標のみ"
+  },
+  "只看这 {n} 家": {
+    "en": "Only these {n}",
+    "ja": "この{n}件のみ"
+  },
+  "只看这个收藏夹": {
+    "en": "Show only this collection",
+    "ja": "このコレクションだけ表示"
+  },
+  "只看这个菜系": {
+    "en": "Show only this cuisine",
+    "ja": "このジャンルだけ表示"
+  },
+  "只能填一个 emoji": {
+    "en": "Enter exactly one emoji",
+    "ja": "絵文字を 1 つだけ入力してください"
+  },
+  "可以预约": {
+    "en": "Reservations accepted",
+    "ja": "予約可"
+  },
+  "台湾料理": {
+    "en": "Taiwanese",
+    "ja": "台湾料理"
+  },
+  "名称": {
+    "en": "Name",
+    "ja": "名前"
+  },
+  "咖啡·三明治": {
+    "en": "Coffee & sandwiches",
+    "ja": "カフェ・サンドイッチ"
+  },
+  "回到规划": {
+    "en": "Back to the plan",
+    "ja": "計画に戻る"
+  },
+  "图标": {
+    "en": "Icon",
+    "ja": "アイコン"
+  },
+  "在 Google Maps 打开": {
+    "en": "Open in Google Maps",
+    "ja": "Google マップで開く"
+  },
+  "在 Tabelog 打开": {
+    "en": "Open on Tabelog",
+    "ja": "Tabelog で開く"
+  },
+  "在Google Map 打开": {
+    "en": "Open in Google Maps",
+    "ja": "Google マップで開く"
+  },
+  "在支持的浏览器里可以把本站安装为应用：桌面 Chrome 在地址栏右侧点安装；iOS Safari 用「分享 → 添加到主屏幕」。": {
+    "en": "Supported browsers can install this site as an app: on desktop Chrome use the install icon in the address bar; on iOS Safari use Share → Add to Home Screen.",
+    "ja": "対応ブラウザではアプリとして追加できます。デスクトップ Chrome はアドレスバーのインストール、iOS Safari は「共有 → ホーム画面に追加」。"
+  },
+  "在结果中上下移动": {
+    "en": "Move through the results",
+    "ja": "結果内を移動"
+  },
+  "在结果里点心形，把餐厅加入收藏": {
+    "en": "Tap the heart in the results to save a restaurant",
+    "ja": "検索結果のハートを押すと保存できます"
+  },
+  "在默认收藏夹": {
+    "en": "In the default collection",
+    "ja": "デフォルトのコレクションにあります"
+  },
+  "地区": {
+    "en": "Region",
+    "ja": "地域"
+  },
+  "地区：{name}": {
+    "en": "Region: {name}",
+    "ja": "地域：{name}"
+  },
+  "地图": {
+    "en": "Map",
+    "ja": "地図"
+  },
+  "地图上的地点标记": {
+    "en": "Your markers on the map",
+    "ja": "地図上のあなたのピン"
+  },
+  "地图图例": {
+    "en": "Map legend",
+    "ja": "地図の凡例"
+  },
+  "地图图层": {
+    "en": "Map layers",
+    "ja": "地図レイヤー"
+  },
+  "地图标记": {
+    "en": "Map markers",
+    "ja": "地図のマーカー"
+  },
+  "地点": {
+    "en": "Places",
+    "ja": "エリア"
+  },
+  "地点搜索失败": {
+    "en": "Place search failed",
+    "ja": "エリア検索に失敗しました"
+  },
+  "地点搜索超时": {
+    "en": "Place search timed out",
+    "ja": "エリア検索がタイムアウトしました"
+  },
+  "地铁 / 私铁 / 城市轨道": {
+    "en": "Subway / private rail / urban rail",
+    "ja": "地下鉄 / 私鉄 / 都市鉄道"
+  },
+  "备份与迁移": {
+    "en": "Backup & transfer",
+    "ja": "バックアップと移行"
+  },
+  "复制": {
+    "en": "Copy",
+    "ja": "コピー"
+  },
+  "复制坐标": {
+    "en": "Copy coordinates",
+    "ja": "座標をコピー"
+  },
+  "复制失败时可以手动选中上面的链接。": {
+    "en": "If copying fails, select the link above manually.",
+    "ja": "コピーできない場合は上のリンクを選択してください。"
+  },
+  "复制失败，请手动复制": {
+    "en": "Copy failed — please copy manually",
+    "ja": "コピーできませんでした。手動でコピーしてください"
+  },
+  "复制清单文本": {
+    "en": "Copy list as text",
+    "ja": "リストをテキストでコピー"
+  },
+  "复制链接": {
+    "en": "Copy link",
+    "ja": "リンクをコピー"
+  },
+  "多选": {
+    "en": "Select",
+    "ja": "複数選択"
+  },
+  "天妇罗·炸物": {
+    "en": "Tempura & fried",
+    "ja": "天ぷら・揚げ物"
+  },
+  "奖项": {
+    "en": "Awards",
+    "ja": "受賞"
+  },
+  "奖项优先": {
+    "en": "Awards first",
+    "ja": "受賞店を優先"
+  },
+  "安装到主屏幕": {
+    "en": "Add to home screen",
+    "ja": "ホーム画面に追加"
+  },
+  "定位到我的位置": {
+    "en": "Locate me",
+    "ja": "現在地"
+  },
+  "定位权限被拒绝，可在浏览器设置中开启": {
+    "en": "Location permission denied — you can turn it on in your browser settings.",
+    "ja": "位置情報が拒否されました。ブラウザの設定でオンにできます。"
+  },
+  "定位超时，请再试一次": {
+    "en": "Location timed out — try again.",
+    "ja": "現在地の取得がタイムアウトしました。もう一度お試しください。"
+  },
+  "导入 favorites.json": {
+    "en": "Import favorites.json",
+    "ja": "favorites.json を読み込む"
+  },
+  "导入会与现有数据按并集合并，不会覆盖已有条目；演示版只写入本机内存。": {
+    "en": "Import merges as a union and never overwrites existing entries. In this demo it only writes to memory.",
+    "ja": "読み込みは和集合で統合し、既存の項目を上書きしません。デモではメモリにのみ書き込みます。"
+  },
+  "导入失败，已回滚": {
+    "en": "Import failed — nothing was changed",
+    "ja": "読み込みに失敗しました。変更は取り消されました"
+  },
+  "导入按并集合并，同 ID 的条目保留当前版本；不提供导入撤销。": {
+    "en": "Import merges as a union; an entry whose id you already have keeps the copy on this device. There is no undo for an import.",
+    "ja": "読み込みは和集合で統合します。同じ ID の項目はこの端末の内容が保持されます。読み込みの取り消しはできません。"
+  },
+  "导出 favorites.json": {
+    "en": "Export favorites.json",
+    "ja": "favorites.json を書き出す"
+  },
+  "寿司·海鲜": {
+    "en": "Sushi & seafood",
+    "ja": "寿司・海鮮"
+  },
+  "将加入 {n} 家餐厅": {
+    "en": "{n} restaurants will be added",
+    "ja": "{n}件を追加します"
+  },
+  "小吃/面类": {
+    "en": "Snacks & noodles",
+    "ja": "軽食・麺類"
+  },
+  "尚未加入任何收藏夹": {
+    "en": "Not in a collection yet",
+    "ja": "コレクションには未登録です"
+  },
+  "居酒屋·酒吧": {
+    "en": "Izakaya & bars",
+    "ja": "居酒屋・バー"
+  },
+  "展开": {
+    "en": "Expand",
+    "ja": "開く"
+  },
+  "展开左栏": {
+    "en": "Expand the left column",
+    "ja": "左カラムを開く"
+  },
+  "展开或收起 {name}": {
+    "en": "Expand or collapse {name}",
+    "ja": "{name}を開く / 閉じる"
+  },
+  "展开或收起菜系": {
+    "en": "Expand or collapse cuisines",
+    "ja": "料理カテゴリを開く / 閉じる"
+  },
+  "展开面板": {
+    "en": "Expand panel",
+    "ja": "パネルを広げる"
+  },
+  "已从收藏夹移除": {
+    "en": "Removed from the collection",
+    "ja": "コレクションから削除しました"
+  },
+  "已切到全部地区，按距离排序": {
+    "en": "Switched to all regions, sorted by distance",
+    "ja": "全エリアに切り替え、距離順に並べ替えました"
+  },
+  "已取消收藏": {
+    "en": "Removed from Saved",
+    "ja": "お気に入りから外しました"
+  },
+  "已取消收藏 {n} 家": {
+    "en": "{n} removed from Saved",
+    "ja": "{n}件の保存を解除しました"
+  },
+  "已同步 · 刚刚": {
+    "en": "Synced · just now",
+    "ja": "同期済み · たった今"
+  },
+  "已同步到你的 Google 账号": {
+    "en": "Synced to your Google account",
+    "ja": "Google アカウントに同期済み"
+  },
+  "已启用：隐藏非日本料理": {
+    "en": "On: hide non-Japanese cuisine",
+    "ja": "有効：日本料理以外を非表示"
+  },
+  "已复制 {n} 家到剪贴板": {
+    "en": "{n} places copied to the clipboard",
+    "ja": "{n}件をクリップボードにコピーしました"
+  },
+  "已复制地址": {
+    "en": "Address copied",
+    "ja": "住所をコピーしました"
+  },
+  "已弃用": {
+    "en": "Hidden",
+    "ja": "除外済み"
+  },
+  "已弃用 1 家，这家餐厅不会再显示在筛选结果和地图上": {
+    "en": "Hidden — it will no longer appear in results or on the map",
+    "ja": "除外しました — 検索結果と地図に表示されなくなります"
+  },
+  "已弃用 {n} 家": {
+    "en": "{n} hidden",
+    "ja": "{n}件を除外しました"
+  },
+  "已弃用 {n} 家 · 跳过 {k} 家": {
+    "en": "{n} hidden · {k} skipped",
+    "ja": "{n}件を除外 · {k}件はスキップ"
+  },
+  "已弃用 {n} 家，这些餐厅不会再显示在筛选结果和地图上": {
+    "en": "{n} hidden — they will no longer appear in results or on the map",
+    "ja": "{n}件を除外しました — 検索結果と地図に表示されなくなります"
+  },
+  "已弃用：不出现在结果里": {
+    "en": "Hidden — it stays out of the results",
+    "ja": "除外中 — 結果には表示されません"
+  },
+  "已恢复显示": {
+    "en": "Shown again",
+    "ja": "再表示しました"
+  },
+  "已收藏": {
+    "en": "Saved",
+    "ja": "お気に入り済"
+  },
+  "已收藏 {f} · 弃用 {b} · 书签 {p} · 收藏夹 {l}": {
+    "en": "Saved {f} · Hidden {b} · Pins {p} · Collections {l}",
+    "ja": "お気に入り {f} · 除外 {b} · ピン {p} · コレクション {l}"
+  },
+  "已收藏 {n} 家": {
+    "en": "{n} saved",
+    "ja": "{n}件を保存しました"
+  },
+  "已离线 · 当前缓存可用": {
+    "en": "Offline · cached data still works",
+    "ja": "オフライン · キャッシュは利用できます"
+  },
+  "已经安装到主屏幕": {
+    "en": "Already installed on your home screen",
+    "ja": "すでにホーム画面に追加されています"
+  },
+  "已经有同名的收藏夹": {
+    "en": "A collection with this name already exists",
+    "ja": "同じ名前のコレクションがあります"
+  },
+  "已选 {n} 家": {
+    "en": "{n} selected",
+    "ja": "{n}件選択中"
+  },
+  "已选择 {n} 个菜系": {
+    "en": "{n} cuisines selected",
+    "ja": "{n}件の料理を選択中"
+  },
+  "已隐藏 {n}": {
+    "en": "{n} hidden",
+    "ja": "非表示 {n}"
+  },
+  "市内": {
+    "en": "In city",
+    "ja": "市内"
+  },
+  "帮助": {
+    "en": "Help",
+    "ja": "ヘルプ"
+  },
+  "帮助与应用": {
+    "en": "Help & app",
+    "ja": "ヘルプとアプリ"
+  },
+  "常用": {
+    "en": "Frequently used",
+    "ja": "よく使う"
+  },
+  "底图暂不可用": {
+    "en": "Basemap unavailable",
+    "ja": "地図を読み込めません"
+  },
+  "座位": {
+    "en": "Seats",
+    "ja": "座席"
+  },
+  "弃用": {
+    "en": "Hidden",
+    "ja": "除外"
+  },
+  "弃用当前餐厅": {
+    "en": "Hide the current restaurant",
+    "ja": "表示中の店を除外"
+  },
+  "弃用这间店": {
+    "en": "Hide this restaurant",
+    "ja": "この店を除外"
+  },
+  "当前已弃用 {n} 家": {
+    "en": "{n} places are on the Hidden list",
+    "ja": "現在 {n}件を除外中"
+  },
+  "御好烧·铁板烧": {
+    "en": "Okonomiyaki & teppan",
+    "ja": "お好み焼き・鉄板焼き"
+  },
+  "快捷键": {
+    "en": "Keyboard shortcuts",
+    "ja": "キーボードショートカット"
+  },
+  "恢复显示": {
+    "en": "Unhide",
+    "ja": "除外を解除"
+  },
+  "恢复显示这个景点": {
+    "en": "Show this landmark again",
+    "ja": "この名所を再表示"
+  },
+  "恢复显示这间店": {
+    "en": "Unhide this restaurant",
+    "ja": "この店の除外を解除"
+  },
+  "意餐·披萨·意面": {
+    "en": "Italian",
+    "ja": "イタリアン"
+  },
+  "我的位置": {
+    "en": "My location",
+    "ja": "現在地"
+  },
+  "打开本页帮助": {
+    "en": "Open this help",
+    "ja": "このヘルプを開く"
+  },
+  "批量弃用": {
+    "en": "Hide selected",
+    "ja": "選択した店を除外"
+  },
+  "批量收藏": {
+    "en": "Save selected",
+    "ja": "選択した店をお気に入り"
+  },
+  "拉美料理": {
+    "en": "Latin American",
+    "ja": "中南米料理"
+  },
+  "拉面·沾面": {
+    "en": "Ramen & tsukemen",
+    "ja": "ラーメン・つけ麺"
+  },
+  "拖动调整面板高度": {
+    "en": "Drag to resize the panel",
+    "ja": "ドラッグしてパネルの高さを調整"
+  },
+  "按城市": {
+    "en": "By city",
+    "ja": "市区ごと"
+  },
+  "按店名": {
+    "en": "By name",
+    "ja": "店名順"
+  },
+  "按收藏夹": {
+    "en": "By collection",
+    "ja": "コレクションごと"
+  },
+  "按晚餐价位上限归档；没有晚餐价位时用午餐，两者都没有则归入价格未知。": {
+    "en": "Tiers come from the upper end of the dinner budget; lunch is used when dinner is missing, and rows with neither land in “price unknown”.",
+    "ja": "ディナー予算の上限で区分します。ディナーがない場合はランチを使い、どちらもない店は「価格不明」になります。"
+  },
+  "排序": {
+    "en": "Sort",
+    "ja": "並べ替え"
+  },
+  "排序方式": {
+    "en": "Sort order",
+    "ja": "並び順"
+  },
+  "探索日本的美食地图": {
+    "en": "Explore Japan by restaurant",
+    "ja": "日本のグルメ地図"
+  },
+  "提前预订": {
+    "en": "Advance booking",
+    "ja": "事前予約"
+  },
+  "搜索": {
+    "en": "Search",
+    "ja": "検索"
+  },
+  "搜索地区": {
+    "en": "Search regions",
+    "ja": "地域を検索"
+  },
+  "搜索建议": {
+    "en": "Search suggestions",
+    "ja": "検索候補"
+  },
+  "搜索餐厅 / 景点 / 地址 …": {
+    "en": "Search restaurants / landmarks / addresses…",
+    "ja": "店名・名所・住所を検索…"
+  },
+  "撤销": {
+    "en": "Undo",
+    "ja": "元に戻す"
+  },
+  "收录范围": {
+    "en": "Coverage",
+    "ja": "収録範囲"
+  },
+  "收藏": {
+    "en": "Saved",
+    "ja": "お気に入り"
+  },
+  "收藏 {n} 家 · 不受筛选影响": {
+    "en": "{n} saved · filters do not apply",
+    "ja": "お気に入り {n}件 · 絞り込みの影響を受けません"
+  },
+  "收藏列表": {
+    "en": "Saved list",
+    "ja": "お気に入りリスト"
+  },
+  "收藏只保存在这台设备上": {
+    "en": "Saved restaurants live only on this device",
+    "ja": "お気に入りはこの端末にのみ保存されています"
+  },
+  "收藏夹": {
+    "en": "Collections",
+    "ja": "コレクション"
+  },
+  "收藏夹操作": {
+    "en": "Collection actions",
+    "ja": "コレクションの操作"
+  },
+  "收藏当前餐厅": {
+    "en": "Save the current restaurant",
+    "ja": "表示中の店を保存"
+  },
+  "收起": {
+    "en": "Collapse",
+    "ja": "閉じる"
+  },
+  "收起到地图": {
+    "en": "Collapse to the map",
+    "ja": "地図に戻す"
+  },
+  "收起左栏": {
+    "en": "Collapse the left column",
+    "ja": "左カラムを閉じる"
+  },
+  "收起面板": {
+    "en": "Shrink panel",
+    "ja": "パネルを縮める"
+  },
+  "放大": {
+    "en": "Zoom in",
+    "ja": "拡大"
+  },
+  "放宽或重置筛选条件后再试": {
+    "en": "Loosen or reset the filters and try again",
+    "ja": "条件をゆるめるかリセットしてお試しください"
+  },
+  "数据已更新，无法撤销此操作": {
+    "en": "Data changed; this action can no longer be undone.",
+    "ja": "データが更新されたため、この操作は元に戻せません"
+  },
+  "数据托管于 Cloudflare，可导出到本地": {
+    "en": "Stored on Cloudflare; exportable at any time",
+    "ja": "データは Cloudflare に保存、いつでも書き出し可能"
+  },
+  "数据来自 Tabelog 公开页面，仅作个人旅行参考。": {
+    "en": "The data comes from Tabelog’s public pages and is a personal travel reference, nothing more.",
+    "ja": "データは食べログの公開ページに基づく個人の旅行用メモです。"
+  },
+  "数据采集于": {
+    "en": "Data collected",
+    "ja": "データ取得日"
+  },
+  "文件含有": {
+    "en": "In the file",
+    "ja": "ファイル内"
+  },
+  "文件超过 2 MiB，已拒绝整份": {
+    "en": "Over 2 MiB — the whole file was refused",
+    "ja": "2 MiB を超えるためファイル全体を拒否しました"
+  },
+  "料理 emoji": {
+    "en": "Cuisine emoji",
+    "ja": "ジャンルの絵文字"
+  },
+  "新增": {
+    "en": "New",
+    "ja": "追加"
+  },
+  "新宿": {
+    "en": "Shinjuku",
+    "ja": "新宿"
+  },
+  "新干线 / JR 特急": {
+    "en": "Shinkansen / JR limited express",
+    "ja": "新幹線 / JR特急"
+  },
+  "新建书签": {
+    "en": "New pin",
+    "ja": "新しいピン"
+  },
+  "新建子收藏夹": {
+    "en": "New collection",
+    "ja": "新しいコレクション"
+  },
+  "新建收藏夹": {
+    "en": "New collection",
+    "ja": "新しいコレクション"
+  },
+  "新建景点": {
+    "en": "New landmark",
+    "ja": "新しい名所"
+  },
+  "无 Tabelog 预订入口": {
+    "en": "No Tabelog booking",
+    "ja": "Tabelog予約なし"
+  },
+  "无法获取位置：定位权限被拒绝": {
+    "en": "Location unavailable: permission denied",
+    "ja": "現在地を取得できません：位置情報が拒否されました"
+  },
+  "无法获取当前位置 · 请检查浏览器的定位权限": {
+    "en": "Location unavailable · check the browser’s location permission",
+    "ja": "現在地を取得できません · 位置情報の許可を確認してください"
+  },
+  "无法读取这个文件": {
+    "en": "This file could not be read",
+    "ja": "このファイルを読み込めません"
+  },
+  "无法预订": {
+    "en": "No reservations",
+    "ja": "予約不可"
+  },
+  "日式咖喱": {
+    "en": "Japanese curry",
+    "ja": "カレー"
+  },
+  "日文原文": {
+    "en": "Japanese original",
+    "ja": "日本語の原文"
+  },
+  "日本料理·乡土": {
+    "en": "Japanese & regional",
+    "ja": "日本料理・郷土料理"
+  },
+  "日本桥": {
+    "en": "Nihonbashi",
+    "ja": "日本橋"
+  },
+  "早餐/咖啡/甜品": {
+    "en": "Breakfast, coffee & dessert",
+    "ja": "朝食・カフェ・スイーツ"
+  },
+  "显示全部收藏": {
+    "en": "Show all saved",
+    "ja": "お気に入りをすべて表示"
+  },
+  "显示全部结果": {
+    "en": "Show all results",
+    "ja": "すべての結果を表示"
+  },
+  "显示这个菜系": {
+    "en": "Show this cuisine",
+    "ja": "このジャンルを表示"
+  },
+  "晚餐价格": {
+    "en": "Dinner price",
+    "ja": "ディナー価格"
+  },
+  "景点": {
+    "en": "Landmarks",
+    "ja": "名所"
+  },
+  "暂无可用操作": {
+    "en": "No actions available",
+    "ja": "利用できる操作はありません"
+  },
+  "更多操作": {
+    "en": "More actions",
+    "ja": "その他の操作"
+  },
+  "更多表情": {
+    "en": "More emoji",
+    "ja": "絵文字をもっと見る"
+  },
+  "最低评分": {
+    "en": "Minimum rating",
+    "ja": "最低評価"
+  },
+  "最近补充": {
+    "en": "Latest addition",
+    "ja": "最新の追加"
+  },
+  "有 Tabelog 网上预订入口，不表示有余位": {
+    "en": "Has a Tabelog online booking link — not a seat check",
+    "ja": "食べログのネット予約導線がある店。空席の保証ではありません"
+  },
+  "有 Tabelog 预订入口": {
+    "en": "Tabelog booking available",
+    "ja": "Tabelog予約あり"
+  },
+  "有新版本": {
+    "en": "A new version is available",
+    "ja": "新しいバージョンがあります"
+  },
+  "未命名地点": {
+    "en": "Untitled place",
+    "ja": "名称未設定の地点"
+  },
+  "未命名收藏夹": {
+    "en": "Untitled collection",
+    "ja": "名称未設定のコレクション"
+  },
+  "未提供": {
+    "en": "Not provided",
+    "ja": "情報なし"
+  },
+  "未提供原文": {
+    "en": "No Japanese original provided",
+    "ja": "原文は提供されていません"
+  },
+  "未提供译文": {
+    "en": "No translation provided",
+    "ja": "翻訳は提供されていません"
+  },
+  "未登录，仅保存在本设备": {
+    "en": "Signed out — stored on this device only",
+    "ja": "未ログイン — この端末にのみ保存"
+  },
+  "未知": {
+    "en": "Unknown",
+    "ja": "不明"
+  },
+  "本地状态": {
+    "en": "On this device",
+    "ja": "この端末の状態"
+  },
+  "机器翻译": {
+    "en": "Machine translation",
+    "ja": "機械翻訳"
+  },
+  "查看 {n} 家结果": {
+    "en": "Show {n} results",
+    "ja": "{n}件の結果を見る"
+  },
+  "查看全部照片": {
+    "en": "See all photos",
+    "ja": "すべての写真を見る"
+  },
+  "查看全部（{n}）": {
+    "en": "See all ({n})",
+    "ja": "すべて表示（{n}）"
+  },
+  "查看原文": {
+    "en": "View source page",
+    "ja": "元のページを見る"
+  },
+  "查看照片 {i} / {n}": {
+    "en": "View photo {i} of {n}",
+    "ja": "写真 {i}/{n} を表示"
+  },
+  "标记与列表仍可用": {
+    "en": "Markers and lists still work",
+    "ja": "マーカーとリストは利用できます"
+  },
+  "样例数据": {
+    "en": "Sample data",
+    "ja": "サンプルデータ"
+  },
+  "格式不正确，已拒绝整份": {
+    "en": "Wrong format — the whole file was refused",
+    "ja": "形式が正しくないためファイル全体を拒否しました"
+  },
+  "模块 {name} 尚未实现": {
+    "en": "Module {name} not implemented yet",
+    "ja": "モジュール {name} は未実装"
+  },
+  "正在只看可网订 · {n} 家": {
+    "en": "Online booking only · {n}",
+    "ja": "ネット予約可のみ · {n}件"
+  },
+  "正在定位…": {
+    "en": "Locating…",
+    "ja": "現在地を取得中…"
+  },
+  "正在搜索地点…": {
+    "en": "Searching places…",
+    "ja": "エリアを検索中…"
+  },
+  "正在更新结果…": {
+    "en": "Updating results…",
+    "ja": "結果を更新中…"
+  },
+  "正在载入…": {
+    "en": "Loading…",
+    "ja": "読み込み中…"
+  },
+  "正在载入原文…": {
+    "en": "Loading the Japanese original…",
+    "ja": "原文を読み込み中…"
+  },
+  "正餐": {
+    "en": "Meals",
+    "ja": "食事"
+  },
+  "步行 {n} 分": {
+    "en": "{n} min walk",
+    "ja": "徒歩{n}分"
+  },
+  "没有找到相关结果": {
+    "en": "No matches",
+    "ja": "該当なし"
+  },
+  "没有符合条件的餐厅": {
+    "en": "No restaurants match these filters",
+    "ja": "条件に一致する店舗がありません"
+  },
+  "法餐": {
+    "en": "French",
+    "ja": "フレンチ"
+  },
+  "浅草": {
+    "en": "Asakusa",
+    "ja": "浅草"
+  },
+  "清空": {
+    "en": "Clear",
+    "ja": "クリア"
+  },
+  "清空选择": {
+    "en": "Clear selection",
+    "ja": "選択を解除"
+  },
+  "演示版不会真的触发安装对话框。": {
+    "en": "The demo does not trigger a real install dialog.",
+    "ja": "デモでは実際のインストール画面は表示されません。"
+  },
+  "烘焙·西点": {
+    "en": "Bakery & pastry",
+    "ja": "パン・洋菓子"
+  },
+  "烤肉·内脏": {
+    "en": "Yakiniku & offal",
+    "ja": "焼肉・ホルモン"
+  },
+  "烤鸡·串烧": {
+    "en": "Yakitori & skewers",
+    "ja": "焼き鳥・串焼き"
+  },
+  "热门": {
+    "en": "Hot",
+    "ja": "人気"
+  },
+  "热门餐厅 2026": {
+    "en": "Hot restaurants 2026",
+    "ja": "人気店 2026"
+  },
+  "照片": {
+    "en": "Photos",
+    "ja": "写真"
+  },
+  "照片 {i} / {n}": {
+    "en": "Photo {i} of {n}",
+    "ja": "写真 {i}/{n}"
+  },
+  "照片暂不可用": {
+    "en": "Photo unavailable",
+    "ja": "写真を読み込めません"
+  },
+  "版本": {
+    "en": "Version",
+    "ja": "バージョン"
+  },
+  "猎奇·珍味": {
+    "en": "Rare & delicacies",
+    "ja": "珍味"
+  },
+  "甜品·冰品": {
+    "en": "Desserts & ice",
+    "ja": "スイーツ・かき氷"
+  },
+  "登录与数据": {
+    "en": "Sign in & data",
+    "ja": "ログインとデータ"
+  },
+  "登录以同步": {
+    "en": "Sign in to sync",
+    "ja": "ログインして同期"
+  },
+  "百名店": {
+    "en": "Hyakumeiten",
+    "ja": "百名店"
+  },
+  "盖饭·亲子丼": {
+    "en": "Rice bowls",
+    "ja": "丼もの"
+  },
+  "研究后排除的餐厅不在结果和地图显示": {
+    "en": "Places you researched and rejected stay out of the results and the map",
+    "ja": "検討のうえ除外した店は結果にも地図にも出ません"
+  },
+  "确认导入": {
+    "en": "Import",
+    "ja": "読み込む"
+  },
+  "确认退出": {
+    "en": "Confirm sign-out",
+    "ja": "ログアウトの確認"
+  },
+  "移除筛选：{name}": {
+    "en": "Remove filter: {name}",
+    "ja": "絞り込みを解除：{name}"
+  },
+  "稍后": {
+    "en": "Later",
+    "ja": "後で"
+  },
+  "符合筛选 {m} 家": {
+    "en": "{m} match the filters",
+    "ja": "条件に一致 {m}件"
+  },
+  "符合筛选 {m} 家 · 屏幕内 {v} 家": {
+    "en": "{m} match the filters · {v} on screen",
+    "ja": "条件に一致 {m}件 · 画面内 {v}件"
+  },
+  "符合筛选的餐厅": {
+    "en": "Matching restaurants",
+    "ja": "条件に合う店"
+  },
+  "第 {k} / {n} 家": {
+    "en": "{k} of {n}",
+    "ja": "{k} / {n} 件"
+  },
+  "筑地": {
+    "en": "Tsukiji",
+    "ja": "築地"
+  },
+  "筛选": {
+    "en": "Filters",
+    "ja": "絞り込み"
+  },
+  "筛选后 {m} 家餐厅符合标准 · 其中屏幕内 {mv} 家 / {total}": {
+    "en": "{m} restaurants match · {mv} on screen / {total}",
+    "ja": "{m}件が条件に一致 ・ 画面内 {mv}件 / {total}"
+  },
+  "筛选条件": {
+    "en": "Filters",
+    "ja": "絞り込み"
+  },
+  "管理收藏": {
+    "en": "Manage saved",
+    "ja": "お気に入りを管理"
+  },
+  "管理收藏夹": {
+    "en": "Manage collections",
+    "ja": "コレクションを管理"
+  },
+  "类型": {
+    "en": "Type",
+    "ja": "種類"
+  },
+  "系统分享": {
+    "en": "Share via system",
+    "ja": "端末の共有メニュー"
+  },
+  "结果": {
+    "en": "Results",
+    "ja": "結果"
+  },
+  "结果与筛选": {
+    "en": "Results and filters",
+    "ja": "結果と絞り込み"
+  },
+  "结果列表": {
+    "en": "Result list",
+    "ja": "検索結果リスト"
+  },
+  "给这个地点起个名字": {
+    "en": "Name this place",
+    "ja": "この地点の名前"
+  },
+  "编辑书签": {
+    "en": "Edit pin",
+    "ja": "ピンを編集"
+  },
+  "缩小": {
+    "en": "Zoom out",
+    "ja": "縮小"
+  },
+  "网订入口 ≠ 余位，请到 Tabelog 确认": {
+    "en": "A booking link is not availability — confirm on Tabelog.",
+    "ja": "ネット予約の有無は空席を意味しません。Tabelog でご確認ください。"
+  },
+  "美式料理·汉堡": {
+    "en": "American & burgers",
+    "ja": "アメリカン・ハンバーガー"
+  },
+  "翻译": {
+    "en": "Translate",
+    "ja": "翻訳"
+  },
+  "翻译失败": {
+    "en": "Translation failed",
+    "ja": "翻訳できませんでした"
+  },
+  "翻译这段日文": {
+    "en": "Translate this Japanese text",
+    "ja": "この日本語を翻訳"
+  },
+  "聚焦搜索": {
+    "en": "Focus search",
+    "ja": "検索にフォーカス"
+  },
+  "能否预订": {
+    "en": "Booking policy",
+    "ja": "予約の可否"
+  },
+  "获奖": {
+    "en": "Awards",
+    "ja": "受賞"
+  },
+  "获奖：{n} 种": {
+    "en": "Awards: {n}",
+    "ja": "受賞：{n}種"
+  },
+  "菜系": {
+    "en": "Cuisines",
+    "ja": "ジャンル"
+  },
+  "菜系：{n} 类": {
+    "en": "Cuisine: {n}",
+    "ja": "料理：{n}種"
+  },
+  "蓝色圆环是当前选中的餐厅；蓝色圆点是聚合，数字为其中的餐厅数；景点用自身 emoji，书签用你选择的 emoji。": {
+    "en": "The blue ring marks the selected restaurant; a blue disc is a cluster and its number is how many restaurants it holds. Landmarks use their own emoji, pins use the one you pick.",
+    "ja": "青いリングは選択中の店、青い丸はクラスタでその数字は含まれる店数です。名所は固有の絵文字、ピンは選んだ絵文字で表示されます。"
+  },
+  "要导入哪些内容": {
+    "en": "What to import",
+    "ja": "読み込む項目"
+  },
+  "设置": {
+    "en": "Settings",
+    "ja": "設定"
+  },
+  "评分": {
+    "en": "Rating",
+    "ja": "評価"
+  },
+  "评分 ≥ {n}": {
+    "en": "Rating ≥ {n}",
+    "ja": "評価 {n}以上"
+  },
+  "评分从高到低": {
+    "en": "Rating, high to low",
+    "ja": "評価が高い順"
+  },
+  "评分快捷选择": {
+    "en": "Rating shortcuts",
+    "ja": "評価のショートカット"
+  },
+  "评分暂无": {
+    "en": "No rating",
+    "ja": "評価なし"
+  },
+  "评分来自 Tabelog 的公开分数，区间 3.4 – 4.5；没有分数的店不会因为评分条件被排除。": {
+    "en": "Scores come from Tabelog’s public ratings (3.4 – 4.5). Restaurants without a score are never excluded by the rating filter.",
+    "ja": "評価は食べログの公開スコア（3.4〜4.5）です。スコアのない店が評価条件で除外されることはありません。"
+  },
+  "评分说明": {
+    "en": "About the rating",
+    "ja": "評価について"
+  },
+  "译文": {
+    "en": "Translation",
+    "ja": "翻訳"
+  },
+  "详细信息加载失败": {
+    "en": "Could not load the details",
+    "ja": "詳細を読み込めませんでした"
+  },
+  "语言": {
+    "en": "Language",
+    "ja": "言語"
+  },
+  "说明": {
+    "en": "Notes",
+    "ja": "備考"
+  },
+  "请填写收藏夹名称": {
+    "en": "Give the collection a name",
+    "ja": "コレクション名を入力してください"
+  },
+  "账户与数据": {
+    "en": "Account & data",
+    "ja": "アカウントとデータ"
+  },
+  "距离最近": {
+    "en": "Nearest first",
+    "ja": "近い順"
+  },
+  "距离约 {distance} {unit}": {
+    "en": "About {distance} {unit} away",
+    "ja": "約 {distance} {unit}"
+  },
+  "跨设备同步收藏、弃用、书签和子收藏夹": {
+    "en": "Sync Saved, Hidden, Pins and collections across devices",
+    "ja": "お気に入り・除外・ピン・コレクションを端末間で同期"
+  },
+  "跳过": {
+    "en": "Skipped",
+    "ja": "スキップ"
+  },
+  "输入店名、菜系、车站或地点": {
+    "en": "Type a restaurant, cuisine, station or place",
+    "ja": "店名・ジャンル・駅・エリアを入力"
+  },
+  "近畿": {
+    "en": "Kinki",
+    "ja": "近畿"
+  },
+  "返回": {
+    "en": "Back",
+    "ja": "戻る"
+  },
+  "返回上一层": {
+    "en": "Go back one layer",
+    "ja": "一つ前に戻る"
+  },
+  "返回全部结果": {
+    "en": "Show all results",
+    "ja": "すべての結果を表示"
+  },
+  "返回搜索": {
+    "en": "Back to search",
+    "ja": "検索に戻る"
+  },
+  "返回收藏": {
+    "en": "Back to Saved",
+    "ja": "お気に入りに戻る"
+  },
+  "返回结果": {
+    "en": "Back to results",
+    "ja": "検索結果に戻る"
+  },
+  "还没有收藏": {
+    "en": "Nothing saved yet",
+    "ja": "保存した店舗はありません"
+  },
+  "还没有收藏夹": {
+    "en": "No collections yet",
+    "ja": "コレクションはまだありません"
+  },
+  "这个地点": {
+    "en": "This place",
+    "ja": "この地点"
+  },
+  "这会删除云端副本和本机的登录镜像，6 秒内再次点击才会执行。": {
+    "en": "This deletes the cloud copy and this device’s signed-in mirror. Tap again within 6 seconds to run it.",
+    "ja": "クラウドの保存分とこの端末のログイン情報を削除します。6 秒以内にもう一度押すと実行されます。"
+  },
+  "这家店不在当前筛选结果中": {
+    "en": "This restaurant is not in the current results",
+    "ja": "この店は現在の絞り込み結果に含まれていません"
+  },
+  "这家店暂无照片": {
+    "en": "No photos for this restaurant",
+    "ja": "この店の写真はありません"
+  },
+  "这张照片没有本地副本": {
+    "en": "No local copy of this photo",
+    "ja": "この写真のローカル版はありません"
+  },
+  "这是 4.0.0 的界面演示，不连接账号与云端同步。": {
+    "en": "This is the 4.0.0 interface demo; it is not connected to accounts or cloud sync.",
+    "ja": "これは 4.0.0 の UI デモで、アカウントやクラウド同期には接続しません。"
+  },
+  "这次筛选里有 {n} 家因此被挡住": {
+    "en": "{n} places are held back by this",
+    "ja": "この条件で {n}件が非表示になっています"
+  },
+  "退出": {
+    "en": "Sign out",
+    "ja": "ログアウト"
+  },
+  "退出后这台设备上的收藏仍然保留，除非你选择一并清除。": {
+    "en": "Signing out leaves everything saved on this device unless you choose to clear it too.",
+    "ja": "ログアウトしてもこの端末のデータは残ります（一緒に消す場合を除く）。"
+  },
+  "退出并清除本设备数据": {
+    "en": "Sign out and clear this device",
+    "ja": "ログアウトして端末のデータも消す"
+  },
+  "退出，保留本设备数据": {
+    "en": "Sign out, keep local data",
+    "ja": "ログアウト（データは残す）"
+  },
+  "选择表情": {
+    "en": "Choose an emoji",
+    "ja": "絵文字を選ぶ"
+  },
+  "酒吧/居酒屋": {
+    "en": "Bars & izakaya",
+    "ja": "バー・居酒屋"
+  },
+  "重命名收藏夹": {
+    "en": "Rename collection",
+    "ja": "コレクション名を変更"
+  },
+  "重新载入": {
+    "en": "Reload",
+    "ja": "再読み込み"
+  },
+  "重置筛选": {
+    "en": "Reset filters",
+    "ja": "絞り込みをリセット"
+  },
+  "重试": {
+    "en": "Retry",
+    "ja": "再試行"
+  },
+  "金奖": {
+    "en": "Gold",
+    "ja": "金賞"
+  },
+  "铜奖": {
+    "en": "Bronze",
+    "ja": "銅賞"
+  },
+  "银奖": {
+    "en": "Silver",
+    "ja": "銀賞"
+  },
+  "银座": {
+    "en": "Ginza",
+    "ja": "銀座"
+  },
+  "链接": {
+    "en": "Link",
+    "ja": "リンク"
+  },
+  "长途": {
+    "en": "Long distance",
+    "ja": "長距離"
+  },
+  "附近": {
+    "en": "Nearby",
+    "ja": "現在地周辺"
+  },
+  "隐私与数据": {
+    "en": "Privacy & data",
+    "ja": "プライバシーとデータ"
+  },
+  "隐私政策": {
+    "en": "Privacy policy",
+    "ja": "プライバシーポリシー"
+  },
+  "隐藏弃用名单": {
+    "en": "Hide the Hidden list",
+    "ja": "除外リストを隠す"
+  },
+  "隐藏景点": {
+    "en": "Hide landmark",
+    "ja": "名所を非表示"
+  },
+  "隐藏非日本料理": {
+    "en": "Hide non-Japanese cuisine",
+    "ja": "日本料理以外を非表示"
+  },
+  "需要预约": {
+    "en": "Reservation required",
+    "ja": "予約必須"
+  },
+  "非日本料理的十类不在这棵树里，由下方「隐藏非日本料理」控制": {
+    "en": "The ten non-Japanese buckets are not in this tree — the “Hide non-Japanese cuisine” switch below controls them.",
+    "ja": "日本料理以外の10区分はこのツリーに含まれません。下の「日本料理以外を非表示」で切り替えます。"
+  },
+  "面板": {
+    "en": "Panel",
+    "ja": "パネル"
+  },
+  "韩国料理": {
+    "en": "Korean",
+    "ja": "韓国料理"
+  },
+  "预算：{n} 档": {
+    "en": "Budget: {n} tiers",
+    "ja": "予算：{n}区分"
+  },
+  "预约信息": {
+    "en": "Reservations",
+    "ja": "予約情報"
+  },
+  "预约信息未提供": {
+    "en": "Reservation info not provided",
+    "ja": "予約情報なし"
+  },
+  "餐厅": {
+    "en": "Restaurants",
+    "ja": "レストラン"
+  },
+  "餐厅详情": {
+    "en": "Restaurant detail",
+    "ja": "店舗詳細"
+  },
+  "饺子·中餐": {
+    "en": "Chinese",
+    "ja": "中華"
+  },
+  "默认收藏夹": {
+    "en": "Default collection",
+    "ja": "既定のコレクション"
+  }
+}

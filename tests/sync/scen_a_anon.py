@@ -47,9 +47,7 @@ def do_action(page, kind, tag):
         page.evaluate('([la, lo]) => window.__mcHideBuiltin(la, lo)',
                       [BI[tag]['lat'], BI[tag]['lon']])
     elif kind == 'import':
-        page.set_input_files('#ssm-import-file', str(import_file()))
-        page.wait_for_timeout(400)
-        page.click('#imp-modal .imp-confirm')
+        L.do_import(page, import_file())
     page.wait_for_timeout(900)   # > the 300 ms storage-event debounce
 
 

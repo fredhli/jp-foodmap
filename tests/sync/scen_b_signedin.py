@@ -256,8 +256,7 @@ def b7_import(br):
     pages = {'A': a, 'B': b}
     b.evaluate('u => window.__mcTapFav(u)', U[4]); b.wait_for_timeout(PW)
     stamp(tl, 'B favourites #4 and pushes', pages)
-    a.set_input_files('#ssm-import-file', str(imp)); a.wait_for_timeout(500)
-    a.click('#imp-modal .imp-confirm'); a.wait_for_timeout(PW)
+    L.do_import(a, imp); a.wait_for_timeout(PW)
     e = stamp(tl, 'A imports a favorites.json with two more restaurants', pages)
     kv = fav_set(e['kv'])
     r = {'id': 'B7', 'name': 'import in one tab vs. a push from the other',

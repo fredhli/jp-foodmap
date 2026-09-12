@@ -1,0 +1,236 @@
+/* ==========================================================================
+   Japan Foodmap 4.0.0 demo — css/list.css
+   Owner: list module. Scope: #list-root / #list-foot / #toast-root and the
+   .ls-* classes rendered inside them. Every number comes from css/tokens.css;
+   shared components (.btn .chip .badge .toast .checkbox …) come from base.css.
+   Rules: VIS-04 (row composition), VIS-06 (award badges in a list),
+   LIST-01 (photo 0.32 / text 0.30, min-h 96 / 76, independent hot zones),
+   MULTI-01/02 (checkbox rail + bulk bar), FEEDBACK-01 (one undo toast).
+   ========================================================================== */
+
+/* ---- shared paddings for the three roots this module owns --------------- */
+#list-root, #list-foot, #toast-root { --ls-pad: var(--pad-panel-narrow); --ls-actions-w: 96px; }
+html:not([data-mode="narrow"]) #list-root,
+html:not([data-mode="narrow"]) #list-foot,
+html:not([data-mode="narrow"]) #toast-root { --ls-pad: var(--pad-panel-mid); }
+html[data-mode="wide"] #list-root,
+html[data-mode="wide"] #list-foot,
+html[data-mode="wide"] #toast-root { --ls-pad: var(--pad-panel-wide); }
+
+#list-root { display: block; position: relative; padding-bottom: var(--sp-2); }
+/* the off-screen height probe (js/list.js calibrate): same width, same styles,
+   never visible, never in the a11y tree, removed in the same frame */
+.ls-probe {
+  position: absolute; left: 0; top: 0; width: 100%;
+  visibility: hidden; pointer-events: none;
+}
+#list-foot { display: block; }
+#toast-root { display: block; }
+
+/* ---- sticky head: subtitle + tools (sort / multi, or saved management) -- */
+.ls-head {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface);
+  padding: var(--sp-2) var(--ls-pad) var(--sp-3);
+  display: grid; gap: var(--sp-2);
+}
+.ls-sub { margin: 0; }
+.ls-status { margin: 0; color: var(--accent-strong); }
+.ls-status:empty { display: none; }
+.ls-tools { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: nowrap; }
+.ls-tool { flex: none; }
+.ls-sort { flex: 1 1 0; min-width: 0; }
+.ls-sort-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-groupby { flex: 1 1 0; min-width: 92px; }
+.ls-tool-icon { border: 1px solid var(--control-hairline); border-radius: var(--r-button); }
+.ls-tool-icon:hover { background: var(--surface-subtle); border-color: var(--control-border); }
+.ls-multi { padding-inline: var(--sp-3); }
+
+/* ---- the list itself ---------------------------------------------------- */
+.ls-list { display: block; }
+.ls-row {
+  position: relative;
+  background: var(--surface);
+  --ls-bg: var(--surface);
+}
+/* The list is windowed (js/list.js): only the rows around the viewport are in
+   the DOM and two .ls-pad rows carry the rest of the height. A separator that
+   depended on the previous sibling would therefore blink on and off while
+   scrolling, so every row owns its top rule and only the true first row — and
+   a row that follows a group heading, which already draws one — drops it. */
+.ls-list > .ls-row { border-top: 1px solid var(--separator); }
+.ls-list > .ls-row.is-first, .ls-group + .ls-row { border-top: 0; }
+.ls-pad { display: block; }
+.ls-row.is-selected { background: var(--accent-soft); --ls-bg: var(--accent-soft); }
+.ls-row.is-checked { background: var(--accent-soft); --ls-bg: var(--accent-soft); }
+.ls-open { display: block; width: 100%; position: relative; color: var(--ink); }
+.ls-text { display: block; position: relative; min-width: 0; }
+.ls-line { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.ls-name { flex: 1 1 auto; min-width: 0; }
+/* the rating owns a stable right column: a longer name never moves the star,
+   and 4.6 / 4.61 keep the same axis (VIS-04) */
+.ls-rate { flex: none; white-space: nowrap; margin-top: 1px; min-width: 3.4em; justify-content: flex-start; }
+.ls-rate.rating-missing { min-width: 0; }
+.ls-meta { display: block; margin-top: var(--c-list-text-gap); overflow-wrap: anywhere; }
+.ls-sep { padding: 0 6px; color: var(--separator); }
+.ls-awards { margin-top: var(--c-list-before-awards); }
+.ls-hidden-mark {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: var(--c-list-before-awards);
+  padding: 2px 8px; border-radius: 6px; background: #FFF3F4; color: var(--danger); font-weight: 600;
+}
+.ls-hidden-mark .ic { width: 14px; height: 14px; }
+
+/* row actions: two independent hot zones, never overlapping the row body */
+.ls-actions { display: flex; align-items: center; gap: 2px; }
+.ls-row .ls-actions .icon-btn { width: var(--touch-min); height: var(--touch-min); }
+
+/* ---- narrow rows: photo bleeds to the row edge and fades out (LIST-01) -- */
+.ls-row-n .ls-open {
+  padding: var(--c-list-row-pad) 0;
+  min-height: var(--list-min-h-narrow);
+  overflow: hidden;
+}
+.ls-row-n .ls-photo {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: calc(var(--list-photo-ratio) * 100%);
+  overflow: hidden; background: var(--surface-subtle);
+}
+.ls-row-n .ls-photo .ls-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ls-row-n .ls-photo.is-empty { display: grid; place-content: center; }
+.ls-photo-ph { display: inline-flex; opacity: .75; }
+/* The fade runs the full width of the photo box and is complete at its edge; the
+   clean gap to the text start (0.38 - 0.32 of the row) is plain surface, not a
+   tail of gradient. A02 is a photo that fades at its edge, not a photo under a
+   veil, and the text needs air to its left. */
+.ls-fade {
+  position: absolute; inset: 0;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0) 45%, var(--ls-bg) 100%);
+}
+.ls-row-n .ls-text {
+  margin-left: calc(var(--list-content-start) * 100%);
+  padding-right: var(--ls-actions-w);
+}
+/* VIS-04: rating + the two actions share one right-hand rail, so the name keeps a
+   stable left edge and the full remaining width across two lines. */
+.ls-row-n .ls-rail {
+  position: absolute; right: var(--sp-2); top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-1);
+  pointer-events: none;
+}
+.ls-row-n .ls-rail > * { pointer-events: auto; }
+.ls-row-n .ls-rail .ls-rate { padding-right: var(--sp-1); }
+.ls-row-n .ls-actions { display: flex; }
+
+/* ---- mid / wide rows: quiet cuisine-emoji directory (VIS-04, A13) ------- */
+.ls-row-c { display: flex; align-items: center; gap: var(--sp-1); padding-inline: var(--ls-pad); }
+.ls-row-c .ls-open {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  padding: 10px 0; min-height: var(--list-min-h-column);
+}
+.ls-row-c .ls-text { flex: 1 1 auto; }
+.ls-emoji { flex: none; display: inline-flex; margin-top: 2px; }
+.ls-row-c .ls-actions { flex: none; }
+.ls-row-c:hover { background: var(--surface-subtle); }
+.ls-row-c.is-selected:hover { background: var(--accent-soft); }
+.ls-row-c.is-selected::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent);
+}
+
+/* ---- multi-select: checkbox rail slides in (M8), row body only selects -- */
+.ls-row.is-multi { display: flex; align-items: center; }
+.ls-row.is-multi .ls-open { flex: 1 1 auto; min-width: 0; }
+.ls-row-n.is-multi .ls-text { padding-right: var(--sp-3); }
+.ls-check {
+  flex: none; width: var(--touch-min); min-height: var(--touch-min);
+  display: grid; place-items: center; cursor: pointer;
+}
+/* Only on the render that ENTERS multi-select (js/list.js adds .multi-enter for
+   one animation), never on the rebuild that follows each individual tick. */
+.multi-enter .ls-check {
+  animation: lsCheckIn var(--m-micro) var(--e-out) both;
+}
+@keyframes lsCheckIn { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+
+/* ---- group headings (city / collection) --------------------------------- */
+.ls-group {
+  display: flex; align-items: stretch;
+  padding-top: var(--c-list-group-gap); padding-bottom: var(--c-list-group-heading-gap);
+  background: var(--surface);
+}
+.ls-group.is-first { padding-top: var(--sp-2); }
+.ls-group-focus {
+  display: flex; align-items: center; flex: none;
+  padding-right: var(--ls-pad);
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator);
+}
+.ls-group-focus .icon-btn { width: var(--touch-min); height: var(--touch-min); }
+.ls-group-focus .icon-btn[aria-pressed="true"] { background: var(--accent-soft); border-radius: var(--r-compact); }
+/* "只看这个收藏夹" is on — the bar says which one, and how to leave it */
+.ls-focus {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  margin: var(--sp-2) var(--ls-pad) 0; padding: 0 var(--sp-3);
+  min-height: var(--touch-min);
+  border-radius: var(--r-button); background: var(--accent-soft); color: var(--accent-strong);
+}
+.ls-focus > .t-control { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a saved pin / landmark / vanished row: same column shape, quieter meta */
+.ls-row-other .ls-meta { color: var(--ink-secondary); }
+.ls-group-btn {
+  display: flex; align-items: center; gap: var(--sp-2);
+  flex: 1 1 auto; min-width: 0; min-height: var(--touch-min);
+  padding: var(--sp-1) var(--ls-pad);
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator);
+  color: var(--ink);
+}
+.ls-group-btn:hover { background: #EEF3FB; }
+.ls-group-btn .ic { color: var(--ink-secondary); }
+.ls-group-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ls-group-n { flex: none; }
+
+/* ---- cards: empty result, out-of-view (FEEDBACK-02) --------------------- */
+.ls-card {
+  margin: var(--sp-4) var(--ls-pad);
+  padding: var(--sp-4);
+  border-radius: var(--r-button);
+  background: var(--surface-subtle);
+  display: grid; gap: var(--sp-2);
+}
+.ls-card p { margin: 0; }
+.ls-card-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
+.ls-empty { text-align: left; }
+
+/* ---- footer: online-booking shortcut / bulk bar ------------------------- */
+.ls-bookable {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  min-height: 52px; padding: 0 var(--ls-pad);
+}
+.ls-bookable .link-btn { flex: none; gap: 2px; }
+.ls-bulk {
+  display: flex; gap: var(--action-gap);
+  padding: var(--sp-2) var(--ls-pad) calc(var(--sp-2) + var(--safe-bottom));
+}
+.ls-bulk .btn { flex: 1 1 0; min-width: 0; min-height: var(--primary-action-min); padding-inline: var(--sp-2); }
+.ls-bulk .btn:last-child { flex: 0 1 auto; }
+
+/* ---- the single undo toast (FEEDBACK-01) -------------------------------- */
+.ls-toast { flex-wrap: wrap; margin: 0 0 var(--sp-2); }
+#sheet-toast .ls-toast, #col-left-toast .ls-toast, #col-detail-toast .ls-toast { margin-bottom: var(--sp-2); }
+.ls-toast .toast-text { flex: 1 1 120px; }
+.ls-undo { flex: none; gap: 4px; }
+.ls-undo[disabled] { color: #B9C6DA; }
+.ls-undo-note { flex: 1 1 100%; color: #C9D6EA; }
+
+/* ---- font-scale / narrow-width relief ----------------------------------- */
+@media (max-width: 380px) {
+  #list-root, #list-foot { --ls-actions-w: 92px; }
+}
+html[data-fs="130"] .ls-tools { flex-wrap: wrap; }
+html[data-fs="130"] .ls-sort { flex: 1 1 100%; }
+html[data-fs="130"] .ls-bulk { flex-wrap: wrap; }
+html[data-fs="130"] .ls-bulk .btn { flex: 1 1 45%; }
+
+/* the Saved group head's ⋯ (rename / copy / delete a collection) */
+.ls-group-focus { display: inline-flex; gap: 2px; align-items: center; }
