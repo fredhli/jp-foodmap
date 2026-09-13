@@ -55,6 +55,7 @@
   var programDepth = 0, moveRaf = 0, lastMV = -1, lastSig = '', lastMapRectSig = '';
   var lastRenderedIds = null, lastSelected = null, lastFavSig = '', lastLang = '';
 
+  var farScale = null;
   var CLUSTER_S = 32, CLUSTER_M = 40, CLUSTER_L = 44;
   var LONGPRESS_MS = 700;
   var BUBBLE_MIN_MAP_H = 210;         // §6.3 / LAY-04: no name bubble in a short map strip
@@ -201,11 +202,21 @@
     return r.bucket === 'na' ? t('未知') : util.fmtPrice(r.bucket, { short: true });
   }
 
+  // Match Leaflet's 120 CSS-pixel metric scale, including its 1/2/3/5 rounding.
+  function scaleMetres() {
+    var y = map.getSize().y / 2;
+    var metres = map.distance(map.containerPointToLatLng([0, y]), map.containerPointToLatLng([120, y]));
+    var pow = Math.pow(10, Math.floor(Math.log(metres) / Math.LN10));
+    var d = metres / pow;
+    return pow * (d >= 10 ? 10 : d >= 5 ? 5 : d >= 3 ? 3 : d >= 2 ? 2 : 1);
+  }
+  M.scaleMetres = scaleMetres;
+
   function markerHtml(r, selected, fav) {
-    var label = priceLabel(r);
-    return '<div class="mp-mk' + (selected ? ' is-selected' : '') + (fav ? ' is-fav' : '') + '" role="button" aria-label="' +
+    var label = priceLabel(r), far = scaleMetres() >= 500 && !selected;
+    return '<div class="mp-mk' + (far ? ' is-far' : '') + (selected ? ' is-selected' : '') + (fav ? ' is-fav' : '') + '" role="button" aria-label="' +
       util.esc(r.name + ' · ' + label) + '">' +
-      '<span class="mp-dot">' + emoji.img(Data.genreEmoji(r), 22) + '</span>' +
+      '<span class="mp-dot">' + emoji.img(Data.genreEmoji(r), far ? 16 : 22) + '</span>' +
       '<span class="mp-tag price-tag price-' + r.bucket + ' num">' + util.esc(label) + '</span>' +
       '</div>';
   }
@@ -254,11 +265,14 @@
 
   function syncMarkers(s) {
     var ids = renderIds(s);
+    var nextFar = scaleMetres() >= 500;
+    var scaleChanged = nextFar !== farScale;
+    farScale = nextFar;
     var sig = ids.join('|');
     var favSig = Array.from(s.user.fav).sort().join('|');
     var selChanged = s.selected.id !== lastSelected;
     var langChanged = s.lang !== lastLang;
-    if (sig === lastSig && favSig === lastFavSig && !selChanged && !langChanged) return false;
+    if (sig === lastSig && favSig === lastFavSig && !selChanged && !langChanged && !scaleChanged) return false;
 
     var want = {}, i;
     for (i = 0; i < ids.length; i++) want[ids[i]] = 1;
@@ -288,7 +302,7 @@
       var id = ids[i], r = Data.byId(id); if (!r) continue;
       var mk3 = markers[id]; if (!mk3) continue;
       var sel = id === s.selected.id, fav = s.user.fav.has(id);
-      var key = (sel ? 's' : '') + (fav ? 'f' : '') + s.lang;
+      var key = (sel ? 's' : '') + (fav ? 'f' : '') + s.lang + farScale;
       if (mk3._vis === key) continue;
       mk3._vis = key;
       mk3.setIcon(makeIcon(r, sel, fav));
@@ -378,11 +392,13 @@
         continue;
       }
       var p = map.latLngToContainerPoint(mk.getLatLng());
-      obstacles.push({ x: p.x - 14, y: p.y - 14, w: 28, h: 28 });
-      var w = tagWidth(priceLabel(r));
+      var far = farScale && id !== s.selected.id;
+      var radius = far ? 10 : 14;
+      obstacles.push({ x: p.x - radius, y: p.y - radius, w: radius * 2, h: radius * 2 });
+      var w = far ? 6 : tagWidth(priceLabel(r));
       items.push({
-        mk: mk, id: id,
-        rect: { x: p.x - w / 2, y: p.y + 16, w: w, h: 22 },
+        mk: mk, id: id, far: far,
+        rect: { x: p.x - w / 2, y: p.y + (far ? 12 : 16), w: w, h: far ? 6 : 22 },
         pri: (id === s.selected.id ? 0 : (s.user.fav.has(id) ? 1 : 2)),
         award: Data.bestAwardRank(r),
         rating: r.rating === null || r.rating === undefined ? -1 : r.rating
@@ -400,7 +416,7 @@
     var painted = 0, hidden = 0, nudged = 0;
     items.forEach(function (it) {
       var dx = null, k;
-      for (k = 0; k < OFFSETS.length && dx === null; k++) {
+      for (k = 0; k < (it.far ? 1 : OFFSETS.length) && dx === null; k++) {
         var cand = { x: it.rect.x + OFFSETS[k], y: it.rect.y, w: it.rect.w, h: it.rect.h };
         if (fits(cand)) { dx = OFFSETS[k]; placed.push(cand); }
       }
@@ -425,9 +441,9 @@
   }
 
   /* ----- landmarks / pins / temp --------------------------------------- */
-  function plateHtml(cls, char, size, name, ja) {
+  function plateHtml(cls, char, size, name, lang) {
     return '<div class="' + cls + '">' + emoji.img(char, size) +
-      (name ? '<span class="mp-plate"' + (ja ? ' lang="ja"' : '') + '>' + util.esc(name) + '</span>' : '') + '</div>';
+      (name ? '<span class="mp-plate"' + (lang ? ' lang="' + lang + '"' : '') + '>' + util.esc(name) + '</span>' : '') + '</div>';
   }
 
   function renderLandmarks(s) {
@@ -445,7 +461,7 @@
       var cls = 'mp-lm bm-mk-attraction' + (hidden ? ' is-hidden bm-mk-hidden' : '');
       var mk = L.marker([lm.lat, lm.lon], {
         pane: 'mp-landmarks', keyboard: false, title: name, alt: name,
-        icon: L.divIcon({ html: plateHtml(cls, lm.emoji || '📍', 26, name), className: 'mp-mk-wrap', iconSize: [0, 0], iconAnchor: [0, 0] })
+        icon: L.divIcon({ html: plateHtml(cls, lm.emoji || '📍', 26, name, Data.placeNameLanguage(lm, name)), className: 'mp-mk-wrap', iconSize: [0, 0], iconAnchor: [0, 0] })
       }).on('click', function (e) { openPlaceMarker(e, lm, 'landmark'); }).addTo(landmarkLayer);
       plateMarks.push({ mk: mk, lat: lm.lat, lon: lm.lon, pri: 1 });
     });
@@ -461,7 +477,7 @@
       var name = Data.pinName(b, s.lang) || b.name || '';
       var mk = L.marker([b.lat, b.lon], {
         pane: 'mp-pins', keyboard: false, title: name, alt: name,
-        icon: L.divIcon({ html: plateHtml('mp-pin bm-mk-bookmark', b.emoji || '📍', 24, name), className: 'mp-mk-wrap', iconSize: [0, 0], iconAnchor: [0, 0] })
+        icon: L.divIcon({ html: plateHtml('mp-pin bm-mk-bookmark', b.emoji || '📍', 24, name, Data.placeNameLanguage(b, name)), className: 'mp-mk-wrap', iconSize: [0, 0], iconAnchor: [0, 0] })
       }).on('click', function (e) { openPlaceMarker(e, b, 'pin'); }).addTo(pinLayer);
       plateMarks.push({ mk: mk, lat: b.lat, lon: b.lon, pri: 0 });
     });
@@ -541,7 +557,7 @@
   function bubbleHtml(r, s) {
     var photo = bubblePhoto[r.id];
     var media = photo
-      ? '<img class="mp-bubble-photo" src="' + util.esc(photo) + '" alt="" draggable="false" referrerpolicy="no-referrer">'
+      ? '<img class="mp-bubble-photo" src="' + util.esc(PhotoUrls.url(photo, 320)) + '" alt="" draggable="false" referrerpolicy="no-referrer">'
       : '<span class="mp-bubble-photo mp-bubble-photo-fallback">' + emoji.img(Data.genreEmoji(r), 22) + '</span>';
     var rating = (r.rating === null || r.rating === undefined)
       ? '<span class="rating-missing t-badge">' + util.esc(t('评分暂无')) + '</span>'
@@ -576,7 +592,6 @@
     var im = bubbleEl && bubbleEl.querySelector('img.mp-bubble-photo');
     if (!im) return;
     im.addEventListener('error', function () {
-      bubblePhoto[r.id] = null;
       var span = document.createElement('span');
       span.className = 'mp-bubble-photo mp-bubble-photo-fallback';
       span.innerHTML = emoji.img(Data.genreEmoji(r), 22);
@@ -773,6 +788,8 @@
         if (el._mpTrim) continue;
         var txt = el.textContent || '';
         var cut = txt.replace(STN_SUFFIX_RE, '');
+        var run = el.querySelector('[lang]');
+        if (run) el.lang = run.lang;
         if (cut !== txt) el.textContent = cut;
         el._mpTrim = 1;
       }
@@ -838,6 +855,7 @@
     if (Math.abs(c.lat - s.mapView.center[0]) > 1e-7 || Math.abs(c.lng - s.mapView.center[1]) > 1e-7 || z !== s.mapView.zoom) {
       App.set({ mapView: { center: [c.lat, c.lng], zoom: z } }, { silent: true });
     }
+    syncMarkers(s);
     layoutTags();
     layoutPlates();
     if (s.layers.long || s.layers.city) scheduleStationPolish();

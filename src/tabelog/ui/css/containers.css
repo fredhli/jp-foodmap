@@ -314,3 +314,6 @@ html[data-mode="wide"] #candidates-host { display: none; }
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
 }
+
+html[data-sheet="collapsed"] #sheet-handle { height: 12px; }
+html[data-sheet="collapsed"] .ct-entry { min-height: 44px; }

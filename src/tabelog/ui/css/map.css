@@ -340,3 +340,10 @@ html[data-search-active] #map-root .leaflet-control-container { display: none; }
 @media (prefers-reduced-motion: reduce) {
   #fab-root, #map-root .leaflet-bottom.leaflet-left { transition: none; }
 }
+
+.mp-mk.is-far { transform: translate(-50%, -10px); }
+.mp-mk.is-far .mp-dot { width: 20px; height: 20px; box-shadow: 0 1px 2px rgba(17,26,67,.16); }
+.mp-mk.is-far .mp-dot .emj { width: 16px; height: 16px; }
+.mp-mk.is-far .mp-dot .emj-text { font-size: 16px; }
+.mp-mk.is-far .mp-tag { width: 6px; height: 6px; min-height: 6px; padding: 0; border: 0; border-radius: 50%; font-size: 0; line-height: 0; overflow: hidden; }
+.mp-mk.is-far.is-fav .mp-dot::after { width: 6px; height: 6px; border-width: 1px; }

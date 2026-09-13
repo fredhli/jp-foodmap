@@ -537,6 +537,7 @@
   /** detailTools(state) — the ⋯ / expand / close cluster detail.js puts in its title row. */
   C.detailTools = function (s) {
     s = s || App.state;
+    if (s.layout.mode === 'mid') return '<button class="icon-btn" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
     var expanded = s.sheet.state === 'expanded' || s.sheet.state === 'full';
     return '<button class="icon-btn icon-btn-secondary" data-ct="sheet" data-sheet="' + (expanded ? 'detail' : 'expanded') + '" ' +
       'aria-label="' + util.esc(t(expanded ? '收起面板' : '展开面板')) + '" aria-expanded="' + expanded + '">' +
@@ -719,6 +720,7 @@
           '</span>';
       }
     }
+    if (mode === 'mid') return back ? '<div class="ct-detail-head">' + back + '</div>' : '';
     return '<div class="ct-detail-head">' + back + pager +
       '<button class="icon-btn ct-close" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button></div>';
   }

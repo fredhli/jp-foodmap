@@ -24,6 +24,7 @@ body {
   background: var(--surface);
   color: var(--ink);
   font-family: var(--font-family);
+  font-synthesis: none;
   font-size: var(--t-body-size);
   line-height: var(--t-body-line);
   font-weight: var(--t-body-weight);
@@ -31,7 +32,8 @@ body {
   text-rendering: optimizeLegibility;
   touch-action: pan-x pan-y;     /* page-level pinch off (3.2.3 policy) */
 }
-html[lang="ja"] body { font-family: var(--font-family-ja); }
+:lang(zh-TW) { font-family: var(--font-family-tw); }
+:lang(ja) { font-family: var(--font-family-ja); }
 h1, h2, h3, h4, p, ul, ol, figure { margin: 0; }
 ul, ol { padding: 0; list-style: none; }
 button, input, select, textarea {

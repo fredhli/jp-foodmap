@@ -13,6 +13,52 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-09-13
+
+Mobile and Fold layouts use less space for controls and show more of the
+map. The release follows a read-only audit of the owner's A-1–A-6 / B-1
+report and a revision of the design specification.
+
+### Changed
+
+- Distant restaurant markers use a smaller cuisine icon and a price-colored
+  dot at scales of 500 m or more; full price labels return at 300 m or less.
+  Selected restaurants retain a readable budget. Scale selection accounts
+  for latitude and matches the map's scale bar.
+- Phone and mid-width detail actions start at 44 px, with less padding;
+  Google Maps is the primary action in both layouts. Fold detail headers,
+  galleries and candidate cards use less space. Font scaling still changes
+  text size and permits content to grow.
+- Chinese, Traditional Chinese and Japanese text use separate system font
+  stacks. Japanese place names retain their own language within translated UI.
+- The rating shortcuts omit 4.2. The slider and saved 4.2 thresholds retain
+  their range and behavior.
+
+### Fixed
+
+- Photos whose 640 px Tabelog variant returns 404 can use another size of
+  the same image. Photo surfaces share bounded retries and successful URLs.
+- Fold candidate cards load restaurant photos when they become visible.
+- Detail awards avoid repeating the same award with and without its year.
+- First-run invitations occupy less space and wait while another task is
+  open, without marking the invitation as read.
+- Tabelog detail actions use the logo supplied by the owner from a deployed
+  static asset path.
+
+### Verified
+
+Build contracts, pipeline, legacy-state compatibility, 12 browser viewports,
+both-engine UX journeys, all 36 original visibility checks, feature retention,
+52 simulated sync scenarios, offline reliability and the new photo regressions
+pass. At 475×751 in Chinese, visible map area rises from 68.6% to 79.2% on
+the home screen and from 14.6% to 25.4% with detail open.
+
+Real Tabelog images and lightboxes were checked for both reported restaurants.
+Rail rendering was checked against real local Okayama data; the test network
+returned 403 for remote high-LOD data. Physical Fold/Safari and the owner's
+original font environment remain untested. Full evidence is in
+`audit_outputs/4.1.0/RELEASE.md`. The Worker and Android shell are unchanged.
+
 ## [4.0.0] - 2026-09-12
 
 The presentation layer is rebuilt from the approved 4.0.0 demo

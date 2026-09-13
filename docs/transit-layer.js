@@ -916,7 +916,10 @@
           }
           var label = nm;
           if (lc2 >= 3) label = nm + '  (' + lc2 + LINES_SUFFIX + ')';
-          dot.bindTooltip(label, opts);
+          var labelNode = document.createElement('span');
+          if (/[\u3040-\u30ff\u3400-\u9fff]/.test(nm)) labelNode.lang = 'ja';
+          labelNode.textContent = label;
+          dot.bindTooltip(labelNode, opts);
         }
         stLayer.addLayer(dot);
         stOn.set(stn, { marker: dot, radius: p.radius, showLabel: p.showLabel });

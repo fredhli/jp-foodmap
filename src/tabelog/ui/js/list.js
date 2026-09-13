@@ -601,7 +601,7 @@
       var box = el.parentElement; if (!box) return;
       box.classList.remove('skeleton');
       box.classList.add('is-empty'); el.remove();
-      photoCache[box.getAttribute('data-ref') || ''] = '';
+      // Keep the source URL so a later visit can retry.
       box.innerHTML = (box.getAttribute('data-fallback') || '') + '<span class="ls-fade"></span>';
     }, true);
     // MOTION M14: stop the shimmer the moment the photo has decoded
@@ -1269,7 +1269,7 @@
     if (!url) return;
     box.classList.remove('is-empty');
     box.classList.add('skeleton');
-    box.innerHTML = '<img class="ls-img" src="' + esc(url) + '" alt="" loading="lazy" decoding="async">' +
+    box.innerHTML = '<img class="ls-img" src="' + esc(PhotoUrls.url(url, 320)) + '" alt="" loading="lazy" decoding="async">' +
       '<span class="ls-fade"></span>';
   }
 
@@ -1326,7 +1326,7 @@
       name = g ? g.label : '';
     } catch (e) { name = ''; }
     return '<div class="ls-focus" role="status">' +
-      '<span class="t-control"' + (name ? ' lang="ja"' : '') + '>' + esc(name) + '</span>' +
+      '<span class="t-control">' + esc(name) + '</span>' +
       '<button class="link-btn" data-act="clear-focus">' + t('显示全部收藏') + '</button></div>';
   }
 
@@ -1455,7 +1455,7 @@
     var known = photoCache[ref];
     if (known) {
       return '<span class="ls-photo skeleton" data-ref="' + esc(ref) + '" aria-hidden="true" data-fallback="' + esc(fallback) + '">' +
-        '<img class="ls-img" src="' + esc(known) + '" alt="" loading="lazy" decoding="async"><span class="ls-fade"></span></span>';
+        '<img class="ls-img" src="' + esc(PhotoUrls.url(known, 320)) + '" alt="" loading="lazy" decoding="async"><span class="ls-fade"></span></span>';
     }
     var pending = (known === undefined || known === null) ? ' data-pending' : '';
     return '<span class="ls-photo is-empty" data-ref="' + esc(ref) + '"' + pending + ' aria-hidden="true" data-fallback="' + esc(fallback) + '">' +
@@ -1497,7 +1497,7 @@
       '<button class="ls-open"' + openAttrs(it.ref, name, s) + '>' +
         '<span class="ls-emoji" aria-hidden="true">' + glyph + '</span>' +
         '<span class="ls-text">' +
-          '<span class="ls-line"><span class="ls-name t-list-name-column clamp-2" lang="ja">' + esc(name) + '</span></span>' +
+          '<span class="ls-line"><span class="ls-name t-list-name-column clamp-2"' + (D.placeNameLanguage(it.bm, name) ? ' lang="' + D.placeNameLanguage(it.bm, name) + '"' : '') + '>' + esc(name) + '</span></span>' +
           '<span class="ls-meta t-secondary">' + esc(kindLabel) + '</span>' +
         '</span>' +
       '</button>' + actions(it.ref, name, s, it.kind) + '</li>';

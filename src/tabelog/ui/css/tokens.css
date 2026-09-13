@@ -48,8 +48,9 @@
   --price-na-bg: #9CA3AF;      --price-na-fg: #111A43;
 
   /* ---- typography ------------------------------------------------------ */
-  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", "Hiragino Sans", "Yu Gothic", sans-serif;
-  --font-family-ja: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", "Noto Sans CJK SC", sans-serif;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-family-tw: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
+  --font-family-ja: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", sans-serif;
 
   /* 14 roles: size / line / weight. Sizes in rem so html{font-size} scales
      them (fontScale 100/115/130 — I18N-02: text scale, never transform). */
@@ -72,7 +73,7 @@
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
   --sp-optical: 2px;
   --pad-panel-narrow: 16px;
-  --pad-detail-narrow: 18px;
+  --pad-detail-narrow: 16px;
   --pad-panel-mid: 20px;
   --pad-panel-wide: 24px;
   --gap-field: 12px;
@@ -100,6 +101,7 @@
   --icon-size: 20px; --icon-stroke: 2px;
   --layer-row-min: 56px;
   --search-row-min: 56px;
+  --search-entry-min: 56px;
 
   /* ---- layout constants (LAY-01..03). Written as numbers where JS also
      consumes them; core.js reads the same values from Data.config.layout
@@ -112,7 +114,7 @@
   --topbar-mid: 56px;
   --topbar-wide: 60px;
   --rail-w: 56px;
-  --sheet-collapsed: 80px;
+  --sheet-collapsed: 56px;
   --sheet-expanded-map: 170px;
   --layers-pref-w: 360px; --layers-margin: 16px; --layers-anchor-gap: 8px;
   --layers-header-min: 44px; --layers-row-min: 56px;
@@ -120,7 +122,7 @@
   --list-photo-ratio: .32; --list-content-start: .38;
   --gallery-h-narrow: 144px; --gallery-h-column: 272px;
   --gallery-primary-share: .6667;
-  --action-cols: 1fr 2.2fr 1fr; --action-gap: 8px;
+  --action-cols: 1fr 1.65fr 1fr; --action-gap: 8px;
   --form-max-w: 480px;
 
   /* ---- map visual (MAP-01) --------------------------------------------- */
@@ -200,4 +202,8 @@
     --m-sheet: 0ms;
     --m-fly: 0ms;
   }
+}
+
+@media (max-width: 1099px) {
+  :root { --primary-action-min: 44px; --pad-panel-mid: 16px; --gallery-h-column: 208px; --search-entry-min: 44px; }
 }

@@ -665,9 +665,9 @@
     compactHLte: 620, severeHLte: 419,
     topbarMid: 56, topbarWide: 60, rail: 56,
     wideLeft: { min: 344, ratio: .22, max: 384 }, wideDetail: { min: 400, ratio: .27, max: 480 },
-    midLeft: { min: 300, ratio: .35, max: 344 }, midDetail: { min: 340, ratio: .45, max: 420 },
+    midLeft: { min: 300, ratio: .35, max: 344 }, midDetail: { min: 320, ratio: .40, max: 380 },
     fullThreeColumnMapMin: 480,
-    sheet: { collapsed: 80, resultsNormal: .49, resultsCompact: .63, detailSmall: .61, detailLarge: .65, detailCompact: .70,
+    sheet: { collapsed: 56, resultsNormal: .49, resultsCompact: .63, detailSmall: .61, detailLarge: .65, detailCompact: .70,
              filterNormal: .72, filterCompact: .82, expandedMap: 170, minText: 24, minControl: 44, minSuggestion: 56 },
     layers: { width: 360, margin: 16, gap: 8, headerMin: 44, rowMin: 56 }
   };
@@ -1259,4 +1259,46 @@
     App.ready = true;
     App.emit('ready');
   };
+})();
+
+/* Photo variants share an identity, but a size is not guaranteed to exist. */
+(function () {
+  'use strict';
+  var good = Object.create(null), sources = Object.create(null);
+  function variants(source, size) {
+    var u;
+    try { u = new URL(source, document.baseURI); } catch (_) { return [source]; }
+    if (u.hostname !== 'tblg.k-img.com') return [source];
+    var m = u.pathname.match(/\/restaurant\/images\/Rvw\/(\d+)\/(?:\d+x\d+_(?:rect|square)_)?([A-Za-z0-9_-]+)\.jpg$/);
+    if (!m) return [source];
+    var base = 'https://tblg.k-img.com/restaurant/images/Rvw/' + m[1] + '/';
+    return [base + size + 'x' + size + '_rect_' + m[2] + '.jpg',
+      base + (size === 320 ? '640x640' : '320x320') + '_rect_' + m[2] + '.jpg',
+      source, base + m[2] + '.jpg'].filter(function (x, i, a) { return a.indexOf(x) === i; });
+  }
+  function key(source) { var a = variants(source, 640); return a[a.length - 1]; }
+  function url(source, size) {
+    var result = good[key(source)] || variants(source, size || 640)[0];
+    sources[result] = source;
+    return result;
+  }
+  function state(img) {
+    if (!img._photoAttempt || img._photoAttempt.current !== img.src) {
+      img._photoAttempt = { current: img.src, source: sources[img.src] || img.src, tried: [] };
+    }
+    return img._photoAttempt;
+  }
+  function isPhoto(img) { return img && img.matches && img.matches('img.dt-photo-img,img.dt-cand-img,img.dt-lb-img,img.ls-img,img.mp-bubble-photo'); }
+  document.addEventListener('error', function (e) {
+    var img = e.target; if (!isPhoto(img)) return;
+    var st = state(img); st.tried.push(img.src);
+    var next = variants(st.source, /320x320/.test(st.source) ? 320 : 640).filter(function (u) { return st.tried.indexOf(u) < 0; })[0];
+    if (next) { e.stopImmediatePropagation(); st.current = next; img.src = next; }
+    else { delete good[key(st.source)]; img.style.visibility = 'hidden'; img.dataset.photoFailed = 'true'; }
+  }, true);
+  document.addEventListener('load', function (e) {
+    var img = e.target; if (!isPhoto(img)) return;
+    good[key(img.src)] = img.src; img.style.visibility = ''; delete img.dataset.photoFailed;
+  }, true);
+  window.PhotoUrls = { variants: variants, url: url };
 })();

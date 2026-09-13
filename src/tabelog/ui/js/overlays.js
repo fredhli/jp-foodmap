@@ -1245,7 +1245,7 @@
     var rows = mrow('list:default', t('默认收藏夹'), '⭐', defaultCount, inDefault, true, false) +
       lists.map(function (l) {
         var n = Data.members(s.user.bookmarks, l.id).length;
-        return mrow(l.id, listName(l), l.emoji, n, mine.has(l.id), false, true);
+        return mrow(l.id, listName(l), l.emoji, n, mine.has(l.id), false, false);
       }).join('');
 
     return popHead(t(saved ? '管理收藏' : '加入收藏')) +
@@ -1501,7 +1501,7 @@
           '<div class="ov-pick-lists">' + lists.map(function (l) {
             var on = (d.lists || []).indexOf(l.id) >= 0;
             return '<button type="button" class="ov-pick-list" data-ov="form-list" data-list="' + esc(l.id) + '" aria-pressed="' + on + '">' +
-              (l.emoji ? emoji.img(l.emoji, 16) : '') + '<span lang="ja">' + esc(listName(l)) + '</span></button>';
+              (l.emoji ? emoji.img(l.emoji, 16) : '') + '<span>' + esc(listName(l)) + '</span></button>';
           }).join('') + '</div></div>' : '') +
         '<button type="button" class="ov-inline-add" data-ov="new-list" data-from="bookmarkForm">' +
           ic('folderPlus', { cls: 'ic-sm' }) + esc(t('新建子收藏夹')) + '</button>' +
@@ -1754,7 +1754,7 @@
     // first-run row, the sign-in hint and the install offer are invitations,
     // not alerts, so they wait. Offline / new version / sync failure are
     // conditions, not invitations, and stay visible.
-    var quiet = !!s.search.active || langGateActive(s) || !!s.overlay.kind;
+    var quiet = !!s.search.active || langGateActive(s) || !!s.overlay.kind || !!s.selected.id || s.sheet.state !== 'collapsed';
     var key = [s.notices.offline, s.notices.newVersion, s.notices.introSeen, s.lang, quiet,
       s.sync.kind, s.sync.retryVisible, s.sync.hintDismissed, s.account.signedIn,
       localNotices.geo, localNotices.geoDismissed, localNotices.updateDismissed,
@@ -1786,7 +1786,7 @@
     }
     // M-109 first-run row: one dismissible line, never a scrim.
     if (!quiet && !s.notices.introSeen && !localNotices.introDismissed && !s.notices.offline) {
-      html += noticeRow('', 'info', esc(t('这是一张日本美食与景点地图')),
+      html += noticeRow('ov-notice--intro', 'info', esc(t('这是一张日本美食与景点地图')),
         '<button class="btn btn-quiet" data-ov="intro-region">' + esc(t('选一个地区开始')) + '</button>' +
         '<button class="btn btn-quiet" data-ov="intro-legend">' + esc(t('地图怎么看')) + '</button>' +
         '<button class="icon-btn" data-ov="intro-close" aria-label="' + esc(t('关闭')) + '">' + ic('x') + '</button>');

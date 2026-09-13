@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const listeners = {};
+const window = {};
+const document = { baseURI: 'https://jpfoodmap.com/', addEventListener: (event, fn) => listeners[event] = fn };
+const source = fs.readFileSync('src/tabelog/ui/js/core.js', 'utf8');
+vm.runInNewContext(source.slice(source.indexOf('/* Photo variants')), { window, document, URL });
+const P = window.PhotoUrls;
+const base = 'https://tblg.k-img.com/restaurant/images/Rvw/123/';
+const small = base + '320x320_rect_abc.jpg';
+const large = base + '640x640_rect_abc.jpg';
+function img(src) { return { src, style: {}, dataset: {}, matches: () => true }; }
+function event(type, target) { let stopped = false; listeners[type]({ target, stopImmediatePropagation() { stopped = true; } }); return stopped; }
+const a = img(large);
+assert.equal(event('error', a), true);
+assert.equal(a.src, small);
+event('load', a);
+assert.equal(P.url(large, 640), small, 'all photo entrances reuse the working size');
+const b = img(base + '640x640_rect_def.jpg');
+event('load', b);
+assert.equal(P.url(b.src, 320), b.src, 'valid 640 stays cached');
+const c = img(base + '640x640_rect_fail.jpg');
+let attempts = [c.src];
+while (event('error', c)) { attempts.push(c.src); assert.ok(attempts.length <= 4); }
+assert.equal(new Set(attempts).size, attempts.length);
+assert.equal(c.style.visibility, 'hidden');
+assert.equal(c.dataset.photoFailed, 'true');
+assert.ok(P.url(attempts[0], 640).includes('640x640'), 'failure is retryable on next entry');
+const d = img(large);
+event('error', d);
+d.src = base + '640x640_rect_switched.jpg';
+event('error', d);
+assert.equal(d.src, base + '320x320_rect_switched.jpg', 'lightbox switch resets the bounded attempt');
+const external = 'https://example.com/640x640_rect_abc.jpg';
+assert.equal(P.url(external, 320), external);
+assert.equal(event('error', img(external)), false, 'unknown hosts are never rewritten');
+const original = 'https://tblg.k-img.com/resize/660x370c/restaurant/images/Rvw/123/abc.jpg';
+assert.equal(P.url(original, 640), small, 'source carousel and old payload share the same cache identity');
+console.log('Photo fallback: 640 failure, valid 640, shared cache, all fail, switch, external and old payload passed.');

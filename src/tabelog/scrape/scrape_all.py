@@ -30,6 +30,7 @@ import argparse
 import asyncio
 import csv
 import json
+from html import unescape
 import re
 import sys
 from datetime import datetime, timezone
@@ -187,23 +188,18 @@ THUMBNAIL_RE = re.compile(
 
 
 def extract_photo_urls(html: str, limit: int = 3) -> list[str]:
-    """First `limit` unique (rid, photo_id) pairs as 640x640_rect_ URLs.
-
-    Tries the carousel form first; falls through to the thumbnail-grid
-    form for restaurants whose detail page has no hero carousel.
-    """
+    """First unique photos, preserving the actual URL found on the page."""
     seen: set[tuple[str, str]] = set()
     out: list[str] = []
+    html = unescape(html)
     for regex in (CAROUSEL_RE, THUMBNAIL_RE):
         for m in regex.finditer(html):
             key = (m.group(1), m.group(2))
             if key in seen:
                 continue
             seen.add(key)
-            out.append(
-                f"https://tblg.k-img.com/restaurant/images/Rvw/{key[0]}/"
-                f"640x640_rect_{key[1]}.jpg"
-            )
+            query = re.match(r'\?[^\s"<>\']*', html[m.end():])
+            out.append("https://" + m.group(0) + (query.group(0) if query else ""))
             if len(out) >= limit:
                 return out
     return out

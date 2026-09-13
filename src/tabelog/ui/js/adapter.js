@@ -286,7 +286,7 @@
       { key: 'awards', label: '奖项优先' }, { key: 'distance', label: '距离最近', needsLocation: true },
       { key: 'name', label: '按店名' }
     ];
-    config.RATING_MIN = 3.4; config.RATING_MAX = 4.5; config.RATING_QUICK = [3.6, 3.8, 4.0, 4.2];
+    config.RATING_MIN = 3.4; config.RATING_MAX = 4.5; config.RATING_QUICK = [3.6, 3.8, 4.0];
     config.BOOKMARK_QUICK_EMOJI = ['📍', '🏠', '🏨', '🍴', '⭐', '❤️', '🛍️', '⛩️', '♨️', '🚉'];
     config.LIST_QUICK_EMOJI = ['📁', '🍣', '🍜', '☕', '🍶', '⭐'];
     config.layout = { narrowLt: 750, wideGte: 1100 };
@@ -331,6 +331,19 @@
   Data.regionGroupName = function (g) { return window.t(g.name); };
   Data.landmarkName = function (lm) { return biz ? biz.bmDisplayName(lm) : (lm.name_sc || lm.name_src || ''); };
   Data.pinName = Data.landmarkName;
+  Data.placeNameLanguage = function (place, name) {
+    if (!place || (place.name && !place.name_src)) return '';
+    var lang = App.state.lang;
+    if (lang === 'zh' && place.name_sc) return 'zh-CN';
+    if (lang === 'tw' && (place.name_tc || place.name_sc)) return 'zh-TW';
+    if (lang === 'en' && place.name_en) return 'en';
+    if (lang === 'ja' && place.name_jp) return 'ja';
+    if (lang === 'en' && place.name_sc) return 'zh-CN';
+    if (name === place.name_src || name === place.name_jp) {
+      return /^fb-/.test(place.id || '') || name === place.name_jp || /[\u3040-\u30ff]/.test(name) ? 'ja' : '';
+    }
+    return '';
+  };
   Data.placeName = function (p, lang) { return p.name ? (p.name[lang] || p.name.zh || '') : (p.label || ''); };
   Data.genreEmoji = function (r) { return config.GENRE_EMOJI[(r.categories && r.categories[0]) || '其他'] || '🍽️'; };
   Data.cuisineLabel = function (cat) { return window.t(cat); };

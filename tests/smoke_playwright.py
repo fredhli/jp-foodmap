@@ -844,7 +844,15 @@ def check_workbench(page, name):
     opened = page.evaluate("""() => {
       const d = document.getElementById('col-detail');
       const card = document.querySelector('#col-detail-body #detail-root');
-      return {right: getComputedStyle(document.documentElement)
+      const title = d.querySelector('.dt-title-row');
+      const close = title && title.querySelector('[data-ct="close-detail"]');
+      const tr = title && title.getBoundingClientRect(), cr = close && close.getBoundingClientRect();
+      return {mode: App.state.layout.mode,
+              titlePad: tr ? tr.left - d.getBoundingClientRect().left : -1,
+              titleTop: tr ? tr.top - d.getBoundingClientRect().top : -1,
+              closeHit: cr ? [cr.width, cr.height] : null,
+              closeInTitle: !!(cr && tr && cr.top < tr.bottom && cr.bottom > tr.top),
+              right: getComputedStyle(document.documentElement)
                        .getPropertyValue('--col-detail-w').trim(),
               onscreen: d.getBoundingClientRect().left < innerWidth - 100,
               gap: card ? Math.round(card.getBoundingClientRect().top
@@ -852,8 +860,14 @@ def check_workbench(page, name):
     }""")
     if opened["right"] == "0px" or not opened["onscreen"]:
         raise AssertionError(f"detail column did not slide in: {opened}")
-    # W-1: the card used to start at exactly 0px from the column's top edge.
-    if opened["gap"] < 10:
+    # 4.1.0 merges mid's close into the title row. Protect its actual padding
+    # and 44px control instead of requiring the removed, empty header row.
+    if opened["mode"] == "mid":
+        if (opened["titlePad"] < 16 or opened["titleTop"] < 10
+                or not opened["closeInTitle"] or not opened["closeHit"]
+                or min(opened["closeHit"]) < 44):
+            raise AssertionError(f"compact title lost spacing or close target: {opened}")
+    elif opened["gap"] < 10:
         raise AssertionError(
             f"card is flush against the top of the detail column: {opened}")
     page.evaluate("() => App.act.closeDetail && App.act.closeDetail()")
@@ -905,26 +919,28 @@ def check_goto_zoom(page, name):
     through act.openDetail -> MapMod.reveal, which is the same promise: the
     chosen restaurant ends up inside the visible map rect at a zoom you can
     see it at."""
-    page.evaluate("() => App.act.closeDetail && App.act.closeDetail()")
-    page.wait_for_timeout(300)
-    # Phone-likes keep the list behind the Results tab.
-    if not page.evaluate("() => !!document.querySelector('#list-root .ls-row[data-id]')"):
-        page.evaluate("() => { App.act.setTab('results'); App.act.setSheet('expanded'); }")
-        page.wait_for_timeout(700)
-    if not page.evaluate("() => !!document.querySelector('#list-root .ls-row[data-id]')"):
-        raise AssertionError("no result row to click")
+    # closeDetail collapses the phone sheet, but virtual rows can remain in
+    # its hidden DOM until the next map render. Open the task explicitly;
+    # DOM presence alone does not mean a result is available to click.
+    page.evaluate("""() => {
+      App.act.closeDetail();
+      App.act.setTab('results');
+      if (App.state.layout.mode === 'narrow') App.act.setSheet('expanded');
+    }""")
+    row = page.locator('#list-root .ls-row[data-id]').first
+    row.wait_for(state='visible', timeout=20000)
     # A country-wide view, i.e. the state the bug was reported from.
     page.evaluate("() => { " + MAP_HANDLE_JS
                   + " if (m) m.setView([35.68, 139.76], 10, {animate: false}); }")
-    page.wait_for_timeout(500)
+    page.wait_for_function("() => App.state.mapView.zoom === 10", timeout=20000)
+    # Moving the map can rebuild the virtual window. Resolve the real row
+    # again after the move; an empty visible Results list must still fail.
+    row.wait_for(state='visible', timeout=20000)
     before = page.evaluate("() => { " + MAP_HANDLE_JS + " return m ? m.getZoom() : null; }")
     if before != 10:
         raise AssertionError(f"could not set the starting view (zoom={before})")
-    rid = page.evaluate(
-        "() => document.querySelector('#list-root .ls-row[data-id]').getAttribute('data-id')")
-    page.evaluate(
-        "() => document.querySelector('#list-root .ls-row[data-id] .ls-open')"
-        "  .dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    rid = row.get_attribute('data-id')
+    row.locator('.ls-open').click()
     page.wait_for_function(DETAIL_OPEN_JS, timeout=20000)
     page.wait_for_timeout(1200)      # let the move finish
     after = page.evaluate("() => { " + MAP_HANDLE_JS + " return m.getZoom(); }")

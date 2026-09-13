@@ -90,20 +90,9 @@
     if (!det || !Array.isArray(det.photos)) return [];
     return det.photos.filter(function (p) { return typeof p === 'string' && p; });
   }
-  /**
-   * thumb(url) — W-4, carried over verbatim in intent from 3.2.x: Tabelog's
-   * size tokens are not interchangeable. `_rect_` scales into the box,
-   * `_square_` centre-crops server-side first, so a square thumb has already
-   * thrown a third of a landscape photo away. 320x320_rect_ (≈21 KB) is the
-   * small one; hidpi and wide screens take 640x640_rect_, which is the exact
-   * URL the lightbox loads, so tapping through costs no extra bytes. 640 is
-   * Tabelog's ceiling — 800 and 1200 both 404.
-   */
-  function thumbToken() {
-    return ((window.devicePixelRatio || 1) > 1.2 || window.innerWidth >= 700)
-      ? '640x640_rect_' : '320x320_rect_';
+  function thumb(url) {
+    return PhotoUrls.url(url, ((window.devicePixelRatio || 1) > 1.2 || window.innerWidth >= 700) ? 640 : 320);
   }
-  function thumb(url) { return String(url).replace('640x640_rect_', thumbToken()); }
 
   /** a yen ceiling from the popups (slot 1 / 2) → the short price-bucket label. */
   function priceOf(v) {
@@ -178,7 +167,7 @@
     if (!r) return [];
     var hidden = s.user.black.has(id);
     var items = [];
-    if (!shareInline || isNarrow(s)) {
+    if (!shareInline || s.layout.mode !== 'wide') {
       items.push({ key: 'share', icon: 'share', label: '分享这家店', run: function () { doShare(id, null); } });
     }
     items.push({
@@ -313,15 +302,21 @@
     if (bucketName) meta.push('<span class="dt-genre">' + esc(bucketName) + '</span>');
     meta.push('<span class="price-text num">' + ctx.util.fmtPrice(r.bucket, { short: true }) + '</span>');
 
-    // VIS-06: the slug badges carry the colour family and the localized name;
-    // the ribbons (slot 8) are the only record of the award *year*, so both.
-    var awards = ctx.Data.awardObjs(r).map(function (a) {
+    var ribbonHost = document.createElement('div');
+    ribbonHost.innerHTML = (det && det.ribbons) || '';
+    var dated = Object.create(null);
+    function family(slug) { return /gold|silver|bronze/.test(slug) ? 'award' : (/hyaku/.test(slug) ? 'hyaku' : slug); }
+    Array.prototype.forEach.call(ribbonHost.querySelectorAll('.rst-ribbon'), function (el) {
+      var m = el.className.match(/rst-ribbon-([\w-]+)/);
+      if (m && /20\d{2}/.test(el.textContent)) dated[family(m[1])] = true;
+    });
+    var awards = ctx.Data.awardObjs(r).filter(function (a) { return !dated[family(a.slug)]; }).map(function (a) {
       return '<span class="badge badge-lg badge-' + esc(a.slug) + '">' + esc(ctx.Data.awardLabel(a)) + '</span>';
     }).join('');
-    var ribbons = (det && det.ribbons) ? '<div class="dt-ribbons">' + det.ribbons + '</div>' : '';
+    var ribbons = ribbonHost.innerHTML ? '<div class="dt-ribbons">' + ribbonHost.innerHTML + '</div>' : '';
 
     var tools = '';
-    if (isNarrow(s)) {
+    if (s.layout.mode !== 'wide') {
       tools = '<button class="icon-btn dt-more" data-act="more" data-ov="open" data-kind="more" aria-label="' + t('更多操作') + '" aria-haspopup="menu" aria-expanded="' +
         (s.overlay.kind === 'more') + '">' + ic('more') + '</button>' +
         ((window.Containers && window.Containers.detailTools) ? window.Containers.detailTools(s) : '');
@@ -357,7 +352,7 @@
     var cells = ph.map(function (p, i) {
       return '<button type="button" class="dt-photo" data-photo="' + i + '" aria-label="' + t('查看照片 {i} / {n}', { i: i + 1, n: n }) + '">' +
         '<img class="dt-photo-img" src="' + esc(thumb(p)) + '" alt="" loading="lazy" decoding="async"' +
-        (thumb(p) === p ? '' : ' data-alt-src="' + esc(p) + '"') + '></button>';
+        '' + '></button>';
     }).join('');
     var all = (!narrow && n > 1)
       ? '<button type="button" class="dt-gallery-all" data-act="lightbox" data-index="0">' + ic('images', { cls: 'ic-sm' }) + '<span>' + t('查看全部照片') + '</span></button>'
@@ -553,7 +548,7 @@
   function favLabel(s, r) { return t(s.user.fav.has(r.id) ? '已收藏' : '加入收藏'); }
 
   function actionsHtml(s, r) {
-    var narrow = isNarrow(s);
+    var narrow = s.layout.mode !== 'wide';
     var maps = mapsUrl(r);
     var fav = s.user.fav.has(r.id);
     if (narrow) {
@@ -564,9 +559,9 @@
         '<a class="btn btn-primary btn-fixed dt-act dt-act-main" href="' + esc(maps) + '" target="_blank" rel="noopener" ' +
         'aria-label="' + t('在Google Map 打开') + '">' +
         '<img class="dt-gmaps" src="img/google-maps-v2.png" alt="" width="22" height="22">' +
-        '<span class="dt-act-label dt-act-label-wrap t-body">' + t('在Google Map 打开') + '</span></a>' +
+        '<span class="dt-act-label dt-act-label-wrap t-body">Google Maps</span></a>' +
         '<a class="btn btn-secondary btn-fixed btn-stack dt-act dt-act-side" href="' + esc(r.id) + '" target="_blank" rel="noopener" ' +
-        'aria-label="' + t('在 Tabelog 打开') + '">' + ic('external') +
+        'aria-label="' + t('在 Tabelog 打开') + '">' + '<span class="dt-tabelog" aria-hidden="true"><img src="img/tabelog-logo.webp" alt=""></span>' +
         '<span class="dt-act-label t-control">Tabelog</span></a>' +
         '</div>';
     }
@@ -580,7 +575,7 @@
         ic('share') + '<span class="dt-act-label">' + t('分享') + '</span></button>');
     }
     parts.push('<a class="btn btn-secondary btn-fixed dt-act-row" href="' + esc(r.id) + '" target="_blank" rel="noopener" aria-label="' + t('在 Tabelog 打开') + '">' +
-      ic('external') + '<span class="dt-act-label">Tabelog</span></a>');
+      '<span class="dt-tabelog" aria-hidden="true"><img src="img/tabelog-logo.webp" alt=""></span>' + '<span class="dt-act-label">Tabelog</span></a>');
     parts.push('<button type="button" class="btn btn-secondary btn-fixed dt-act-row dt-act-more" data-act="more" data-ov="open" data-kind="more" aria-label="' + t('更多操作') + '" ' +
       'aria-haspopup="menu" aria-expanded="' + (s.overlay.kind === 'more') + '">' + ic('more') + '</button>');
     return '<div class="dt-actions is-row">' + parts.join('') + '</div>';
@@ -594,10 +589,7 @@
     var show = ids.slice(0, 60);          // the track scrolls; 10k cards do not
     var cards = show.map(function (id) {
       var r = D.byId(id); if (!r) return '';
-      var det = Dm.detailFor(id), ph = photosOf(det);
-      var media = ph.length
-        ? '<img class="dt-cand-img" src="' + esc(thumb(ph[0])) + '" alt="" loading="lazy" decoding="async">'
-        : '<span class="dt-cand-img is-empty">' + ctx.emoji.img(D.genreEmoji(r), 22) + '</span>';
+      var media = '<span class="dt-cand-img is-empty">' + ctx.emoji.img(D.genreEmoji(r), 22) + '</span>';
       var on = id === s.selected.id;
       return '<button type="button" class="dt-cand-card' + (on ? ' is-on' : '') + '" data-cand="' + esc(id) + '"' +
         (on ? ' aria-current="true"' : '') + '>' + media +
@@ -636,7 +628,7 @@
     el.innerHTML =
       '<button type="button" class="icon-btn dt-lb-btn dt-lb-close" data-lb="close" aria-label="' + t('关闭') + '">' + ic('x') + '</button>' +
       '<button type="button" class="icon-btn dt-lb-btn dt-lb-prev" data-lb="prev" aria-label="' + t('上一张') + '">' + ic('chevronLeft') + '</button>' +
-      '<figure class="dt-lb-fig"><img class="dt-lb-img" alt="" src="' + esc(ph[lbIndex]) + '">' +
+      '<figure class="dt-lb-fig"><img class="dt-lb-img" alt="" src="' + esc(PhotoUrls.url(ph[lbIndex], 640)) + '">' +
       '<figcaption class="dt-lb-cap t-control"><span class="dt-lb-name" lang="ja">' + esc(r.name) + '</span>' +
       '<span class="dt-lb-count num" data-lb-count>' + t('照片 {i} / {n}', { i: lbIndex + 1, n: ph.length }) + '</span></figcaption></figure>' +
       '<button type="button" class="icon-btn dt-lb-btn dt-lb-next" data-lb="next" aria-label="' + t('下一张') + '">' + ic('chevronRight') + '</button>';
@@ -645,7 +637,10 @@
     var count = el.querySelector('[data-lb-count]');
     function show(i) {
       lbIndex = (i + ph.length) % ph.length;
-      img.src = ph[lbIndex];
+      var failed = el.querySelector('.dt-photo-failed');
+      if (failed) failed.remove();
+      img._photoAttempt = null; img.style.visibility = '';
+      img.src = PhotoUrls.url(ph[lbIndex], 640);
       count.textContent = t('照片 {i} / {n}', { i: lbIndex + 1, n: ph.length });
       lastPhotoIndex = lbIndex;
       ctx.App.set({ overlay: { payload: { id: id, index: lbIndex } } }, { silent: true });
@@ -658,6 +653,7 @@
       if (k === 'close') ctx.act.closeOverlay('close');
       else if (k === 'prev') show(lbIndex - 1);
       else if (k === 'next') show(lbIndex + 1);
+      else if (k === 'retry') show(lbIndex);
     });
     el.addEventListener('keydown', function (e) {
       if (e.isComposing || e.keyCode === 229) return;
@@ -675,6 +671,7 @@
       el.querySelector('.dt-lb-prev').hidden = true;
       el.querySelector('.dt-lb-next').hidden = true;
     }
+    bindPhotoFallbacks(el);
     lbEl = el;
     setTimeout(function () { try { el.focus(); } catch (e2) { /* ignore */ } }, 0);
     return el;
@@ -686,7 +683,7 @@
     pass = pass || 0;
     var row = foot.querySelector('.dt-actions');
     if (!row || !row.clientWidth) return;
-    if (isNarrow(s)) {
+    if (s.layout.mode !== 'wide') {
       if (stacked) return;
       var overflow = false;
       Array.prototype.forEach.call(row.querySelectorAll('.dt-act-label'), function (l) {
@@ -757,27 +754,21 @@
   /* -------------------------------------------------------------- painting */
 
   function bindPhotoFallbacks(host) {
-    Array.prototype.forEach.call(host.querySelectorAll('.dt-photo-img, .dt-cand-img'), function (img) {
+    Array.prototype.forEach.call(host.querySelectorAll('img.dt-photo-img, img.dt-cand-img, img.dt-lb-img'), function (img) {
       var frame = img.parentElement;
       if (frame && !img.complete) {
         frame.classList.add('skeleton');
         img.addEventListener('load', function () { frame.classList.remove('skeleton'); }, { once: true });
       }
-      // not `once`: the first failure retries the full-size URL (Tabelog's
-      // small token 404s on a few rows), and only the second gives up.
       img.addEventListener('error', function () {
-        var alt = img.getAttribute('data-alt-src');
-        if (alt && img.src.indexOf(alt) < 0) { img.removeAttribute('data-alt-src'); img.src = alt; return; }
-        var h = img.parentElement;
-        if (!h) return;
-        h.classList.remove('skeleton');
-        h.classList.add('is-failed');
-        img.remove();
-        if (!h.querySelector('.dt-photo-failed')) {
-          var p = document.createElement('span');
-          p.className = 'dt-photo-failed t-secondary';
-          p.textContent = t('照片暂不可用');
-          h.appendChild(p);
+        if (!frame) return;
+        frame.classList.remove('skeleton');
+        if (!frame.querySelector('.dt-photo-failed')) {
+          var note = document.createElement(img.classList.contains('dt-lb-img') ? 'button' : 'span');
+          if (note.tagName === 'BUTTON') { note.type = 'button'; note.setAttribute('data-lb', 'retry'); }
+          note.className = 'dt-photo-failed t-secondary';
+          note.textContent = t('照片暂不可用') + (note.tagName === 'BUTTON' ? ' · ' + t('重试') : '');
+          frame.appendChild(note);
         }
       });
     });
@@ -825,6 +816,30 @@
     foot.innerHTML = actionsHtml(s, r);
   }
 
+  var candidateObserver = null;
+  function loadCandidates() {
+    if (candidateObserver) candidateObserver.disconnect();
+    var track = cand.querySelector('.dt-cand-track');
+    if (!track) return;
+    candidateObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var card = entry.target;
+        candidateObserver.unobserve(card);
+        var id = card.getAttribute('data-cand');
+        ctx.Data.detail(id).then(function (det) {
+          if (!card.isConnected) return;
+          var ph = photosOf(det); if (!ph.length) return;
+          var img = document.createElement('img');
+          img.className = 'dt-cand-img'; img.alt = ''; img.decoding = 'async';
+          img.src = PhotoUrls.url(ph[0], 320);
+          card.replaceChild(img, card.querySelector('.dt-cand-img'));
+          bindPhotoFallbacks(card);
+        }).catch(function () {});
+      });
+    }, { root: track, rootMargin: '0px 180px', threshold: 0 });
+    Array.prototype.forEach.call(track.children, function (card) { candidateObserver.observe(card); });
+  }
   function paintCandidates(s) {
     var host = s.layout.mode === 'mid' && s.selected.id;
     if (!host) { if (candSig !== '') { cand.innerHTML = ''; candSig = ''; } return; }
@@ -843,7 +858,7 @@
     if (sig === candSig) return;
     candSig = sig;
     cand.innerHTML = candidateHtml(s);
-    bindPhotoFallbacks(cand);
+    loadCandidates();
     var on = cand.querySelector('.dt-cand-card.is-on');
     if (on) ctx.motion.afterGeometry(function () { try { on.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) { /* ignore */ } });
   }

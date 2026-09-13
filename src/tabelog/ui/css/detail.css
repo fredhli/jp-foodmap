@@ -28,7 +28,7 @@ html[data-mode="wide"] #detail-root .dt { --dt-pad: var(--pad-panel-wide); }
 
 /* ---- identity (VIS-03: 8px inside the group) ----------------------------- */
 .dt-title-row { display: flex; align-items: flex-start; gap: var(--sp-2); }
-.dt-title { flex: 1 1 auto; min-width: 0; }
+.dt-title { flex: 1 1 auto; min-width: 0; text-wrap: balance; }
 /* the 44px targets must not stretch the title row: VIS-03 keeps title→meta at 8px */
 .dt-more { flex: none; margin-block: -7px; }
 /* narrow: ⋯ / expand / close share the name row instead of a strip of their own */
@@ -335,3 +335,32 @@ html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide
 .dt-cand-title .ic { flex: none; }
 .dt-cand-tools { flex: none; }
 .dt-cand-tools .link-btn { white-space: nowrap; padding-inline: 4px; }
+
+.dt-tabelog { width: 20px; height: 20px; object-fit: contain; flex: none; }
+.dt-photo-failed { position: absolute; inset: 0; display: grid; place-content: center; pointer-events: none; }
+.dt-cand-card { position: relative; }
+@media (max-width: 1099px) {
+  #detail-foot .dt-actions { padding-block: 4px; padding-bottom: calc(4px + var(--safe-bottom)); grid-template-columns: minmax(0,1fr) minmax(0,1.65fr) minmax(0,1fr); }
+  .dt-act { gap: 4px; padding-inline: 4px; }
+  .dt-act-side { flex-direction: row; flex-wrap: wrap; }
+  .dt-act-side .ic, .dt-tabelog, .dt-gmaps { width: 18px; height: 18px; }
+  .dt-act-main { flex-wrap: wrap; }
+  .dt-act-label-wrap { display: block; overflow: visible; white-space: normal; overflow-wrap: normal; }
+  .dt-act-fav .dt-act-label { white-space: normal; overflow: visible; }
+  #detail-foot .dt-actions.is-stack { grid-template-columns: minmax(0,1fr); }
+  #candidates-root .dt-cand { padding: 4px 8px; }
+  .dt-cand-row { margin-top: 0; }
+  .dt-cand-img { height: 56px; }
+  .dt-cand-card { padding-bottom: 0; gap: 2px; }
+  .dt-cand-head { gap: 4px; }
+  .dt-cand-title { white-space: normal; }
+  .dt-cand-tools { gap: 2px; }
+  .dt-cand-nav { display: none; }
+}
+.dt-cand-card .dt-photo-failed { bottom: auto; height: 56px; }
+.dt-lb-fig { position: relative; }
+.dt-lb-fig .dt-photo-failed { min-height: 44px; color: #fff; }
+.dt-lb-fig button.dt-photo-failed { pointer-events: auto; }
+/* The supplied square asset includes a wordmark; show its orange symbol here. */
+.dt-tabelog { position: relative; display: inline-block; overflow: hidden; }
+.dt-tabelog img { position: absolute; width: 200%; height: 200%; max-width: none; left: -50%; top: -40%; clip-path: inset(28% 24% 39% 24%); }
