@@ -191,7 +191,7 @@ html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide
 #detail-foot .dt-actions.is-col .dt-act-more { width: 100%; }
 
 /* ---- Fold-inner candidate strip (§10.4) --------------------------------- */
-#candidates-root .dt-cand--collapsed { padding: 0; }
+#candidates-root .dt-cand.dt-cand--collapsed { padding: 0; }
 .dt-cand-reopen {
   display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 44px;
   padding: 0 var(--sp-3); border-radius: var(--r-button); background: none; border: 0;
@@ -327,10 +327,8 @@ html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide
 .dt-index-btn:disabled { opacity: .35; }
 .dt-index-pos { white-space: nowrap; }
 
-/* The Fold-inner strip host is narrow (it shares the map band with the FABs),
-   so the head must shrink by ellipsis rather than wrap its two labels into
-   two lines each. */
-.dt-cand-head { flex-wrap: nowrap; }
+/* Let the tools move below the title when enlarged text needs more room. */
+.dt-cand-head { flex-wrap: wrap; }
 .dt-cand-title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-cand-title .ic { flex: none; }
 .dt-cand-tools { flex: none; }

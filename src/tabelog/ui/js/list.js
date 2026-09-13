@@ -62,7 +62,7 @@
   /* virtualiser state ---------------------------------------------------- */
   var items = [];              // flat render list: {t:'g'|'r', key, …}
   var indexOf = Object.create(null);   // ref → item index
-  var itemH = Object.create(null);     // item key → measured px
+  var itemH = Object.create(null);     // geometry key → measured px
   var avgH = Object.create(null);      // estimate bucket → {sum, n}
   var vp = null;               // the <ul> the window paints into
   var curScroller = null, offScroll = null;
@@ -959,7 +959,14 @@
     var narrow = s.layout.mode === 'narrow';
     groups.forEach(function (g) {
       var isOpen = !open || open.has(g.key);
-      if (g.label !== null) items.push({ t: 'g', key: 'g:' + g.key, g: g, open: isOpen });
+      if (g.label !== null) {
+        var first = items.length === 0;
+        var afterRows = !first && items[items.length - 1].t === 'r';
+        var hasRows = isOpen && g.items.length > 0;
+        var geometry = (first ? 'first' : afterRows ? 'after-rows' : 'after-heading') + (hasRows ? ':rows' : ':empty');
+        items.push({ t: 'g', key: 'g:' + g.key, heightKey: 'g:' + g.key + '|' + geometry,
+          geometry: geometry, first: first, afterRows: afterRows, hasRows: hasRows, g: g, open: isOpen });
+      }
       if (g.label !== null && !isOpen) return;
       g.items.forEach(function (it) {
         if (it.kind === 'rst' && !it.d) it.d = D.byId(it.ref);
@@ -968,23 +975,26 @@
         items.push({ t: 'r', key: key, kind: it.kind, ref: it.ref, d: it.d, bm: it.bm, narrow: narrow, group: g });
       });
     });
+    itemSignature = items.map(heightKeyOf).join('\u0003');
     offsDirty = true;
   }
 
   /* ---- height bookkeeping ---------------------------------------------- */
+  var itemSignature = '';
+  function heightKeyOf(it) { return it.heightKey || it.key; }
   function bucketOf(it) {
-    if (it.t === 'g') return 'g';
+    if (it.t === 'g') return 'g:' + it.geometry;
     return (it.narrow ? 'n:' : 'c:') + it.kind;
   }
   function defaultH(it) {
-    if (it.t === 'g') return 80;
+    if (it.t === 'g') return 44 + (it.first ? 8 : it.afterRows ? 24 : 0) + (it.hasRows ? 12 : 0);
     return it.narrow ? 97 : 77;
   }
   function estH(it) {
     var b = avgH[bucketOf(it)];
     return b && b.n ? b.avg : defaultH(it);
   }
-  function hOf(it) { var h = itemH[it.key]; return h === undefined ? estH(it) : h; }
+  function hOf(it) { var h = itemH[heightKeyOf(it)]; return h === undefined ? estH(it) : h; }
   /**
    * noteH — a measured height. The mean is an EMA over the last ~20 samples,
    * not a cumulative average: a row measured while its column was still
@@ -996,9 +1006,9 @@
    */
   function noteH(it, h) {
     if (!(h > 0)) return false;
-    var prev = itemH[it.key];
+    var prev = itemH[heightKeyOf(it)];
     if (prev !== undefined && Math.abs(prev - h) < 0.5) return false;
-    itemH[it.key] = h;
+    itemH[heightKeyOf(it)] = h;
     var k = bucketOf(it), b = avgH[k] || (avgH[k] = { avg: h, n: 0 });
     b.n += 1;
     b.avg += (h - b.avg) / Math.min(b.n, 20);
@@ -1149,7 +1159,7 @@
     var buf = '<li class="ls-pad" aria-hidden="true" style="height:' + Math.round(topPad) + 'px"></li>';
     for (var i = start; i < end; i++) {
       var it = items[i];
-      buf += it.t === 'g' ? groupHead(it.g, it.open, i === 0) : rowHtml(it, s, i === 0);
+      buf += it.t === 'g' ? groupHead(it) : rowHtml(it, s, i === 0);
     }
     buf += '<li class="ls-pad" aria-hidden="true" style="height:' + Math.round(Math.max(0, totalH - offs[end])) + 'px"></li>';
     // A window repaint replaces every row node, which sends the keyboard
@@ -1201,13 +1211,13 @@
   var calibKey = null;
   function calibrate(s) {
     if (!vp || items.length < 60) return;
-    var key = measureW + '|' + items.length + '|' + (items[0] && items[0].key);
+    var key = measureW + '|' + itemSignature;
     if (calibKey === key) return;
     calibKey = key;
     var N = 48, picks = [], seen = Object.create(null);
     for (var i = 0; i < N; i++) {
       var idx = Math.floor(i * items.length / N);
-      if (seen[idx] || itemH[items[idx].key] !== undefined) continue;
+      if (seen[idx] || itemH[heightKeyOf(items[idx])] !== undefined) continue;
       seen[idx] = 1; picks.push(idx);
     }
     if (!picks.length) return;
@@ -1217,7 +1227,7 @@
     var buf = '';
     picks.forEach(function (idx) {
       var it = items[idx];
-      buf += it.t === 'g' ? groupHead(it.g, it.open, false) : rowHtml(it, s, false);
+      buf += it.t === 'g' ? groupHead(it) : rowHtml(it, s, false);
     });
     probe.innerHTML = buf;
     root.appendChild(probe);
@@ -1330,7 +1340,8 @@
       '<button class="link-btn" data-act="clear-focus">' + t('显示全部收藏') + '</button></div>';
   }
 
-  function groupHead(g, isOpen, first) {
+  function groupHead(it) {
+    var g = it.g, isOpen = it.open;
     var focusBtn = '';
     if (g.listId) {
       var on = App.state.saved.onlyList === g.listId;
@@ -1343,7 +1354,8 @@
         '<button class="icon-btn icon-btn-secondary ls-group-more" data-group-menu="' + esc(g.listId) + '" ' +
         'aria-haspopup="menu" aria-label="' + esc(t('收藏夹操作')) + '">' + ctx.icon('more') + '</button></span>';
     }
-    return '<li class="ls-group' + (first ? ' is-first' : '') + '">' +
+    return '<li class="ls-group' + (it.first ? ' is-first' : '') +
+      (it.afterRows ? ' is-after-rows' : '') + (it.hasRows ? ' has-rows' : '') + '">' +
       '<button class="ls-group-btn" data-group="' + esc(g.key) + '" aria-expanded="' + isOpen + '">' +
         ctx.icon(isOpen ? 'chevronDown' : 'chevronRight', { cls: 'ic-sm' }) +
         (g.emoji ? ctx.emoji.img(g.emoji, 18) : '') +

@@ -13,6 +13,22 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-09-13
+
+Collapsed city and collection headings no longer leave blank bands in Saved.
+Spacing is retained around visible restaurant content; virtual-list measurement
+tracks each heading’s actual layout state. Empty collections use the same rule.
+Heading emoji reserve their width before loading, so long collection names do
+not gain a line after the virtual list has measured them. The collapsed Fold
+candidate strip also drops padding inherited from its open state, keeping the
+reopen control at its natural height (44 px minimum). At large text sizes,
+its heading and tools wrap onto separate lines instead of squeezing the title
+into a tall column.
+
+Validated with 196 targeted records across Chromium/WebKit at 100%, 130% and
+200% text, plus build contracts, legacy-state compatibility, feature retention
+and existing UX journeys. See `audit_outputs/4.1.1/REPORT.md` for evidence.
+
 ## [4.1.0] - 2026-09-13
 
 Mobile and Fold layouts use less space for controls and show more of the

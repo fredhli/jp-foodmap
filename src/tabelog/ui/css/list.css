@@ -155,10 +155,12 @@ html[data-mode="wide"] #toast-root { --ls-pad: var(--pad-panel-wide); }
 /* ---- group headings (city / collection) --------------------------------- */
 .ls-group {
   display: flex; align-items: stretch;
-  padding-top: var(--c-list-group-gap); padding-bottom: var(--c-list-group-heading-gap);
+  padding: 0;
   background: var(--surface);
 }
 .ls-group.is-first { padding-top: var(--sp-2); }
+.ls-group.is-after-rows { padding-top: var(--c-list-group-gap); }
+.ls-group.has-rows { padding-bottom: var(--c-list-group-heading-gap); }
 .ls-group-focus {
   display: flex; align-items: center; flex: none;
   padding-right: var(--ls-pad);
@@ -187,6 +189,7 @@ html[data-mode="wide"] #toast-root { --ls-pad: var(--pad-panel-wide); }
 }
 .ls-group-btn:hover { background: #EEF3FB; }
 .ls-group-btn .ic { color: var(--ink-secondary); }
+.ls-group-btn > .emj, .ls-group-btn > .emj-text { flex: none; }
 .ls-group-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .ls-group-n { flex: none; }
 
