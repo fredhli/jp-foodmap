@@ -1844,9 +1844,12 @@
         '<button class="icon-btn" data-ov="notice-dismiss" data-notice="sync" aria-label="' + esc(t('关闭')) + '">' + ic('x') + '</button>', 'alert');
     }
     if (localNotices.geo && !localNotices.geoDismissed) {
-      html += noticeRow('ov-notice--danger', 'warning',
-        esc(localNotices.geoMessage || t('无法获取当前位置 · 请检查浏览器的定位权限')),
-        '<button class="icon-btn" data-ov="notice-dismiss" data-notice="geo" aria-label="' + esc(t('关闭')) + '">' + ic('x') + '</button>', 'alert');
+      var geoActions = '<button class="btn btn-quiet" data-ov="geo-retry">' + esc(t('重试')) + '</button>' +
+        (s.nativeSettings ? '<button class="btn btn-quiet" data-ov="geo-settings">' + esc(s.nativeSettings.label) + '</button>' : '') +
+        '<button class="icon-btn" data-ov="notice-dismiss" data-notice="geo" aria-label="' + esc(t('关闭')) + '">' + ic('x') + '</button>';
+      html += noticeRow('ov-notice--danger ov-notice--geo', 'warning',
+        esc(localNotices.geoMessage ? t(localNotices.geoMessage) : t('无法获取当前位置 · 请检查浏览器的定位权限')),
+        geoActions, 'alert');
     }
     // M-109 first-run row: one dismissible line, never a scrim.
     if (!quiet && !s.notices.introSeen && !localNotices.introDismissed && !s.notices.offline) {
@@ -1882,7 +1885,8 @@
     if (p.status === 'ok') { localNotices.geo = false; sig.search = null; sig.notice = null; App.requestRender('geo'); return; }
     if (p.status === 'denied' || p.status === 'error') {
       localNotices.geo = true; localNotices.geoDismissed = false;
-      localNotices.geoMessage = p.message || null;
+      localNotices.geoMessage = p.message || p.reason || null;
+      localNotices.geoPurpose = p.purpose === 'locate' ? 'locate' : 'nearby';
       sig.search = null; sig.notice = null; App.requestRender('notice');
     }
   }
@@ -2228,6 +2232,12 @@
       /* lightbox + notices */
       case 'lb-step': stepLightbox(Number(node.dataset.d)); break;
       case 'reload': act.acceptUpdate(); break;
+      case 'geo-retry':
+        localNotices.geoDismissed = true; sig.notice = null;
+        if (localNotices.geoPurpose === 'locate' || s.nearby.active) act.locate();
+        else act.toggleNearby();
+        break;
+      case 'geo-settings': act.openNativeSettings(); break;
       case 'notice-dismiss':
         if (node.dataset.notice === 'geo') localNotices.geoDismissed = true;
         else if (node.dataset.notice === 'sync') localNotices.syncDismissed = true;

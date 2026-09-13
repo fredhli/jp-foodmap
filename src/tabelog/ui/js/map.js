@@ -1171,10 +1171,24 @@
      ================================================================== */
   // Each native callback closes over its request, including callbacks arriving after cancel.
   var geoRequest = null, geoTimer = 0, locationMarker = null, accuracyCircle = null, nearbyCircle = null;
-  function errText(err) {
-    if (err && err.code === 1) return '定位权限被拒绝，可在浏览器设置中开启';
-    if (err && err.code === 3) return '定位超时，请再试一次';
-    return '无法取得位置';
+  function errInfo(err) {
+    var code = err && typeof err.code === 'number' ? err.code : 0;
+    if (code === 1) return { code: code, text: '定位权限被拒绝，可在浏览器设置中开启' };
+    if (code === 3) return { code: code, text: '定位超时，请再试一次' };
+    return { code: code, text: '无法取得位置' };
+  }
+  function positionTime(position) {
+    var now = Date.now(), raw = position && position.timestamp;
+    // Some Android WebViews expose a missing/zero/monotonic timestamp even
+    // though the coordinates were obtained successfully. Leaflet ignored the
+    // field before 4.2.0, so rejecting the entire fix here was a regression.
+    // A real epoch timestamp remains authoritative; otherwise the callback's
+    // receipt time is the only usable freshness boundary. maximumAge above
+    // still limits any location cached by the browser to ten minutes.
+    if (typeof raw !== 'number' || !isFinite(raw) || raw < 946684800000) {
+      return { ts: now, sampleTs: null, timeSource: 'received' };
+    }
+    return { ts: raw, sampleTs: raw, timeSource: 'sample' };
   }
   M.cancelLocation = function () {
     geoRequest = null; clearTimeout(geoTimer);
@@ -1183,10 +1197,10 @@
   M.requestLocation = function (request) {
     M.cancelLocation();
     geoRequest = request;
-    function finish(fix, reason) {
+    function finish(fix, reason, code) {
       if (geoRequest !== request) return;
       geoRequest = null; clearTimeout(geoTimer);
-      if (reason) request.onError(reason); else request.onSuccess(fix);
+      if (reason) request.onError(reason, code || 0); else request.onSuccess(fix);
     }
     if (!navigator.geolocation) { finish(null, '无法取得位置'); return; }
     geoTimer = setTimeout(function () { finish(null, '定位超时，请再试一次'); }, 16000);
@@ -1194,10 +1208,11 @@
       navigator.geolocation.getCurrentPosition(function (position) {
         var c = position && position.coords;
         if (!c) { finish(null, '无法取得位置'); return; }
+        var sampled = positionTime(position);
         finish({ lat: c.latitude, lon: c.longitude,
           acc: typeof c.accuracy === 'number' && isFinite(c.accuracy) && c.accuracy >= 0 ? c.accuracy : null,
-          ts: position.timestamp });
-      }, function (err) { finish(null, errText(err)); },
+          ts: sampled.ts, sampleTs: sampled.sampleTs, timeSource: sampled.timeSource });
+      }, function (err) { var info = errInfo(err); finish(null, info.text, info.code); },
       { enableHighAccuracy: true, maximumAge: 600000, timeout: 15000 });
     } catch (_) { finish(null, '无法取得位置'); }
   };

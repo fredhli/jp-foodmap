@@ -89,15 +89,25 @@ with lib_browser.serve_docs(8993) as base, sync_playwright() as p:
           App.act.resetFilters();
           window.uiFix=Data.restaurants.find(r=>r.lat&&r.lon);
           window.geoCallback=null;
+          window.settingsOpened=0;
+          App.set({nativeSettings:{label:'应用设置'}});
+          App.act.openNativeSettings=()=>{settingsOpened++};
           Object.defineProperty(navigator,'geolocation',{value:{getCurrentPosition:(success)=>{window.geoCallback=success}},configurable:true});
         }''')
-        page.evaluate("App.emit('map:locate',{status:'error',message:'test-location-error'})")
+        page.evaluate("App.emit('map:locate',{status:'denied',reason:'定位权限被拒绝，可在浏览器设置中开启',purpose:'nearby'})")
         page.wait_for_timeout(100)
         assert page.locator('[data-notice="geo"]').is_visible()
-        page.locator('[data-ov="nearby"]').click()
+        assert '定位权限被拒绝' in page.locator('#notice-root .ov-notice--danger').text_content()
+        assert page.locator('[data-ov="geo-retry"]').is_visible()
+        assert page.locator('[data-ov="geo-settings"]').is_visible()
+        assert all(b['width'] >= 44 and b['height'] >= 44 for b in page.locator('.ov-notice--geo [data-ov]').evaluate_all('(xs)=>xs.map(x=>{const r=x.getBoundingClientRect();return {width:r.width,height:r.height}})'))
+        page.screenshot(path=str(args.output/f'cover-{w}-location-permission.png'))
+        page.locator('[data-ov="geo-settings"]').click()
+        assert page.evaluate('settingsOpened===1')
+        page.locator('[data-ov="geo-retry"]').click()
         page.wait_for_timeout(100)
         assert page.locator('[data-notice="geo"]').count()==0
-        assert page.evaluate('App.state.nearby.pending')
+        assert page.evaluate('App.state.nearby.pending && App.state.nearby.purpose==="nearby"')
         page.locator('[data-ov="nearby"]').click()
         assert not page.evaluate('App.state.nearby.pending || App.state.nearby.active')
         page.locator('[data-ov="nearby"]').click()

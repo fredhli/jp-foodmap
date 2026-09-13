@@ -26,6 +26,8 @@ GEO = """(() => {
   }});
   window.giveFix = (index, lat=35.6812, lon=139.7671, ts=Date.now()) =>
     geoRequests[index].ok({coords:{latitude:lat, longitude:lon, accuracy:12}, timestamp:ts});
+  window.giveFixWithoutTime = (index, lat=35.6812, lon=139.7671) =>
+    geoRequests[index].ok({coords:{latitude:lat, longitude:lon, accuracy:12}});
   window.rejectFix = (index, code) => geoRequests[index].fail({code});
 })();"""
 SNAP = """() => {
@@ -108,6 +110,7 @@ with lib_browser.serve_docs(8997) as base, sync_playwright() as p:
         ['bookableOnly','favOnly','hideBlack','hideForeign','gcalOnly'].every(k=>!f[k])&&s.saved.onlyList===null&&
         s.sort==='distance'&&s.search.query===''&&s.search.placeFilter===null&&!s.search.dropLoc;
     }""")
+    check(page, 'standard epoch sample time remains authoritative', 'App.state.nearby.fix.timeSource==="sample"&&App.state.nearby.fix.sampleTs===App.state.nearby.fix.ts')
     check(page, 'snapshot clones Sets rather than sharing filter objects', """() => {
       const values=new Set(['gold']);App.act.applyFilters({awards:values});values.add('silver');
       return !App.state.nearby.planning.filters.awards.has('silver')&&App.state.nearby.planning.filters.awards.size===2;
@@ -165,7 +168,27 @@ with lib_browser.serve_docs(8997) as base, sync_playwright() as p:
     assert {k: v for k, v in planning.items() if k not in ['center', 'zoom']} == {k: v for k, v in now.items() if k not in ['center', 'zoom']}
     check(page, 'FAB does not enter nearby', '!App.state.nearby.active&&Data.locationOrigin()!==null')
     page.evaluate('window.goodFix=JSON.stringify(App.state.nearby.fix);window.goodLast=localStorage.getItem("tabelog.lastLocation");window.goodView=JSON.stringify(App.state.mapView)')
-    for code in [1, 2, 3]:
+    page.evaluate("""() => {App.set({nativeSettings:{label:'应用设置'}});window.settingsOpened=0;
+      App.act.openNativeSettings=()=>{settingsOpened++};App.act.locate();rejectFix(geoRequests.length-1,1)}""")
+    page.wait_for_selector('#notice-root .ov-notice--danger [data-ov="geo-settings"]')
+    check(page, 'permission denial keeps the exact reason and request purpose', """() => {
+      const n=document.querySelector('#notice-root .ov-notice--danger');
+      return App.state.nearby.error==='定位权限被拒绝，可在浏览器设置中开启'&&n&&
+        n.textContent.includes('定位权限被拒绝')&&!!n.querySelector('[data-ov="geo-retry"]')&&
+        !!n.querySelector('[data-ov="geo-settings"]');
+    }""")
+    page.locator('[data-ov="geo-settings"]').click()
+    check(page, 'Android recovery opens the existing app settings action', 'settingsOpened===1')
+    retry_before = page.evaluate('geoRequests.length')
+    page.locator('[data-ov="geo-retry"]').click()
+    check(page, 'location retry preserves standalone locate semantics', f'geoRequests.length==={retry_before + 1}&&App.state.nearby.pending&&App.state.nearby.purpose==="locate"&&!App.state.nearby.active')
+    page.evaluate('App.act.toggleNearby()')
+    page.evaluate('App.act.toggleNearby();rejectFix(geoRequests.length-1,1)')
+    nearby_retry_before = page.evaluate('geoRequests.length')
+    page.locator('[data-ov="geo-retry"]').click()
+    check(page, 'permission retry preserves Nearby mode semantics', f'geoRequests.length==={nearby_retry_before + 1}&&App.state.nearby.pending&&App.state.nearby.purpose==="nearby"&&!App.state.nearby.active')
+    page.evaluate('App.act.toggleNearby()')
+    for code in [2, 3]:
         page.evaluate(f'App.act.locate();rejectFix(geoRequests.length-1,{code})')
         check(page, f'error {code} preserves previous validated fix and view', 'JSON.stringify(App.state.nearby.fix)===goodFix&&localStorage.getItem("tabelog.lastLocation")===goodLast&&JSON.stringify(App.state.mapView)===goodView&&!App.state.nearby.pending')
     page.evaluate('App.act.toggleNearby();giveFix(geoRequests.length-1,52.52,13.4)')
@@ -179,9 +202,16 @@ with lib_browser.serve_docs(8997) as base, sync_playwright() as p:
     check(page, 'out of order late callback cannot replace latest fix', 'JSON.stringify(App.state.nearby.fix)===newFix')
     page.evaluate('App.act.locate();rejectFix(geoRequests.length-1,3);giveFix(geoRequests.length-1,35,135)')
     check(page, 'callback after timeout cannot resurrect request', '!App.state.nearby.pending&&JSON.stringify(App.state.nearby.fix)===newFix')
-    for stamp in ['null', 'Date.now()+1000', 'Date.now()-600001']:
+    page.evaluate('App.act.locate();giveFixWithoutTime(geoRequests.length-1,35.71,139.81)')
+    check(page, 'missing WebView timestamp uses bounded callback receipt time', 'App.state.nearby.fix.lat===35.71&&App.state.nearby.fix.sampleTs===null&&App.state.nearby.fix.timeSource==="received"&&Date.now()-App.state.nearby.fix.ts<2000')
+    page.evaluate('App.act.locate();giveFix(geoRequests.length-1,35.715,139.815,0)')
+    check(page, 'zero WebView timestamp uses bounded callback receipt time', 'App.state.nearby.fix.lat===35.715&&App.state.nearby.fix.sampleTs===null&&App.state.nearby.fix.timeSource==="received"&&Date.now()-App.state.nearby.fix.ts<2000')
+    page.evaluate('App.act.locate();giveFix(geoRequests.length-1,35.72,139.82,123456)')
+    check(page, 'monotonic WebView timestamp uses bounded callback receipt time', 'App.state.nearby.fix.lat===35.72&&App.state.nearby.fix.sampleTs===null&&App.state.nearby.fix.timeSource==="received"&&Date.now()-App.state.nearby.fix.ts<2000')
+    page.evaluate('window.newFix=JSON.stringify(App.state.nearby.fix)')
+    for stamp in ['Date.now()+1000', 'Date.now()-600001']:
         page.evaluate(f'App.act.locate();giveFix(geoRequests.length-1,35.7,139.8,{stamp})')
-        check(page, f'invalid native timestamp {stamp} is never fabricated', 'JSON.stringify(App.state.nearby.fix)===newFix&&!App.state.nearby.pending')
+        check(page, f'invalid epoch timestamp {stamp} is rejected', 'JSON.stringify(App.state.nearby.fix)===newFix&&!App.state.nearby.pending')
 
     # Persist the temporary task in this tab, and leave another tab's preferences alone.
     page.evaluate('App.act.toggleNearby()')

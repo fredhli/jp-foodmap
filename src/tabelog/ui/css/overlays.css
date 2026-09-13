@@ -333,6 +333,8 @@
 .ov-notice--danger .ic { color: var(--danger); }
 .ov-notice .btn { min-height: 36px; padding: 0 var(--sp-3); }
 .ov-notice .icon-btn { width: 36px; height: 36px; }
+.ov-notice--geo .btn { min-height: var(--touch-min); }
+.ov-notice--geo .icon-btn { width: var(--touch-min); height: var(--touch-min); }
 
 /* ==========================================================================
    5. Shared bits

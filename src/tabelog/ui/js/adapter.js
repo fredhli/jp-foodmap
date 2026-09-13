@@ -816,17 +816,19 @@
     App.set({ nearby: { pending: false, requestId: null, purpose: null } });
     return nb;
   }
-  function locationFailure(id, reason) {
+  function locationFailure(id, reason, code, purpose) {
     if (!App.state.nearby.pending || App.state.nearby.requestId !== id) return;
+    purpose = purpose || App.state.nearby.purpose || 'nearby';
     App.set({ nearby: { pending: false, requestId: null, purpose: null, error: reason } });
     App.act.showToast({ kind: 'error', text: window.t(reason) });
-    App.emit('map:locate', { status: 'error', reason: reason, requestId: id });
+    App.emit('map:locate', { status: code === 1 ? 'denied' : 'error', reason: reason,
+      message: reason, code: code || 0, purpose: purpose, requestId: id });
   }
   function acceptLocation(id, purpose, fix) {
     var s = App.state, nb = s.nearby;
     if (!nb.pending || nb.requestId !== id) return;
-    if (!Data.validLocation(fix, false)) { locationFailure(id, '地图只覆盖日本'); return; }
-    if (!Data.validLocation(fix, true)) { locationFailure(id, '无法取得位置'); return; }
+    if (!Data.validLocation(fix, false)) { locationFailure(id, '地图只覆盖日本', 0, purpose); return; }
+    if (!Data.validLocation(fix, true)) { locationFailure(id, '无法取得位置', 0, purpose); return; }
     nearbyTransaction = true;
     var entering = purpose === 'nearby' && !nb.active;
     var plan = entering ? snapshotPlanning(s) : nb.planning;
@@ -855,7 +857,7 @@
     App.set({ nearby: { pending: true, requestId: id, purpose: purpose, error: null } });
     App.emit('map:locate', { status: 'locating', requestId: id });
     window.MapMod.requestLocation({ requestId: id, purpose: purpose, onSuccess: function (fix) { acceptLocation(id, purpose, fix); },
-      onError: function (reason) { locationFailure(id, reason); } });
+      onError: function (reason, code) { locationFailure(id, reason, code, purpose); } });
   }
   function wireNearbyActs(act) {
     var applyFilters = act.applyFilters;

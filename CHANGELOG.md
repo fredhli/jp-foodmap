@@ -13,6 +13,19 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-09-13
+
+Location fixes returned by Android WebView are accepted when their timestamp
+is missing, zero, or uses a non-epoch clock. Their callback receipt time is
+used as the bounded freshness reference while standards-compliant sample
+timestamps remain authoritative. This restores Nearby mode on WebViews that
+worked before the stricter 4.2.0 freshness check.
+
+Location failures now show their actual reason. The notice offers Retry and,
+inside the Android shell, a direct link to the app settings where a denied
+location permission can be enabled. Retrying preserves whether the failed
+request came from Nearby mode or the standalone locate button.
+
 ## [4.2.0] - 2026-09-13
 
 Nearby mode is now a toggle with 200 m, 500 m, 1 km and 2 km ranges. It
