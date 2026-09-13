@@ -64,7 +64,7 @@ import lib_browser  # noqa: E402
 VIEWPORTS = {
     'iphone402': dict(w=402, h=874, browser='webkit', dpr=3,
                       home=0.78, drawer=0.10, detail=0.18),
-    'fold475':   dict(w=475, h=751, browser='chromium', dpr=2,
+    'fold475':   dict(w=475, h=751, browser='chromium', dpr=2.625,
                       home=0.78, drawer=None, detail=0.18),
     'fold591':   dict(w=591, h=689, browser='chromium', dpr=2,
                       home=None, drawer=0.30, detail=0.18),

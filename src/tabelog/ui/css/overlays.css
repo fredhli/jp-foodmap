@@ -464,3 +464,7 @@ html[data-fold-cover] .ov-cover-nearby { flex: none; min-width: 44px; }
 html[data-fold-cover] .ov-caprow .ov-capsule { overflow: hidden; }
 html[data-fold-cover] .ov-cover-nearby .ic { flex: none; }
 html[data-fold-cover] .ov-cover-icon .ov-cover-near-label { display: none; }
+
+.ov-layout-diagnostics { margin-top: var(--sp-3); }
+.ov-layout-diagnostics summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
+.ov-layout-readings { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }

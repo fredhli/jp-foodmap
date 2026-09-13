@@ -87,7 +87,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.1.2"
+EXPECTED_APP_VERSION = "4.1.3"
 
 # map.py is the single source of both build-time facts the About sheet states.
 # Parsed as text rather than imported: importing map.py runs the whole render

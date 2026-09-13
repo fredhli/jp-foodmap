@@ -1663,5 +1663,45 @@
   "默认收藏夹": {
     "en": "Default collection",
     "ja": "既定のコレクション"
+  },
+  "布局诊断": {
+    "en": "Layout diagnostics",
+    "ja": "レイアウト診断"
+  },
+  "复制诊断信息": {
+    "en": "Copy diagnostics",
+    "ja": "診断情報をコピー"
+  },
+  "仅在本地显示和复制屏幕信息，不含账号或收藏数据。": {
+    "en": "Screen information is shown and copied locally. Account and saved-place data are excluded.",
+    "ja": "画面情報は端末内で表示・コピーされます。アカウントや保存済みデータは含まれません。"
+  },
+  "屏幕或缩放读数无效": {
+    "en": "Invalid screen or pixel ratio readings",
+    "ja": "画面サイズまたはピクセル比の値が無効です"
+  },
+  "未检测到触屏": {
+    "en": "Touchscreen not detected",
+    "ja": "タッチ操作が検出されません"
+  },
+  "屏幕不是竖向": {
+    "en": "Screen is not in portrait orientation",
+    "ja": "画面が縦向きではありません"
+  },
+  "当前不是窄屏布局": {
+    "en": "Current layout is not narrow",
+    "ja": "現在は狭幅レイアウトではありません"
+  },
+  "页面未占满屏幕宽度": {
+    "en": "Page does not fill the screen width",
+    "ja": "ページが画面の横幅全体を使用していません"
+  },
+  "物理屏幕尺寸不匹配": {
+    "en": "Physical screen dimensions do not match",
+    "ja": "物理画面サイズが一致しません"
+  },
+  "外屏尺寸匹配": {
+    "en": "Cover screen dimensions match",
+    "ja": "カバー画面サイズが一致しました"
   }
 }

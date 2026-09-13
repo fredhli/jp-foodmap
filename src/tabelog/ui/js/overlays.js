@@ -258,7 +258,7 @@
   function renderSearch(s) {
     var mode = s.layout.mode, active = !!s.search.active;
     var nb = nearbyState(s);
-    var key = [mode, active, s.layout.foldCover, s.fontScale, s.lang, s.account.signedIn, s.filters.region,
+    var key = [mode, active, s.layout.foldCover, s.layout.foldCover && s.layout.W < 450, s.fontScale, s.lang, s.account.signedIn, s.filters.region,
                s.search.placeFilter, !!nb.fix, !!nb.active, !!nb.planning,
                s.overlay.kind === 'regionPicker', s.overlay.kind === 'account'].join('|');
     if (sig.search !== key) {
@@ -347,7 +347,7 @@
         region.childNodes[1].replaceWith(label);
         nearby.setAttribute('aria-label', t('附近'));
         nearby.classList.add('ov-cover-nearby');
-        if (s.fontScale >= 130) nearby.classList.add('ov-cover-icon');
+        if (s.fontScale >= 130 || s.layout.W < 450) nearby.classList.add('ov-cover-icon');
         var nearLabel = document.createElement('span'); nearLabel.className = 'ov-cover-near-label'; nearLabel.textContent = t('附近');
         nearby.lastChild.replaceWith(nearLabel);
         row.insertBefore(region, row.lastElementChild); row.insertBefore(nearby, row.lastElementChild);
@@ -1364,6 +1364,24 @@
         ic('download') + esc(t('安装')) + '</button>' : '') +
       steps + '<p class="ov-sub">' + esc(t('装好之后离线也能看地图')) + '</p>';
   }
+  function layoutDiagnosticText(s) {
+    var doc = document.documentElement, sc = window.screen || {}, vv = window.visualViewport;
+    var info = App.layout.foldCoverInfo(doc.clientWidth || window.innerWidth);
+    function finite(v) { return typeof v === 'number' && Number.isFinite(v) ? v : null; }
+    return JSON.stringify({
+      appVersion: (s.buildMeta || {}).appVersion || '',
+      screen: { width: info.screenWidth, height: info.screenHeight },
+      availableScreen: { width: finite(sc.availWidth), height: finite(sc.availHeight) },
+      layoutViewport: { width: info.layoutWidth, height: finite(doc.clientHeight) },
+      innerViewport: { width: finite(window.innerWidth), height: finite(window.innerHeight) },
+      visualViewport: vv ? { width: finite(vv.width), height: finite(vv.height) } : null,
+      devicePixelRatio: info.dpr,
+      physicalScreen: { width: info.physicalWidth, height: info.physicalHeight },
+      touch: { detected: info.touch, maxTouchPoints: info.maxTouchPoints, coarsePointer: info.coarsePointer },
+      foldCover: { matched: info.matched, enabled: !!s.layout.foldCover,
+        attributeApplied: doc.hasAttribute('data-fold-cover'), reason: t(info.reason) }
+    }, null, 2);
+  }
   function helpBody(s) {
     var topic = helpTopic(s);
     var body = '';
@@ -1402,7 +1420,11 @@
         '<div class="ov-kbd-row"><span class="ov-kbd-desc">' + esc(t('收录范围')) + '</span><b class="num">' + esc(t('{n} 家', { n: u.fmtCount(Data.restaurants.length, s.lang) })) + '</b></div>' +
         (bm.scrapedAt ? '<div class="ov-kbd-row"><span class="ov-kbd-desc">' + esc(t('数据采集于')) + '</span><b class="num" lang="en">' + esc(bm.scrapedAt) + '</b></div>' : '') +
         (bm.latestScrape && bm.latestScrape !== bm.scrapedAt ? '<div class="ov-kbd-row"><span class="ov-kbd-desc">' + esc(t('最近补充')) + '</span><b class="num" lang="en">' + esc(bm.latestScrape) + '</b></div>' : '') +
-        '<p class="ov-sub">' + esc(t('数据来自 Tabelog 公开页面，仅作个人旅行参考。')) + '</p>';
+        '<p class="ov-sub">' + esc(t('数据来自 Tabelog 公开页面，仅作个人旅行参考。')) + '</p>' +
+        '<details class="ov-layout-diagnostics"><summary data-ov="layout-diagnostics">' + esc(t('布局诊断')) + '</summary>' +
+        '<p class="ov-sub">' + esc(t('仅在本地显示和复制屏幕信息，不含账号或收藏数据。')) + '</p>' +
+        '<pre class="ov-layout-readings"></pre><button class="btn btn-secondary" data-ov="copy-layout-diagnostics">' +
+        esc(t('复制诊断信息')) + '</button></details>';
     }
     return popHead(t(HELP_TITLE[topic] || '帮助')) + '<div class="ov-pop-body"><div class="ov-help-body">' + body + '</div></div>';
   }
@@ -1941,6 +1963,16 @@
   function runAction(name, node, e) {
     var s = S();
     switch (name) {
+      case 'layout-diagnostics':
+        node.parentElement.open = !node.parentElement.open;
+        if (node.parentElement.open) node.parentElement.querySelector('pre').textContent = layoutDiagnosticText(s);
+        break;
+      case 'copy-layout-diagnostics': {
+        var diagnostic = layoutDiagnosticText(s);
+        node.parentElement.querySelector('pre').textContent = diagnostic;
+        copyText(diagnostic);
+        break;
+      }
       case 'search-activate': rememberTrigger(); App.set({ search: { active: true, activeIndex: -1 } }); break;
       case 'search-cancel':
         App.emit('search:cancel', { reason: 'button' });

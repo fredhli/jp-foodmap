@@ -13,6 +13,22 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.1.3] - 2026-09-13
+
+Fold cover detection now compares the screen dimensions multiplied by device
+pixel ratio with the recorded 1248×1972 display. The previous fixed CSS
+475×751 check excluded the same screen at other display densities. A one-CSS-pixel
+rounding tolerance handles screen/viewport floor and ceiling differences.
+Full-width portrait touch and both physical dimensions remain required.
+
+About includes collapsed, local-only layout diagnostics with a copy action.
+It reports current measurements and matching/application state without account,
+Saved, location or URL data. Smaller cover profiles retain usable touch controls.
+
+Validated with 22 targeted profiles, 14 independent Chromium/WebKit cases, and
+416/475 cover smoke checks. An extra WebKit form-click failure reproduces equally
+on 4.1.2 and 4.1.3; it is recorded separately in `audit_outputs/4.1.3/REPORT.md`.
+
 ## [4.1.2] - 2026-09-13
 
 Map selections are revealed inside the usable map area, including short map

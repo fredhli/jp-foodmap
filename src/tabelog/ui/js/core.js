@@ -680,13 +680,28 @@
     return W < CFG.narrowLt ? 'narrow' : (W < CFG.wideGte ? 'mid' : 'wide');
   };
 
-  // Stable screen geometry keeps this profile independent of keyboard/toolbars.
-  layout.isFoldCover = function (W) {
-    var sc = window.screen, touch = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
-    if (!sc || !touch) return false;
-    var short = Math.min(sc.width, sc.height), long = Math.max(sc.width, sc.height);
-    return Math.abs(short - 475) <= 1 && Math.abs(long - 751) <= 1 && Math.abs(W - 475) <= 1 && layout.mode(W) === 'narrow';
+  // Match physical screen geometry; browser bars and keyboards only change the viewport.
+  layout.foldCoverInfo = function (W) {
+    var sc = window.screen || {}, dpr = window.devicePixelRatio;
+    var sw = sc.width, sh = sc.height;
+    var points = navigator.maxTouchPoints || 0;
+    var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    function positive(v) { return typeof v === 'number' && Number.isFinite(v) && v > 0; }
+    function finite(v) { return typeof v === 'number' && Number.isFinite(v) ? v : null; }
+    var reason = '';
+    if (!positive(sw) || !positive(sh) || !positive(dpr) || !positive(W)) reason = '屏幕或缩放读数无效';
+    else if (!(points > 0 || coarse)) reason = '未检测到触屏';
+    else if (sw >= sh) reason = '屏幕不是竖向';
+    else if (layout.mode(W) !== 'narrow') reason = '当前不是窄屏布局';
+    else if (Math.abs(W - sw) > 1) reason = '页面未占满屏幕宽度';
+    // screen and viewport can round CSS dimensions differently by one pixel.
+    else if (Math.abs(sw * dpr - 1248) > dpr + 1e-6 || Math.abs(sh * dpr - 1972) > dpr + 1e-6) reason = '物理屏幕尺寸不匹配';
+    return { matched: !reason, reason: reason || '外屏尺寸匹配',
+      screenWidth: finite(sw), screenHeight: finite(sh), layoutWidth: finite(W), dpr: finite(dpr),
+      physicalWidth: finite(sw * dpr), physicalHeight: finite(sh * dpr),
+      maxTouchPoints: finite(points), coarsePointer: coarse, touch: points > 0 || coarse };
   };
+  layout.isFoldCover = function (W) { return layout.foldCoverInfo(W).matched; };
 
   // safe-area probe: reads env() once per measure
   var _probe = null;
