@@ -28,7 +28,7 @@
      Containers.afterSettle(fn)
      Containers.temporarilyCollapse() / restore()   LAYER-03 fallback 1
      Containers.snapCandidates(state)
-     Containers.detailTools(state)                  the ⋯ / expand / × cluster
+     Containers.detailTools(state)                  the ⋯ / expand / source-exit cluster
      Containers.mapBand(state)
    Events emitted: 'sheet:snapped' {state, reason:'drag'}, 'columns:changed'.
    ========================================================================== */
@@ -44,6 +44,7 @@
   var _tempCollapsed = null;      // LAYER-03 saved semantic stop
   var _lastSheetH = null;
   var _lastCols = null;
+  var _route = null;              // narrow results ↔ detail horizontal transition
 
   var SHEET_MIN = 80;
 
@@ -75,6 +76,9 @@
     });
     // a cancelled search puts the panel back exactly where it was (NAV-04)
     App.on('search:cancel', function () { App.requestRender('search'); });
+    App.on('detail:open', function (p) {
+      if (p && p.origin === 'results' && roots.listRoot.parentElement === els['sheet-body']) routeDetail('forward');
+    });
     // NAV-01/NAV-02: after a card closes the caret must be somewhere the
     // reader can see. The list returns it to the source row when there was
     // one; otherwise we place it. The flag survives the renders that follow,
@@ -85,6 +89,7 @@
       // the header fallback is only for a card opened from search, a marker or
       // a deep link, where there is no row to go back to.
       var origin = p && p.selected && p.selected.origin;
+      if (origin === 'results' && p.reason === 'back' && roots.detailRoot.parentElement === els['sheet-body']) routeDetail('back');
       _rescueRef = (origin === 'results' || origin === 'saved') ? (p.selected.id || null) : null;
       _rescue = true;
       _rescueAt = Date.now();
@@ -328,6 +333,75 @@
   }
   function park(root) { place(root, els.parking); }
 
+  function finishRoute(route) {
+    if (!route || route.done) return;
+    route.done = true;
+    if (route.ghost && route.ghost.parentNode) route.ghost.parentNode.removeChild(route.ghost);
+    els.sheet.style.transition = '';
+    els.sheet.style.transform = '';
+    els.sheet.style.willChange = '';
+    els.sheet.removeAttribute('data-route-motion');
+    if (_route === route) _route = null;
+    route.resolve();
+    App.emit('detail:route-settled', { direction: route.direction });
+  }
+
+  function cancelRoute() {
+    if (_route) finishRoute(_route);
+  }
+
+  /** A fixed visual copy lets the old task leave while App renders the new
+   *  task underneath it. The real persistent roots still move through
+   *  placeRoots(), so scroll anchors, listeners and source restoration remain
+   *  owned by List/Detail rather than by the animation. */
+  function routeDetail(direction) {
+    var s = App.state;
+    if (s.layout.mode !== 'narrow' || ctx.motion.reduced) return;
+    cancelRoute();
+    var rect = els.sheet.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    var ghost = els.sheet.cloneNode(true);
+    ghost.removeAttribute('id');
+    ghost.setAttribute('data-route-ghost', direction);
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.inert = true;
+    var cs = getComputedStyle(els.sheet);
+    ghost.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + rect.top + 'px;' +
+      'width:' + rect.width + 'px;height:' + rect.height + 'px;bottom:auto;display:flex;' +
+      'flex-direction:column;overflow:hidden;pointer-events:none;z-index:11;background:' + cs.backgroundColor + ';' +
+      'border-radius:' + cs.borderRadius + ';box-shadow:' + cs.boxShadow + ';';
+    document.body.appendChild(ghost);
+    var oldBody = els['sheet-body'], ghostBody = ghost.querySelector('#sheet-body');
+    if (ghostBody) ghostBody.scrollTop = oldBody.scrollTop;
+
+    var route = { direction: direction, ghost: ghost, done: false, resolve: null };
+    var settled = new Promise(function (resolve) { route.resolve = resolve; });
+    _route = route;
+    ctx.motion.geometryBusy(settled);
+    els.sheet.setAttribute('data-route-motion', direction);
+    els.sheet.style.transform = direction === 'forward' ? 'translateX(100%)' : 'translateX(-100%)';
+    els.sheet.style.willChange = 'transform';
+
+    util.raf(function () { util.raf(function () {
+      if (_route !== route || route.done) return;
+      var duration = Math.max(1, ctx.motion.micro || 160);
+      var incomingFrom = direction === 'forward' ? 'translateX(100%)' : 'translateX(-100%)';
+      var outgoingTo = direction === 'forward' ? 'translateX(-100%)' : 'translateX(100%)';
+      var transition = 'transform ' + duration + 'ms ' + ctx.motion.easeStandard;
+      ghost.style.transition = transition;
+      els.sheet.style.transition = transition;
+      // Read once after installing the transitions so both engines commit the
+      // starting transforms before the destination values are written.
+      void ghost.offsetWidth; void els.sheet.offsetWidth;
+      ghost.style.transform = outgoingTo;
+      els.sheet.style.transform = 'translateX(0)';
+      Promise.all([
+        ctx.motion.afterTransition(ghost, { prop: 'transform', timeout: duration + 60 }),
+        ctx.motion.afterTransition(els.sheet, { prop: 'transform', timeout: duration + 60 })
+      ]).then(function () { finishRoute(route); });
+    }); });
+  }
+
   function placeRoots(s) {
     var mode = s.layout.mode;
     if (mode === 'narrow') {
@@ -473,7 +547,7 @@
 
     // M1 / M1b: hold scrollTop + focus restores until the height transition ends
     var h = s.sheet.height;
-    if (_lastSheetH !== null && _lastSheetH !== h && !s.sheet.dragging) {
+    if (_lastSheetH !== null && _lastSheetH !== h && !s.sheet.dragging && !_route) {
       ctx.motion.geometryBusy(ctx.motion.afterTransition(els.sheet, { prop: 'height', timeout: ctx.motion.sheet + 60 })
         .then(function () {
           if (_dragPending) { App.emit('sheet:snapped', { state: _dragPending, reason: 'drag' }); _dragPending = null; }
@@ -529,10 +603,14 @@
   // Mobile navigation shares the sticky restaurant title group.
   function headNav() { return ''; }
 
-  C.detailBack = function (s) {
+  function detailBackButton(s, extra) {
     var label = window.Detail && window.Detail.backLabel ? window.Detail.backLabel(s) : null;
-    return label ? '<button class="icon-btn icon-btn-secondary dt-back" data-ct="back" aria-label="' +
+    return label ? '<button class="icon-btn icon-btn-secondary dt-back' + (extra ? ' ' + extra : '') + '" data-ct="back" aria-label="' +
       util.esc(t(label)) + '">' + ctx.icon('back') + '</button>' : '';
+  }
+  C.detailBack = function (s) {
+    if (s.layout.mode === 'narrow' && s.selected.origin === 'results') return '';
+    return detailBackButton(s, '');
   };
 
   /** detailTools(state) — the ⋯ / expand / close cluster detail.js puts in its title row. */
@@ -540,10 +618,13 @@
     s = s || App.state;
     if (s.layout.mode === 'mid') return '<button class="icon-btn" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
     var expanded = s.sheet.state === 'expanded' || s.sheet.state === 'full';
+    var endAction = s.selected.origin === 'results'
+      ? detailBackButton(s, 'dt-back--end')
+      : '<button class="icon-btn" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
     return '<button class="icon-btn icon-btn-secondary" data-ct="sheet" data-sheet="' + (expanded ? 'detail' : 'expanded') + '" ' +
       'aria-label="' + util.esc(t(expanded ? '收起面板' : '展开面板')) + '" aria-expanded="' + expanded + '">' +
       ctx.icon(expanded ? 'collapse' : 'expand') + '</button>' +
-      '<button class="icon-btn" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
+      endAction;
   };
 
   function tabsMarkup(s, n) {
@@ -816,6 +897,7 @@
   };
 
   C.destroy = function () {
+    cancelRoute();
     ['sheet-head', 'col-left-head', 'col-left-rail', 'col-detail-head', 'topbar-brand'].forEach(function (id) {
       if (els[id]) els[id].innerHTML = '';
     });

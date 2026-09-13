@@ -205,7 +205,17 @@ with lib_browser.serve_docs(8988 if args.browser=='chromium' else 8989) as base,
             verify(sum(e['kind']=='pushState' for e in events)==before_push,'back created history')
             record('map-return')
         else:
-            open_row('saved' if name=='saved-back' else 'results')
+            if name == 'close-button':
+                # 4.2.2 deliberately replaces Close with Back for a Results
+                # source. Keep testing the distinct Close semantic on a map
+                # source, where there is no list route to restore.
+                tab('results')
+                zoom_to_markers()
+                page.locator('.leaflet-marker-icon:has(.mp-mk)').first.dispatch_event('click')
+                wait(lambda s:s.get('detail') and s.get('full'),'marker detail')
+                verify(not state['back'],'map source gained a result back action')
+            else:
+                open_row('saved' if name=='saved-back' else 'results')
             verify(state['saveHit'] and state['mapsHit'],'primary action unavailable')
             record('detail')
             if name=='resize-phone-wide':

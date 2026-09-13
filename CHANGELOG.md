@@ -13,6 +13,18 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-09-13
+
+On phones, a detail opened from filtered Results now has one rightmost Back
+button in place of the separate Back-plus-Close controls. It returns to the
+same result list, scroll anchor and focus target; the Close button remains for
+details without a Results source.
+
+The Results-to-detail transition now expresses the navigation hierarchy
+horizontally: Results leaves to the left while detail enters from the right,
+and Back reverses the motion. The sheet does not animate vertically during
+this route change. Reduced-motion preferences switch immediately.
+
 ## [4.2.1] - 2026-09-13
 
 Location fixes returned by Android WebView are accepted when their timestamp

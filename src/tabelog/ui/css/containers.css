@@ -42,6 +42,7 @@ html:not([data-mode="narrow"]) #narrow-top { display: none; }
   will-change: height;
 }
 #sheet[data-dragging] { transition: none; }
+#sheet[data-route-motion] { transition: none; }
 #sheet[data-full] { border-radius: 0; }
 html:not([data-mode="narrow"]) #sheet { display: none; }
 /* SEARCH-02: sheet and its entry bar leave the screen and the focus order */
