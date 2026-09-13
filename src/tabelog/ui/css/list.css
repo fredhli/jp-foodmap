@@ -242,7 +242,16 @@ html[data-fold-cover][data-list-tab="results"] #list-root {
   --list-min-h-narrow: 84px; --c-list-row-pad: 6px;
   --c-list-text-gap: 2px; --c-list-before-awards: 4px;
 }
-html[data-fold-cover] .ls-summary { display: flex; align-items: center; gap: 6px; }
-html[data-fold-cover] .ls-summary .ls-sub { flex: 1 1 auto; min-width: 0; }
-html[data-fold-cover] .ls-cover-booking { flex: none; min-height: 44px; max-width: 48%; white-space: normal; }
+html[data-fold-cover] .ls-head--cover { padding-block: 6px; gap: 0; }
+html[data-fold-cover] .ls-cover-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; }
+html[data-fold-cover] .ls-cover-toolbar .ls-sub { flex: 1 1 80px; min-width: min-content; line-height: 1.25; display: flex; flex-wrap: wrap; column-gap: 8px; }
+html[data-fold-cover] .ls-cover-toolbar .ls-sub > span { white-space: nowrap; }
+html[data-fold-cover] .ls-cover-toolbar .ls-tools { flex: none; gap: 6px; flex-wrap: nowrap; }
+html[data-fold-cover] .ls-cover-toolbar .ls-sort,
+html[data-fold-cover] .ls-cover-toolbar .ls-multi { width: 44px; min-width: 44px; min-height: 44px; padding: 0; flex: none; justify-content: center; }
+html[data-fold-cover] .ls-cover-toolbar .ls-multi > span { display: none; }
+html[data-fold-cover] .ls-cover-booking { flex: 0 1 auto; min-width: 44px; min-height: 44px; padding: 4px 8px; gap: 4px; max-width: 42%; white-space: normal; justify-content: center; }
+html[data-fold-cover] .ls-cover-booking > span { overflow-wrap: anywhere; }
+html[data-fold-cover][data-fs="200"] .ls-cover-toolbar { flex-wrap: wrap; }
+html[data-fold-cover][data-fs="200"] .ls-cover-toolbar .ls-sub { flex-basis: 100%; }
 html[data-fold-cover] #sheet-foot:has(> #list-foot:empty) { border-top: 0; }

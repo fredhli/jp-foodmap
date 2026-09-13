@@ -307,6 +307,9 @@ html[data-search-active] #map-root .leaflet-control-container { display: none; }
   gap: var(--sp-2);
   transition: bottom var(--m-sheet) var(--e-standard), right var(--m-standard) var(--e-standard);
 }
+#fab-root.is-horizontal { flex-direction: row; }
+#fab-root.is-horizontal [data-fab="in"],
+#fab-root.is-horizontal [data-fab="out"] { display: none; }
 #fab-root.is-hidden { visibility: hidden; pointer-events: none; }
 .mp-fab {
   position: relative;

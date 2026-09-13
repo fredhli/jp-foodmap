@@ -317,3 +317,12 @@ html[data-mode="wide"] #candidates-host { display: none; }
 
 html[data-sheet="collapsed"] #sheet-handle { height: 12px; }
 html[data-sheet="collapsed"] .ct-entry { min-height: 44px; }
+
+/* Only the page's real top inset gets a surface, independent of viewport panning. */
+#app::before {
+  --ct-safe-top: max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px));
+  content: ""; position: absolute; left: 0; right: 0;
+  top: max(0px, calc(var(--U-top) - var(--ct-safe-top)));
+  height: var(--ct-safe-top); background: var(--surface);
+  z-index: var(--z-topbar); pointer-events: none;
+}

@@ -97,27 +97,29 @@ html:not([data-mode="narrow"]) .dt-gallery.is-empty { height: var(--gallery-h-co
 .dt-gallery-all::after { content: ""; position: absolute; inset: -4px; }
 .dt-gallery-all:hover { background: rgba(17, 26, 67, .88); }
 
-/* ---- summary 2 : 1 (VIS-03) --------------------------------------------- */
+/* The two budgets keep their full values; booking yields its row first. */
 .dt-summary {
   margin-top: var(--c-detail-gallery-to-summary);
-  display: grid; grid-template-columns: 2fr 1fr; gap: var(--c-detail-summary-gap);
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--sp-2);
 }
-.dt-summary.is-stacked { grid-template-columns: 1fr; }
-.dt-sum-budget { display: grid; grid-template-columns: 1fr 1fr; }
-.dt-summary.is-stacked-budget .dt-sum-budget { grid-template-columns: 1fr; }
+.dt-sum-budget {
+  display: flex; flex-wrap: wrap; flex: 2 1 auto; width: max-content; max-width: 100%;
+}
+.dt-sum-budget .dt-sum-cell { flex: 1 1 max-content; }
 .dt-sum-budget .dt-sum-cell + .dt-sum-cell { border-left: 1px solid var(--separator); }
-.dt-summary.is-stacked-budget .dt-sum-budget .dt-sum-cell + .dt-sum-cell { border-left: 0; border-top: 1px solid var(--separator); }
-.dt-sum-book { background: var(--surface); border: 1px solid var(--separator); border-radius: var(--r-button); }
-/* 12px block / 8px inline keeps 无网订入口 on one line at 402px (VIS-03: the
-   pair never truncates; the stack fallback is for real pressure, not rounding) */
-.dt-sum-cell { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-2); min-width: 0; }
-.dt-sum-cell .ic { color: var(--ink-secondary); }
-.dt-sum-text { min-width: 0; }
-.dt-sum-label { white-space: nowrap; overflow: hidden; }
-.dt-sum-val {
-  font-size: var(--t-body-size); line-height: var(--t-body-line); font-weight: 600;
-  white-space: nowrap; overflow: hidden;
+.dt-sum-book {
+  flex: 0 1 auto; max-width: 100%; background: var(--surface);
+  border: 1px solid var(--separator); border-radius: var(--r-button);
 }
+.dt-sum-cell {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-2); min-width: 0; max-width: 100%;
+}
+.dt-sum-book .dt-sum-cell { padding-inline: var(--sp-1); gap: var(--sp-1); }
+.dt-sum-cell .ic { color: var(--ink-secondary); flex: none; }
+.dt-sum-text { min-width: 0; }
+.dt-sum-label, .dt-sum-val { white-space: normal; overflow-wrap: anywhere; }
+.dt-sum-val { font-size: var(--t-body-size); line-height: var(--t-body-line); font-weight: 600; }
 
 /* ---- reading groups ------------------------------------------------------ */
 .dt-sec { margin-top: var(--c-detail-reading-gap); }
@@ -338,13 +340,13 @@ html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide
 .dt-photo-failed { position: absolute; inset: 0; display: grid; place-content: center; pointer-events: none; }
 .dt-cand-card { position: relative; }
 @media (max-width: 1099px) {
-  #detail-foot .dt-actions { padding-block: 4px; padding-bottom: calc(4px + var(--safe-bottom)); grid-template-columns: minmax(0,1fr) minmax(0,1.65fr) minmax(0,1fr); }
+  #detail-foot .dt-actions { padding-block: 4px; padding-bottom: calc(4px + var(--safe-bottom)); grid-template-columns: minmax(var(--touch-min),1fr) minmax(var(--touch-min),1.65fr) minmax(var(--touch-min),1fr); }
   .dt-act { gap: 4px; padding-inline: 4px; }
-  .dt-act-side { flex-direction: row; flex-wrap: wrap; }
+  .dt-act-side { flex-direction: row; flex-wrap: nowrap; }
   .dt-act-side .ic, .dt-tabelog, .dt-gmaps { width: 18px; height: 18px; }
-  .dt-act-main { flex-wrap: wrap; }
-  .dt-act-label-wrap { display: block; overflow: visible; white-space: normal; overflow-wrap: normal; }
-  .dt-act-fav .dt-act-label { white-space: normal; overflow: visible; }
+  .dt-act-main { flex-wrap: nowrap; }
+  .dt-act-label-wrap { display: block; overflow: visible; white-space: nowrap; overflow-wrap: normal; }
+  .dt-act-fav .dt-act-label { white-space: nowrap; overflow: visible; }
   #detail-foot .dt-actions.is-stack { grid-template-columns: minmax(0,1fr); }
   #candidates-root .dt-cand { padding: 4px 8px; }
   .dt-cand-row { margin-top: 0; }
@@ -362,3 +364,31 @@ html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide
 /* The supplied square asset includes a wordmark; show its orange symbol here. */
 .dt-tabelog { position: relative; display: inline-block; overflow: hidden; }
 .dt-tabelog img { position: absolute; width: 200%; height: 200%; max-width: none; left: -50%; top: -40%; clip-path: inset(28% 24% 39% 24%); }
+
+@media (max-width: 1099px) {
+  #detail-root .dt { padding-top: var(--sp-2); }
+  .dt-title-row {
+    position: sticky; top: 0; z-index: 2; background: var(--surface);
+    align-items: flex-start; padding-block: var(--sp-2);
+    margin-top: calc(-1 * var(--sp-2));
+    margin-inline: calc(-1 * var(--dt-pad)); padding-inline: var(--dt-pad);
+  }
+  .dt-title { overflow-wrap: anywhere; }
+  .dt-tools { gap: 0; margin: 0 -8px 0 0; }
+  .dt-tools .icon-btn { margin-block: 0; min-width: var(--touch-min); min-height: var(--touch-min); }
+  .dt-act.is-icon-only .dt-act-label { display: none; }
+  .dt-act.is-icon-only .ic, .dt-act.is-icon-only .dt-tabelog,
+  .dt-act.is-icon-only .dt-gmaps { width: 22px; height: 22px; }
+}
+.dt-title-row.is-compact-tools .dt-tools { display: grid; grid-template-columns: repeat(2, var(--touch-min)); }
+
+.dt-mapmark { position: relative; width: 22px; height: 22px; flex: none; display: inline-block; }
+.dt-mapmark .dt-gmaps { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dt-tabelog > .ic, .dt-mapmark > .ic { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dt-tabelog > .ic { color: #e68b16; }
+.dt-tabelog.is-ready > .ic, .dt-mapmark.is-ready > .ic { visibility: hidden; }
+.dt-tabelog:not(.is-ready) > img, .dt-mapmark:not(.is-ready) > img { visibility: hidden; }
+@media (max-width: 1099px) {
+  .dt-mapmark { width: 18px; height: 18px; }
+  .dt-act.is-icon-only .dt-mapmark { width: 22px; height: 22px; }
+}

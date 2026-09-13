@@ -90,8 +90,8 @@ def close_detail(page, w):
     #bs-content .rst-close. 4.0's narrow sheet header has the same labelled
     back control ([data-ct="back"]) and the columns have [data-ct="close-detail"]."""
     if w < 750:
-        back = page.locator('#sheet-head [data-ct="back"]')
-        label = back.inner_text().strip()
+        back = page.locator('[data-ct="back"]:visible').first
+        label = back.get_attribute('aria-label') or back.inner_text().strip()
         back.click()
         return label
     page.locator('[data-ct="close-detail"]').first.click()
@@ -296,11 +296,11 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 page.wait_for_timeout(300)
                 before=page.evaluate(MAP+'.getCenter()')
                 show_map(page)
-                page.locator('[data-fab="locate"]').click()
-                page.wait_for_function("() => App.state.sort==='distance'", timeout=20000)
+                page.locator('[data-ov="nearby"]:visible').first.click()
+                page.wait_for_function("() => App.state.nearby.active && App.state.sort==='distance'", timeout=20000)
                 assert page.evaluate('() => App.state.filters.region') is None
-                planned=page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")
-                assert planned=={'region':25,'sort':'price','center':[before['lat'],before['lng']],'zoom':11}, planned
+                planned=page.evaluate("JSON.parse(JSON.stringify(App.state.nearby.planning, (k,v)=>v instanceof Set?Array.from(v).sort():v))")
+                assert planned['filters']['region']==25 and planned['sort']=='price' and planned['center']==[before['lat'],before['lng']] and planned['zoom']==11, planned
                 page.wait_for_timeout(400)
                 tab(page,'results',w)
                 # 3.2.x asserted .ux-distance was rendered: after 附近 the list
@@ -310,9 +310,9 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 page.reload()
                 lib_browser.wait_ready(page)
                 page.wait_for_timeout(800)
-                assert page.locator('[data-ov="restore-plan"]').first.is_visible(), 'planning route lost on reload'
-                assert page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned, 'planning coordinates changed on reload'
-                page.locator('[data-ov="restore-plan"]').first.click()
+                assert page.locator('[data-ov="nearby"]:visible').first.get_attribute('aria-pressed')=='true', 'nearby mode lost on reload'
+                assert page.evaluate("JSON.parse(JSON.stringify(App.state.nearby.planning, (k,v)=>v instanceof Set?Array.from(v).sort():v))")==planned, 'planning coordinates changed on reload'
+                page.locator('[data-ov="nearby"]:visible').first.click()
                 page.wait_for_timeout(700)
                 assert page.evaluate('() => App.state.filters.region')==25
                 assert page.evaluate('() => App.state.sort')=='price'

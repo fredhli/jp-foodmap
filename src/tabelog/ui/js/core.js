@@ -518,7 +518,7 @@
       // Seeded by adapter.js from Business at boot. Declared here so a module
       // that reads them before boot (or in a no-adapter path) gets the empty
       // shape rather than undefined.
-      nearby: { active: false, planning: null, pending: false, fix: null },
+      nearby: { active: false, planning: null, pending: false, fix: null, radiusM: 1000, needsLocation: false, revision: 0, requestId: null, purpose: null, error: null },
       install: { standalone: false, installed: false, canPrompt: false, ios: false, snackEligible: false },
       buildMeta: { appVersion: '', scrapedAt: '', latestScrape: '' },
       nativeSettings: null,
@@ -534,6 +534,13 @@
   var _silentDepth = 0;
 
   App.get = function () { return App.state; };
+
+  util.cloneState = function clone(v) {
+    if (v instanceof Set) return new Set(v);
+    if (Array.isArray(v)) return v.map(clone);
+    if (util.isPlainObject(v)) { var out = {}; Object.keys(v).forEach(function (k) { out[k] = clone(v[k]); }); return out; }
+    return v;
+  };
 
   function mergeInto(target, patch, path, changed) {
     Object.keys(patch).forEach(function (k) {
@@ -829,6 +836,7 @@
       case 'full': target = H; break;
       default: target = S.collapsed;
     }
+    if (state.layout.foldCover && ['browse', 'detail', 'filter'].indexOf(sheetState) >= 0) target = H * .62;
     target = Math.round(target);
     var F = 0, C = 0;
     if (_sheetMeasure && sheetState !== 'collapsed') {

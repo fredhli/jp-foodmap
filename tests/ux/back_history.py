@@ -80,7 +80,7 @@ probe = r"""(() => {
     //   #bs-foot .rst-gmaps  -> .dt-actions .dt-gmaps (its button/anchor)
     //   the four inert ids   -> #detail-root / #detail-foot unreachable
     const S=window.App&&App.state, detailRoot=el('detail-root'), detailFoot=el('detail-foot');
-    const backBtn=document.querySelector('#sheet-head [data-ct="back"], #col-detail-head [data-ct="back"]');
+    const backBtn=document.querySelector('[data-ct="back"]');
     const favBtn=document.querySelector('.dt-actions [data-act="fav"]');
     const gmaps=(()=>{const i=document.querySelector('.dt-actions .dt-gmaps');return i?(i.closest('a,button')||i):null;})();
     const dead=e=>!e||!!e.closest('[inert]')||!!e.closest('#parking')||!e.getClientRects().length;
@@ -89,7 +89,7 @@ probe = r"""(() => {
       ready:!!(window.Adapter&&Adapter.ready&&S),
       detail:!!(S&&S.selected.id),full:!!(detailRoot&&detailRoot.querySelector('.dt-lists')),
       drawer:!!(S&&S.sheet.state!=='collapsed'),history:history.state,length:history.length,
-      back:backBtn&&backBtn.getClientRects().length?backBtn.textContent:'',
+      back:backBtn&&backBtn.getClientRects().length?(backBtn.getAttribute('aria-label')||backBtn.textContent):'',
       sourceTab:S&&S.sheet.tab,
       scroll:scrollerEl?scrollerEl.scrollTop:null,
       active:{id:active?.id,ref:active?.closest?.('.ls-row')?.getAttribute('data-id'),box:box(active),

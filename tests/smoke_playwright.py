@@ -614,8 +614,18 @@ def check_segmented_pill(page, name):
 
     # A previous check may have left the panel open on the filters tab.
     page.evaluate("() => { App.act.closeDetail && App.act.closeDetail();"
-                  "        App.act.setSheet('collapsed'); }")
-    page.wait_for_timeout(400)
+                  "        Containers.snapTo('collapsed'); }")
+    collapsed = """() => {
+      const sheet = document.getElementById('sheet');
+      const target = App.layout.sheetTarget('collapsed', App.state).h;
+      return document.documentElement.dataset.sheet === 'collapsed'
+        && App.state.sheet.state === 'collapsed' && !App.motion.isGeometryBusy()
+        && Math.abs(sheet.getBoundingClientRect().height - target) < 1;
+    }"""
+    page.wait_for_function(collapsed, timeout=8000)
+    page.evaluate("""() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+    page.wait_for_function(collapsed, timeout=8000)
     state = page.evaluate("""() => {
       const R = el => { const r = el.getBoundingClientRect();
         return {l:r.left, t:r.top, r:r.right, b:r.bottom, w:r.width, h:r.height}; };
@@ -693,8 +703,8 @@ def check_segmented_pill(page, name):
     ref = row.get_attribute("data-id")
     row.locator(".ls-open").click()
     page.wait_for_function(DETAIL_OPEN_JS, timeout=30000)
-    page.locator('#sheet-head [data-ct="back"]').click(trial=True)
-    page.locator('#sheet-head [data-ct="back"]').click()
+    page.locator('[data-ct="back"]:visible').click(trial=True)
+    page.locator('[data-ct="back"]:visible').click()
     # The restore runs behind a rAF and repeats once with measured row heights,
     # so wait for the result rather than for a fixed number of milliseconds.
     try:
@@ -855,11 +865,13 @@ def check_workbench(page, name):
       const d = document.getElementById('col-detail');
       const card = document.querySelector('#col-detail-body #detail-root');
       const title = d.querySelector('.dt-title-row');
+      const name = title && title.querySelector('.dt-title');
       const close = title && title.querySelector('[data-ct="close-detail"]');
       const tr = title && title.getBoundingClientRect(), cr = close && close.getBoundingClientRect();
+      const nr = name && name.getBoundingClientRect();
       return {mode: App.state.layout.mode,
-              titlePad: tr ? tr.left - d.getBoundingClientRect().left : -1,
-              titleTop: tr ? tr.top - d.getBoundingClientRect().top : -1,
+              titlePad: nr ? nr.left - d.getBoundingClientRect().left : -1,
+              titleTop: nr ? nr.top - d.getBoundingClientRect().top : -1,
               closeHit: cr ? [cr.width, cr.height] : null,
               closeInTitle: !!(cr && tr && cr.top < tr.bottom && cr.bottom > tr.top),
               right: getComputedStyle(document.documentElement)
@@ -870,10 +882,10 @@ def check_workbench(page, name):
     }""")
     if opened["right"] == "0px" or not opened["onscreen"]:
         raise AssertionError(f"detail column did not slide in: {opened}")
-    # 4.1.0 merges mid's close into the title row. Protect its actual padding
-    # and 44px control instead of requiring the removed, empty header row.
+    # The 4.2.0 sticky title background reaches both edges; the name retains
+    # 16px side padding and 8px top padding, alongside the 44px controls.
     if opened["mode"] == "mid":
-        if (opened["titlePad"] < 16 or opened["titleTop"] < 10
+        if (opened["titlePad"] < 16 or opened["titleTop"] < 8
                 or not opened["closeInTitle"] or not opened["closeHit"]
                 or min(opened["closeHit"]) < 44):
             raise AssertionError(f"compact title lost spacing or close target: {opened}")

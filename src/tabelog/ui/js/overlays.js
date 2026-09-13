@@ -78,7 +78,9 @@
     if (window.Filters && typeof window.Filters.badge === 'function') { try { return window.Filters.badge(); } catch (e) { /* fall through */ } }
     return Data.summaryCount(s.filters, counts(s));
   }
+  function radiusLabel(s) { var m = nearbyState(s).radiusM || 1000; return m < 1000 ? m + ' m' : (m / 1000) + ' km'; }
   function regionLabel(s) {
+    if (nearbyState(s).active) return radiusLabel(s);
     return (s.filters.region === null || s.filters.region === undefined)
       ? t('全部地区') : Data.regionName(s.filters.region, s.lang);
   }
@@ -214,7 +216,13 @@
     draft = null; draftKey = null; draftErr = {}; saving = false;
     if (p && p.kind === 'layers') restoreLayersFallback();
     if (p && p.kind === 'importDialog') importPreview = null;
+    var scopeSelector = p && p.kind === 'regionPicker' && lastTrigger
+      ? (lastTrigger.classList.contains('ft-region') ? '.ft-region' : '[data-kind="regionPicker"]') : null;
     restoreTrigger();
+    if (scopeSelector) u.raf(function () { motion.afterGeometry(function () {
+      var trigger = document.querySelector(scopeSelector);
+      if (trigger && trigger.getClientRects().length && !trigger.closest('[inert],#parking')) trigger.focus({preventScroll:true});
+    }); });
   }
 
   /* DEVICE PASS (DESIGN §5.3 / §14.2): the account sheet is one of the temporary
@@ -259,7 +267,7 @@
     var mode = s.layout.mode, active = !!s.search.active;
     var nb = nearbyState(s);
     var key = [mode, active, s.layout.foldCover, s.layout.foldCover && s.layout.W < 450, s.fontScale, s.lang, s.account.signedIn, s.filters.region,
-               s.search.placeFilter, !!nb.fix, !!nb.active, !!nb.planning,
+               s.search.placeFilter, !!nb.fix, !!nb.active, !!nb.pending, nb.radiusM, nb.needsLocation,
                s.overlay.kind === 'regionPicker', s.overlay.kind === 'account'].join('|');
     if (sig.search !== key) {
       sig.search = key; sig.sugs = null;
@@ -333,28 +341,29 @@
             '<span class="ov-chip-pin">' + emoji.img('📍', 16) + '</span>' + esc(regionLabel(s)) + ic('chevronDown', { cls: 'ic-sm' }) +
           '</button>' +
           '<button class="chip chip-tall glass' + (nb.active ? ' is-on' : '') + '" data-ov="nearby" aria-pressed="' + (!!nb.active) + '">' +
-            ic('locate', { cls: 'ic-sm' }) + esc(t('附近')) + '</button>' +
-          (nb.active && nb.planning ? '<button class="chip chip-tall glass" data-ov="restore-plan">' +
-            ic('back', { cls: 'ic-sm' }) + esc(t('回到规划')) + '</button>' : '') +
+            ic('locate', { cls: 'ic-sm' }) + esc(t('附近模式')) + '</button>' +
         '</div>';
+      var scopeButton = R.search.querySelector('[data-kind="regionPicker"]');
+      scopeButton.setAttribute('data-scope-picker', '');
+      scopeButton.setAttribute('aria-label', t(nb.active ? '附近范围：{radius}' : '地区：{name}', {radius: radiusLabel(s), name: regionLabel(s)}));
+      if (nb.active) scopeButton.setAttribute('data-radius-picker', '');
+      var nearButton = R.search.querySelector('[data-ov="nearby"]');
+      nearButton.setAttribute('aria-label', t(nb.pending ? '附近模式，定位中，再按取消' : '附近模式'));
       if (s.layout.foldCover) {
         var row = R.search.querySelector('.ov-caprow'), chips = R.search.querySelector('.ov-chips');
         var region = chips.querySelector('[data-kind="regionPicker"]'), nearby = chips.querySelector('[data-ov="nearby"]');
         region.classList.add('ov-cover-region');
-        region.setAttribute('aria-label', regionLabel(s));
         var label = document.createElement('span'); label.className = 'ov-cover-label';
         label.textContent = regionLabel(s);
         region.childNodes[1].replaceWith(label);
-        nearby.setAttribute('aria-label', t('附近'));
         nearby.classList.add('ov-cover-nearby');
-        if (s.fontScale >= 130 || s.layout.W < 450) nearby.classList.add('ov-cover-icon');
-        var nearLabel = document.createElement('span'); nearLabel.className = 'ov-cover-near-label'; nearLabel.textContent = t('附近');
+        var nearLabel = document.createElement('span'); nearLabel.className = 'ov-cover-near-label'; nearLabel.textContent = t('附近模式');
         nearby.lastChild.replaceWith(nearLabel);
         row.insertBefore(region, row.lastElementChild); row.insertBefore(nearby, row.lastElementChild);
         if (!chips.children.length) chips.remove();
       }
     } else {
-      R.search.innerHTML = '<button class="ov-topfield data-ov="search-activate" aria-label="' + esc(t('搜索')) + '">' + ic('search') + q + '</button>';
+      R.search.innerHTML = '<button class="ov-topfield" data-ov="search-activate" aria-label="' + esc(t('搜索')) + '">' + ic('search') + q + '</button>';
     }
     if (flipBack && !motion.reduced) {
       var back = R.search.querySelector('.ov-capsule, .ov-topfield');
@@ -574,7 +583,7 @@
     var list = el('ov-sugs');
     if (!list) return;
     var memoKey = [s.filters.region, s.filters.ratingMin, s.filters.budgets.size, s.filters.cuisines.size,
-      s.filters.awards.size, s.filters.bookableOnly, s.filters.favOnly, s.filters.hideBlack,
+      s.filters.awards.size, s.filters.bookableOnly, s.filters.favOnly, s.filters.hideBlack, Data.scopeKey(Data.resultScope(s)),
       s.filters.hideForeign, s.filters.gcalOnly, s.user.fav.size, s.user.black.size].join('|');
     var key = [s.search.query, s.lang, s.search.dropLoc, s.layout.mode, memoKey,
       api.pending, api.error, api.items ? api.items.length : -1, api.q].join('|');
@@ -746,13 +755,12 @@
     var n = badgeCount(s);
     var key = ['w', s.lang, s.filters.region, n, s.sheet.tab, s.account.signedIn, s.sync.dirty,
                s.overlay.kind, transient && transient.kind,
-               !!(s.nearby && s.nearby.active), !!(s.nearby && s.nearby.planning)].join('|');
+               !!(s.nearby && s.nearby.active), !!(s.nearby && s.nearby.pending), (s.nearby || {}).radiusM].join('|');
     if (sig.chips === key) return;
     sig.chips = key;
     var nbw = nearbyState(s);
     R.topRight.innerHTML =
-      (nbw.active && nbw.planning ? '<button class="chip ov-chip" data-ov="restore-plan">' +
-        ic('back', { cls: 'ic-sm' }) + esc(t('回到规划')) + '</button>' : '') +
+      '<button class="chip ov-chip' + (nbw.active ? ' is-on' : '') + '" data-ov="nearby" aria-pressed="' + (!!nbw.active) + '" aria-label="' + esc(t(nbw.pending ? '附近模式，定位中，再按取消' : '附近模式')) + '">' + ic('locate', { cls: 'ic-sm' }) + esc(t('附近模式')) + '</button>' +
       '<button class="chip ov-chip" data-ov="open" data-kind="regionPicker" aria-haspopup="dialog" aria-expanded="' + (s.overlay.kind === 'regionPicker') + '">' +
         '<span class="ov-chip-pin">' + emoji.img('📍', 16) + '</span>' + esc(regionLabel(s)) + ic('chevronDown', { cls: 'ic-sm' }) +
       '</button>' +
@@ -763,6 +771,10 @@
         ic('globe', { cls: 'ic-sm' }) + esc(langLabel(s.lang)) + ic('chevronDown', { cls: 'ic-sm' }) +
       '</button>' +
       avatarHtml(s, '');
+    var scopeButton = R.topRight.querySelector('[data-kind="regionPicker"]');
+    scopeButton.setAttribute('data-scope-picker', '');
+    scopeButton.toggleAttribute('data-radius-picker', !!nbw.active);
+    scopeButton.setAttribute('aria-label', t(nbw.active ? '附近范围：{radius}' : '地区：{name}', {radius:radiusLabel(s), name:regionLabel(s)}));
   }
 
   /* ----------------------------------------------------------------------
@@ -787,11 +799,15 @@
     node.className = 'ov-pop scale-in';
     node.id = 'ov-pop';
     node.setAttribute('role', 'dialog');
-    node.setAttribute('aria-label', t(POP_TITLE[k] || k));
+    node.setAttribute('aria-label', t(k === 'regionPicker' && nearbyState(s).active ? '附近范围' : (POP_TITLE[k] || k)));
     var bottom = isBottomSheetKind(s, k);
     node.innerHTML = (bottom ? '<div class="ov-grip handle-hit" aria-hidden="true"><div class="handle"></div></div>' : '') + popBody(s, k);
     R.pop.appendChild(node);
     if (bottom) bindSheetDrag(node);
+    if (k === 'regionPicker' && nearbyState(s).active) {
+      trapFocus(node);
+      motion.afterGeometry(function () { var selected = node.querySelector('[data-ov="radius"][aria-checked="true"]'); if (selected) selected.focus({preventScroll:true}); });
+    }
     if (k === 'account') mountSignIn(s, node);
     // DEVICE PASS (§5.3): temporary-task popovers lock background focus and take it.
     // Without this the account sheet covered the phone screen while Tab still
@@ -827,7 +843,7 @@
     if (k === 'account') return [s.account.signedIn, s.account.email, s.account.message, s.sync.text, s.sync.kind,
       s.sync.retryVisible, s.sync.storageInfo, s.user.fav.size, s.user.black.size, s.user.bookmarks.length,
       deleteArmedAt ? 1 : 0, signOutArmed ? 1 : 0, deleteMsg && deleteMsg.text, (s.install || {}).standalone, (s.install || {}).canPrompt].join(',');
-    if (k === 'regionPicker') return [s.filters.region, listFilter].join(',');
+    if (k === 'regionPicker') return [s.filters.region, listFilter, nearbyState(s).active, nearbyState(s).radiusM].join(',');
     if (k === 'sortMenu') return s.sort + '|' + JSON.stringify(s.overlay.payload || {});
     if (k === 'memberPicker') return [s.user.bookmarks.length, s.user.fav.size, JSON.stringify(s.overlay.payload || {})].join(',');
     if (k === 'help') return JSON.stringify(s.overlay.payload || {}) + '|' + JSON.stringify(s.install || {}) + '|' + JSON.stringify(s.buildMeta || {});
@@ -845,7 +861,7 @@
     switch (k) {
       case 'layers': return layersBody(s);
       case 'account': return accountBody(s);
-      case 'regionPicker': return regionBody(s);
+      case 'regionPicker': return nearbyState(s).active ? radiusBody(s) : regionBody(s);
       case 'sortMenu': return sortBody(s);
       case 'more': return moreBody(s);
       case 'share': return shareBody(s);
@@ -1150,6 +1166,15 @@
   }
 
   /* ---- region picker ---------------------------------------------------- */
+  function radiusBody(s) {
+    return popHead(t('附近范围')) + '<div class="ov-pop-body" role="radiogroup" aria-label="' + esc(t('附近范围')) + '">' +
+      [200, 500, 1000, 2000].map(function (m) {
+        var selected = (nearbyState(s).radiusM || 1000) === m;
+        return '<button class="ov-rg-row" role="radio" tabindex="' + (selected ? '0' : '-1') + '" aria-checked="' + selected + '" data-ov="radius" data-radius="' + m + '">' +
+          '<span>' + (m < 1000 ? m + ' m' : m / 1000 + ' km') + '</span>' + (selected ? ic('check') : '') + '</button>';
+      }).join('') + '</div>';
+  }
+
   function regionBody(s) {
     var c = counts(s);
     var q = (listFilter || '').toLowerCase();
@@ -1420,6 +1445,7 @@
         '<div class="ov-kbd-row"><span class="ov-kbd-desc">' + esc(t('收录范围')) + '</span><b class="num">' + esc(t('{n} 家', { n: u.fmtCount(Data.restaurants.length, s.lang) })) + '</b></div>' +
         (bm.scrapedAt ? '<div class="ov-kbd-row"><span class="ov-kbd-desc">' + esc(t('数据采集于')) + '</span><b class="num" lang="en">' + esc(bm.scrapedAt) + '</b></div>' : '') +
         (bm.latestScrape && bm.latestScrape !== bm.scrapedAt ? '<div class="ov-kbd-row"><span class="ov-kbd-desc">' + esc(t('最近补充')) + '</span><b class="num" lang="en">' + esc(bm.latestScrape) + '</b></div>' : '') +
+        '<p class="ov-sub">' + esc(t('开启附近模式后可选择距离并临时筛选；再次按附近模式，恢复原来的规划。收藏始终完整保留。')) + '</p>' +
         '<p class="ov-sub">' + esc(t('数据来自 Tabelog 公开页面，仅作个人旅行参考。')) + '</p>' +
         '<details class="ov-layout-diagnostics"><summary data-ov="layout-diagnostics">' + esc(t('布局诊断')) + '</summary>' +
         '<p class="ov-sub">' + esc(t('仅在本地显示和复制屏幕信息，不含账号或收藏数据。')) + '</p>' +
@@ -1724,7 +1750,7 @@
     node._trapped = true;
     node.addEventListener('keydown', function (e) {
       if (e.key !== 'Tab') return;
-      var f = node.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])');
+      var f = Array.from(node.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]')).filter(function (e) { return e.tabIndex >= 0 && e.getClientRects().length; });
       if (!f.length) return;
       var first = f[0], last = f[f.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -1852,6 +1878,7 @@
   }
   function onLocateResult(p) {
     p = p || {};
+    if (p.status === 'locating') { onLocateRequest(); return; }
     if (p.status === 'ok') { localNotices.geo = false; sig.search = null; sig.notice = null; App.requestRender('geo'); return; }
     if (p.status === 'denied' || p.status === 'error') {
       localNotices.geo = true; localNotices.geoDismissed = false;
@@ -1901,6 +1928,15 @@
      6. Field wiring (no re-render under the caret) + actions
      -------------------------------------------------------------------- */
   function bindFields() {
+    u.delegate(R.pop, 'keydown', '[data-ov="radius"]', function (e, node) {
+      var keys = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
+      if (keys.indexOf(e.key) < 0) return;
+      e.preventDefault();
+      var buttons = Array.from(R.pop.querySelectorAll('[data-ov="radius"]'));
+      var i = buttons.indexOf(node), next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length;
+      buttons.forEach(function (b, j) { b.tabIndex = j === next ? 0 : -1; });
+      buttons[next].focus();
+    });
     u.delegate(R.modal, 'input', 'input', function (e, node) {
       if (node.id === 'ov-name' || node.id === 'ov-list-name') { if (!draft) return; draft.name = node.value; clearFieldError(node); }
       else if (node.id === 'ov-emoji') { if (!draft) return; draft.emoji = node.value; validateEmoji(); syncEmojiChips(); }
@@ -1989,31 +2025,8 @@
       }
       case 'pick': O.pick(Number(node.dataset.i)); break;
       case 'place-retry': if (api.q) ssSearchPlaces(api.q, s.lang); break;
-      case 'nearby': {
-        // "Find nearby" is a detour, not a new plan: remember where the plan
-        // was (region / sort / centre / zoom) so 回到规划 can put it back. The
-        // record rides in tabelog.listView through state.nearby, in the shape
-        // 3.2.x wrote — sort is stored in the business spelling ('award').
-        var nb = nearbyState(s);
-        if (!nb.active) {
-          var cc = s.mapView.center || [];
-          App.set({ nearby: { active: true, pending: true, planning: {
-            region: (s.filters.region === undefined) ? null : s.filters.region,
-            sort: s.sort === 'awards' ? 'award' : s.sort,
-            center: [cc[0], cc[1]], zoom: s.mapView.zoom } } });
-        }
-        App.emit('map:locate-request');
-        break;
-      }
-      case 'restore-plan': {
-        var pl = nearbyState(s).planning;
-        App.set({ nearby: { active: false, pending: false } });
-        if (!pl) break;
-        act.applyFilters({ region: pl.region == null ? null : pl.region });
-        App.set({ sort: pl.sort === 'award' ? 'awards' : pl.sort });
-        if (window.MapMod && MapMod.restoreView) { try { MapMod.restoreView(pl.center, pl.zoom); } catch (err) {} }
-        break;
-      }
+      case 'nearby': act.toggleNearby(); break;
+      case 'radius': act.setNearbyRadius(Number(node.dataset.radius)); act.closeOverlay('pick'); break;
       case 'open': {
         var kind = node.dataset.kind;
         if (s.overlay.kind === kind) { act.closeOverlay('toggle'); break; }

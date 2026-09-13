@@ -62,6 +62,7 @@
   var stacked = false, shareInline = true;
   var lbEl = null, lbIndex = 0;
   var lastPhotoIndex = 0;
+  var measuredTitleH = null;
 
   /* popups payload cache: 'id|lang' → {st:'loading'|'ok'|'err', det} */
   var detCache = Object.create(null);
@@ -74,10 +75,27 @@
   function ic(n, o) { return ctx.icon(n, o); }
   function isNarrow(s) { return s.layout.mode === 'narrow'; }
   function modeOf(s) { return s.layout.mode; }
-  function matches(s, r) { try { return ctx.Data.filterMatch(r, s.filters); } catch (e) { return true; } }
+  function matches(s, r) { try { return ctx.Data.filterMatch(r, s.filters, ctx.Data.resultScope(s)); } catch (e) { return true; } }
 
   /** DETAIL-02: metres → minutes at 80 m/min; no metres means no fake walk time. */
   function walkMin(m) { return Math.max(1, Math.round(Number(m) / 80)); }
+
+  function tabelogIcon() {
+    return '<span class="dt-tabelog" aria-hidden="true">' + ic('external') +
+      '<img src="img/tabelog-logo.webp" alt=""></span>';
+  }
+  function mapsIcon() {
+    return '<span class="dt-mapmark" aria-hidden="true">' + ic('pin') +
+      '<img class="dt-gmaps" src="img/google-maps-v2.png" alt="" width="22" height="22"></span>';
+  }
+  function bindBrandIcons(host) {
+    Array.prototype.forEach.call(host.querySelectorAll('.dt-tabelog img, .dt-gmaps'), function (img) {
+      function show() { img.parentElement.classList.toggle('is-ready', img.complete && img.naturalWidth > 0); }
+      img.addEventListener('load', show);
+      img.addEventListener('error', show);
+      show();
+    });
+  }
 
   function mapsUrl(r) {
     return 'https://www.google.com/maps/search/?api=1&query=' +
@@ -158,7 +176,8 @@
   /* ------------------------------------------------------------ public API */
 
   Dm.backLabel = function (s) {
-    return { results: '返回结果', saved: '返回收藏', search: '返回搜索', filters: '返回结果' }[s.selected.origin] || null;
+    var results = s.nearby && s.nearby.active ? '返回附近' : '返回结果';
+    return { results: results, saved: '返回收藏', search: '返回搜索', filters: results }[s.selected.origin] || null;
   };
 
   Dm.moreItems = function (s) {
@@ -218,7 +237,7 @@
   var _cand = { ref: null, sort: null, from: '', ids: null };
   Dm.candidates = function (s) {
     var D = ctx.Data;
-    var base = D.applyFilters(s.filters);
+    var base = D.M(s);
     var from = nearFrom(s), fk = from ? from.join(',') : '';
     if (_cand.ids && _cand.ref === base && _cand.sort === s.sort && _cand.from === fk) return _cand.ids;
     var ids = D.sort(base, s.sort, { from: from });
@@ -226,7 +245,7 @@
     return ids;
   };
   function nearFrom(s) {
-    var f = s.nearby && s.nearby.fix;
+    var f = ctx.Data.locationOrigin(s);
     if (f && typeof f.lat === 'number' && typeof f.lon === 'number') return [f.lat, f.lon];
     return null;
   }
@@ -317,7 +336,7 @@
 
     var tools = '';
     if (s.layout.mode !== 'wide') {
-      tools = '<button class="icon-btn dt-more" data-act="more" data-ov="open" data-kind="more" aria-label="' + t('更多操作') + '" aria-haspopup="menu" aria-expanded="' +
+      tools = ((window.Containers && window.Containers.detailBack) ? window.Containers.detailBack(s) : '') + '<button class="icon-btn dt-more" data-act="more" data-ov="open" data-kind="more" aria-label="' + t('更多操作') + '" aria-haspopup="menu" aria-expanded="' +
         (s.overlay.kind === 'more') + '">' + ic('more') + '</button>' +
         ((window.Containers && window.Containers.detailTools) ? window.Containers.detailTools(s) : '');
     }
@@ -327,8 +346,7 @@
     var genreLine = (det && det.genreText)
       ? '<div class="dt-genre-ja t-secondary">' + jaRun(det.genreText) + '</div>' : '';
 
-    return '<header class="dt-identity">' +
-      '<div class="dt-title-row"><h1 class="dt-title ' + titleCls + '" data-section="top" lang="ja">' + esc(r.name) + '</h1>' + more + '</div>' +
+    return '<div class="dt-title-row"><h1 class="dt-title ' + titleCls + '" data-section="top" lang="ja">' + esc(r.name) + '</h1>' + more + '</div><header class="dt-identity">' +
       '<div class="dt-meta t-body">' + meta.join('<span class="dt-sep" aria-hidden="true"></span>') + '</div>' +
       genreLine +
       (awards ? '<div class="dt-awards badge-row badge-row-lg">' + awards + '</div>' : '') +
@@ -374,9 +392,10 @@
       cell('moon', '人均晚餐', dinner, loading ? '' : priceTitle(det && det.dinnerUpper)) +
       cell('sun', '人均午餐', lunch, loading ? '' : priceTitle(det && det.lunchUpper)) +
       '</div>' +
-      '<div class="dt-sum-book">' +
-      cell('calendar', 'Tabelog 预订', t(r.bookable ? '有 Tabelog 预订入口' : '无 Tabelog 预订入口')) +
-      '</div></div>';
+      '<div class="dt-sum-book" role="group" aria-label="' + esc(t(r.bookable ? '有 Tabelog 预订入口' : '无 Tabelog 预订入口')) + '">' +
+      '<div class="dt-sum-cell" aria-hidden="true">' + tabelogIcon() +
+      '<div class="dt-sum-text">' +
+      '<div class="dt-sum-val">' + esc(t(r.bookable ? '有入口' : '无入口')) + '</div></div></div></div></div>';
   }
 
   function infoRow(icon, label, valueHtml, opts) {
@@ -552,16 +571,16 @@
     var maps = mapsUrl(r);
     var fav = s.user.fav.has(r.id);
     if (narrow) {
-      return '<div class="dt-actions' + (stacked ? ' is-stack' : '') + '">' +
+      return '<div class="dt-actions">' +
         '<button type="button" class="btn btn-secondary btn-fixed btn-stack dt-act dt-act-side dt-act-fav' + (fav ? ' is-on' : '') + '" ' +
-        'data-act="fav" aria-pressed="' + fav + '">' + ic('heart', fav ? { fill: true } : null) +
-        '<span class="dt-act-label t-control">' + favLabel(s, r) + '</span></button>' +
+        'data-act="fav" aria-label="' + esc(favLabel(s, r)) + '" aria-pressed="' + fav + '">' + ic('heart', fav ? { fill: true } : null) +
+        '<span class="dt-act-label t-control">' + t(fav ? '已收藏' : '收藏') + '</span></button>' +
         '<a class="btn btn-primary btn-fixed dt-act dt-act-main" href="' + esc(maps) + '" target="_blank" rel="noopener" ' +
         'aria-label="' + t('在Google Map 打开') + '">' +
-        '<img class="dt-gmaps" src="img/google-maps-v2.png" alt="" width="22" height="22">' +
+        mapsIcon() +
         '<span class="dt-act-label dt-act-label-wrap t-body">Google Maps</span></a>' +
         '<a class="btn btn-secondary btn-fixed btn-stack dt-act dt-act-side" href="' + esc(r.id) + '" target="_blank" rel="noopener" ' +
-        'aria-label="' + t('在 Tabelog 打开') + '">' + '<span class="dt-tabelog" aria-hidden="true"><img src="img/tabelog-logo.webp" alt=""></span>' +
+        'aria-label="' + t('在 Tabelog 打开') + '">' + tabelogIcon() +
         '<span class="dt-act-label t-control">Tabelog</span></a>' +
         '</div>';
     }
@@ -569,13 +588,13 @@
     parts.push('<button type="button" class="btn btn-primary btn-fixed dt-act-row dt-act-save" data-act="fav" aria-pressed="' + fav + '">' +
       ic('heart', fav ? { fill: true } : null) + '<span class="dt-act-label">' + favLabel(s, r) + '</span></button>');
     parts.push('<a class="btn btn-secondary btn-fixed dt-act-row" href="' + esc(maps) + '" target="_blank" rel="noopener" aria-label="' + t('在Google Map 打开') + '">' +
-      '<img class="dt-gmaps" src="img/google-maps-v2.png" alt="" width="20" height="20"><span class="dt-act-label">Google Maps</span></a>');
+      mapsIcon() + '<span class="dt-act-label">Google Maps</span></a>');
     if (shareInline && s.layout.mode === 'wide') {
       parts.push('<button type="button" class="btn btn-secondary btn-fixed dt-act-row dt-act-share" data-act="share">' +
         ic('share') + '<span class="dt-act-label">' + t('分享') + '</span></button>');
     }
     parts.push('<a class="btn btn-secondary btn-fixed dt-act-row" href="' + esc(r.id) + '" target="_blank" rel="noopener" aria-label="' + t('在 Tabelog 打开') + '">' +
-      '<span class="dt-tabelog" aria-hidden="true"><img src="img/tabelog-logo.webp" alt=""></span>' + '<span class="dt-act-label">Tabelog</span></a>');
+      tabelogIcon() + '<span class="dt-act-label">Tabelog</span></a>');
     parts.push('<button type="button" class="btn btn-secondary btn-fixed dt-act-row dt-act-more" data-act="more" data-ov="open" data-kind="more" aria-label="' + t('更多操作') + '" ' +
       'aria-haspopup="menu" aria-expanded="' + (s.overlay.kind === 'more') + '">' + ic('more') + '</button>');
     return '<div class="dt-actions is-row">' + parts.join('') + '</div>';
@@ -684,13 +703,19 @@
     var row = foot.querySelector('.dt-actions');
     if (!row || !row.clientWidth) return;
     if (s.layout.mode !== 'wide') {
-      if (stacked) return;
-      var overflow = false;
-      Array.prototype.forEach.call(row.querySelectorAll('.dt-act-label'), function (l) {
-        if (l.scrollWidth > l.clientWidth + 1) overflow = true;
-        if (l.classList.contains('dt-act-label-wrap') && l.scrollHeight > l.clientHeight + 1) overflow = true;
+      var style = getComputedStyle(row);
+      var available = row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      var gap = parseFloat(style.columnGap) || 0;
+      var minimum = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--touch-min')) || 44;
+      stacked = available < 3 * minimum + 2 * gap;
+      row.classList.toggle('is-stack', stacked);
+      Array.prototype.forEach.call(row.querySelectorAll('.dt-act'), function (button) {
+        button.classList.remove('is-icon-only');
+        var label = button.querySelector('.dt-act-label');
+        if (label && (button.scrollWidth > button.clientWidth + 1 || label.scrollWidth > label.clientWidth + 1)) {
+          button.classList.add('is-icon-only');
+        }
       });
-      if (overflow) { stacked = true; footSig = null; paintFoot(s); }
       return;
     }
     row.classList.remove('is-two-row'); row.classList.remove('is-col');
@@ -727,27 +752,25 @@
     return false;
   }
 
-  function measureSummary() {
-    var sum = root.querySelector('.dt-summary');
-    if (!sum || !sum.clientWidth) return;
-    sum.classList.remove('is-stacked', 'is-stacked-budget');
-    if (!overflowsSummary(sum)) return;
-    sum.classList.add('is-stacked');
-    if (overflowsSummary(sum)) sum.classList.add('is-stacked-budget');
-  }
-  function overflowsSummary(sum) {
-    var over = false;
-    Array.prototype.forEach.call(sum.querySelectorAll('.dt-sum-label, .dt-sum-val'), function (el) {
-      if (el.scrollWidth > el.clientWidth + 1) over = true;
-    });
-    return over;
+  function measureTitle(s) {
+    var row = root.querySelector('.dt-title-row');
+    if (!row || s.layout.mode === 'wide') return;
+    row.classList.remove('is-compact-tools');
+    var title = row.querySelector('.dt-title');
+    var font = parseFloat(getComputedStyle(title).fontSize) || 24;
+    if (title.clientWidth < font * 5 || title.offsetHeight > 88) row.classList.add('is-compact-tools');
+    var height = s.layout.mode + '|' + row.offsetHeight;
+    if (height !== measuredTitleH) {
+      measuredTitleH = height;
+      if (s.layout.mode === 'narrow') ctx.App.requestRender('layout');
+    }
   }
 
   function afterPaintMeasure() {
     ctx.util.raf(function () {
       if (!ctx.App.state.selected.id) return;
       measureActions(ctx.App.state);
-      measureSummary();
+      measureTitle(ctx.App.state);
     });
   }
 
@@ -789,7 +812,8 @@
       entry.st, jaMap ? 1 : 0, jaErr ? 1 : 0, s.user.fav.has(r.id) ? 1 : 0,
       (s.user.bookmarks || []).length,
       isNarrow(s) ? s.sheet.state : '',
-      isNarrow(s) ? '' : indexSig(s)].join('|');
+      isNarrow(s) ? '' : indexSig(s), s.selected.origin, Dm.backLabel(s),
+      ctx.Data.scopeKey(ctx.Data.resultScope(s)), (nearFrom(s) || []).join(',')].join('|');
     if (sig === bodySig) return false;
     var sc = window.Containers && window.Containers.scroller && window.Containers.scroller('detail');
     var keepTop = (bodySig && bodySig.split('|')[0] === r.id && sc) ? sc.scrollTop : null;
@@ -801,6 +825,8 @@
       void root.offsetWidth;
       root.classList.add('rise-in');
     }
+    measureTitle(s);
+    bindBrandIcons(root);
     bindPhotoFallbacks(root);
     if (keepTop !== null) ctx.motion.afterGeometry(function () { if (sc) sc.scrollTop = keepTop; });
     return true;
@@ -814,6 +840,8 @@
     if (sig === footSig) return;
     footSig = sig;
     foot.innerHTML = actionsHtml(s, r);
+    bindBrandIcons(foot);
+    if (s.layout.mode !== 'wide') measureActions(s);
   }
 
   var candidateObserver = null;
@@ -844,7 +872,7 @@
     var host = s.layout.mode === 'mid' && s.selected.id;
     if (!host) { if (candSig !== '') { cand.innerHTML = ''; candSig = ''; } return; }
     if (!s.detail.candidatesOpen) {
-      var csig = 'collapsed|' + s.lang + '|' + s.fontScale;
+      var csig = 'collapsed|' + s.lang + '|' + s.fontScale + '|' + Dm.candidates(s).length;
       if (candSig === csig) return;
       candSig = csig;
       cand.innerHTML = '<div class="dt-cand dt-cand--collapsed"><button class="dt-cand-reopen" type="button" data-act="cand-open">' +
@@ -914,7 +942,7 @@
       var s = ctx.App.state;
       if (!s.selected.id) return;
       if (stacked || !shareInline) { stacked = false; shareInline = true; footSig = null; paintFoot(s); }
-      ctx.util.raf(function () { measureActions(ctx.App.state); measureSummary(); });
+      ctx.util.raf(function () { measureActions(ctx.App.state); });
     });
 
     function onTrans(which) {
@@ -984,9 +1012,10 @@
 
   Dm.render = function (s, changed) {
     if (!ctx.App.changedAny(changed, ['selected', 'user', 'detail', 'lang', 'fontScale', 'layout', 'filters', 'sort',
-      'overlay', 'columns', 'sheet', 'detail:data', 'detail:ja', 'nearby'])) return;
+      'overlay', 'columns', 'sheet', 'detail:data', 'detail:ja', 'nearby', 'location'])) return;
     var r = s.selected.id ? ctx.Data.byId(s.selected.id) : null;
     if (!r) {
+      measuredTitleH = null;
       if (bodySig !== null) { root.innerHTML = ''; foot.innerHTML = ''; bodySig = null; footSig = null; }
       paintCandidates(s);
       return;

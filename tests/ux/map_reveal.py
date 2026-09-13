@@ -50,8 +50,11 @@ def check(ok,msg):
         (args.output/'results.json').write_text(json.dumps({'records':records,'failures':failures},indent=2))
         if not args.baseline: raise AssertionError(msg)
 
-def record(page,name,visible=True,maxpan=1):
-    page.wait_for_timeout(1000)
+def record(page,name,visible=True,maxpan=1,observe=True):
+    # Most actions deliberately keep a bounded observation window: stale
+    # reveal work must have time to surface before a closed-case can pass.
+    if observe:
+        page.wait_for_timeout(1000)
     d=page.evaluate(probe)
     records.append({'name':name,**d})
     (args.output/'results.json').write_text(json.dumps({'records':records,'failures':failures},indent=2))
@@ -63,6 +66,33 @@ def record(page,name,visible=True,maxpan=1):
     check(len(d['pan'])<=maxpan,name+': repeated pan '+str(d['pan']))
     return d
 
+def wait_viewport_settled(page,height):
+    """Wait for a resized viewport, its sheet target and Leaflet to settle.
+
+    A fixed delay can end on the first frame of the reveal pan: WebKit may
+    spend most of that delay finishing the sheet transition.  First require
+    the new layout and DOM height, then drain the queued afterGeometry frames,
+    wait for both Leaflet animations to stop, and confirm they stay stopped
+    across two more frames.  This does not require observing a transient busy
+    state, so reduced motion and faster engines follow the same path.
+    """
+    page.wait_for_function("""height => {
+      if (innerHeight !== height || App.state.layout.H !== height) return false;
+      if (App.state.layout.mode !== 'narrow') return true;
+      const sheet = document.getElementById('sheet');
+      const target = App.layout.sheetTarget(App.state.sheet.state, App.state).h;
+      return !!sheet && Math.abs(sheet.getBoundingClientRect().height - target) < 1;
+    }""",arg=height,timeout=10000)
+    two_frames="""() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)))"""
+    idle="""() => !App.motion.isGeometryBusy()
+      && !(MapMod.map._panAnim && MapMod.map._panAnim._inProgress)
+      && !MapMod.map._animatingZoom"""
+    page.evaluate(two_frames)
+    page.wait_for_function(idle,timeout=10000)
+    page.evaluate(two_frames)
+    page.wait_for_function(idle,timeout=10000)
+
 def reset(page):
     page.evaluate("""()=>{App.act.closeDetail();MapMod.map.setView([35.6812,139.7671],15,{animate:false});App.set({userDraggedMap:false});App.act.setTab('saved');App.act.setSheet('expanded')}""")
     page.wait_for_timeout(550)
@@ -71,7 +101,7 @@ def reset(page):
 with lib_browser.serve_docs(8993) as base,sync_playwright() as p:
     browser=getattr(p,args.browser).launch()
     for width,height in [tuple(map(int,c.split(':'))) for c in args.cases.split(',')]:
-        context=browser.new_context(viewport={'width':width,'height':height},screen={'width':475 if width==475 else width,'height':751 if width==475 else height},has_touch=True,is_mobile=True,service_workers='block')
+        context=browser.new_context(viewport={'width':width,'height':height},screen={'width':475 if width==475 else width,'height':751 if width==475 else height},device_scale_factor=2.625 if width==475 else 3,has_touch=True,is_mobile=True,service_workers='block')
         page=context.new_page()
         page.route('https://**/*',lambda r:r.abort())
         page.route('**/index.html',lambda r:r.fulfill(content_type='text/html',body=html))
@@ -122,7 +152,8 @@ with lib_browser.serve_docs(8993) as base,sync_playwright() as p:
             check(not d['dragged'],'new selection retains old drag suppression')
             page.evaluate('window.panCalls=[];window.moveEvents=[]')
             page.set_viewport_size({'width':393,'height':600})
-            record(page,'resize-short-strip')
+            wait_viewport_settled(page,600)
+            record(page,'resize-short-strip',observe=False)
             page.evaluate('window.panCalls=[];window.moveEvents=[];App.act.setSheet("expanded")')
             record(page,'sheet-expanded')
         if width==393 and height==852:
@@ -131,7 +162,8 @@ with lib_browser.serve_docs(8993) as base,sync_playwright() as p:
             page.evaluate("id=>App.act.openDetail(id,'results')",A)
             page.wait_for_function('window.panCalls.length>0&&MapMod.map._panAnim&&MapMod.map._panAnim._inProgress',timeout=5000)
             page.set_viewport_size({'width':393,'height':640})
-            d=record(page,'resize-during-program-pan',maxpan=2)
+            wait_viewport_settled(page,640)
+            d=record(page,'resize-during-program-pan',maxpan=2,observe=False)
             check(all(not e['byUser'] for e in d['events']),'resize released program movement identity early')
             page.set_viewport_size({'width':393,'height':852})
             reset(page)
@@ -150,16 +182,16 @@ with lib_browser.serve_docs(8993) as base,sync_playwright() as p:
             page.evaluate("""()=>{App.act.closeDetail();App.act.applyFilters({region:25});App.set({sort:'price'});App.act.setTab('results');if(App.state.layout.mode==='narrow')App.act.setSheet('collapsed');MapMod.map.setView([35.01,135.77],11,{animate:false});navigator.geolocation.getCurrentPosition=ok=>setTimeout(()=>ok({coords:{latitude:35.6812,longitude:139.7671,accuracy:10},timestamp:Date.now()}),30)}""")
             page.wait_for_timeout(500)
             planned_center=page.evaluate('MapMod.map.getCenter()')
-            page.locator('[data-fab="locate"]').tap()
-            page.wait_for_function("App.state.sort==='distance'",timeout=15000)
+            page.locator('[data-ov="nearby"]:visible').first.tap()
+            page.wait_for_function("App.state.nearby.active && App.state.sort==='distance'",timeout=15000)
             page.wait_for_timeout(700)
-            planned=page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")
+            planned=page.evaluate("JSON.parse(JSON.stringify(App.state.nearby.planning, (k,v)=>v instanceof Set?Array.from(v).sort():v))")
             page.reload()
             lib_browser.wait_ready(page)
             page.evaluate("""()=>{window.restoreCalls=[];const m=MapMod.map;['setView','flyTo','setZoom','_stop','invalidateSize'].forEach(k=>{const old=m[k];m[k]=function(...a){restoreCalls.push({method:k,args:a,time:performance.now(),zoom:m.getZoom(),stack:new Error().stack});return old.apply(this,a)}});['movestart','moveend','zoomstart','zoomend'].forEach(k=>m.on(k,()=>restoreCalls.push({event:k,time:performance.now(),zoom:m.getZoom()})))}""")
             page.wait_for_timeout(650)
-            check(page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned,'nearby reload lost planning context')
-            page.locator('[data-ov="restore-plan"]:visible').first.tap()
+            check(page.evaluate("JSON.parse(JSON.stringify(App.state.nearby.planning, (k,v)=>v instanceof Set?Array.from(v).sort():v))")==planned,'nearby reload lost planning context')
+            page.locator('[data-ov="nearby"]:visible').first.tap()
             page.evaluate("""()=>{window.restorePressure=[];[80,160,240,320,360,400,416,432].forEach(ms=>setTimeout(()=>{restorePressure.push(MapMod.map.getZoom());App.emit('layout:settled',App.state.layout)},ms))}""")
             try:
                 page.wait_for_function('MapMod.map.getZoom()===11',timeout=8000)
@@ -171,8 +203,8 @@ with lib_browser.serve_docs(8993) as base,sync_playwright() as p:
             restored=page.evaluate('({zoom:MapMod.map.getZoom(),region:App.state.filters.region,sort:App.state.sort})')
             records.append({'name':str(width)+'-restore-view','errorPx':error,'planning':planned,'restored':restored,'pressureZooms':pressure,'trace':page.evaluate('window.restoreCalls')})
             check(any(z!=11 for z in pressure),'restore pressure missed the in-flight view')
-            check(error<=1,'restore-plan changed the saved view centre by '+str(error)+'px')
-            check(restored=={'zoom':11,'region':25,'sort':'price'},'restore-plan lost centre/zoom/filter semantics')
+            check(error<=1,'nearby exit changed the saved view centre by '+str(error)+'px')
+            check(restored=={'zoom':11,'region':25,'sort':'price'},'nearby exit lost centre/zoom/filter semantics')
         if height==852 or width==475:
             for kind in ['point','view']:
                 page.evaluate("""()=>{App.act.closeDetail();App.act.setSheet('collapsed');MapMod.map.setView([35.6812,139.7671],15,{animate:false});if(!window.locationWatch){locationWatch=true;const old=MapMod.map.flyTo;MapMod.map.flyTo=function(...a){window.locationMoves.push(a);return old.apply(this,a)};App.on('map:moveend',e=>window.locationEvents.push({byUser:e.byUser}))}window.locationMoves=[];window.locationEvents=[];MapMod.placeTempPin({lat:36.8562395,lon:136.9894408,label:'目的地'})}""")

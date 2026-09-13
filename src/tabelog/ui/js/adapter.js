@@ -52,6 +52,9 @@
   var KEY_FILTER = 'tabelog.filterState';
   var KEY_SEEN_INTRO = 'tabelog.seenIntro';
   var KEY_OOV = 'tabelog.oovHintDismissed';
+  var KEY_NEARBY = 'tabelog.nearbySession.v1';
+  var normalPrefsHeld = false, nearbyTransaction = false;
+  function normalPrefsAllowed() { return !normalPrefsHeld && !(App.state.nearby && App.state.nearby.active); }
   var LAYER_KEYS = {
     long: 'tabelog.showTransitLong',
     city: 'tabelog.showTransitCity',
@@ -92,6 +95,7 @@
   var viewSaveTimer = 0;
   function saveViewNow() {
     if (!map) return;
+    if (!normalPrefsAllowed()) { saveNearbySession(); return; }
     try {
       var c = map.getCenter();
       localStorage.setItem(KEY_VIEW, JSON.stringify({ lat: c.lat, lon: c.lng, zoom: map.getZoom() }));
@@ -104,19 +108,6 @@
     });
     // The pagehide flush is registered by wireUnloadFlush(), deliberately
     // after Business's own — see the comment there.
-    // Persist every successful fix so a reopen can paint the last position
-    // immediately (before the live fix arrives).
-    m.on('locationfound', function (e) {
-      // The freshest fix this session. Data.sort('distance') prefers it over
-      // both the caller's `from` and the persisted one, so the list's 距离最近
-      // and the map's own ordering can never disagree. (list coreRequest #3)
-      A.liveFix = { lat: e.latlng.lat, lng: e.latlng.lng };
-      try {
-        localStorage.setItem(KEY_LASTLOC, JSON.stringify({
-          lat: e.latlng.lat, lon: e.latlng.lng, acc: e.accuracy || null, ts: Date.now()
-        }));
-      } catch (_) {}
-    });
   };
   Prefs.readLastLocation = function () {
     var f = lsJSON(KEY_LASTLOC);
@@ -128,7 +119,7 @@
 
   // tabelog.listView — {sort, select, tab, leftCollapsed, planningContext, nearbyActive}
   // (3.2.x wbLoadListView / wbSaveListView tolerance, additive fields only).
-  var SORT_TO_UI = { rating: 'rating', price: 'price', award: 'awards', distance: 'distance', name: 'name' };
+  var SORT_TO_UI = { rating: 'rating', price: 'price', awards: 'awards', award: 'awards', distance: 'distance', name: 'name' };
   var SORT_TO_BIZ = { rating: 'rating', price: 'price', awards: 'award', distance: 'distance', name: 'name' };
   Prefs.readListView = function () {
     var out = { sort: 'rating', select: false, tab: 'results', leftCollapsed: false, planningContext: null, nearbyActive: false };
@@ -152,14 +143,15 @@
     return out;
   };
   Prefs.writeListView = function (s) {
+    if (!normalPrefsAllowed()) { saveNearbySession(); return; }
     var tab = s.sheet.tab === 'saved' ? 'fav' : (s.sheet.tab === 'filters' ? 'filter' : 'results');
     lsSet(KEY_LIST, JSON.stringify({
       sort: SORT_TO_BIZ[s.sort] || 'rating',
       select: !!s.multi.active,
       tab: tab,
       leftCollapsed: s.columns.userLeftPreference === 'closed',
-      planningContext: (s.nearby && s.nearby.planning) || null,
-      nearbyActive: !!(s.nearby && s.nearby.active)
+      planningContext: null,
+      nearbyActive: false
     }));
   };
 
@@ -208,6 +200,7 @@
     return f;
   };
   Prefs.writeFilterState = function (f) {
+    if (!normalPrefsAllowed()) { saveNearbySession(); return; }
     // literal, so a cleared section round-trips as cleared — 3.2.x reads
     // prices: [] as "nothing selected" too, which is the same meaning.
     var prices = Array.from(f.budgets);
@@ -444,20 +437,51 @@
       Array.from(f.awards || []).sort(), !!f.bookableOnly, !!f.favOnly, !!f.hideBlack, !!f.hideForeign, !!f.gcalOnly, _userSeq,
       App.state.saved && App.state.saved.onlyList]);
   }
-  Data.filterMatch = function (r, f) {
-    biz.setFilterState(toBizFilter(f));
-    return biz.passesFilter(r);
+  Data.validLocation = function (f, fresh) {
+    if (!f || typeof f.lat !== 'number' || typeof f.lon !== 'number' || !isFinite(f.lat) || !isFinite(f.lon) ||
+        !Data.inJapan({ lat: f.lat, lng: f.lon })) return false;
+    if (!fresh) return true;
+    return typeof f.ts === 'number' && isFinite(f.ts) && f.ts <= Date.now() && Date.now() - f.ts <= 600000;
   };
-  Data.applyFilters = function (f) {
-    var key = filterKey(f);
+  Data.locationOrigin = function (state) {
+    var s = state || App.state, nb = s.nearby || {};
+    var f = nb.active ? (nb.needsLocation ? null : nb.fix) : (A.liveFix || nb.fix);
+    return Data.validLocation(f, true) ? { lat: f.lat, lng: f.lon, lon: f.lon, acc: f.acc, ts: f.ts } : null;
+  };
+  Data.resultScope = function (state) {
+    var nb = (state || App.state).nearby || {};
+    return { mode: nb.active ? 'nearby' : 'planning', radiusM: nb.radiusM || 1000, fix: nb.fix,
+      revision: nb.revision || 0, paused: !!nb.active && (!!nb.needsLocation || !Data.validLocation(nb.fix, true)) };
+  };
+  Data.scopeKey = function (scope) {
+    scope = scope || Data.resultScope();
+    var f = scope.fix;
+    return [scope.mode, scope.radiusM, scope.revision, scope.paused, f && f.lat, f && f.lon, f && f.ts].join(':');
+  };
+  Data.distanceM = function (a, b) {
+    var rad = Math.PI / 180, dlat = (b.lat - a.lat) * rad, dlon = (b.lon - a.lon) * rad;
+    var h = Math.sin(dlat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dlon / 2) ** 2;
+    return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
+  };
+  function inScope(r, scope) {
+    return scope.mode !== 'nearby' || (!scope.paused && Data.validLocation(scope.fix, false) &&
+      typeof r.lat === 'number' && typeof r.lon === 'number' && Data.distanceM(scope.fix, r) <= scope.radiusM + 1e-7);
+  }
+  Data.filterMatch = function (r, f, scope) {
+    biz.setFilterState(toBizFilter(f));
+    return inScope(r, scope || Data.resultScope()) && biz.passesFilter(r);
+  };
+  Data.applyFilters = function (f, scope) {
+    scope = scope && scope.mode ? scope : Data.resultScope();
+    var key = filterKey(f) + '|' + Data.scopeKey(scope);
     if (_M.ids && _M.key === key) return _M.ids;
     biz.setFilterState(toBizFilter(f));
     var out = [], rows = Data.restaurants;
-    for (var i = 0; i < rows.length; i++) if (biz.passesFilter(rows[i])) out.push(rows[i].id);
+    for (var i = 0; i < rows.length; i++) if (inScope(rows[i], scope) && biz.passesFilter(rows[i])) out.push(rows[i].id);
     _M = { key: key, ids: out };
     return out;
   };
-  Data.M = function (state) { return Data.applyFilters(state.filters, state.user); };
+  Data.M = function (state) { return Data.applyFilters(state.filters, Data.resultScope(state)); };
   Data.inBounds = function (r, b) { return !!b && r.lat >= b.south && r.lat <= b.north && r.lon >= b.west && r.lon <= b.east; };
   Data.MV = function (ids, bounds) {
     if (!bounds) return ids.slice();
@@ -470,33 +494,32 @@
     var bizKey = SORT_TO_BIZ[key] || 'rating';
     var center = null;
     if (bizKey === 'distance') {
-      // The live fix the map just got beats both the caller's `from` and the
-      // map centre, so 距离最近 always agrees with the map's own ordering.
-      var live = A.liveFix || (App.state.nearby && App.state.nearby.fix) || null;
-      if (live && typeof live.lat === 'number') center = { lat: live.lat, lng: (live.lng != null ? live.lng : live.lon) };
-      else if (ctx.from) center = { lat: ctx.from[0], lng: ctx.from[1] };
-      else if (map) { var c = map.getCenter(); center = { lat: c.lat, lng: c.lng }; }
+      var live = Data.locationOrigin();
+      if (live) center = { lat: live.lat, lng: live.lon };
+      else if (!App.state.nearby.active && ctx.from) center = { lat: ctx.from[0], lng: ctx.from[1] };
+      else if (!App.state.nearby.active && map) center = map.getCenter();
       else bizKey = 'rating';
     }
     return biz.sortRows(rows, bizKey, center).map(function (r) { return r.id; });
   };
   /** counts(filters) — FILTER-02: every option's count with the other conditions unchanged. */
   var _counts = { key: '', out: null };
-  Data.counts = function (f) {
-    var key = 'c' + filterKey(f);
+  Data.counts = function (f, scope) {
+    scope = scope || Data.resultScope();
+    var key = 'c' + filterKey(f) + '|' + Data.scopeKey(scope);
     if (_counts.out && _counts.key === key) return _counts.out;
     var out = { total: 0, region: {}, budgets: {}, cuisines: {}, groups: {}, awards: {}, bookable: 0, fav: 0, gcal: 0, foreignBlocked: 0, hiddenBlack: 0, rating: {} };
     var clone = function (over) { return Object.assign({}, f, over || {}); };
     var count = function (ff) {
       biz.setFilterState(toBizFilter(ff));
       var n = 0, rows = Data.restaurants;
-      for (var i = 0; i < rows.length; i++) if (biz.passesFilter(rows[i])) n++;
+      for (var i = 0; i < rows.length; i++) if (inScope(rows[i], scope) && biz.passesFilter(rows[i])) n++;
       return n;
     };
     out.total = count(f);
     var fNoRegion = toBizFilter(clone({ region: null }));
     biz.setFilterState(fNoRegion);
-    Data.restaurants.forEach(function (r) { if (biz.passesFilter(r) && r.pref != null) out.region[r.pref] = (out.region[r.pref] || 0) + 1; });
+    Data.restaurants.forEach(function (r) { if (inScope(r, scope) && biz.passesFilter(r) && r.pref != null) out.region[r.pref] = (out.region[r.pref] || 0) + 1; });
     config.PRICE_BUCKETS.forEach(function (b) { out.budgets[b.key] = count(clone({ budgets: new Set([b.key]) })); });
     config.ALL_CUISINES.forEach(function (c) { out.cuisines[c] = count(clone({ cuisines: new Set([c]) })); });
     config.MEAL_GROUPS.forEach(function (g) { out.groups[g.name] = count(clone({ cuisines: new Set(g.buckets) })); });
@@ -702,8 +725,182 @@
   /* ========================================================================
      act: the intents modules call. Business is the only writer of user data.
      ==================================================================== */
+  function unrestrictedFilters() {
+    return { region: null, ratingMin: 3.4, budgets: new Set(PRICE_KEYS), cuisines: new Set(ALL_CUISINES),
+      awards: new Set(), bookableOnly: false, favOnly: false, hideBlack: false, hideForeign: false, gcalOnly: false };
+  }
+  function snapshotPlanning(s) {
+    var c = map.getCenter();
+    return util.cloneState({ filters: s.filters, sort: s.sort, onlyList: s.saved.onlyList,
+      search: { query: s.search.query, placeFilter: s.search.placeFilter, dropLoc: s.search.dropLoc },
+      center: [c.lat, c.lng], zoom: map.getZoom() });
+  }
+  function saveNearbySession() {
+    var s = App.state, nb = s.nearby;
+    if (nearbyTransaction || !nb || !nb.active || !nb.planning) return;
+    var view = s.mapView;
+    try { var c = map.getCenter(); view = { center: [c.lat, c.lng], zoom: map.getZoom() }; } catch (_) {}
+    try {
+      sessionStorage.setItem(KEY_NEARBY, JSON.stringify({ version: 1, planning: nb.planning,
+        filters: s.filters, sort: s.sort, onlyList: s.saved.onlyList,
+        search: { query: s.search.query, placeFilter: s.search.placeFilter, dropLoc: s.search.dropLoc },
+        view: view, radiusM: nb.radiusM, fix: nb.fix, revision: nb.revision }, function (k, v) {
+        return v instanceof Set ? Array.from(v) : v;
+      }));
+    } catch (_) {}
+  }
+  function validView(v) {
+    return !!v && Array.isArray(v.center) && v.center.length === 2 &&
+      v.center.every(function (n) { return typeof n === 'number' && isFinite(n); }) &&
+      Math.abs(v.center[0]) <= 90 && Math.abs(v.center[1]) <= 180 &&
+      typeof v.zoom === 'number' && isFinite(v.zoom) && v.zoom >= 0 && v.zoom <= 22;
+  }
+  function readSessionFilters(f) {
+    if (!f || !(f.region === null || (Number.isInteger(f.region) && f.region >= 0 && f.region <= 46)) ||
+        typeof f.ratingMin !== 'number' || !isFinite(f.ratingMin) ||
+        !['budgets', 'cuisines', 'awards'].every(function (k) { return Array.isArray(f[k]); }) ||
+        !['bookableOnly', 'favOnly', 'hideBlack', 'hideForeign', 'gcalOnly'].every(function (k) { return typeof f[k] === 'boolean'; })) return null;
+    var out = util.cloneState(f);
+    out.budgets = new Set(f.budgets.filter(function (k) { return PRICE_KEYS.indexOf(k) >= 0; }));
+    out.cuisines = new Set(f.cuisines.filter(function (k) { return ALL_CUISINES.indexOf(k) >= 0; }));
+    out.awards = new Set(f.awards.filter(function (k) { return AWARD_SLUGS.indexOf(k) >= 0; }));
+    out.ratingMin = util.clamp(f.ratingMin, 3.4, 4.5);
+    return out;
+  }
+  function validSearch(s) {
+    return !!s && typeof s.query === 'string' && typeof s.dropLoc === 'boolean' &&
+      Object.prototype.hasOwnProperty.call(s, 'placeFilter') && (s.placeFilter === null || typeof s.placeFilter === 'string' || util.isPlainObject(s.placeFilter));
+  }
+  function existingList(id) { return typeof id === 'string' && biz.flFindList(id) ? id : null; }
+  function applyListFocus(id) {
+    id = existingList(id);
+    biz.setFavFocus(id ? new Set(biz.flMembers(id).filter(function (r) { return r.indexOf('http') === 0; })) : null);
+    _userSeq++;
+    return id;
+  }
+  function restoreNearbySession(s) {
+    var o;
+    try { o = JSON.parse(sessionStorage.getItem(KEY_NEARBY) || 'null'); } catch (_) { return false; }
+    var p = o && o.planning;
+    if (!o || o.version !== 1 || !validView(p) || !validView(o.view) || !validSearch(p.search) || !validSearch(o.search) ||
+        !Object.prototype.hasOwnProperty.call(p, 'onlyList') || !Object.prototype.hasOwnProperty.call(o, 'onlyList') ||
+        !SORT_TO_UI[p.sort] || !SORT_TO_UI[o.sort] || [200, 500, 1000, 2000].indexOf(o.radiusM) < 0) return false;
+    var planningFilters = readSessionFilters(p.filters), filters = readSessionFilters(o.filters);
+    if (!planningFilters || !filters) return false;
+    normalPrefsHeld = true;
+    p.filters = planningFilters; p.sort = SORT_TO_UI[p.sort]; p.onlyList = existingList(p.onlyList);
+    s.filters = filters; s.sort = SORT_TO_UI[o.sort]; s.saved.onlyList = applyListFocus(o.onlyList);
+    Object.assign(s.search, o.search);
+    s.mapView = util.cloneState(o.view);
+    s.nearby = { active: true, pending: false, planning: p, radiusM: o.radiusM,
+      fix: Data.validLocation(o.fix, false) ? o.fix : null, needsLocation: !Data.validLocation(o.fix, true),
+      revision: Number.isInteger(o.revision) ? o.revision + 1 : 1, requestId: null, purpose: null, error: null };
+    return true;
+  }
+  var locationSeq = 0, fixExpiryTimer = 0;
+  function scheduleFixExpiry() {
+    clearTimeout(fixExpiryTimer);
+    var nb = App.state.nearby;
+    if (!nb.active || nb.needsLocation) return;
+    if (!Data.validLocation(nb.fix, true)) {
+      App.set({ nearby: { needsLocation: true, revision: nb.revision + 1 } });
+      App.emit('filters:changed', App.state.filters);
+      return;
+    }
+    fixExpiryTimer = setTimeout(scheduleFixExpiry, Math.max(1, nb.fix.ts + 600001 - Date.now()));
+  }
+  function cancelRequest() {
+    var nb = App.state.nearby;
+    locationSeq++;
+    if (window.MapMod) window.MapMod.cancelLocation();
+    App.set({ nearby: { pending: false, requestId: null, purpose: null } });
+    return nb;
+  }
+  function locationFailure(id, reason) {
+    if (!App.state.nearby.pending || App.state.nearby.requestId !== id) return;
+    App.set({ nearby: { pending: false, requestId: null, purpose: null, error: reason } });
+    App.act.showToast({ kind: 'error', text: window.t(reason) });
+    App.emit('map:locate', { status: 'error', reason: reason, requestId: id });
+  }
+  function acceptLocation(id, purpose, fix) {
+    var s = App.state, nb = s.nearby;
+    if (!nb.pending || nb.requestId !== id) return;
+    if (!Data.validLocation(fix, false)) { locationFailure(id, '地图只覆盖日本'); return; }
+    if (!Data.validLocation(fix, true)) { locationFailure(id, '无法取得位置'); return; }
+    nearbyTransaction = true;
+    var entering = purpose === 'nearby' && !nb.active;
+    var plan = entering ? snapshotPlanning(s) : nb.planning;
+    if (entering) normalPrefsHeld = true;
+    A.liveFix = util.cloneState(fix);
+    lsSet(KEY_LASTLOC, JSON.stringify(fix));
+    App.set({ nearby: { active: nb.active || entering, pending: false, planning: plan, fix: fix,
+      needsLocation: false, radiusM: entering ? 1000 : nb.radiusM,
+      revision: nb.revision + 1, requestId: null, purpose: null, error: null } });
+    if (entering) {
+      applyListFocus(null);
+      App.set({ filters: unrestrictedFilters(), sort: 'distance', saved: { onlyList: null },
+        search: { active: false, query: '', placeFilter: null, dropLoc: false } });
+      window.MapMod.placeTempPin(null);
+    }
+    nearbyTransaction = false;
+    saveNearbySession();
+    scheduleFixExpiry();
+    App.emit('filters:changed', s.filters);
+    App.emit('map:locate', { status: 'ok', requestId: id, latlng: [fix.lat, fix.lon], accuracy: fix.acc });
+    window.MapMod.showLocation(fix);
+  }
+  function requestLocation(purpose) {
+    cancelRequest();
+    var id = ++locationSeq;
+    App.set({ nearby: { pending: true, requestId: id, purpose: purpose, error: null } });
+    App.emit('map:locate', { status: 'locating', requestId: id });
+    window.MapMod.requestLocation({ requestId: id, purpose: purpose, onSuccess: function (fix) { acceptLocation(id, purpose, fix); },
+      onError: function (reason) { locationFailure(id, reason); } });
+  }
+  function wireNearbyActs(act) {
+    var applyFilters = act.applyFilters;
+    act.applyFilters = function (patch) {
+      if (!App.state.nearby.active && !nearbyTransaction) normalPrefsHeld = false;
+      applyFilters(patch);
+    };
+    act.resetFilters = function () {
+      if (!App.state.nearby.active) normalPrefsHeld = false;
+      var f = App.state.nearby.active ? unrestrictedFilters() : App.defaultState().filters;
+      if (!App.state.nearby.active) { f.budgets = new Set(PRICE_KEYS); f.cuisines = new Set(ALL_CUISINES); }
+      applyListFocus(null);
+      App.set({ filters: f, sort: App.state.nearby.active ? 'distance' : 'rating', saved: { onlyList: null } });
+      App.emit('filters:changed', App.state.filters); App.emit('filters:reset');
+    };
+    act.toggleNearby = function () {
+      if (App.state.nearby.pending) { cancelRequest(); return; }
+      if (App.state.nearby.active) { act.exitNearby(); return; }
+      requestLocation('nearby');
+    };
+    act.locate = function () { requestLocation('locate'); };
+    act.exitNearby = function () {
+      var p = App.state.nearby.planning;
+      cancelRequest(); clearTimeout(fixExpiryTimer);
+      if (!App.state.nearby.active || !p) return;
+      nearbyTransaction = true; normalPrefsHeld = true;
+      var list = applyListFocus(p.onlyList);
+      App.set({ filters: util.cloneState(p.filters), sort: p.sort, saved: { onlyList: list }, search: util.cloneState(p.search),
+        nearby: { active: false, planning: null, pending: false, needsLocation: false, error: null, revision: App.state.nearby.revision + 1 } });
+      try { sessionStorage.removeItem(KEY_NEARBY); } catch (_) {}
+      window.MapMod.restoreView(p.center, p.zoom);
+      nearbyTransaction = false;
+      App.emit('filters:changed', App.state.filters);
+      App.emit('map:locate', { status: 'restored' });
+    };
+    act.setNearbyRadius = function (m) {
+      if (!App.state.nearby.active || [200, 500, 1000, 2000].indexOf(m) < 0) return;
+      App.set({ nearby: { radiusM: m, revision: App.state.nearby.revision + 1 } });
+      App.emit('filters:changed', App.state.filters);
+    };
+  }
+
   function wireActs() {
     var act = App.act;
+    wireNearbyActs(act);
     /** validRef(id) — a Saved/Hidden entry is always a Tabelog detail_url that
      *  is in the corpus. Junk (null, a number, a stale id) would go straight
      *  into omakase_state_cache_v2 and from there into the synced KV blob, so
@@ -758,6 +955,7 @@
     act.addToList = function (listId, ref) { var ok = biz.flAdd(listId, ref); mirrorUser('bookmarks', ref, true); return ok; };
     act.removeFromList = function (listId, ref) { var ok = biz.flRemove(listId, ref); mirrorUser('bookmarks', ref); return ok; };
     act.setListFocus = function (listId) {
+      if (!App.state.nearby.active && !nearbyTransaction) normalPrefsHeld = false;
       var refs = listId ? new Set(biz.flMembers(listId).filter(function (r) { return r.indexOf('http') === 0; })) : null;
       biz.setFavFocus(refs);
       App.set({ saved: { onlyList: listId || null } });
@@ -805,9 +1003,6 @@
     act.share = function (id, ev) { var d = Data.byId(id); if (d) biz.shareRestaurant(d, ev); };
     act.shareUrl = function (id) { var d = Data.byId(id); return d ? biz.shareUrlFor(d) : ''; };
     act.translateJa = function (text) { return biz.googleTranslateJa(text); };
-    // nearby / geolocation are the map module's (plugin); the planning
-    // context it needs persisted rides in tabelog.listView through the
-    // `nearby` state slice: {active, planning:{region, sort, center, zoom}}
   }
 
   /* ========================================================================
@@ -847,6 +1042,14 @@
   }
 
   function wirePersistence() {
+    App.on('state:changed', function (changed) {
+      if (!nearbyTransaction && !App.state.nearby.active && changed.has('sort')) normalPrefsHeld = false;
+      if (App.state.nearby.active) saveNearbySession();
+    });
+    App.on('map:moveend', function (e) {
+      if (e && e.byUser && !App.state.nearby.active) normalPrefsHeld = false;
+      if (App.state.nearby.active) saveNearbySession();
+    });
     App.on('filters:changed', function () { Prefs.writeFilterState(App.state.filters); Prefs.writeListView(App.state); });
     App.subscribe(function (state, changed) {
       if (App.changedAny(changed, ['layers'])) {
@@ -872,8 +1075,14 @@
    * PUT never reached the Worker.)
    */
   function wireUnloadFlush() {
+    window.addEventListener('pageshow', function (event) {
+      if (!event.persisted) return;
+      cancelRequest();
+      scheduleFixExpiry();
+    });
     window.addEventListener('pagehide', function () {
-      try { saveViewNow(); } catch (_) {}
+      try { saveNearbySession(); saveViewNow(); } catch (_) {}
+      try { Prefs.writeFilterState(App.state.filters); } catch (_) {}
       try { persistLayers(App.state.layers, false); } catch (_) {}
       try { Prefs.writeListView(App.state); } catch (_) {}
     });
@@ -903,7 +1112,7 @@
     };
     window.__favCount = function () { return biz.state.fav.size; };
     window.__favFocus = function (listId) { App.act.setListFocus(listId); };
-    window.__uxFindNearby = function () { App.emit('map:locate-request'); };
+    window.__uxFindNearby = function () { App.act.toggleNearby(); };
     window.__adapter = A;
   }
 
@@ -934,7 +1143,17 @@
       s.mapView = { center: [c0.lat, c0.lng], zoom: map.getZoom() };
     } catch (_) {}
     s.columns.userLeftPreference = lv.leftCollapsed ? 'closed' : null;
-    s.nearby = { active: lv.nearbyActive, planning: lv.planningContext, pending: false, fix: Prefs.readLastLocation() };
+    s.nearby.fix = Prefs.readLastLocation();
+    if (!Data.validLocation(s.nearby.fix, true)) s.nearby.fix = null;
+    // Old nearby state only saved these planning fields; combine with the persisted filters.
+    if (lv.planningContext) {
+      s.filters.region = lv.planningContext.region == null ? null : lv.planningContext.region;
+      s.sort = SORT_TO_UI[lv.planningContext.sort] || 'rating';
+      s.mapView = { center: lv.planningContext.center.slice(), zoom: lv.planningContext.zoom };
+    }
+    A.restoredNearbySession = restoreNearbySession(s);
+    A.restoreSeedView = A.restoredNearbySession || !!lv.planningContext;
+    A.seedView = util.cloneState(s.mapView);
     s.user = { fav: new Set(biz.state.fav), black: new Set(biz.state.black), bookmarks: mirroredBookmarks() };
     var acc = mirrorAccount();
     s.signedIn = acc.signedIn; s.account = Object.assign(s.account, acc.account);
@@ -979,6 +1198,8 @@
     wireCompatShims();
     App.boot({ leafletMap: map, mapEl: mapEl, lang: A.uiLang(), seed: seedState });
     A.booted = true;
+    if (A.restoreSeedView) window.MapMod.restoreView(A.seedView.center, A.seedView.zoom);
+    scheduleFixExpiry();
     wireObservers();
     mirrorUser('boot');
     // sync starts after the UI exists so every status paint has a home

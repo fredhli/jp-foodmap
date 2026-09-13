@@ -279,6 +279,10 @@
         F += el.offsetHeight || 0;
       });
     }
+    if (sheetState !== 'collapsed' && state && state.selected && state.selected.id) {
+      var title = roots.detailRoot.querySelector('.dt-title-row');
+      F += title ? title.offsetHeight : 0;
+    }
     var S = CFG.sheet, Cmin;
     if (sheetState === 'collapsed') Cmin = 0;
     else if (state && state.search && state.search.active) Cmin = S.minSuggestion;
@@ -415,7 +419,7 @@
     var badge = 0;
     try { badge = (window.Filters && window.Filters.badge) ? window.Filters.badge() : D.summaryCount(s.filters, null); }
     catch (e) { try { badge = D.summaryCount(s.filters, null); } catch (e2) { badge = 0; } }
-    return { M: M, fav: fav, badge: badge };
+    return { M: D.resultScope(s).paused ? null : M, fav: fav, badge: badge };
   }
 
   C.render = function (s, changed) {
@@ -482,24 +486,26 @@
   function segment(key, label, count, iconName, badgeStyle, always) {
     // A zero Saved list or a zero filter badge has nothing to say, but 结果 0 is the
     // answer to the question the user just asked — show it.
-    var showN = always || !!count;
+    var showN = count !== null && (always || !!count);
     var inner = (iconName ? ctx.icon(iconName, { cls: 'ic-sm' }) : '') +
       '<span class="ct-seg-label">' + util.esc(label) + '</span>' +
       (showN ? (badgeStyle === 'badge'
         ? '<span class="count-badge num">' + util.fmtCount(count || 0) + '</span>'
         : '<span class="count-text num">' + util.fmtCount(count || 0) + '</span>') : '');
     return '<button class="ct-seg" data-ct="tab" data-tab="' + key + '" aria-label="' +
-      util.esc(t('{label}，共 {n}', { label: label, n: util.fmtCount(count || 0) })) + '">' + inner + '</button>';
+      util.esc(count === null ? label : t('{label}，共 {n}', { label: label, n: util.fmtCount(count || 0) })) + '">' + inner + '</button>';
   }
 
-  /* variant A — collapsed entry bar: 结果 N | ♡ 收藏 | 筛选 n | ^ */
+  /* variant A — collapsed entry bar: 结果 N | 筛选 n | ♡ 收藏 | ^ */
+  function resultLabel(s) { return t(s.nearby && s.nearby.active ? '附近' : '结果'); }
+
   function headEntry(s, n) {
     return '<div class="ct-entry"><div class="ct-segs">' +
-      segment('results', t('结果'), n.M, null, 'text', true) +
-      '<span class="ct-sep" aria-hidden="true"></span>' +
-      segment('saved', t('收藏'), n.fav, 'heart', 'text') +
+      segment('results', resultLabel(s), n.M, null, 'text', true) +
       '<span class="ct-sep" aria-hidden="true"></span>' +
       segment('filters', t('筛选'), n.badge, 'sliders', 'badge') +
+      '<span class="ct-sep" aria-hidden="true"></span>' +
+      segment('saved', t('收藏'), n.fav, 'heart', 'text') +
       '</div>' +
       '<button class="ct-expand" data-ct="sheet" data-sheet="' + (s.sheet.tab === 'filters' ? 'filter' : 'browse') + '" ' +
       'aria-label="' + util.esc(t('展开面板')) + '" aria-expanded="false">' + ctx.icon('up') + '</button>' +
@@ -520,19 +526,14 @@
       '</div></div>';
   }
 
-  /* variant C — detail navigation row (VIS-03 quiet row)
-     The detail tool buttons (⋯ / expand / close) ride the restaurant NAME row that
-     detail.js renders, not a strip of their own. What is left here is the
-     source-return link, and with no source there is no row at all. The buttons
-     still carry data-ct, so this host's delegation keeps handling them. */
-  function headNav(s) {
-    var label = null;
-    try { label = (window.Detail && window.Detail.backLabel) ? window.Detail.backLabel(s) : null; } catch (e) { label = null; }
-    if (!label) return '';
-    return '<div class="ct-nav">' +
-      '<button class="ct-back" data-ct="back">' + ctx.icon('back', { cls: 'ic-sm' }) + '<span>' + util.esc(t(label)) + '</span></button>' +
-      '</div>';
-  }
+  // Mobile navigation shares the sticky restaurant title group.
+  function headNav() { return ''; }
+
+  C.detailBack = function (s) {
+    var label = window.Detail && window.Detail.backLabel ? window.Detail.backLabel(s) : null;
+    return label ? '<button class="icon-btn icon-btn-secondary dt-back" data-ct="back" aria-label="' +
+      util.esc(t(label)) + '">' + ctx.icon('back') + '</button>' : '';
+  };
 
   /** detailTools(state) — the ⋯ / expand / close cluster detail.js puts in its title row. */
   C.detailTools = function (s) {
@@ -549,16 +550,16 @@
     var tab = s.sheet.tab;
     var one = function (key, label, count, badge, always) {
       var sel = tab === key;
-      var showN = always || !!count;
+      var showN = count !== null && (always || !!count);
       return '<button class="tab" role="tab" data-ct="tab" data-tab="' + key + '" aria-selected="' + sel + '">' +
         '<span class="ct-tab-label">' + util.esc(label) + '</span>' +
         (showN ? (badge ? '<span class="count-badge num">' + util.fmtCount(count || 0) + '</span>'
           : '<span class="count-text num">' + util.fmtCount(count || 0) + '</span>') : '') + '</button>';
     };
     return '<div class="tabs" role="tablist" aria-label="' + util.esc(t('结果与筛选')) + '">' +
-      one('results', t('结果'), n.M, false, true) +
-      one('saved', t('收藏'), n.fav, false) +
+      one('results', resultLabel(s), n.M, false, true) +
       one('filters', t('筛选'), n.badge, false) +
+      one('saved', t('收藏'), n.fav, false) +
       '<span class="tab-ink" aria-hidden="true"></span></div>';
   }
 
@@ -687,14 +688,14 @@
     var item = function (key, iconName, label, count) {
       return '<button class="ct-rail-btn" role="tab" data-ct="tab" data-tab="' + key + '" ' +
         'aria-selected="' + (s.sheet.tab === key) + '" aria-label="' +
-        util.esc(t('{label}，共 {n}', { label: label, n: util.fmtCount(count || 0) })) + '">' +
+        util.esc(count === null ? label : t('{label}，共 {n}', { label: label, n: util.fmtCount(count || 0) })) + '">' +
         ctx.icon(iconName) + '<span>' + util.esc(label) + '</span>' +
         (count ? '<span class="ct-rail-count num">' + util.fmtCount(count) + '</span>' : '') + '</button>';
     };
     return '<div class="ct-rail-tabs" role="tablist" aria-label="' + util.esc(t('结果与筛选')) + '">' +
-      item('results', 'list', t('结果'), n.M) +
-      item('saved', 'heart', t('收藏'), n.fav) +
+      item('results', 'list', resultLabel(s), n.M) +
       item('filters', 'sliders', t('筛选'), n.badge) +
+      item('saved', 'heart', t('收藏'), n.fav) +
       '</div><span class="ct-rail-spacer"></span>' +
       '<button class="ct-rail-btn ct-rail-expand" data-ct="expand-left" aria-label="' + util.esc(t('展开左栏')) + '">' +
       ctx.icon('chevronRight') + '<span>' + util.esc(t('展开')) + '</span></button>' +
@@ -720,7 +721,7 @@
           '</span>';
       }
     }
-    if (mode === 'mid') return back ? '<div class="ct-detail-head">' + back + '</div>' : '';
+    if (mode === 'mid') return '';
     return '<div class="ct-detail-head">' + back + pager +
       '<button class="icon-btn ct-close" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button></div>';
   }

@@ -215,9 +215,7 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         page.wait_for_timeout(600)
         check(page.evaluate("JSON.parse(localStorage.getItem('tabelog.bookmarks')).some(b=>b.name_src==='UX searched place')"),'search popup save failed')
 
-        # 附近: the undo toast, the exact planning context, the pressed chip,
-        # and a reload that keeps the plan without claiming a sort it is not
-        # using.
+        # Nearby mode preserves the planning view and temporary sorting across reload.
         tab('filters')
         page.evaluate("()=>App.act.applyFilters({region:25})")
         page.wait_for_timeout(400)
@@ -227,16 +225,14 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         page.evaluate(MAP+'.setView([35.01,135.77],11,{animate:false})')
         original=page.evaluate(MAP+'.getCenter()')
         show_map()
-        page.locator('[data-fab="locate"]').click()
-        page.wait_for_function("()=>App.state.sort==='distance'",timeout=20000)
-        # 3.2.x looked for a 撤销 button inside .sync-toast; 4.0's toast is state.
-        check(page.evaluate("()=>!!(App.state.toast&&App.state.toast.action&&/撤销/.test(App.state.toast.action.label))"),
-              'nearby switch has no undo toast')
-        planned=page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")
-        check(planned=={'region':25,'sort':'price','center':[original['lat'],original['lng']],'zoom':11},'planning context does not match original view')
+        page.locator('[data-ov="nearby"]:visible').first.click()
+        page.wait_for_function("()=>App.state.nearby.active && App.state.sort==='distance'",timeout=20000)
+        check(page.locator('[data-ov="restore-plan"]').count()==0, 'obsolete planning button remains')
+        planned=page.evaluate("JSON.parse(JSON.stringify(App.state.nearby.planning, (k,v)=>v instanceof Set?Array.from(v).sort():v))")
+        check(planned['filters']['region']==25 and planned['sort']=='price' and planned['center']==[original['lat'],original['lng']] and planned['zoom']==11,'planning context does not match original view')
         if w<750:
             show_map()
-            check(page.locator('.ov-chips [data-ov="nearby"]').get_attribute('aria-pressed')=='true','nearby chip not pressed')
+            check(page.locator('[data-ov="nearby"]:visible').get_attribute('aria-pressed')=='true','nearby chip not pressed')
         for sort in ['rating','price','distance']:
             page.evaluate("(s)=>App.set({sort:s})",sort)
             page.wait_for_timeout(250)
@@ -245,11 +241,11 @@ with lib_browser.serve_docs(8985 if args.browser=='webkit' else 8986) as base,sy
         page.evaluate("()=>App.set({sort:'rating'})")
         page.wait_for_timeout(300)
         page.reload();lib_browser.wait_ready(page);page.wait_for_timeout(700)
-        check(page.evaluate("JSON.parse(localStorage.getItem('tabelog.listView')).planningContext")==planned,'planning coordinates changed on reload')
+        check(page.evaluate("JSON.parse(JSON.stringify(App.state.nearby.planning, (k,v)=>v instanceof Set?Array.from(v).sort():v))")==planned,'planning coordinates changed on reload')
         check(page.evaluate("()=>App.state.sort")!='distance','reload falsely claims distance sorting')
         save(page,f'{args.browser}-{w}-nearby-reload-rating')
-        check(page.locator('[data-ov="restore-plan"]').first.is_visible(),'return plan action lost')
-        page.locator('[data-ov="restore-plan"]').first.click()
+        check(page.locator('[data-ov="nearby"]:visible').first.get_attribute('aria-pressed')=='true','nearby toggle lost')
+        page.locator('[data-ov="nearby"]:visible').first.click()
         # The restore flies the map back; WebKit finishes that animation later
         # than Chromium, so wait for the view rather than for a fixed delay.
         try:

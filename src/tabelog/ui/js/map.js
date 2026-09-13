@@ -818,6 +818,7 @@
     if (gestureBusy()) { settledPending = true; return; }
     settledPending = false;
     invalidateGeometry();
+    layoutFab(App.state);
     afterMove(true);
     flushLocation();
     if (App.state.selected.id) M.reveal(App.state.selected.id, { reason: 'viewport' });
@@ -879,10 +880,9 @@
       if (Date.now() - lastLongPress < 500) { e.stopPropagation(); e.preventDefault(); }
     }, true);
     bindLongPress();
-    bindLocateEvents();
 
     App.on('map:reveal', function (p) { if (p && p.id) M.reveal(p.id, { reason: p.reason }); });
-    App.on('map:locate-request', function (p) { if (!p || p.from !== 'map') M.locate(); });
+    App.on('map:locate-request', function () { act.locate(); });
     // overlays' 重试 on a failed rail row — refetch, toggles untouched.
     App.on('layers:retry', function () { M.retryRail(); });
     App.on('layout:settled', refreshGeometry);
@@ -1169,158 +1169,64 @@
      locate + 附近 (MAP-03) — the real leaflet.locatecontrol plugin.
      Only a user gesture reaches here; nothing asks for the permission on load.
      ================================================================== */
-  var locateCtl = null, locateTries = 0, nearbyTimer = 0, requestedPlan = null;
-
-  function locateStrings() {
-    return {
-      title: t('显示我的位置'),
-      popup: t('距离约 {distance} {unit}'),
-      outsideMapBoundsMsg: t('当前位置在地图范围之外'),
-      metersUnit: t('米'),
-      feetUnit: t('英尺')
-    };
-  }
-
-  function attachLocate() {
-    if (locateCtl) return true;
-    if (typeof L === 'undefined' || !L.control || typeof L.control.locate !== 'function') return false;
-    locateCtl = L.control.locate({
-      position: 'topleft',
-      flyTo: true,
-      setView: 'untilPan',
-      initialZoomLevel: 16,
-      keepCurrentZoomLevel: false,
-      cacheLocation: true,
-      showCompass: true,
-      drawCircle: true,
-      drawMarker: true,
-      // maximumAge 10 min lets the OS hand back a recent fix instead of
-      // re-summoning the GPS chip (and, on iOS, re-prompting).
-      locateOptions: { enableHighAccuracy: true, maximumAge: 600000, watch: false, timeout: 15000 },
-      onLocationError: function (err) { locateFailed(errText(err)); },
-      strings: locateStrings()
-    }).addTo(map);
-    return true;
-  }
-
+  // Each native callback closes over its request, including callbacks arriving after cancel.
+  var geoRequest = null, geoTimer = 0, locationMarker = null, accuracyCircle = null, nearbyCircle = null;
   function errText(err) {
-    var code = err && (err.code !== undefined ? err.code : err.status);
-    if (code === 1) return '定位权限被拒绝，可在浏览器设置中开启';
-    if (code === 3) return '定位超时，请再试一次';
+    if (err && err.code === 1) return '定位权限被拒绝，可在浏览器设置中开启';
+    if (err && err.code === 3) return '定位超时，请再试一次';
     return '无法取得位置';
   }
-
-  // The 3.2.x Japan test, kept verbatim in shape: the bare bbox also holds
-  // Jeju, the Korean east coast, Vladivostok and south Sakhalin, so the west
-  // edge steps east with latitude. (coreRequest: expose Business.uxInJapan as
-  // Data.inJapan so there is one copy.)
-  // The coverage test is Business's (bbox + west-edge staircase), reached
-  // through the adapter so there is exactly one copy. The literal table below
-  // is only the fallback for a no-adapter path.
-  var JAPAN_BBOX = { latMin: 20.0, latMax: 46.2, lonMin: 122.5, lonMax: 154.5 };
-  var JAPAN_WEST_EDGE = [[32.5, 128.0], [33.5, 128.9], [34.8, 130.0], [37.0, 132.0], [42.0, 139.0], [45.6, 999]];
-  function inJapan(ll) {
-    if (Data && typeof Data.inJapan === 'function') return Data.inJapan(ll);
-    if (!ll || !(ll.lat >= JAPAN_BBOX.latMin && ll.lat <= JAPAN_BBOX.latMax &&
-                 ll.lng >= JAPAN_BBOX.lonMin && ll.lng <= JAPAN_BBOX.lonMax)) return false;
-    var west = JAPAN_BBOX.lonMin;
-    for (var i = 0; i < JAPAN_WEST_EDGE.length; i++) if (ll.lat >= JAPAN_WEST_EDGE[i][0]) west = JAPAN_WEST_EDGE[i][1];
-    return ll.lng >= west;
-  }
-
-  function snapView(center, zoom) {
-    map.setView(center, zoom, { animate: false });
-    if (map._animatingZoom) map.once('zoomend', function () { map.setView(center, zoom, { animate: false }); });
-  }
-
-  /** MAP-03: one toast with the accurate reason and a way out. Region, sort and
-   *  the map itself are left exactly where they were. */
-  function locateFailed(key) {
-    clearTimeout(nearbyTimer);
-    var wasPending = nearbyOf(App.state).pending;
-    requestedPlan = null;
-    App.set({ nearby: { pending: false } });
-    if (!wasPending && !key) return;
-    act.showToast({ kind: 'error', text: t(key || '无法取得位置') });
-    App.set({ toast: { action: { label: t('选地区'), run: function () { act.setTab('filters'); act.openOverlay('regionPicker'); } } } });
-    App.emit('map:locate', { status: 'error', reason: key || '无法取得位置' });
-  }
-
-  function restorePlanning() {
-    var plan = nearbyOf(App.state).planning;
-    if (!plan) return;
-    clearTimeout(nearbyTimer);
-    try { if (locateCtl) locateCtl.stop(); } catch (_) {}
-    App.set({ nearby: { active: false, planning: null, pending: false } });
-    act.applyFilters({ region: plan.region === undefined ? null : plan.region });
-    App.set({ sort: plan.sort || 'rating' });
-    if (plan.center) snapView(plan.center, plan.zoom);
-    App.emit('map:locate', { status: 'restored' });
-  }
-  M.restorePlanning = restorePlanning;
-
-  function bindLocateEvents() {
-    map.on('locationfound', function (e) {
-      if (!e || !e.latlng) return;
-      var s = App.state;
-      var nb = nearbyOf(s);
-      if (nb.pending && !inJapan(e.latlng)) {
-        // MAP-03: a fix outside Japan never switches the scope — the corpus has
-        // nothing near it. The plugin has already started flying; put it back.
-        var plan = requestedPlan;
-        try { if (locateCtl) locateCtl.stop(); } catch (_) {}
-        if (plan && plan.center) snapView(plan.center, plan.zoom);
-        locateFailed('地图只覆盖日本');
-        return;
-      }
-      var fix = { lat: e.latlng.lat, lon: e.latlng.lng, acc: e.accuracy || null, ts: Date.now() };
-      if (!nb.pending) { App.set({ nearby: { fix: fix } }); return; }
-      clearTimeout(nearbyTimer);
-      var wasNearby = nb.active;
-      if (!wasNearby) {
-        var plan2 = requestedPlan; requestedPlan = null;
-        App.set({ nearby: { active: true, pending: false, fix: fix, planning: plan2 } });
-        act.applyFilters({ region: null });
-        App.set({ sort: 'distance' });
-        act.showToast({ kind: 'info', text: t('已切到全部地区，按距离排序'), undo: restorePlanning });
-        App.set({ toast: { action: { label: t('撤销'), run: restorePlanning } } });
-      } else {
-        App.set({ nearby: { pending: false, fix: fix } });
-      }
-      App.emit('map:locate', { status: 'ok', latlng: [fix.lat, fix.lon], accuracy: fix.acc });
-    });
-  }
-
-  /** locate() — the FAB's "find nearby": locate, switch to all regions +
-   *  distance, and offer Undo. A second tap while already nearby only
-   *  re-locates. Never called except from a user gesture. */
-  M.locate = function () {
-    if (!map) return;
-    App.emit('map:locate-request', { from: 'map' });
-    if (nearbyOf(App.state).pending) return;
-    if (!attachLocate()) {
-      // the plugin is `defer`red and optional (BUG-01): retry briefly, then say so
-      if (locateTries++ < 20) { setTimeout(function () { M.locate(); }, 250); return; }
-      locateFailed('无法取得位置');
+  M.cancelLocation = function () {
+    geoRequest = null; clearTimeout(geoTimer);
+    locationPending = null; locationIntent = false;
+  };
+  M.requestLocation = function (request) {
+    M.cancelLocation();
+    geoRequest = request;
+    function finish(fix, reason) {
+      if (geoRequest !== request) return;
+      geoRequest = null; clearTimeout(geoTimer);
+      if (reason) request.onError(reason); else request.onSuccess(fix);
+    }
+    if (!navigator.geolocation) { finish(null, '无法取得位置'); return; }
+    geoTimer = setTimeout(function () { finish(null, '定位超时，请再试一次'); }, 16000);
+    try {
+      navigator.geolocation.getCurrentPosition(function (position) {
+        var c = position && position.coords;
+        if (!c) { finish(null, '无法取得位置'); return; }
+        finish({ lat: c.latitude, lon: c.longitude,
+          acc: typeof c.accuracy === 'number' && isFinite(c.accuracy) && c.accuracy >= 0 ? c.accuracy : null,
+          ts: position.timestamp });
+      }, function (err) { finish(null, errText(err)); },
+      { enableHighAccuracy: true, maximumAge: 600000, timeout: 15000 });
+    } catch (_) { finish(null, '无法取得位置'); }
+  };
+  function paintLocation(s) {
+    var fix = Data.locationOrigin(s), nb = s.nearby;
+    if (!fix) {
+      [locationMarker, accuracyCircle, nearbyCircle].forEach(function (layer) { if (layer) map.removeLayer(layer); });
       return;
     }
-    try { map.stop(); } catch (_) {}
-    var s = App.state;
-    if (!nearbyOf(s).active) {
-      var c = map.getCenter();
-      requestedPlan = nearbyOf(s).planning || { region: s.filters.region === undefined ? null : s.filters.region,
-        sort: s.sort, center: [c.lat, c.lng], zoom: map.getZoom() };
+    var ll = [fix.lat, fix.lon];
+    if (!locationMarker) {
+      locationMarker = L.marker(ll, { keyboard: true, title: t('显示我的位置'), alt: t('显示我的位置'),
+        icon: L.divIcon({ className: 'mp-location-marker', html: '<span style="display:block;width:16px;height:16px;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 0 0 1px #2563eb"></span>', iconSize: [22, 22], iconAnchor: [11, 11] }) });
+      locationMarker.bindTooltip(t('显示我的位置'));
     }
-    App.set({ nearby: { pending: true } });
-    App.emit('map:locate', { status: 'locating' });
-    clearTimeout(nearbyTimer);
-    nearbyTimer = setTimeout(function () {
-      if (!nearbyOf(App.state).pending) return;
-      try { if (locateCtl) locateCtl.stop(); } catch (_) {}
-      locateFailed('定位超时，请再试一次');
-    }, 18000);
-    try { locateCtl.stop(); locateCtl.start(); } catch (_) { locateFailed('无法取得位置'); }
+    locationMarker.setLatLng(ll).addTo(map);
+    if (!accuracyCircle) accuracyCircle = L.circle(ll, { interactive: false, color: '#2563eb', weight: 1, fillOpacity: .06 });
+    if (fix.acc !== null) accuracyCircle.setLatLng(ll).setRadius(fix.acc).addTo(map);
+    else map.removeLayer(accuracyCircle);
+    if (!nearbyCircle) nearbyCircle = L.circle(ll, { interactive: false, color: '#2563eb', weight: 2, fillOpacity: .045 });
+    if (nb.active && !nb.needsLocation) nearbyCircle.setLatLng(ll).setRadius(nb.radiusM).addTo(map);
+    else map.removeLayer(nearbyCircle);
+  }
+  M.showLocation = function (fix) {
+    paintLocation(App.state);
+    M.flyTo([fix.lat, fix.lon], 16);
   };
+  M.locate = function () { act.locate(); };
+  M.restorePlanning = function () { act.exitNearby(); };
 
   /* ======================================================================
      FAB group (MAP-03 / LAYER-02 anchor)
@@ -1385,6 +1291,27 @@
     return '<button type="button" class="mp-fab glass" data-fab="' + key + '" aria-label="' + util.esc(label) + '">' + icon(ic) + '</button>';
   }
 
+  function layoutFab(s) {
+    if (!fabEl) return;
+    fabEl.classList.remove('is-horizontal');
+    fabEl.style.top = ''; fabEl.style.bottom = '';
+    if (fabEl.classList.contains('is-hidden')) return;
+    var r = s.layout.mapRect, b = fabEl.getBoundingClientRect(), gap = 4;
+    if (!r || !b.width || !b.height) return;
+    if (b.top >= r.y + gap && b.bottom <= r.y + r.h - gap) return;
+    var locate = fabEl.querySelector('[data-fab="locate"]'), layers = fabEl.querySelector('[data-fab="layers"]');
+    if (!locate || !layers) return;
+    var a = locate.getBoundingClientRect(), c = layers.getBoundingClientRect();
+    var rowGap = parseFloat(getComputedStyle(fabEl).gap) || 8;
+    var w = a.width + c.width + rowGap, h = Math.max(a.height, c.height);
+    if (r.w < w + gap * 2 || r.h < h + gap * 2) return;
+    fabEl.classList.add('is-horizontal');
+    b = fabEl.getBoundingClientRect();
+    var top = Math.max(r.y + gap, Math.min(b.top, r.y + r.h - b.height - gap));
+    var parent = fabEl.offsetParent, origin = parent ? parent.getBoundingClientRect().top + parent.clientTop : 0;
+    fabEl.style.top = (top - origin) + 'px'; fabEl.style.bottom = 'auto';
+  }
+
   /* ======================================================================
      render
      ================================================================== */
@@ -1405,7 +1332,7 @@
     }
 
     var markersChanged = false;
-    if (full || any(changed, ['filters', 'user', 'selected', 'lang', 'saved'])) markersChanged = syncMarkers(s);
+    if (full || any(changed, ['filters', 'user', 'selected', 'lang', 'saved', 'nearby'])) markersChanged = syncMarkers(s);
 
     if (full || any(changed, ['layers', 'user', 'lang'])) { renderLandmarks(s); renderPins(s); syncRail(s); }
 
@@ -1415,6 +1342,8 @@
 
     document.documentElement.toggleAttribute('data-map-short', s.layout.mapRect.h < 80);
     renderFab(s);
+    layoutFab(s);
+    if (full || any(changed, ['nearby', 'lang'])) paintLocation(s);
 
     if (markersChanged || full || any(changed, ['layout', 'sheet', 'columns', 'search', 'selected', 'mapView', 'fontScale', 'lang'])) {
       layoutTags();

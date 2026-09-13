@@ -408,10 +408,6 @@
     "en": "Coffee & sandwiches",
     "ja": "カフェ・サンドイッチ"
   },
-  "回到规划": {
-    "en": "Back to the plan",
-    "ja": "計画に戻る"
-  },
   "图标": {
     "en": "Icon",
     "ja": "アイコン"
@@ -1703,5 +1699,77 @@
   "外屏尺寸匹配": {
     "en": "Cover screen dimensions match",
     "ja": "カバー画面サイズが一致しました"
+  },
+  "附近模式": {
+    "en": "Nearby mode",
+    "ja": "周辺モード"
+  },
+  "附近模式，定位中，再按取消": {
+    "en": "Nearby mode, locating; press again to cancel",
+    "ja": "周辺モード、位置を取得中。もう一度押すとキャンセル"
+  },
+  "附近范围": {
+    "en": "Nearby radius",
+    "ja": "周辺の範囲"
+  },
+  "附近范围：{radius}": {
+    "en": "Nearby radius: {radius}",
+    "ja": "周辺の範囲：{radius}"
+  },
+  "附近模式已暂停，请重新定位": {
+    "en": "Nearby mode paused. Locate again to continue.",
+    "ja": "周辺モードを一時停止中です。現在地を再取得してください。"
+  },
+  "需要重新定位": {
+    "en": "Location needed",
+    "ja": "現在地の再取得が必要"
+  },
+  "重新定位": {
+    "en": "Locate again",
+    "ja": "現在地を再取得"
+  },
+  "结果 {n}": {
+    "en": "Results {n}",
+    "ja": "結果 {n}"
+  },
+  "图内 {n}": {
+    "en": "In view {n}",
+    "ja": "地図内 {n}"
+  },
+  "排序方式：{name}": {
+    "en": "Sort: {name}",
+    "ja": "並び順：{name}"
+  },
+  "网订": {
+    "en": "Online",
+    "ja": "予約"
+  },
+  "{radius} 内没有符合条件的餐厅": {
+    "en": "No matching restaurants within {radius}",
+    "ja": "{radius}以内に条件に合うレストランはありません"
+  },
+  "调整附近范围": {
+    "en": "Change radius",
+    "ja": "範囲を変更"
+  },
+  "清除临时筛选": {
+    "en": "Clear temporary filters",
+    "ja": "一時的な絞り込みを解除"
+  },
+  "开启附近模式后可选择距离并临时筛选；再次按附近模式，恢复原来的规划。收藏始终完整保留。": {
+    "en": "Turn on Nearby mode to choose a radius and adjust temporary filters. Press Nearby mode again to restore your plan. Saved places are always kept in full.",
+    "ja": "周辺モードでは距離を選び、一時的に絞り込めます。もう一度押すと元の計画に戻ります。保存済みの場所はすべて保持されます。"
+  },
+  "有入口": {
+    "en": "Link available",
+    "ja": "入口あり"
+  },
+  "无入口": {
+    "en": "No link",
+    "ja": "入口なし"
+  },
+  "返回附近": {
+    "en": "Back to nearby",
+    "ja": "周辺に戻る"
   }
 }

@@ -13,6 +13,31 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-09-13
+
+Nearby mode is now a toggle with 200 m, 500 m, 1 km and 2 km ranges. It
+remembers the full planning filters, sorting and map view, clears the filters
+for the nearby search, and restores the plan when switched off. Temporary
+nearby settings survive a tab reload without replacing normal planning
+preferences. Saved stays complete in both modes. Location requests share
+one implementation; cancelled or invalid results cannot change the map or
+location cache. The location button moves to the user's position without
+implicitly enabling Nearby mode.
+
+Tabs now read Results, Filters, Saved; Results becomes Nearby while the mode
+is active. Fold cover screens retain visible Nearby mode text, use matching
+borderless header controls, combine the results tools into one compact row,
+and share a higher default panel height across browsing, filters and details.
+Mobile details combine Back with the title controls, prioritize complete meal
+budgets, and use shorter action labels or accessible icons to keep three
+actions together. The drawable status-bar inset has a white background.
+
+Validated with 43 Nearby checks per browser engine, 64 detail checks, 36 Fold
+cover layout cases, 22 screen profiles, and 37 map-navigation cases per engine.
+The final WebKit failures were intermediate animation frames sampled too early;
+the tests now wait for the rendered target and completed map movement while
+retaining the original visibility and hit-testing assertions.
+
 ## [4.1.3] - 2026-09-13
 
 Fold cover detection now compares the screen dimensions multiplied by device

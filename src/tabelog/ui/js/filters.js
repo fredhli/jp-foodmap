@@ -78,7 +78,7 @@
 
   function stateKey(s) {
     var f = s.filters;
-    return [s.lang, f.region, f.ratingMin,
+    return [s.lang, D.scopeKey(D.resultScope(s)), f.region, f.ratingMin,
       Array.from(f.budgets).sort().join(','), Array.from(f.cuisines).sort().join(','), Array.from(f.awards).sort().join(','),
       f.bookableOnly ? 1 : 0, f.favOnly ? 1 : 0, f.hideBlack ? 1 : 0, f.hideForeign ? 1 : 0, f.gcalOnly ? 1 : 0,
       _userRev, D.restaurants.length].join('~');
@@ -316,11 +316,13 @@
     var C = cfg(), f = s.filters, c = F.counts();
     var mIds = D.applyFilters(f);
     var M = mIds.length, MV = currentMV(mIds), TOTAL = D.restaurants.length;
+    var scope = D.resultScope(s), nearby = scope.mode === 'nearby';
+    var radius = scope.radiusM < 1000 ? scope.radiusM + ' m' : scope.radiusM / 1000 + ' km';
 
     /* summary line + chips */
     var sum = root.querySelector('#ft-summary');
     if (sum) {
-      sum.innerHTML = t('筛选后 {m} 家餐厅符合标准 · 其中屏幕内 {mv} 家 / {total}', {
+      sum.innerHTML = scope.paused ? esc(t('附近模式已暂停，请重新定位')) : t('筛选后 {m} 家餐厅符合标准 · 其中屏幕内 {mv} 家 / {total}', {
         m: '<b class="num">' + num(M) + '</b>', mv: '<span class="num">' + num(MV) + '</span>', total: '<span class="num">' + num(TOTAL) + '</span>'
       });
     }
@@ -338,10 +340,15 @@
 
     /* region */
     var regionBtn = root.querySelector('.ft-region');
+    setText(root.querySelector('[data-section="region"] .ft-title span'), t(nearby ? '附近范围' : '地区'));
+    if (regionBtn) {
+      regionBtn.toggleAttribute('data-radius-picker', nearby);
+      regionBtn.setAttribute('aria-label', t(nearby ? '附近范围：{radius}' : '地区：{name}', {radius: radius, name: f.region == null ? t('全部地区') : D.regionName(f.region, s.lang)}));
+    }
     if (regionBtn) regionBtn.setAttribute('aria-expanded', (s.overlay.kind === 'regionPicker' || _regionOpen) ? 'true' : 'false');
     var regionTotal = 0; Object.keys(c.region).forEach(function (k) { regionTotal += c.region[k]; });
-    setText(root.querySelector('.ft-region-name'), f.region === null || f.region === undefined ? t('全部地区') : D.regionName(f.region, s.lang));
-    setText(root.querySelector('.ft-region-count'), '(' + num(f.region === null || f.region === undefined ? regionTotal : (c.region[f.region] || 0)) + ')');
+    setText(root.querySelector('.ft-region-name'), nearby ? radius : f.region === null || f.region === undefined ? t('全部地区') : D.regionName(f.region, s.lang));
+    setText(root.querySelector('.ft-region-count'), nearby ? '' : '(' + num(f.region === null || f.region === undefined ? regionTotal : (c.region[f.region] || 0)) + ')');
     syncRegionPanel(s, c, regionTotal);
 
     /* rating */
@@ -438,7 +445,7 @@
     var see = foot.querySelector('.ft-see');
     if (see) {
       var updating = F.isUpdating();
-      setText(see, updating ? t('正在更新结果…') : t('查看 {n} 家结果', { n: num(M) }));
+      setText(see, scope.paused ? t('重新定位') : updating ? t('正在更新结果…') : t('查看 {n} 家结果', { n: num(M) }));
       see.setAttribute('aria-busy', updating ? 'true' : 'false');
       see.classList.toggle('is-updating', updating);
     }
@@ -447,7 +454,7 @@
   function syncRegionPanel(s, c, regionTotal) {
     var panel = root.querySelector('#ft-region-panel');
     if (!panel) return;
-    var show = _regionFallback && _regionOpen;
+    var show = !D.resultScope(s).paused && !(s.nearby && s.nearby.active) && _regionFallback && _regionOpen;
     panel.hidden = !show;
     if (!show) return;
     var C = cfg(), f = s.filters;
@@ -503,6 +510,7 @@
    * inline list, so the form takes the job back for the rest of the session.
    */
   function openRegion() {
+    if (App.state.nearby && App.state.nearby.active) { ctx.act.openOverlay('regionPicker', null); return; }
     if (_regionFallback) {
       _regionOpen = !_regionOpen;
       App.requestRender('filters:region');
@@ -530,6 +538,7 @@
     var u = U;
     u.delegate(root, 'click', '[data-act="region"]', openRegion);
     u.delegate(root, 'click', '[data-region]', function (e, b) {
+      if (App.state.nearby && App.state.nearby.active) return;
       var raw = b.getAttribute('data-region');
       apply({ region: raw === '' ? null : Number(raw) });
       _regionOpen = false;
@@ -574,7 +583,8 @@
     });
     u.delegate(root, 'click', '[data-act="show-foreign"]', function (e) { e.preventDefault(); apply({ hideForeign: false }); });
     u.delegate(root, 'click', '[data-act="reset"]', function () { _help.rating = false; _help.budget = false; ctx.act.resetFilters(); });
-    u.delegate(foot, 'click', '[data-see-results]', function () { ctx.act.setTab('results'); });
+    u.delegate(foot, 'click', '[data-see-results]', function () {
+      if (D.resultScope(App.state).paused) { ctx.act.locate(); return; } ctx.act.setTab('results'); });
   }
 
   /* ------------------------------------------------------------ lifecycle */
@@ -594,7 +604,7 @@
 
   F.render = function (s, changed) {
     if (!App.changedAny(changed, ['*', 'filters', 'filtersUi', 'user', 'lang', 'layout', 'sheet', 'fontScale', 'mapView', 'columns',
-      'overlay', 'filters:help', 'filters:mv', 'filters:settled', 'filters:counts', 'filters:region'])) return;
+      'overlay', 'nearby', 'filters:help', 'filters:mv', 'filters:settled', 'filters:counts', 'filters:region'])) return;
     if (_domLang !== s.lang || !root.firstChild) {
       root.innerHTML = buildHtml();
       foot.innerHTML = buildFootHtml();

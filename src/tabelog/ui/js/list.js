@@ -201,8 +201,8 @@
   }
 
   function sortCtx(s) {
-    var fix = s.nearby && s.nearby.fix;
-    return { from: (fix && typeof fix.lat === 'number') ? [fix.lat, fix.lon] : null };
+    var fix = D.locationOrigin(s);
+    return { from: (fix && typeof fix.lat === 'number') ? [fix.lat, fix.lng != null ? fix.lng : fix.lon] : null };
   }
 
   /* Sorting 8k rows is not free, and groupsFor() is called from render, from
@@ -215,7 +215,7 @@
     var M = D.M(s);
     if (M !== _mRef) { _mRef = M; _mEpoch += 1; }
     var c = sortCtx(s);
-    var key = s.sort + '|' + (c.from ? c.from[0].toFixed(3) + ',' + c.from[1].toFixed(3) : '');
+    var key = s.sort + '|' + D.scopeKey(D.resultScope(s)) + '|' + (c.from ? c.from.join(',') : '');
     if (_ord.M === M && _ord.key === key && _ord.ids) return _ord.ids;
     var ids = D.sort(M, s.sort, c);
     _ord = { M: M, key: key, ids: ids };
@@ -632,6 +632,8 @@
       case 'clear-focus': focusList(null); break;
       case 'to-filters': ctx.act.setTab('filters'); break;
       case 'reset-filters': ctx.act.resetFilters(); break;
+      case 'nearby-locate': ctx.act.locate(); break;
+      case 'nearby-radius': ctx.act.openOverlay('regionPicker', null); break;
       case 'bookable-only': ctx.act.applyFilters({ bookableOnly: true }); break;
       case 'bookable-all': ctx.act.applyFilters({ bookableOnly: false }); break;
       case 'oov-show': showAllResults(); break;
@@ -887,7 +889,7 @@
     var idsSig = L.length + '#' + _mEpoch + '|' + (L.length ? L[0] + '|' + L[L.length - 1] : '') +
       '|' + s.sort + '|' + s.sheet.tab + '|' + s.saved.groupBy;
     var sig = [
-      s.layout.mode, s.layout.foldCover, s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
+      s.layout.mode, s.layout.foldCover, D.scopeKey(D.resultScope(s)), JSON.stringify(D.locationOrigin(s)), s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
       s.multi.active ? '1' : '0', Array.from(s.multi.ids).sort().join(','), s.multi.scope,
       s.sort, s.saved.groupBy, s.saved.openGroups ? Array.from(s.saved.openGroups).sort().join(',') : '*',
       s.saved.onlyList || '', rev, s.lang, s.fontScale,
@@ -1285,7 +1287,8 @@
   /* ---- head -------------------------------------------------------------- */
   function head(s, L, M, mvCount) {
     var saved = s.sheet.tab === 'saved';
-    var sub, tools;
+    var sub, tools, scope = D.resultScope(s);
+    var compact = s.layout.foldCover && !saved && !s.multi.active;
     if (s.multi.active) {
       var C = s.multi.ids, k = 0;
       C.forEach(function (id) { if (idxOf(id) < 0) k += 1; });
@@ -1310,28 +1313,30 @@
         ? t('符合筛选 {m} 家', { m: u.fmtCount(M.length) })
         : t('符合筛选 {m} 家 · 屏幕内 {v} 家', { m: u.fmtCount(M.length), v: u.fmtCount(mvCount) });
       var cur = D.config.SORTS.filter(function (o) { return o.key === s.sort; })[0] || D.config.SORTS[0];
+      if (scope.paused) sub = t('需要重新定位');
+      else if (compact) sub = '<span>' + t('结果 {n}', {n: u.fmtCount(M.length)}) + '</span>' + (mvCount === null ? '' : '<span>' + t('图内 {n}', {n: u.fmtCount(mvCount)}) + '</span>');
       tools =
-        '<button class="select-btn ls-sort" data-act="sort" aria-haspopup="menu" aria-expanded="' + (s.overlay.kind === 'sortMenu') + '" aria-label="' + esc(t('排序方式')) + '">' +
-          '<span class="ls-sort-label">' + t(cur.label) + '</span>' + ctx.icon('chevronDown', { cls: 'ic-sm' }) + '</button>' +
+        '<button class="select-btn ls-sort" data-act="sort" aria-haspopup="menu" aria-expanded="' + (s.overlay.kind === 'sortMenu') + '" aria-label="' + esc(t('排序方式：{name}', {name:t(cur.label)})) + '">' +
+          (compact ? ctx.icon('sliders') : '<span class="ls-sort-label">' + t(cur.label) + '</span>' + ctx.icon('chevronDown', { cls: 'ic-sm' })) + '</button>' +
         multiBtn(L.length);
     }
-    return '<div class="ls-head">' +
-      '<div class="ls-summary"><p class="ls-sub t-secondary">' + sub + '</p>' +
-      (s.layout.foldCover && !saved && !s.multi.active ? coverBooking(s, M) : '') + '</div>' +
-      '<div class="ls-tools">' + tools + '</div>' +
-      '<p class="ls-status t-secondary" role="status">' + (status.text ? t(status.text, status.params) : '') + '</p>' +
-      '</div>';
+    var summary = '<p class="ls-sub t-secondary">' + sub + '</p>';
+    var bar = compact ? '<div class="ls-cover-toolbar">' + summary + coverBooking(s, M) + '<div class="ls-tools">' + tools + '</div></div>' :
+      '<div class="ls-summary">' + summary + '</div><div class="ls-tools">' + tools + '</div>';
+    return '<div class="ls-head' + (compact ? ' ls-head--cover' : '') + '">' + bar +
+      '<p class="ls-status t-secondary" role="status">' + (status.text ? t(status.text, status.params) : '') + '</p></div>';
   }
 
   function coverBooking(s, M) {
+    if (D.resultScope(s).paused) return '';
     var n = M.filter(function (id) { var r = D.byId(id); return r && r.bookable; }).length;
     var on = !!s.filters.bookableOnly;
     return '<button class="chip ls-cover-booking' + (on ? ' is-on' : '') + '" data-act="' + (on ? 'bookable-all' : 'bookable-only') +
-      '" aria-pressed="' + on + '" aria-label="' + esc(t('只看可网订')) + '"' + (!on && !n ? ' disabled' : '') + '>' + t('只看可网订') + ' ' + u.fmtCount(n) + '</button>';
+      '" aria-pressed="' + on + '" aria-label="' + esc(t(on ? '正在只看可网订 · {n} 家' : '其中 {n} 家可网订', {n:u.fmtCount(n)})) + '"' + (!on && !n ? ' disabled' : '') + '>' + (on ? ctx.icon('check', {cls:'ic-sm'}) : '') + '<span>' + t('网订') + ' ' + u.fmtCount(n) + '</span>' + '</button>';
   }
 
   function multiBtn(n) {
-    return '<button class="btn btn-secondary ls-tool ls-multi" data-act="multi"' + (n ? '' : ' disabled') + '>' + ctx.icon('select', { cls: 'ic-sm' }) + '<span>' + t('多选') + '</span></button>';
+    return '<button class="btn btn-secondary ls-tool ls-multi" data-act="multi" aria-label="' + esc(t('多选')) + '"' + (n ? '' : ' disabled') + '>' + ctx.icon('select', { cls: 'ic-sm' }) + '<span>' + t('多选') + '</span></button>';
   }
 
   function focusBar(s) {
@@ -1397,7 +1402,7 @@
   function distanceFrom(r) {
     var s = App.state;
     if (s.sort !== 'distance') return null;
-    var fix = (window.Adapter && Adapter.liveFix) || (s.nearby && s.nearby.fix);
+    var fix = D.locationOrigin(s);
     if (!fix || typeof fix.lat !== 'number' || !r || typeof r.lat !== 'number') return null;
     var lon = (fix.lng != null ? fix.lng : fix.lon);
     if (typeof lon !== 'number') return null;
@@ -1522,6 +1527,14 @@
 
   /* ---- cards ------------------------------------------------------------- */
   function emptyResults(s) {
+    var scope = D.resultScope(s);
+    if (scope.mode === 'nearby') {
+      var radius = scope.radiusM < 1000 ? scope.radiusM + ' m' : scope.radiusM / 1000 + ' km';
+      return '<div class="ls-card ls-empty" role="status"><p class="t-group-title">' +
+        t(scope.paused ? '附近模式已暂停，请重新定位' : '{radius} 内没有符合条件的餐厅', {radius:radius}) + '</p>' +
+        '<div class="ls-card-actions">' + (scope.paused ? '<button class="btn btn-primary" data-act="nearby-locate">' + t('重新定位') + '</button>' :
+        '<button class="btn btn-primary" data-act="nearby-radius">' + t('调整附近范围') + '</button><button class="btn btn-secondary" data-act="reset-filters">' + t('清除临时筛选') + '</button>') + '</div></div>';
+    }
     return '<div class="ls-card ls-empty" role="status">' +
       '<p class="t-group-title">' + t('没有符合条件的餐厅') + '</p>' +
       '<p class="t-secondary">' + t('放宽或重置筛选条件后再试') + '</p>' +
@@ -1558,7 +1571,7 @@
         '</div>';
       return;
     }
-    if (s.layout.foldCover || s.sheet.tab !== 'results' || !M.length) { foot.innerHTML = ''; return; }
+    if (s.layout.foldCover || s.sheet.tab !== 'results' || D.resultScope(s).paused || (!M.length && !s.filters.bookableOnly)) { foot.innerHTML = ''; return; }
     if (s.filters.bookableOnly) {
       foot.innerHTML = '<div class="ls-bookable">' +
         '<span class="t-control">' + t('正在只看可网订 · {n} 家', { n: u.fmtCount(M.length) }) + '</span>' +
