@@ -237,3 +237,12 @@ html[data-fs="130"] .ls-bulk .btn { flex: 1 1 45%; }
 
 /* the Saved group head's ⋯ (rename / copy / delete a collection) */
 .ls-group-focus { display: inline-flex; gap: 2px; align-items: center; }
+
+html[data-fold-cover][data-list-tab="results"] #list-root {
+  --list-min-h-narrow: 84px; --c-list-row-pad: 6px;
+  --c-list-text-gap: 2px; --c-list-before-awards: 4px;
+}
+html[data-fold-cover] .ls-summary { display: flex; align-items: center; gap: 6px; }
+html[data-fold-cover] .ls-summary .ls-sub { flex: 1 1 auto; min-width: 0; }
+html[data-fold-cover] .ls-cover-booking { flex: none; min-height: 44px; max-width: 48%; white-space: normal; }
+html[data-fold-cover] #sheet-foot:has(> #list-foot:empty) { border-top: 0; }

@@ -821,10 +821,7 @@
         if (r && typeof r.lat === 'number' && typeof r.lon === 'number') pts.push([r.lat, r.lon]);
       }
       if (!pts.length) return;
-      var U = s.layout.U, R = s.layout.mapRect;
-      var tl = [Math.max(0, R.x - U.x) + 24, Math.max(0, R.y - U.y) + 24];
-      var br = [Math.max(0, (U.x + U.w) - (R.x + R.w)) + 24, Math.max(0, (U.y + U.h) - (R.y + R.h)) + 24];
-      map.fitBounds(window.L.latLngBounds(pts), { paddingTopLeft: tl, paddingBottomRight: br, maxZoom: 16, animate: !ctx.motion.reduced });
+      window.MapMod.fitBounds(window.L.latLngBounds(pts), 16);
     } catch (e) { /* map not ready */ }
   }
 
@@ -890,7 +887,7 @@
     var idsSig = L.length + '#' + _mEpoch + '|' + (L.length ? L[0] + '|' + L[L.length - 1] : '') +
       '|' + s.sort + '|' + s.sheet.tab + '|' + s.saved.groupBy;
     var sig = [
-      s.layout.mode, s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
+      s.layout.mode, s.layout.foldCover, s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
       s.multi.active ? '1' : '0', Array.from(s.multi.ids).sort().join(','), s.multi.scope,
       s.sort, s.saved.groupBy, s.saved.openGroups ? Array.from(s.saved.openGroups).sort().join(',') : '*',
       s.saved.onlyList || '', rev, s.lang, s.fontScale,
@@ -972,7 +969,7 @@
         if (it.kind === 'rst' && !it.d) it.d = D.byId(it.ref);
         var key = 'r:' + it.ref;
         indexOf[it.ref] = items.length;
-        items.push({ t: 'r', key: key, kind: it.kind, ref: it.ref, d: it.d, bm: it.bm, narrow: narrow, group: g });
+        items.push({ t: 'r', key: key, kind: it.kind, ref: it.ref, d: it.d, bm: it.bm, narrow: narrow, cover: !!s.layout.foldCover && s.sheet.tab === 'results', group: g });
       });
     });
     itemSignature = items.map(heightKeyOf).join('\u0003');
@@ -984,11 +981,11 @@
   function heightKeyOf(it) { return it.heightKey || it.key; }
   function bucketOf(it) {
     if (it.t === 'g') return 'g:' + it.geometry;
-    return (it.narrow ? 'n:' : 'c:') + it.kind;
+    return (it.cover ? 'cover:' : it.narrow ? 'n:' : 'c:') + it.kind;
   }
   function defaultH(it) {
     if (it.t === 'g') return 44 + (it.first ? 8 : it.afterRows ? 24 : 0) + (it.hasRows ? 12 : 0);
-    return it.narrow ? 97 : 77;
+    return it.cover && it.kind === 'rst' ? 85 : it.narrow ? 97 : 77;
   }
   function estH(it) {
     var b = avgH[bucketOf(it)];
@@ -1131,7 +1128,7 @@
     }
     var vpW = vp.clientWidth;
     // the measurement key: anything that changes a row's rendered height
-    var mKey = vpW + ':' + App.state.fontScale + ':' + (App.state.multi.active ? 'm' : '') + ':' + App.state.sheet.tab;
+    var mKey = vpW + ':' + App.state.fontScale + ':' + (App.state.multi.active ? 'm' : '') + ':' + App.state.sheet.tab + ':' + App.state.lang + ':' + !!App.state.layout.foldCover;
     if (vpW >= 120 && widthChanged(mKey)) force = true;
     var offs = offsets();
     var vpTop = vpOffset(sc);
@@ -1319,10 +1316,18 @@
         multiBtn(L.length);
     }
     return '<div class="ls-head">' +
-      '<p class="ls-sub t-secondary">' + sub + '</p>' +
+      '<div class="ls-summary"><p class="ls-sub t-secondary">' + sub + '</p>' +
+      (s.layout.foldCover && !saved && !s.multi.active ? coverBooking(s, M) : '') + '</div>' +
       '<div class="ls-tools">' + tools + '</div>' +
       '<p class="ls-status t-secondary" role="status">' + (status.text ? t(status.text, status.params) : '') + '</p>' +
       '</div>';
+  }
+
+  function coverBooking(s, M) {
+    var n = M.filter(function (id) { var r = D.byId(id); return r && r.bookable; }).length;
+    var on = !!s.filters.bookableOnly;
+    return '<button class="chip ls-cover-booking' + (on ? ' is-on' : '') + '" data-act="' + (on ? 'bookable-all' : 'bookable-only') +
+      '" aria-pressed="' + on + '" aria-label="' + esc(t('只看可网订')) + '"' + (!on && !n ? ' disabled' : '') + '>' + t('只看可网订') + ' ' + u.fmtCount(n) + '</button>';
   }
 
   function multiBtn(n) {
@@ -1553,7 +1558,7 @@
         '</div>';
       return;
     }
-    if (s.sheet.tab !== 'results' || !M.length) { foot.innerHTML = ''; return; }
+    if (s.layout.foldCover || s.sheet.tab !== 'results' || !M.length) { foot.innerHTML = ''; return; }
     if (s.filters.bookableOnly) {
       foot.innerHTML = '<div class="ls-bookable">' +
         '<span class="t-control">' + t('正在只看可网订 · {n} 家', { n: u.fmtCount(M.length) }) + '</span>' +

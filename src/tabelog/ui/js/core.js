@@ -591,6 +591,8 @@
     }
     document.documentElement.setAttribute('data-mode', state.layout.mode);
     document.documentElement.setAttribute('data-sheet', state.sheet.state);
+    document.documentElement.toggleAttribute('data-fold-cover', !!state.layout.foldCover);
+    document.documentElement.setAttribute('data-list-tab', state.sheet.tab);
     document.documentElement.toggleAttribute('data-search-active', !!state.search.active);
     document.documentElement.toggleAttribute('data-overlay', !!state.overlay.kind);
     document.documentElement.toggleAttribute('data-multi', !!state.multi.active);
@@ -678,6 +680,14 @@
     return W < CFG.narrowLt ? 'narrow' : (W < CFG.wideGte ? 'mid' : 'wide');
   };
 
+  // Stable screen geometry keeps this profile independent of keyboard/toolbars.
+  layout.isFoldCover = function (W) {
+    var sc = window.screen, touch = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+    if (!sc || !touch) return false;
+    var short = Math.min(sc.width, sc.height), long = Math.max(sc.width, sc.height);
+    return Math.abs(short - 475) <= 1 && Math.abs(long - 751) <= 1 && Math.abs(W - 475) <= 1 && layout.mode(W) === 'narrow';
+  };
+
   // safe-area probe: reads env() once per measure
   var _probe = null;
   function safeArea() {
@@ -751,11 +761,11 @@
     // moves at rest; the safe-area inset is deliberately NOT folded in (the
     // fixed rows already pay it through their own `padding-bottom`).
     var occ = Math.round(Math.max(0, Hfull - (y + h)));
-    var cur = App.state.layout;
-    var same = cur.W === W && cur.H === U.h && cur.occ === occ &&
+    var cur = App.state.layout, foldCover = layout.isFoldCover(W);
+    var same = !!cur.foldCover === foldCover && cur.W === W && cur.H === U.h && cur.occ === occ &&
                cur.U && cur.U.x === U.x && cur.U.y === U.y && cur.U.w === U.w && cur.U.h === U.h;
     if (same) return false;
-    App.set({ layout: { W: W, H: U.h, U: U, occ: occ, mode: layout.mode(W), compact: U.h <= CFG.compactHLte, severe: U.h <= CFG.severeHLte } });
+    App.set({ layout: { W: W, H: U.h, U: U, occ: occ, mode: layout.mode(W), foldCover: foldCover, compact: U.h <= CFG.compactHLte, severe: U.h <= CFG.severeHLte } });
     App.emit('layout:changed', App.state.layout);
     return true;
   };
@@ -1081,6 +1091,7 @@
     var s = App.state;
     var keepOrigin = s.selected.id && s.selected.origin && (origin === 'map' || origin === 'candidates' || origin === undefined);
     var patch = {
+      userDraggedMap: false,
       selected: { id: id, origin: keepOrigin ? s.selected.origin : (origin || 'map'), anchor: keepOrigin ? s.selected.anchor : (anchor || null) },
       columns: { detailOpen: true },
       detail: { scrollTo: 0 }
@@ -1137,11 +1148,10 @@
     App.emit('tab:changed', tab);
   };
   act.setSheet = function (state, reason) {
-    App.set({ sheet: { state: state } });
+    App.set({ sheet: { state: state }, userDraggedMap: false });
     // reason 'drag' means containers will emit sheet:snapped itself once the height
     // transition ends, so we stay quiet here (containers coreRequest #3).
     if (reason !== 'drag') App.emit('sheet:snapped', { state: state, reason: reason || 'explicit' });
-    if (state === 'expanded' || state === 'detail') App.emit('map:reveal', { id: App.state.selected.id, reason: 'sheet' });
   };
   act.toggleFav = function (id) {
     var u = App.state.user;

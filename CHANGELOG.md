@@ -13,6 +13,28 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-09-13
+
+Map selections are revealed inside the usable map area, including short map
+bands. Navigation requests follow the latest selection and settled layout;
+closing a detail cancels its pending move, and a new explicit selection resets
+old drag suppression. Leaflet’s duplicate resize listener is disabled for
+the current UI so it cannot move the map again after the viewport handler.
+Returning from Nearby restores the saved center and zoom exactly, independently
+of point-of-interest positioning.
+
+The additional compact layout applies only to the measured Fold cover screen
+profile (475×751 CSS screen pixels, touch, portrait layout width about 475).
+Its region and nearby controls sit between search and the avatar, online-booking
+filtering moves into the results summary, and result rows use less vertical
+padding. Other screen layouts and Saved row density retain their prior values.
+
+Validated by 31 final navigation scenarios per engine, independent real-tap and
+planning checks, 14 profile cases, unchanged geometry on eight non-cover cases,
+legacy-state compatibility and existing smoke/UX journeys. Final planning
+restoration error is 0 px. See `audit_outputs/4.1.2/REPORT.md`.
+
+
 ## [4.1.1] - 2026-09-13
 
 Collapsed city and collection headings no longer leave blank bands in Saved.

@@ -258,7 +258,7 @@
   function renderSearch(s) {
     var mode = s.layout.mode, active = !!s.search.active;
     var nb = nearbyState(s);
-    var key = [mode, active, s.lang, s.account.signedIn, s.filters.region,
+    var key = [mode, active, s.layout.foldCover, s.fontScale, s.lang, s.account.signedIn, s.filters.region,
                s.search.placeFilter, !!nb.fix, !!nb.active, !!nb.planning,
                s.overlay.kind === 'regionPicker', s.overlay.kind === 'account'].join('|');
     if (sig.search !== key) {
@@ -337,8 +337,24 @@
           (nb.active && nb.planning ? '<button class="chip chip-tall glass" data-ov="restore-plan">' +
             ic('back', { cls: 'ic-sm' }) + esc(t('回到规划')) + '</button>' : '') +
         '</div>';
+      if (s.layout.foldCover) {
+        var row = R.search.querySelector('.ov-caprow'), chips = R.search.querySelector('.ov-chips');
+        var region = chips.querySelector('[data-kind="regionPicker"]'), nearby = chips.querySelector('[data-ov="nearby"]');
+        region.classList.add('ov-cover-region');
+        region.setAttribute('aria-label', regionLabel(s));
+        var label = document.createElement('span'); label.className = 'ov-cover-label';
+        label.textContent = regionLabel(s);
+        region.childNodes[1].replaceWith(label);
+        nearby.setAttribute('aria-label', t('附近'));
+        nearby.classList.add('ov-cover-nearby');
+        if (s.fontScale >= 130) nearby.classList.add('ov-cover-icon');
+        var nearLabel = document.createElement('span'); nearLabel.className = 'ov-cover-near-label'; nearLabel.textContent = t('附近');
+        nearby.lastChild.replaceWith(nearLabel);
+        row.insertBefore(region, row.lastElementChild); row.insertBefore(nearby, row.lastElementChild);
+        if (!chips.children.length) chips.remove();
+      }
     } else {
-      R.search.innerHTML = '<button class="ov-topfield" data-ov="search-activate" aria-label="' + esc(t('搜索')) + '">' + ic('search') + q + '</button>';
+      R.search.innerHTML = '<button class="ov-topfield data-ov="search-activate" aria-label="' + esc(t('搜索')) + '">' + ic('search') + q + '</button>';
     }
     if (flipBack && !motion.reduced) {
       var back = R.search.querySelector('.ov-capsule, .ov-topfield');
@@ -1963,7 +1979,7 @@
         if (!pl) break;
         act.applyFilters({ region: pl.region == null ? null : pl.region });
         App.set({ sort: pl.sort === 'award' ? 'awards' : pl.sort });
-        if (window.MapMod && MapMod.flyTo) { try { MapMod.flyTo(pl.center, pl.zoom); } catch (err) {} }
+        if (window.MapMod && MapMod.restoreView) { try { MapMod.restoreView(pl.center, pl.zoom); } catch (err) {} }
         break;
       }
       case 'open': {

@@ -488,7 +488,7 @@
    *  overlays owns the menu body; the payload carries the entry so it can offer
    *  编辑 / 删除 / 隐藏景点 (see coreRequests). */
   function openPlaceMarker(e, bm, kind) {
-    var U = App.state.layout.U;
+    var U = mapOrigin();
     var pt = e && e.containerPoint ? e.containerPoint : map.latLngToContainerPoint([bm.lat, bm.lon]);
     App.emit('map:marker-click', { id: bm.id, kind: kind, lat: bm.lat, lon: bm.lon, x: pt.x + U.x, y: pt.y + U.y, bm: bm });
     act.openOverlay('placeMenu', {
@@ -514,7 +514,7 @@
   function layoutPlates() {
     if (!map || !plateMarks.length) return;
     var z = map.getZoom(), placed = [], i;
-    var U = App.state.layout.U, rect = App.state.layout.mapRect;
+    var U = mapOrigin(), rect = App.state.layout.mapRect;
     var x0 = rect.x - U.x - 60, x1 = x0 + rect.w + 120, y0 = rect.y - U.y - 60, y1 = y0 + rect.h + 120;
     var list = plateMarks.slice().sort(function (a, b) { return a.pri - b.pri; });   // pins first
     for (i = 0; i < list.length; i++) {
@@ -599,11 +599,12 @@
     }, { once: true });
   }
 
+  var bubbleSuppressedId = null;
   function renderBubble(s) {
     var id = s.selected.id;
     var r = id ? Data.byId(id) : null;
     var rect = s.layout.mapRect;
-    var allow = !!r && rect.h >= BUBBLE_MIN_MAP_H && rect.w >= 220 && !s.search.active;
+    var allow = !!r && bubbleSuppressedId !== id && rect.h >= BUBBLE_MIN_MAP_H && rect.w >= 220 && !s.search.active;
     if (!allow) { hideBubble(); return; }
     if (!bubbleEl) {
       bubbleAnchor = document.createElement('div');
@@ -633,7 +634,7 @@
 
   function positionBubble(r, rect) {
     if (!bubbleEl || !bubbleAnchor || bubbleAnchor.hidden) return;
-    var U = App.state.layout.U;
+    var U = mapOrigin();
     var ll = L.latLng(r.lat, r.lon);
     L.DomUtil.setPosition(bubbleAnchor, map.latLngToLayerPoint(ll));
     var bw = bubbleEl.offsetWidth || 220, bh = bubbleEl.offsetHeight || 56;
@@ -799,19 +800,62 @@
   /* ======================================================================
      movement, bounds, reveal
      ================================================================== */
+  function mapOrigin() {
+    var el = map.getContainer(), r = el.getBoundingClientRect();
+    return { x: r.left + el.clientLeft, y: r.top + el.clientTop };
+  }
+
+  var geometryDepth = 0;
+  function invalidateGeometry() {
+    geometryDepth += 1; programDepth += 1;
+    try { map.invalidateSize({ pan: false }); } catch (_) {}
+    finally { geometryDepth -= 1; programDepth = Math.max(0, programDepth - 1); }
+  }
+
+  var mapPointers = new Set(), gestureMove = false, gestureZoom = false, settledPending = false;
+  function gestureBusy() { return mapPointers.size > 0 || gestureMove || gestureZoom; }
+  function refreshGeometry() {
+    if (gestureBusy()) { settledPending = true; return; }
+    settledPending = false;
+    invalidateGeometry();
+    afterMove(true);
+    flushLocation();
+    if (App.state.selected.id) M.reveal(App.state.selected.id, { reason: 'viewport' });
+  }
+  function gestureReleased() {
+    if (gestureBusy() || !(settledPending || locationPending || revealPending)) return;
+    util.raf(function () {
+      if (gestureBusy()) return;
+      if (settledPending) refreshGeometry();
+      else {
+        flushLocation();
+        if (revealPending) M.reveal(revealPending.id, { reason: revealPending.reason });
+      }
+    });
+  }
   function bindMap() {
+    mapRoot.addEventListener('pointerdown', function (e) { mapPointers.add(e.pointerId); });
+    function pointerUp(e) { mapPointers.delete(e.pointerId); gestureReleased(); }
+    window.addEventListener('pointerup', pointerUp);
+    window.addEventListener('pointercancel', pointerUp);
+    map.on('movestart', function () { if (!programDepth) gestureMove = true; });
+    map.on('zoomstart', function () { if (!programDepth) gestureZoom = true; });
+    map.on('moveend', function () { if (!geometryDepth) gestureMove = false; gestureReleased(); });
+    map.on('zoomend', function () { gestureZoom = false; gestureReleased(); });
     map.on('movestart zoomstart', function () {
       document.documentElement.setAttribute('data-map-moving', '');
       if (bubbleEl) bubbleEl.classList.add('is-moving');
     });
     map.on('dragstart', function () {
+      revealPending = null; locationPending = null;
       if (!App.state.userDraggedMap) App.set({ userDraggedMap: true }, { silent: true });   // ENV-02 §3
     });
     map.on('moveend zoomend', function () {
       document.documentElement.removeAttribute('data-map-moving');
       if (bubbleEl) bubbleEl.classList.remove('is-moving');
-      if (moveRaf) return;
-      moveRaf = util.raf(function () { moveRaf = 0; afterMove(); });
+      var byUser = programDepth === 0;
+      if (moveRaf) cancelAnimationFrame(moveRaf);
+      moveRaf = util.raf(function () { moveRaf = 0; afterMove(false, byUser); });
     });
     // A tap on empty map dismisses the open card — the affordance 3.2.x had
     // and tests/ux/back_history.py's `close-map` scenario protects. It is a
@@ -841,17 +885,19 @@
     App.on('map:locate-request', function (p) { if (!p || p.from !== 'map') M.locate(); });
     // overlays' 重试 on a failed rail row — refetch, toggles untouched.
     App.on('layers:retry', function () { M.retryRail(); });
-    App.on('layout:settled', function () {
-      try { map.invalidateSize({ pan: false, debounceMoveend: true }); } catch (_) {}
-      afterMove(true);
+    App.on('layout:settled', refreshGeometry);
+    App.on('sheet:snapped', function () {
+      App.set({ userDraggedMap: false }, { silent: true });
+      if (App.state.selected.id) M.reveal(App.state.selected.id, { reason: 'sheet' });
     });
-    App.on('detail:close', function () { hideBubble(); });
+    App.on('detail:open', function () { locationPending = null; locationIntent = false; bubbleSuppressedId = null; });
+    App.on('detail:close', function () { revealPending = null; hideBubble(); });
   }
 
-  function afterMove(silentEmit) {
+  function afterMove(silentEmit, eventByUser) {
     var s = App.state;
     var c = map.getCenter(), z = map.getZoom();
-    var byUser = programDepth === 0;
+    var byUser = eventByUser === undefined ? programDepth === 0 : eventByUser;
     if (Math.abs(c.lat - s.mapView.center[0]) > 1e-7 || Math.abs(c.lng - s.mapView.center[1]) > 1e-7 || z !== s.mapView.zoom) {
       App.set({ mapView: { center: [c.lat, c.lng], zoom: z } }, { silent: true });
     }
@@ -868,7 +914,14 @@
   function program(fn) {
     programDepth += 1;
     var done = false;
-    var release = function () { if (done) return; done = true; programDepth = Math.max(0, programDepth - 1); };
+    var release = function () {
+      if (done) return;
+      if (geometryDepth) { map.once('moveend', release); return; }
+      done = true; programDepth = Math.max(0, programDepth - 1);
+      if (!programDepth && revealPending) util.raf(function () {
+        if (revealPending) M.reveal(revealPending.id, { reason: revealPending.reason });
+      });
+    };
     map.once('moveend', release);
     setTimeout(release, (motion.fly || 400) + 400);
     try { fn(); } catch (e) { release(); throw e; }
@@ -877,7 +930,7 @@
   /** bounds() — the VISIBLE map rectangle after panels / columns (MAP-02 §6). */
   M.bounds = function () {
     if (!map) return null;
-    var s = App.state, rect = s.layout.mapRect, U = s.layout.U;
+    var s = App.state, rect = s.layout.mapRect, U = mapOrigin();
     var x = rect.x - U.x, y = rect.y - U.y;
     var nw = map.containerPointToLatLng([x, y]);
     var se = map.containerPointToLatLng([x + rect.w, y + rect.h]);
@@ -887,38 +940,105 @@
   M.visibleIds = function () { return M.MV(resultOverride || Data.applyFilters(App.state.filters)); };
   M.setResultIds = function (ids) { resultOverride = ids || null; lastSig = ''; App.requestRender('filters'); };
 
+  // All location entry points wait for the panels to publish their final rect.
+  var locationPending = null, locationQueued = false, locationIntent = false;
+  function queueLocation(fn) {
+    revealPending = null;
+    locationPending = fn; locationIntent = true;
+    App.set({ userDraggedMap: false }, { silent: true });
+    if (locationQueued) return;
+    locationQueued = true;
+    util.raf(function () { util.raf(function () {
+      motion.afterGeometry(function () { locationQueued = false; flushLocation(); });
+    }); });
+  }
+  function visibleFrames(gap) {
+    gap = gap === undefined ? 4 : gap;
+    var s = App.state, r = s.layout.mapRect, U = mapOrigin();
+    var box = { left: r.x - U.x, top: r.y - U.y, right: r.x - U.x + r.w, bottom: r.y - U.y + r.h };
+    var search = document.getElementById('search-root');
+    if (s.layout.mode === 'narrow' && search) {
+      box.top = Math.max(box.top, search.getBoundingClientRect().bottom - U.y);
+    }
+    var frames = [box];
+    var obstacles = [fabEl, mapRoot.querySelector('.leaflet-control-attribution'), mapRoot.querySelector('.leaflet-control-scale'),
+      document.querySelector('#candidates-host > #candidates-root')];
+    obstacles = obstacles.concat(Array.prototype.slice.call(document.querySelectorAll('#notice-root > *')));
+    obstacles.forEach(function (el) {
+      if (!el || getComputedStyle(el).visibility === 'hidden') return;
+      var b = el.getBoundingClientRect();
+      if (!b.width || !b.height) return;
+      var o = { left: b.left - U.x - gap, top: b.top - U.y - gap,
+                right: b.right - U.x + gap, bottom: b.bottom - U.y + gap };
+      var next = [];
+      frames.forEach(function (f) {
+        if (o.left >= f.right || o.right <= f.left || o.top >= f.bottom || o.bottom <= f.top) { next.push(f); return; }
+        next.push({ left: f.left, top: f.top, right: Math.min(f.right, o.left), bottom: f.bottom });
+        next.push({ left: Math.max(f.left, o.right), top: f.top, right: f.right, bottom: f.bottom });
+        next.push({ left: f.left, top: f.top, right: f.right, bottom: Math.min(f.bottom, o.top) });
+        next.push({ left: f.left, top: Math.max(f.top, o.bottom), right: f.right, bottom: f.bottom });
+      });
+      frames = next.filter(function (f) { return f.right - f.left >= 36 && f.bottom - f.top >= 36; });
+    });
+    return frames.filter(function (f) { return f.right - f.left >= 36 && f.bottom - f.top >= 36; });
+  }
+  function visibleFrame() {
+    var frames = visibleFrames();
+    frames.sort(function (a, b) { return (b.right - b.left) * (b.bottom - b.top) - (a.right - a.left) * (a.bottom - a.top); });
+    return frames[0] || null;
+  }
+  function flushLocation() {
+    if (!locationPending || !map || motion.isGeometryBusy() || gestureBusy()) return;
+    var b = visibleFrame();
+    if (!b) return;
+    var job = locationPending; locationPending = null;
+    job(b);
+  }
+  function fitOptions(box, zoom) {
+    var size = map.getSize(), pad = Math.min(24, (box.bottom - box.top) / 4, (box.right - box.left) / 4);
+    return { animate: !motion.reduced, maxZoom: zoom,
+      paddingTopLeft: [box.left + pad, box.top + pad],
+      paddingBottomRight: [size.x - box.right + pad, size.y - box.bottom + pad] };
+  }
   M.flyTo = function (latlng, zoom) {
     if (!map) return;
     var z = zoom === undefined ? map.getZoom() : zoom;
-    program(function () {
-      if (motion.reduced) map.setView(latlng, z, { animate: false });
-      else map.flyTo(latlng, z, { duration: (motion.fly || 400) / 1000 });
+    queueLocation(function (box) {
+      var size = map.getSize(), target = L.point((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+      var centre = map.unproject(map.project(latlng, z).subtract(target.subtract(size.divideBy(2))), z);
+      program(function () {
+        if (motion.reduced) map.setView(centre, z, { animate: false });
+        else map.flyTo(centre, z, { duration: (motion.fly || 400) / 1000 });
+      });
     });
   };
-  /** fitPlace({lat, lon, bbox:[S,N,W,E]|LatLngBounds, zoom}) → true when it
-   *  handled the move. overlays falls back to flyTo() on a falsy return, so a
-   *  handler that fits and returns undefined would get a second, competing fly. */
+  // A saved view contains a map centre, not a place to align inside the panels.
+  M.restoreView = function (center, zoom) {
+    if (!map) return;
+    var z = zoom === undefined ? map.getZoom() : zoom;
+    queueLocation(function () {
+      program(function () {
+        if (motion.reduced) map.setView(center, z, { animate: false });
+        else map.flyTo(center, z, { duration: (motion.fly || 400) / 1000 });
+      });
+    });
+  };
+  M.fitBounds = function (bounds, zoom) {
+    if (!map) return;
+    queueLocation(function (box) { program(function () { map.fitBounds(bounds, fitOptions(box, zoom || 16)); }); });
+  };
   M.fitPlace = function (p) {
     if (!p || !map) return false;
     var bbox = p.bbox;
     if (Array.isArray(bbox) && bbox.length === 4 && typeof bbox[0] === 'number') {
-      // [S, N, W, E] — the Nominatim ordering overlays passes.
       bbox = L.latLngBounds([bbox[0], bbox[2]], [bbox[1], bbox[3]]);
     }
-    if (!bbox && (typeof p.lat !== 'number' || typeof (p.lon != null ? p.lon : p.lng) !== 'number')) return false;
-    var lat = p.lat, lon = (p.lon != null ? p.lon : p.lng);
-    program(function () {
-      if (bbox) map.fitBounds(bbox, { animate: !motion.reduced, padding: fitPadding(), maxZoom: p.zoom || 16 });
-      else map.setView([lat, lon], p.zoom || 16, { animate: !motion.reduced });
-    });
+    var lon = p.lon != null ? p.lon : p.lng;
+    if (bbox) M.fitBounds(bbox, p.zoom || 16);
+    else if (typeof p.lat === 'number' && typeof lon === 'number') M.flyTo([p.lat, lon], p.zoom || 16);
+    else return false;
     return true;
   };
-  function fitPadding() {
-    var s = App.state, rect = s.layout.mapRect, U = s.layout.U;
-    var left = rect.x - U.x, top = rect.y - U.y;
-    var right = U.w - (rect.x - U.x + rect.w), bottom = U.h - (rect.y - U.y + rect.h);
-    return L.point(Math.max(left, right) + 24, Math.max(top, bottom) + 24);
-  }
 
   /**
    * reveal(id, {reason}) — LAY-05: at most one minimal pan so the marker sits
@@ -926,53 +1046,79 @@
    * name bubble's space held out. A user drag switches implicit reveals off
    * (ENV-02 §3) until the next explicit select.
    */
-  var revealPending = null;
+  var revealPending = null, revealQueued = false;
   M.reveal = function (id, opts) {
-    var r = id && Data.byId(id);
-    if (!r || !map) return;
+    if (!id || !Data.byId(id) || !map || App.state.selected.id !== id) return;
     var reason = (opts && opts.reason) || 'select';
+    if (locationIntent && reason !== 'select') return;
+    if (reason === 'select') { locationIntent = false; locationPending = null; }
     if (reason !== 'select' && App.state.userDraggedMap) return;
-    if (revealPending) { revealPending = { id: id, reason: revealPending.reason === 'select' ? 'select' : reason }; return; }
     revealPending = { id: id, reason: reason };
-    util.raf(function () {
+    if (revealQueued) return;
+    revealQueued = true;
+    util.raf(function () { util.raf(function () {
       motion.afterGeometry(function () {
+        revealQueued = false;
         var job = revealPending; revealPending = null;
-        if (job) doReveal(job.id, job.reason);
+        if (job && App.state.selected.id === job.id) {
+          if (gestureBusy() || programDepth) revealPending = job;
+          else doReveal(job.id, job.reason);
+        }
       });
-    });
+    }); });
   };
 
   function doReveal(id, reason) {
     var r = Data.byId(id);
-    if (!r || !map) return;
+    if (!r || !map || App.state.selected.id !== id) return;
     if (reason !== 'select' && App.state.userDraggedMap) return;
-    var st = App.state, rect = st.layout.mapRect, U = st.layout.U;
-    if (rect.w < 80 || rect.h < 80) return;
+    var st = App.state, rect = st.layout.mapRect, U = mapOrigin();
+    var selectedEl = mapRoot.querySelector('.mp-mk.is-selected');
+    var dot = selectedEl && selectedEl.querySelector('.mp-dot'), tag = selectedEl && selectedEl.querySelector('.mp-tag');
+    if (dot && tag) {
+      var dr = dot.getBoundingClientRect(), tr = tag.getBoundingClientRect();
+      var actual = { left: Math.min(dr.left - 4, tr.left) - U.x, top: Math.min(dr.top - 4, tr.top) - U.y,
+                     right: Math.max(dr.right + 4, tr.right) - U.x, bottom: Math.max(dr.bottom + 4, tr.bottom) - U.y };
+      if (dr.width && tr.width && visibleFrames(0).some(function (f) {
+        return actual.left >= f.left && actual.top >= f.top && actual.right <= f.right && actual.bottom <= f.bottom;
+      })) { renderBubble(st); return; }
+    }
+    var frames = visibleFrames();
+    if (!frames.length) {
+      revealPending = { id: id, reason: reason };
+      return;
+    }
     var p = map.latLngToContainerPoint([r.lat, r.lon]);
-    var left = rect.x - U.x, top = rect.y - U.y, right = left + rect.w, bot = top + rect.h;
-    var padX = Math.min(56, rect.w / 4), padTop = Math.min(90, rect.h / 3), padBottom = Math.min(70, rect.h / 3);
-    var padLeft = padX, padRight = padX;
-    var fr = fabEl && fabEl.getBoundingClientRect();
-    if (fr && fr.width) {
-      padRight = Math.max(padRight, right - (fr.left - U.x) + 16);
-      padBottom = Math.max(padBottom, bot - (fr.top - U.y) + 16);
+    var short = rect.h < 80;
+    var padLeft = 18, padRight = 18, padTop = 18, padBottom = short ? 18 : 42;
+    if (selectedEl) {
+      var mr = selectedEl.getBoundingClientRect();
+      padLeft = Math.max(padLeft, p.x + U.x - mr.left + 4);
+      padRight = Math.max(padRight, mr.right - p.x - U.x + 4);
+      padTop = Math.max(padTop, p.y + U.y - mr.top + 4);
+      padBottom = Math.max(short ? 18 : 42, mr.bottom - p.y - U.y + 4);
     }
-    if (rect.h >= BUBBLE_MIN_MAP_H) {                 // a bubble will be drawn
-      padLeft = Math.max(padLeft, BUBBLE_HALF_W);
-      padRight = Math.max(padRight, BUBBLE_HALF_W);
-      padTop = Math.max(padTop, BUBBLE_KEEPOUT_TOP);
+    var wantBubble = rect.h >= BUBBLE_MIN_MAP_H && rect.w >= 220;
+    function choose(withBubble) {
+      var best = null;
+      frames.forEach(function (f) {
+        var l = padLeft, rr = padRight, tt = padTop;
+        if (withBubble) { l = Math.max(l, BUBBLE_HALF_W); rr = Math.max(rr, BUBBLE_HALF_W); tt = Math.max(tt, BUBBLE_KEEPOUT_TOP); }
+        var x0 = f.left + l, x1 = f.right - rr, y0 = f.top + tt, y1 = f.bottom - padBottom;
+        if (x1 < x0 || y1 < y0) return;
+        var dx = p.x - util.clamp(p.x, x0, x1), dy = p.y - util.clamp(p.y, y0, y1);
+        var cost = dx * dx + dy * dy;
+        if (!best || cost < best.cost) best = { dx: dx, dy: dy, cost: cost };
+      });
+      return best;
     }
-    padLeft = Math.min(padLeft, rect.w * 0.4); padRight = Math.min(padRight, rect.w * 0.4);
-    padTop = Math.min(padTop, rect.h * 0.4); padBottom = Math.min(padBottom, rect.h * 0.4);
-    var x0 = left + padLeft, x1 = right - padRight;
-    var y0 = top + padTop, y1 = bot - padBottom;
-    if (x1 < x0) { x0 = x1 = (left + right) / 2; }    // no room: centre instead
-    if (y1 < y0) { y0 = y1 = (top + bot) / 2; }
-    var dx = 0, dy = 0;
-    if (p.x < x0) dx = p.x - x0; else if (p.x > x1) dx = p.x - x1;
-    if (p.y < y0) dy = p.y - y0; else if (p.y > y1) dy = p.y - y1;
-    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) { renderBubble(App.state); return; }
-    program(function () { map.panBy([dx, dy], { animate: !motion.reduced, duration: (motion.fly || 400) / 1000 }); });
+    var best = choose(wantBubble);
+    bubbleSuppressedId = null;
+    if (!best && wantBubble) { best = choose(false); bubbleSuppressedId = id; }
+    if (!best) { revealPending = { id: id, reason: reason }; hideBubble(); return; }
+    var dx = best.dx, dy = best.dy;
+    if (Math.abs(dx) < .01 && Math.abs(dy) < .01) { renderBubble(App.state); return; }
+    program(function () { map.panBy([dx < 0 ? Math.floor(dx) : Math.ceil(dx), dy < 0 ? Math.floor(dy) : Math.ceil(dy)], { animate: !motion.reduced, duration: (motion.fly || 400) / 1000 }); });
   }
 
   /** select(id, {reveal}) — the map's own way into a detail card (NAV-01 origin 'map'). */
@@ -985,7 +1131,7 @@
   /* ----- long press → place menu --------------------------------------- */
   var lastLongPress = 0;
   function emitPlaceMenu(latlng, pt) {
-    var U = App.state.layout.U;
+    var U = mapOrigin();
     App.emit('map:contextmenu', { lat: latlng.lat, lon: latlng.lng, x: pt.x + U.x, y: pt.y + U.y });
   }
 
@@ -1248,7 +1394,7 @@
     var full = !changed || changed.has('*');
 
     if (full) {
-      try { map.invalidateSize({ pan: false }); } catch (_) {}
+      invalidateGeometry();
       lastSig = ''; lastFab = ''; lastFavSig = ''; lastSelected = null; lastLang = '';
       _tagW = {};
     }
@@ -1258,14 +1404,6 @@
       if (wantOffline !== offline || (wantOffline && !offlineNote)) M.setTilesOffline(wantOffline);
     }
 
-    // view sync (deep links and programmatic moves from other modules)
-    if (full || any(changed, ['mapView'])) {
-      var c = map.getCenter();
-      if (Math.abs(c.lat - s.mapView.center[0]) > 1e-6 || Math.abs(c.lng - s.mapView.center[1]) > 1e-6 || map.getZoom() !== s.mapView.zoom) {
-        program(function () { map.setView(s.mapView.center, s.mapView.zoom, { animate: false }); });
-      }
-    }
-
     var markersChanged = false;
     if (full || any(changed, ['filters', 'user', 'selected', 'lang', 'saved'])) markersChanged = syncMarkers(s);
 
@@ -1273,8 +1411,9 @@
 
     // geometry: only a real container resize needs invalidateSize; mapRect is logical
     var rectSig = [s.layout.W, s.layout.H, s.layout.U.x, s.layout.U.y, s.layout.U.w, s.layout.U.h].join(',');
-    if (rectSig !== lastMapRectSig) { lastMapRectSig = rectSig; if (!full) { try { map.invalidateSize({ pan: false }); } catch (_) {} } }
+    if (rectSig !== lastMapRectSig) { lastMapRectSig = rectSig; if (!full) invalidateGeometry(); }
 
+    document.documentElement.toggleAttribute('data-map-short', s.layout.mapRect.h < 80);
     renderFab(s);
 
     if (markersChanged || full || any(changed, ['layout', 'sheet', 'columns', 'search', 'selected', 'mapView', 'fontScale', 'lang'])) {

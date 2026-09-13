@@ -2340,7 +2340,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.1.1"
+APP_VERSION = "4.1.2"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -22436,7 +22436,11 @@ def main(argv: list[str] | None = None) -> None:
     # transit option lives in custom JS as a togglable OpenRailwayMap
     # overlay (rail lines + station markers drawn on top), wired to the
     # floating "🚇 公共交通" pill button (see FAB_HTML / initMap).
-    m = folium.Map(location=JAPAN_CENTER, zoom_start=6, tiles=None, zoom_control=False)
+    # The 4.x UI owns viewport resizing; a second Leaflet listener can move the map again.
+    m = folium.Map(
+        location=JAPAN_CENTER, zoom_start=6, tiles=None, zoom_control=False,
+        track_resize=not UI_40,
+    )
     folium.TileLayer(
         tiles=carto_tile_url,
         attr=(

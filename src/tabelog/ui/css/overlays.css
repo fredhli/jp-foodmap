@@ -452,3 +452,15 @@
   .ov-notice--intro .btn { min-height: 44px; }
   .ov-notice--intro .icon-btn { width: 44px; height: 44px; }
 }
+
+/* Fold cover portrait: the full search still opens from this compact entry. */
+html[data-fold-cover] .ov-caprow { gap: 6px; }
+html[data-fold-cover] .ov-caprow .ov-capsule { min-width: 44px; min-height: 44px; padding-inline: 10px; gap: 6px; }
+html[data-fold-cover] .ov-caprow .ov-avatar { width: 44px; height: 44px; }
+html[data-fold-cover] .ov-caprow .chip { min-height: 44px; padding-inline: 8px; gap: 4px; }
+html[data-fold-cover] .ov-cover-region { max-width: 156px; min-width: 104px; flex: 0 0 auto; }
+html[data-fold-cover] .ov-cover-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-fold-cover] .ov-cover-nearby { flex: none; min-width: 44px; }
+html[data-fold-cover] .ov-caprow .ov-capsule { overflow: hidden; }
+html[data-fold-cover] .ov-cover-nearby .ic { flex: none; }
+html[data-fold-cover] .ov-cover-icon .ov-cover-near-label { display: none; }

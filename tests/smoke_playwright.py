@@ -742,15 +742,25 @@ def check_chrome(page, name):
       const R = s => { const e = document.querySelector(s);
         if (!e || !e.getClientRects().length) return null;
         const r = e.getBoundingClientRect();
-        return {l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width}; };
-      return {stack: R('#fab-root'), chips: R('.ov-chips'),
-              region: R('.ov-chips [data-kind="regionPicker"]'),
+        return {l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height}; };
+      return {cover: !!App.state.layout.foldCover, caprow: R('.ov-caprow'),
+              nearby: R('#search-root [data-ov="nearby"]'), avatar: R('#search-root .ov-avatar'),
+              stack: R('#fab-root'), chips: R('.ov-chips'),
+              region: R(App.state.layout.foldCover ? '#search-root [data-kind="regionPicker"]' : '.ov-chips [data-kind="regionPicker"]'),
               intro: R('#notice-root .ov-notice'),
               input: R('.ov-capsule') || R('#ov-sinput') || R('.ov-topfield'),
               phone: App.state.layout.mode === 'narrow'};
     }""")
     out = []
-    if g["phone"]:
+    if g["phone"] and g["cover"]:
+        controls = [g[k] for k in ["input", "region", "nearby", "avatar"]]
+        if not all(c and c["w"] >= 44 and c["h"] >= 44 for c in controls):
+            raise AssertionError(f"Fold header controls need 44px touch bounds: {g}")
+        centres = [c["t"] + c["h"] / 2 for c in controls]
+        if max(centres) - min(centres) > 1 or any(a["r"] > b["l"] for a,b in zip(controls,controls[1:])):
+            raise AssertionError(f"Fold header must order search, region, nearby, account on one row: {g}")
+        out.append("Fold header controls share one row and retain 44px targets")
+    elif g["phone"]:
         if not g["chips"] or not g["region"]:
             raise AssertionError(f"phone header is missing its chip row / region chip: {g}")
         if abs(g["chips"]["l"] - g["input"]["l"]) > 4:
@@ -765,7 +775,7 @@ def check_chrome(page, name):
         # W-10 is about is that the intro row belongs to the header band and
         # does not sit on top of the chip row, so that is what is asserted:
         # inside the page gutter, no wider than the header, below the chips.
-        band = g["chips"] or g["input"]
+        band = (g["caprow"] if g["cover"] else g["chips"]) or g["input"]
         if g["intro"]["l"] < band["l"] - 1 or g["intro"]["r"] > band["r"] + 1:
             raise AssertionError(
                 f"intro row escapes the header band (the chip row's span): {g}")

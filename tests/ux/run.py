@@ -131,15 +131,22 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 chrome=page.evaluate("""()=>{
                   const head=document.getElementById('sheet-head');
                   const sheet=document.getElementById('sheet');
-                  const chips=document.querySelector('.ov-chips');
-                  const region=document.querySelector('.ov-chips [data-kind="regionPicker"]');
-                  const nearby=document.querySelector('.ov-chips [data-ov="nearby"]');
+                  const cover=!!App.state.layout.foldCover;
+                  const scope=cover?'.ov-caprow':'.ov-chips';
+                  const chips=document.querySelector(scope);
+                  const region=document.querySelector(scope+' [data-kind="regionPicker"]');
+                  const nearby=document.querySelector(scope+' [data-ov="nearby"]');
+                  const controls=cover?['.ov-capsule','[data-kind="regionPicker"]','[data-ov="nearby"]','.ov-avatar'].map(sel=>{
+                    const e=chips&&chips.querySelector(sel);if(!e)return null;
+                    const b=e.getBoundingClientRect(),hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);
+                    return {x:b.x,y:b.y,w:b.width,h:b.height,hit:hit===e||e.contains(hit)};
+                  }):[];
                   const fabs=document.getElementById('fab-root');
                   const r=sheet.getBoundingClientRect(),f=fabs.getBoundingClientRect();
                   const segs=[...head.querySelectorAll('[data-ct="tab"]')];
                   const res=segs.find(e=>e.dataset.tab==='results');
                   const digits=s=>(s||'').replace(/[^0-9]/g,'');
-                  return {segs:segs.length,
+                  return {cover,controls,segs:segs.length,
                     pillText:digits((res&&res.textContent)||''),
                     shownCount:String(Data.M(App.state).length),
                     hitsFabs:f.width>0&&r.right>f.left&&r.left<f.right&&r.bottom>f.top&&r.top<f.bottom,
@@ -150,6 +157,12 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
                 assert not chrome['hitsFabs'], chrome
                 assert chrome['chipsShown'] and '全部地区' in chrome['regionText'], chrome
                 assert chrome['nearbyOff'], chrome
+                if chrome['cover']:
+                    controls=chrome['controls']
+                    assert len(controls)==4 and all(c and c['w']>=44 and c['h']>=44 and c['hit'] for c in controls), chrome
+                    centres=[c['y']+c['h']/2 for c in controls]
+                    assert max(centres)-min(centres)<=1, chrome
+                    assert all(a['x']+a['w']<=b['x'] for a,b in zip(controls,controls[1:])), chrome
                 # The 结果 segment carries the live match count. Narrow widths
                 # abbreviate it (7.9k), so accept either spelling.
                 shown=int(chrome['shownCount'])
