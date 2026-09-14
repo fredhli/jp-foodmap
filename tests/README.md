@@ -166,6 +166,8 @@ use isolated browser state and every external HTTPS request is blocked.
 .venv-wsl/bin/python tests/ux/supplement.py --docs docs --browser webkit --output /tmp/ux-sup
 .venv-wsl/bin/python tests/ux/review_regressions.py --docs docs --browser webkit --output /tmp/ux-rr
 .venv-wsl/bin/python tests/ux/visibility.py --output /tmp/ux-vis
+.venv-wsl/bin/python tests/ux/fold_cover_density.py --output /tmp/ux-fold-cover-density
+.venv-wsl/bin/python tests/ux/fold_inner_density.py --output /tmp/ux-fold-inner-density
 .venv-wsl/bin/python tests/ux/pinch.py --json /tmp/ux-pinch.json
 ```
 
@@ -178,6 +180,13 @@ carrying the live count, and the `#ss-chips` row naming the region.
 `review_regressions.py` covers place navigation, closed-detail focus and
 the nearby-sort copy. `supplement.py` covers keyboard, resize and the
 first-visit context menu.
+
+`fold_cover_density.py` checks the cover's task-specific sheet stops, Android
+top inset, first-screen filter content, text scaling and compact detail.
+`fold_inner_density.py` checks positive and negative physical-screen profiles,
+full and split windows, filter information density, chip hit areas, map/FAB
+and attribution clearance, column widths, detail geometry and virtual-list
+height calibration.
 
 `visibility.py` (M-3.2-11) is the executable form of the release's
 acceptance numbers. It is the audit script

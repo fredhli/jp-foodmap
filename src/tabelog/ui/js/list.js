@@ -891,7 +891,7 @@
     var idsSig = L.length + '#' + _mEpoch + '|' + (L.length ? L[0] + '|' + L[L.length - 1] : '') +
       '|' + s.sort + '|' + s.sheet.tab + '|' + s.saved.groupBy;
     var sig = [
-      s.layout.mode, s.layout.foldCover, s.layout.z, D.scopeKey(D.resultScope(s)), JSON.stringify(D.locationOrigin(s)), s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
+      s.layout.mode, s.layout.foldCover, s.layout.foldInner, s.layout.z, D.scopeKey(D.resultScope(s)), JSON.stringify(D.locationOrigin(s)), s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
       s.multi.active ? '1' : '0', Array.from(s.multi.ids).sort().join(','), s.multi.scope,
       s.sort, s.saved.groupBy, s.saved.openGroups ? Array.from(s.saved.openGroups).sort().join(',') : '*',
       s.saved.onlyList || '', rev, s.lang, s.fontScale,
@@ -973,7 +973,8 @@
         if (it.kind === 'rst' && !it.d) it.d = D.byId(it.ref);
         var key = 'r:' + it.ref;
         indexOf[it.ref] = items.length;
-        items.push({ t: 'r', key: key, kind: it.kind, ref: it.ref, d: it.d, bm: it.bm, narrow: narrow, cover: !!s.layout.foldCover && s.sheet.tab === 'results', group: g });
+        items.push({ t: 'r', key: key, kind: it.kind, ref: it.ref, d: it.d, bm: it.bm, narrow: narrow,
+          cover: !!s.layout.foldCover && s.sheet.tab === 'results', inner: !!s.layout.foldInner, group: g });
       });
     });
     itemSignature = items.map(heightKeyOf).join('\u0003');
@@ -985,11 +986,11 @@
   function heightKeyOf(it) { return it.heightKey || it.key; }
   function bucketOf(it) {
     if (it.t === 'g') return 'g:' + it.geometry;
-    return (it.cover ? 'cover:' : it.narrow ? 'n:' : 'c:') + it.kind;
+    return (it.cover ? 'cover:' : it.inner ? 'inner:' : it.narrow ? 'n:' : 'c:') + it.kind;
   }
   function defaultH(it) {
     if (it.t === 'g') return px(44 + (it.first ? 8 : it.afterRows ? 24 : 0) + (it.hasRows ? 12 : 0));
-    return px(it.cover && it.kind === 'rst' ? 85 : it.narrow ? 97 : 77);
+    return px(it.cover && it.kind === 'rst' ? 85 : it.inner && !it.narrow ? 73 : it.narrow ? 97 : 77);
   }
   function estH(it) {
     var b = avgH[bucketOf(it)];
@@ -1132,7 +1133,7 @@
     }
     var vpW = vp.clientWidth;
     // the measurement key: anything that changes a row's rendered height
-    var mKey = vpW + ':' + App.state.fontScale + ':' + (App.state.multi.active ? 'm' : '') + ':' + App.state.sheet.tab + ':' + App.state.lang + ':' + !!App.state.layout.foldCover + ':' + App.state.layout.z;
+    var mKey = vpW + ':' + App.state.fontScale + ':' + (App.state.multi.active ? 'm' : '') + ':' + App.state.sheet.tab + ':' + App.state.lang + ':' + !!App.state.layout.foldCover + ':' + !!App.state.layout.foldInner + ':' + App.state.layout.z;
     var minW = px(120);
     if (vpW >= minW && widthChanged(mKey)) force = true;
     var offs = offsets();
@@ -1292,7 +1293,8 @@
   function head(s, L, M, mvCount) {
     var saved = s.sheet.tab === 'saved';
     var sub, tools, scope = D.resultScope(s);
-    var compact = s.layout.foldCover && !saved && !s.multi.active;
+    var compactProfile = !saved && !s.multi.active ? (s.layout.foldCover ? 'cover' : s.layout.foldInner ? 'inner' : '') : '';
+    var compact = !!compactProfile;
     if (s.multi.active) {
       var C = s.multi.ids, k = 0;
       C.forEach(function (id) { if (idxOf(id) < 0) k += 1; });
@@ -1325,17 +1327,17 @@
         multiBtn(L.length);
     }
     var summary = '<p class="ls-sub t-secondary">' + sub + '</p>';
-    var bar = compact ? '<div class="ls-cover-toolbar">' + summary + coverBooking(s, M) + '<div class="ls-tools">' + tools + '</div></div>' :
+    var bar = compact ? '<div class="ls-' + compactProfile + '-toolbar">' + summary + compactBooking(s, M, compactProfile) + '<div class="ls-tools">' + tools + '</div></div>' :
       '<div class="ls-summary">' + summary + '</div><div class="ls-tools">' + tools + '</div>';
-    return '<div class="ls-head' + (compact ? ' ls-head--cover' : '') + '">' + bar +
+    return '<div class="ls-head' + (compact ? ' ls-head--' + compactProfile : '') + '">' + bar +
       '<p class="ls-status t-secondary" role="status">' + (status.text ? t(status.text, status.params) : '') + '</p></div>';
   }
 
-  function coverBooking(s, M) {
+  function compactBooking(s, M, profile) {
     if (D.resultScope(s).paused) return '';
     var n = M.filter(function (id) { var r = D.byId(id); return r && r.bookable; }).length;
     var on = !!s.filters.bookableOnly;
-    return '<button class="chip ls-cover-booking' + (on ? ' is-on' : '') + '" data-act="' + (on ? 'bookable-all' : 'bookable-only') +
+    return '<button class="chip ls-' + profile + '-booking' + (on ? ' is-on' : '') + '" data-act="' + (on ? 'bookable-all' : 'bookable-only') +
       '" aria-pressed="' + on + '" aria-label="' + esc(t(on ? '正在只看可网订 · {n} 家' : '其中 {n} 家可网订', {n:u.fmtCount(n)})) + '"' + (!on && !n ? ' disabled' : '') + '>' + (on ? ctx.icon('check', {cls:'ic-sm'}) : '') + '<span>' + t('网订') + ' ' + u.fmtCount(n) + '</span>' + '</button>';
   }
 
@@ -1575,7 +1577,7 @@
         '</div>';
       return;
     }
-    if (s.layout.foldCover || s.sheet.tab !== 'results' || D.resultScope(s).paused || (!M.length && !s.filters.bookableOnly)) { foot.innerHTML = ''; return; }
+    if (s.layout.foldCover || s.layout.foldInner || s.sheet.tab !== 'results' || D.resultScope(s).paused || (!M.length && !s.filters.bookableOnly)) { foot.innerHTML = ''; return; }
     if (s.filters.bookableOnly) {
       foot.innerHTML = '<div class="ls-bookable">' +
         '<span class="t-control">' + t('正在只看可网订 · {n} 家', { n: u.fmtCount(M.length) }) + '</span>' +

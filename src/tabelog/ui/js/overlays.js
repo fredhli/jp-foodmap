@@ -1551,6 +1551,7 @@
   function layoutDiagnosticText(s) {
     var doc = document.documentElement, sc = window.screen || {}, vv = window.visualViewport;
     var info = App.layout.foldCoverInfo(doc.clientWidth || window.innerWidth);
+    var inner = App.layout.foldInnerInfo(doc.clientWidth || window.innerWidth);
     function finite(v) { return typeof v === 'number' && Number.isFinite(v) ? v : null; }
     return JSON.stringify({
       appVersion: (s.buildMeta || {}).appVersion || '',
@@ -1564,6 +1565,9 @@
       touch: { detected: info.touch, maxTouchPoints: info.maxTouchPoints, coarsePointer: info.coarsePointer },
       foldCover: { matched: info.matched, enabled: !!s.layout.foldCover,
         attributeApplied: doc.hasAttribute('data-fold-cover'), reason: t(info.reason) },
+      foldInner: { matched: inner.matched, enabled: !!s.layout.foldInner,
+        attributeApplied: doc.hasAttribute('data-fold-inner'), reason: t(inner.reason),
+        physicalShort: inner.physicalShort, physicalLong: inner.physicalLong },
       uiDensity: { z: finite(s.layout.z), attribute: doc.getAttribute('data-ui-z'),
         screenShortSide: finite(Math.min(sc.width, sc.height)) }
     }, null, 2);

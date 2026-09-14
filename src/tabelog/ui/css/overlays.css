@@ -511,3 +511,10 @@ html[data-fold-cover][data-fs="200"] .ov-cover-nearby > .ic { display: none; }
 .ov-layout-diagnostics { margin-top: var(--sp-3); }
 .ov-layout-diagnostics summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
 .ov-layout-readings { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+
+/* Secondary content popovers follow the Fold-inner reading density. Their
+   close buttons and primary actions keep the shared 44px target. */
+html[data-fold-inner] .ov-menu .menu-row,
+html[data-fold-inner] .ov-rg-row { min-height: 40px; }
+html[data-fold-inner] .ov-layer-row { min-height: 48px; padding-block: 4px; }
+html[data-fold-inner] .ov-acc { gap: 12px; padding-bottom: 16px; }

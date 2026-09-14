@@ -13,6 +13,38 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.5] - 2026-09-14
+
+Galaxy Z Fold 8 cover and inner screens now use device-specific information
+density while iPhones, ordinary tablets and desktops keep their 4.2.4 layout.
+The inner profile follows the physical 2448x1848 panel through rotation and
+split-screen changes using screen geometry, pixel ratio and touch capability;
+it does not use a user-agent string or the shared 95% density flag.
+
+On the cover screen, Results and Saved retain the 0.62-height panel, Detail
+uses 0.66 and Filters uses 0.68. Filter chips form one horizontal strip,
+section and footer spacing are tighter, and the Detail gallery is 104-112px.
+The title, budget summary and reading groups use the same compact rhythm while
+the tabs, close and back controls, map buttons and three fixed Detail actions
+retain their existing touch targets.
+
+On the inner screen, the browsing column uses 42% of the mid-width viewport
+within a 352-420px clamp and Detail uses 44% within a 360-420px clamp. The
+filter summary, active conditions, sections, option rows and fixed result
+action are compact; budgets and awards form two columns only when their
+container and text scale permit it. Cuisine groups start folded unless a
+selection or a manual expansion needs one open. Results combine counts,
+online booking, sort and multi-select into one toolbar and use a 72px column
+row floor with matching virtual-list cache buckets. The Detail gallery is
+176px, or 164px on the shortest landscape size, and its candidate strip uses
+a compact expansion with a remembered 44px collapsed control.
+
+Layout diagnostics report both Fold profiles and their physical geometry.
+Fold-specific Playwright coverage now supplies the real screen and DPR values,
+checks positive and negative profile cases, horizontal overflow, first-screen
+filter density, map widths, touch targets and virtual row calibration. No
+storage key, sync field, Worker API, filter meaning or Android shell changed.
+
 ## [4.2.4] - 2026-09-14
 
 On the Fold's inner screen and on desktops the interface is drawn at 95% of

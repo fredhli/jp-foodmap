@@ -327,3 +327,20 @@ html[data-sheet="collapsed"] .ct-entry { min-height: 44px; }
   height: var(--ct-safe-top); background: var(--surface);
   z-index: var(--z-topbar); pointer-events: none;
 }
+
+/* 4.2.5 Fold profiles: compact chrome without changing its real controls. */
+html[data-fold-cover] #narrow-top { padding-top: 8px; }
+html[data-fold-cover] .ct-tabs { min-height: 48px; }
+
+html[data-fold-inner][data-mode="mid"] #topbar {
+  gap: 8px;
+  padding-inline: 12px;
+}
+html[data-fold-inner][data-mode="mid"] #topbar-brand { flex: none; }
+html[data-fold-inner][data-mode="mid"] #topbar-brand .ct-brand-text { display: none; }
+html[data-fold-inner][data-mode="mid"] .ct-logo { width: 34px; height: 34px; }
+html[data-fold-inner][data-mode="mid"] #topbar-right { gap: 6px; }
+html[data-fold-inner][data-mode="mid"] .ct-col-head { min-height: 48px; }
+html[data-fold-inner][data-mode="mid"] #candidates-host {
+  bottom: calc(var(--vv-occ) + 44px);
+}

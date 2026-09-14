@@ -487,7 +487,7 @@
       lang: 'zh',
       fontScale: 100,
       demo: null,                       // 'offline' | 'update' | null (URL ?demo=)
-      layout: { mode: 'narrow', W: 402, H: 874, U: { x: 0, y: 0, w: 402, h: 874 }, occ: 0, mapRect: { x: 0, y: 0, w: 402, h: 794 }, compact: false, severe: false, z: 1 },
+      layout: { mode: 'narrow', W: 402, H: 874, U: { x: 0, y: 0, w: 402, h: 874 }, occ: 0, mapRect: { x: 0, y: 0, w: 402, h: 794 }, compact: false, severe: false, foldCover: false, foldInner: false, z: 1 },
       sheet: { state: 'collapsed', tab: 'results', dragging: false, height: 80 },
       columns: { leftOpen: true, userLeftPreference: null, autoCollapsed: false, detailOpen: false, detailPaused: false },
       selected: { id: null, origin: null, anchor: null },
@@ -514,7 +514,7 @@
       // mirrored from Business by adapter.js (read-only for modules)
       account: { signedIn: false, email: '', name: '', picture: '', message: '', messageColor: '' },
       sync: { text: '', kind: '', dirty: false, retryVisible: false, storageInfo: '', hintDismissed: true },
-      detail: { scrollTo: null, translation: 'zh', candidatesOpen: true },
+      detail: { scrollTo: null, translation: 'zh', candidatesOpen: true, candidatesTouched: false },
       // Seeded by adapter.js from Business at boot. Declared here so a module
       // that reads them before boot (or in a no-adapter path) gets the empty
       // shape rather than undefined.
@@ -522,7 +522,7 @@
       install: { standalone: false, installed: false, canPrompt: false, ios: false, snackEligible: false },
       buildMeta: { appVersion: '', scrapedAt: '', latestScrape: '' },
       nativeSettings: null,
-      filtersUi: { scrollTo: null, openGroups: new Set(['正餐']), cuisinesOpen: true }
+      filtersUi: { scrollTo: null, openGroups: new Set(['正餐']), openGroupsTouched: false, cuisinesOpen: true }
     };
   };
 
@@ -599,6 +599,7 @@
     document.documentElement.setAttribute('data-mode', state.layout.mode);
     document.documentElement.setAttribute('data-sheet', state.sheet.state);
     document.documentElement.toggleAttribute('data-fold-cover', !!state.layout.foldCover);
+    document.documentElement.toggleAttribute('data-fold-inner', !!state.layout.foldInner);
     document.documentElement.setAttribute('data-list-tab', state.sheet.tab);
     document.documentElement.toggleAttribute('data-search-active', !!state.search.active);
     document.documentElement.toggleAttribute('data-overlay', !!state.overlay.kind);
@@ -742,6 +743,40 @@
   };
   layout.isFoldCover = function (W) { return layout.foldCoverInfo(W).matched; };
 
+  // Fold inner screen: match the physical panel, not the viewport. The viewport
+  // can be the full 932/816 CSS px screen, its portrait rotation, or a 591px
+  // split window while screen and DPR continue to describe the same panel.
+  layout.foldInnerInfo = function (W) {
+    var sc = window.screen || {}, dpr = window.devicePixelRatio;
+    var sw = sc.width, sh = sc.height;
+    var points = navigator.maxTouchPoints || 0;
+    var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    function positive(v) { return typeof v === 'number' && Number.isFinite(v) && v > 0; }
+    function finite(v) { return typeof v === 'number' && Number.isFinite(v) ? v : null; }
+    var reason = '';
+    var pw = positive(sw) && positive(dpr) ? sw * dpr : null;
+    var ph = positive(sh) && positive(dpr) ? sh * dpr : null;
+    var physicalShort = pw === null || ph === null ? null : Math.min(pw, ph);
+    var physicalLong = pw === null || ph === null ? null : Math.max(pw, ph);
+    // One CSS-pixel of screen rounding plus DPR rounding covers both known
+    // full-panel renderings (932x704@2.625 and 816x616@3) and the measured
+    // 60% Android window (592x689@2.625). Android WebView may expose either
+    // the full panel or the app window through screen while in multi-window.
+    var tolerance = positive(dpr) ? dpr + 1 : 0;
+    var fullPanel = physicalShort !== null && physicalLong !== null &&
+      Math.abs(physicalShort - 1848) <= tolerance && Math.abs(physicalLong - 2448) <= tolerance;
+    var splitPanel = physicalShort !== null && physicalLong !== null &&
+      Math.abs(physicalShort - 1552) <= tolerance && Math.abs(physicalLong - 1808) <= tolerance;
+    if (!positive(sw) || !positive(sh) || !positive(dpr) || !positive(W)) reason = '屏幕或缩放读数无效';
+    else if (!(points > 0 || coarse)) reason = '未检测到触屏';
+    else if (!fullPanel && !splitPanel) reason = '物理屏幕尺寸不匹配';
+    return { matched: !reason, reason: reason || '内屏尺寸匹配',
+      screenWidth: finite(sw), screenHeight: finite(sh), layoutWidth: finite(W), dpr: finite(dpr),
+      physicalWidth: finite(pw), physicalHeight: finite(ph), physicalShort: finite(physicalShort), physicalLong: finite(physicalLong),
+      maxTouchPoints: finite(points), coarsePointer: coarse, touch: points > 0 || coarse };
+  };
+  layout.isFoldInner = function (W) { return layout.foldInnerInfo(W).matched; };
+
   // safe-area probe: reads env() once per measure
   var _probe = null;
   function safeArea() {
@@ -817,11 +852,11 @@
     var occ = Math.round(Math.max(0, Hfull - (y + h)));
     var z = readUiZ();
     if (z !== _z || document.documentElement.hasAttribute('data-ui-z') !== (z !== 1)) applyUiZ(z);
-    var cur = App.state.layout, foldCover = layout.isFoldCover(W);
-    var same = !!cur.foldCover === foldCover && cur.z === z && cur.W === W && cur.H === U.h && cur.occ === occ &&
+    var cur = App.state.layout, foldCover = layout.isFoldCover(W), foldInner = layout.isFoldInner(W);
+    var same = !!cur.foldCover === foldCover && !!cur.foldInner === foldInner && cur.z === z && cur.W === W && cur.H === U.h && cur.occ === occ &&
                cur.U && cur.U.x === U.x && cur.U.y === U.y && cur.U.w === U.w && cur.U.h === U.h;
     if (same) return false;
-    App.set({ layout: { W: W, H: U.h, U: U, occ: occ, mode: layout.mode(W), foldCover: foldCover, z: z, compact: U.h <= px(CFG.compactHLte), severe: U.h <= px(CFG.severeHLte) } });
+    App.set({ layout: { W: W, H: U.h, U: U, occ: occ, mode: layout.mode(W), foldCover: foldCover, foldInner: foldInner, z: z, compact: U.h <= px(CFG.compactHLte), severe: U.h <= px(CFG.severeHLte) } });
     App.emit('layout:changed', App.state.layout);
     return true;
   };
@@ -831,8 +866,8 @@
     state = state || App.state;
     var L = state.layout, C = state.columns, W = L.W, mode = L.mode;
     if (mode === 'narrow') return { leftW: 0, detailW: 0, railW: 0, topbarH: 0, detailPaused: false, autoCollapsed: false, leftVisible: false };
-    var cl = mode === 'wide' ? CFG.wideLeft : CFG.midLeft;
-    var cd = mode === 'wide' ? CFG.wideDetail : CFG.midDetail;
+    var cl = mode === 'wide' ? CFG.wideLeft : (L.foldInner ? { min: 352, ratio: .42, max: 420 } : CFG.midLeft);
+    var cd = mode === 'wide' ? CFG.wideDetail : (L.foldInner ? { min: 360, ratio: .44, max: 420 } : CFG.midDetail);
     var fullLeft = util.clamp(Math.round(W * cl.ratio), px(cl.min), px(cl.max));
     var detailW = C.detailOpen ? util.clamp(Math.round(W * cd.ratio), px(cd.min), px(cd.max)) : 0;
     var rail = px(CFG.rail);
@@ -850,7 +885,7 @@
       else { leftW = rail; autoCollapsed = true; }
     }
     return { leftW: leftW, detailW: detailW, railW: rail, fullLeft: fullLeft,
-             topbarH: Math.max(px(mode === 'wide' ? CFG.topbarWide : CFG.topbarMid), _topbarH),
+             topbarH: Math.max(px(mode === 'wide' ? CFG.topbarWide : L.foldInner ? 50 : CFG.topbarMid), _topbarH),
              detailPaused: detailPaused, autoCollapsed: autoCollapsed, leftVisible: leftW > rail };
   };
 
@@ -871,7 +906,16 @@
       case 'full': target = H; break;
       default: target = Math.ceil(px(S.collapsed) - 1e-6);
     }
-    if (state.layout.foldCover && ['browse', 'detail', 'filter'].indexOf(sheetState) >= 0) target = H * .62;
+    if (state.layout.foldCover) {
+      if (sheetState === 'browse') target = H * .62;
+      else if (sheetState === 'detail') target = H * .66;
+      else if (sheetState === 'filter') target = H * .68;
+    } else if (state.layout.foldInner && state.layout.mode === 'narrow' && sheetState === 'filter' && H <= 700) {
+      // The 60% inner split has less vertical room than the portrait screen.
+      // This stop exposes the rating and budget heading without changing any
+      // ordinary phone's panel ratios.
+      target = H * .77;
+    }
     target = Math.round(target);
     var F = 0, C = 0;
     if (_sheetMeasure && sheetState !== 'collapsed') {

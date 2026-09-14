@@ -112,6 +112,17 @@ desktops; never a phone or the Fold cover), and `tokens.css` turns that into
 
 `?uiz=95` / `?uiz=100` force either density for a side-by-side check.
 
+## Fold device profiles (4.2.5)
+
+The shared 95% density flag is not a device selector. `core.js` separately
+publishes `layout.foldCover` / `html[data-fold-cover]` for the recorded cover
+display and `layout.foldInner` / `html[data-fold-inner]` for the physical inner
+panel, including its measured 60% Android window. Both predicates use screen
+geometry, DPR and touch capability rather than a user-agent string. Fold-only
+CSS must stay under one of those attributes, and any render signature or row
+height cache affected by a profile must include it. Ordinary phones, tablets
+and desktops keep the base component values even when they also use `--ui-z`.
+
 ## What the build refuses to ship
 
 `map.py`'s emission is not a copy — it is the last place anything can be

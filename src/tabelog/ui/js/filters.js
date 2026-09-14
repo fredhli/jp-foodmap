@@ -69,6 +69,17 @@
   function effCuisines(f) { return new Set(f.cuisines || []); }
   function budgetsUnrestricted(f) { return !!f.budgets && f.budgets.size === cfg().PRICE_BUCKETS.length; }
   function cuisinesUnrestricted(f) { return !!f.cuisines && f.cuisines.size === cfg().ALL_CUISINES.length; }
+  function effectiveOpenGroups(s) {
+    var open = s.filtersUi.openGroups || new Set();
+    if (!s.layout.foldInner || s.filtersUi.openGroupsTouched) return open;
+    // The first Fold-inner view starts with the large meal groups folded. A
+    // restricted cuisine selection still reveals the group that contains it.
+    var selected = effCuisines(s.filters), out = new Set();
+    if (!cuisinesUnrestricted(s.filters)) cfg().MEAL_GROUPS.forEach(function (g) {
+      if (g.buckets.some(function (b) { return selected.has(b); })) out.add(g.name);
+    });
+    return out;
+  }
   function r2(v) { return Math.round(Number(v) * 100) / 100; }
   function num(n) { return U.fmtCount(n); }
   function esc(s) { return U.esc(s); }
@@ -216,7 +227,7 @@
     h.push('<section class="ft-sec" data-section="budget">' +
       headHtml('budget', '晚餐价格', bulkLinks('budget', '全选', '全清'), helpBtn('budget', '关于价格分档')) +
       '<p class="ft-help t-secondary" id="ft-help-budget" hidden>' + esc(t('按晚餐价位上限归档；没有晚餐价位时用午餐，两者都没有则归入价格未知。')) + '</p>' +
-      '<div class="ft-rows">' + rows + '</div>' +
+      '<div class="ft-rows ft-budget-rows">' + rows + '</div>' +
       '</section>');
 
     /* ---- cuisines (one frame for every parent and child) ---- */
@@ -312,6 +323,14 @@
   }
   function setText(node, s) { if (node && node.textContent !== s) node.textContent = s; }
 
+  function syncChipEdges(host) {
+    if (!host) return;
+    var overflow = host.scrollWidth > host.clientWidth + 1;
+    host.toggleAttribute('data-scroll', overflow);
+    host.toggleAttribute('data-start', !overflow || host.scrollLeft <= 1);
+    host.toggleAttribute('data-end', !overflow || host.scrollLeft + host.clientWidth >= host.scrollWidth - 1);
+  }
+
   function currentMV(mIds) {
     if (window.MapMod && typeof window.MapMod.MV === 'function' && window.MapMod.map) {
       try { return window.MapMod.MV(mIds).length; } catch (e) { /* map not ready */ }
@@ -327,22 +346,37 @@
     var radius = scope.radiusM < 1000 ? scope.radiusM + ' m' : scope.radiusM / 1000 + ' km';
 
     /* summary line + chips */
+    var compactProfile = !!(s.layout.foldCover || s.layout.foldInner);
     var sum = root.querySelector('#ft-summary');
     if (sum) {
-      sum.innerHTML = scope.paused ? esc(t('附近模式已暂停，请重新定位')) : t('筛选后 {m} 家餐厅符合标准 · 其中屏幕内 {mv} 家 / {total}', {
-        m: '<b class="num">' + num(M) + '</b>', mv: '<span class="num">' + num(MV) + '</span>', total: '<span class="num">' + num(TOTAL) + '</span>'
+      var fullSummary = scope.paused ? t('附近模式已暂停，请重新定位') : t('筛选后 {m} 家餐厅符合标准 · 其中屏幕内 {mv} 家 / {total}', {
+        m: num(M), mv: num(MV), total: num(TOTAL)
       });
+      sum.setAttribute('aria-label', fullSummary);
+      sum.innerHTML = scope.paused ? esc(fullSummary) : compactProfile
+        ? '<b class="num">' + esc(t('结果 {n}', { n: num(M) })) + '</b><span class="num">' + esc(t('图内 {n}', { n: num(MV) })) + '</span>'
+        : t('筛选后 {m} 家餐厅符合标准 · 其中屏幕内 {mv} 家 / {total}', {
+          m: '<b class="num">' + num(M) + '</b>', mv: '<span class="num">' + num(MV) + '</span>', total: '<span class="num">' + num(TOTAL) + '</span>'
+        });
     }
     var chipHost = root.querySelector('#ft-chips');
     if (chipHost) {
       var groups = D.summaryGroups(f, c);
       chipHost.innerHTML = groups.map(function (g, i) {
-        var label = t(g.label, g.params);
-        return '<span class="chip is-on ft-chip"><span class="ft-chip-t">' + esc(label) + '</span>' +
+        var label = t(g.label, g.params), visual = label;
+        if (compactProfile && g.key === 'region') visual = (g.params && g.params.name) || label;
+        else if (compactProfile && g.key === 'rating') visual = '≥ ' + (g.params && g.params.n || s.filters.ratingMin.toFixed(2));
+        else if (compactProfile && g.key === 'hideForeign') visual = t('隐藏非日本料理');
+        return '<span class="chip is-on ft-chip"><span class="ft-chip-t">' + esc(visual) + '</span>' +
           '<button type="button" class="chip-x" data-chip="' + i + '" aria-label="' + esc(t('移除筛选：{name}', { name: label })) + '">' + ctx.icon('x', { cls: 'ic-sm' }) + '</button></span>';
       }).join('');
       chipHost.hidden = groups.length === 0;
       F._chipGroups = groups;
+      if (compactProfile) U.raf(function () {
+        if (!chipHost.isConnected) return;
+        chipHost.onscroll = function () { syncChipEdges(chipHost); };
+        syncChipEdges(chipHost);
+      });
     }
 
     /* region */
@@ -402,7 +436,7 @@
       setText(root.querySelector('[data-count="group:' + cssq(g.name) + '"]'), num(c.groups[g.name] || 0));
       var box = root.querySelector('.ft-grp[data-group="' + cssq(g.name) + '"]');
       if (box) {
-        var open = !!(s.filtersUi.openGroups && s.filtersUi.openGroups.has(g.name));
+        var open = effectiveOpenGroups(s).has(g.name);
         box.setAttribute('data-open', open ? 'true' : 'false');
         box.classList.toggle('is-on', restricted && on > 0);
         var arrow = box.querySelector('[data-grp-toggle]');
@@ -578,8 +612,8 @@
     /* the arrow only opens / closes — it never changes the selection (§8.2) */
     u.delegate(root, 'click', '[data-grp-toggle]', function (e, b) {
       e.preventDefault(); e.stopPropagation();
-      var name = b.dataset.grpToggle, open = App.state.filtersUi.openGroups || new Set();
-      App.set({ filtersUi: { openGroups: U.setToggle(open, name) } });
+      var name = b.dataset.grpToggle, open = effectiveOpenGroups(App.state);
+      App.set({ filtersUi: { openGroups: U.setToggle(open, name), openGroupsTouched: true } });
     });
     u.delegate(root, 'click', '[data-cuisines-toggle]', function () {
       App.set({ filtersUi: { cuisinesOpen: !App.state.filtersUi.cuisinesOpen } });

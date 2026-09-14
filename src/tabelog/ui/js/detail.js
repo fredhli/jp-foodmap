@@ -605,6 +605,11 @@
 
   /* ----------------------------------------------------- candidate strip */
 
+  function candidatesOpen(s) {
+    if (s.detail.candidatesTouched) return !!s.detail.candidatesOpen;
+    return !(s.layout.foldInner && s.layout.H <= 640);
+  }
+
   function candidateHtml(s) {
     var ids = Dm.candidates(s), D = ctx.Data;
     if (!ids.length) return '';
@@ -811,7 +816,7 @@
 
   function paintBody(s, r) {
     var entry = ensureDetail(r.id, s.lang);
-    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.layout.z, s.detail.translation,
+    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.layout.z, s.layout.foldInner ? 1 : 0, s.detail.translation,
       s.user.black.has(r.id) ? 1 : 0, matches(s, r) ? 1 : 0, s.overlay.kind === 'more' ? 1 : 0,
       entry.st, jaMap ? 1 : 0, jaErr ? 1 : 0, s.user.fav.has(r.id) ? 1 : 0,
       (s.user.bookmarks || []).length,
@@ -839,7 +844,7 @@
   function paintFoot(s) {
     var r = ctx.Data.byId(s.selected.id);
     if (!r) { foot.innerHTML = ''; footSig = null; return; }
-    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.layout.z, s.user.fav.has(r.id) ? 1 : 0,
+    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.layout.z, s.layout.foldInner ? 1 : 0, s.user.fav.has(r.id) ? 1 : 0,
       stacked ? 1 : 0, shareInline ? 1 : 0, s.overlay.kind === 'more' ? 1 : 0].join('|');
     if (sig === footSig) return;
     footSig = sig;
@@ -875,8 +880,8 @@
   function paintCandidates(s) {
     var host = s.layout.mode === 'mid' && s.selected.id;
     if (!host) { if (candSig !== '') { cand.innerHTML = ''; candSig = ''; } return; }
-    if (!s.detail.candidatesOpen) {
-      var csig = 'collapsed|' + s.lang + '|' + s.fontScale + '|' + s.layout.z + '|' + Dm.candidates(s).length;
+    if (!candidatesOpen(s)) {
+      var csig = 'collapsed|' + s.lang + '|' + s.fontScale + '|' + s.layout.z + '|' + !!s.layout.foldInner + '|' + s.layout.H + '|' + Dm.candidates(s).length;
       if (candSig === csig) return;
       candSig = csig;
       cand.innerHTML = '<div class="dt-cand dt-cand--collapsed"><button class="dt-cand-reopen" type="button" data-act="cand-open">' +
@@ -886,7 +891,7 @@
       return;
     }
     var ids = Dm.candidates(s);
-    var sig = [s.lang, s.fontScale, s.layout.z, s.selected.id, ids.length, ids.slice(0, 60).join(',')].join('|');
+    var sig = [s.lang, s.fontScale, s.layout.z, s.layout.foldInner ? 1 : 0, s.selected.id, ids.length, ids.slice(0, 60).join(',')].join('|');
     if (sig === candSig) return;
     candSig = sig;
     cand.innerHTML = candidateHtml(s);
@@ -920,8 +925,8 @@
         case 'prev': step(-1); break;
         case 'next': step(1); break;
         case 'cand-all': ctx.act.setTab('results'); ctx.App.set({ columns: { userLeftPreference: 'open' } }); break;
-        case 'cand-close': ctx.App.set({ detail: { candidatesOpen: false } }); break;
-        case 'cand-open': ctx.App.set({ detail: { candidatesOpen: true } }); break;
+        case 'cand-close': ctx.App.set({ detail: { candidatesOpen: false, candidatesTouched: true } }); break;
+        case 'cand-open': ctx.App.set({ detail: { candidatesOpen: true, candidatesTouched: true } }); break;
         case 'cand-prev': scrollCand(-1); break;
         case 'cand-next': scrollCand(1); break;
       }

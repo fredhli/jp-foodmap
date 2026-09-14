@@ -701,7 +701,7 @@
       var h = c.scrollHeight || c.getBoundingClientRect().height;
       if (h > need) need = h;
     });
-    ctx.layout.setTopbarH(need > 0 ? need + px(12) : 0);
+    ctx.layout.setTopbarH(need > 0 ? need + px(App.state.layout.foldInner ? 8 : 12) : 0);
   }
 
   function fitTabs(scope) {

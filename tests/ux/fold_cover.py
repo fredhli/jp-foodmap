@@ -51,8 +51,9 @@ probe = """() => {
   search:q('.ov-capsule,.ov-topfield'),region:q('#search-root [data-kind="regionPicker"]'),
   nearby:q('#search-root [data-ov="nearby"]'),avatar:q('#search-root .ov-avatar'),
   row:q('.ls-row .ls-open'),booking:q('.ls-cover-booking'),foot:q('#list-foot'),
-  overflow:document.documentElement.scrollWidth>innerWidth,metrics:ListMod.metrics(),
-  identity:App.layout.foldCoverInfo ? App.layout.foldCoverInfo(App.state.layout.W) : null};
+ overflow:document.documentElement.scrollWidth>innerWidth,metrics:ListMod.metrics(),
+  identity:App.layout.foldCoverInfo ? App.layout.foldCoverInfo(App.state.layout.W) : null,
+  innerProfile:!!App.state.layout.foldInner};
 }"""
 
 def check(ok, message):
@@ -99,12 +100,16 @@ with lib_browser.serve_docs(8992) as base, sync_playwright() as p:
         page.wait_for_timeout(650)
         result = page.evaluate(probe)
         check(result['profile'] == expected, name + ': profile identity')
+        expected_inner = name in ('split591', 'split688', 'inner704', 'inner932')
+        check(result['innerProfile'] == expected_inner, name + ': inner profile identity')
+        check(not (result['profile'] and result['innerProfile']), name + ': profiles are exclusive')
         check(not result['overflow'], name + ': page overflow')
         z = lib_browser.ui_z(page)   # 4.2.4: the cover and phones are 1, a split Fold inner screen or a desktop .95
         check(z == (0.95 if min(sw, sh) >= 560 else 1), name + ': ui density follows the screen')
         dpx = lambda value, design: abs(float(value[:-2]) - design * z) < 0.05
         if result['row']:
-            check(dpx(result['row']['min'], 84 if expected else 96 if w<750 else 76),name+': row min')
+            row_design = 84 if expected else 72 if expected_inner and w >= 750 else 96 if w < 750 else 76
+            check(dpx(result['row']['min'], row_design),name+': row min')
             if w<750: check(dpx(result['row']['pad'], 6 if expected else 12), name+': row padding')
         if expected and result['profile']:
             buttons = [result[k] for k in ['search','region','nearby','avatar']]
@@ -162,10 +167,11 @@ with lib_browser.serve_docs(8992) as base, sync_playwright() as p:
             diagnostic.locator('summary').press('Space')
             check(diagnostic.evaluate('(e)=>e.open'),name+': diagnostic keyboard opens')
             reading = json.loads(diagnostic.locator('pre').text_content())
-            check(set(reading)=={'appVersion','screen','availableScreen','layoutViewport','innerViewport','visualViewport','devicePixelRatio','physicalScreen','touch','foldCover','uiDensity'},name+': diagnostic whitelist')
+            check(set(reading)=={'appVersion','screen','availableScreen','layoutViewport','innerViewport','visualViewport','devicePixelRatio','physicalScreen','touch','foldCover','foldInner','uiDensity'},name+': diagnostic whitelist')
             check(reading['uiDensity']['z']==(0.95 if min(sw,sh)>=560 else 1) and reading['uiDensity']['screenShortSide']==min(sw,sh),name+': diagnostic density')
             check(reading['devicePixelRatio']==dpr and reading['screen']=={'width':sw,'height':sh},name+': diagnostic dimensions')
             check(reading['foldCover']['matched']==expected and reading['foldCover']['enabled']==expected and reading['foldCover']['attributeApplied']==expected and bool(reading['foldCover']['reason']),name+': diagnostic match/applied/reason')
+            check(reading['foldInner']['matched']==expected_inner and reading['foldInner']['enabled']==expected_inner and reading['foldInner']['attributeApplied']==expected_inner and bool(reading['foldInner']['reason']),name+': diagnostic inner match/applied/reason')
             check(reading['appVersion']==page.evaluate('App.state.buildMeta.appVersion'),name+': diagnostic version')
             diagnostic.locator('[data-ov="copy-layout-diagnostics"]').click()
             copied = page.evaluate('window.copiedDiagnostic')

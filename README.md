@@ -9,7 +9,7 @@ Per-user Saved restaurants, the Hidden list, pins and lists sync through a
 small Cloudflare Worker (`worker/`) behind Google Sign-In. Visitors who skip
 sign-in keep their state purely in `localStorage`.
 
-**Version: 4.2.2.** See [CHANGELOG.md](CHANGELOG.md) for what changed, and
+**Version: 4.2.5.** See [CHANGELOG.md](CHANGELOG.md) for what changed, and
 [CLAUDE.md](CLAUDE.md) for the architecture notes, the storage-key contract
 and the backwards-compatibility red lines.
 
@@ -33,7 +33,8 @@ The panel tabs are **Results**, **Filters**, and **Saved**. **Nearby mode**
 temporarily replaces the area filter with a distance range; switching it off
 restores the previous filters, sorting and map view. Saved remains complete
 in either mode. Fold cover screens also use a more compact results toolbar
-and a higher default panel shared by results, filters, Saved and details.
+and task-specific panel heights for results, filters, Saved and details. Fold
+inner screens use wider task columns and denser filters, results and details.
 
 ## Android APP
 
@@ -41,7 +42,7 @@ and a higher default panel shared by results, filters, Saved and details.
 sideloaded APK (`android/apk/jpfoodmap.apk`, carried to the phone by
 Dropbox — the APK is gitignored, the `BUILD-INFO.txt` stamp beside it is
 not). The shell is **3.2.3**, `versionCode 30203`, and loads the current site;
-`minSdk 31`, `targetSdk 36`, built for one device (Galaxy Z Fold 8). The 4.2.2
+`minSdk 31`, `targetSdk 36`, built for one device (Galaxy Z Fold 8). The 4.2.5
 website update requires no new APK because it changes no native setting.
 
 What the shell adds over the PWA: the page survives a fold/unfold without
@@ -125,7 +126,7 @@ flock /tmp/tabelog-build.lock uv run python src/tabelog/scrape/map.py
 uv run python scripts/verify_build.py   # 11 build-output contracts
 uv run python tests/pipeline/run.py     # scrape → CSV → geocode → publish
 uv run python tests/compat/run.py       # pre-2.0 localStorage still loads
-uv run python tests/smoke_playwright.py # the built page on 5 viewports
+uv run python tests/smoke_playwright.py # the built page on 12 viewports
 node tests/worker/run.mjs               # the Worker against an in-memory KV
 uv run python tests/sync/run_all.py     # sync state machine vs a fake Worker
 ```
@@ -145,7 +146,7 @@ uv run python tests/sync/run_all.py     # sync state machine vs a fake Worker
 - **`tests/compat/run.py`** replays snapshots of pre-2.0 `localStorage` from
   `tests/compat/fixtures/*.json` against the current build. This is the
   executable form of the cardinal rule below.
-- **`tests/smoke_playwright.py`** boots the built page on eleven viewports,
+- **`tests/smoke_playwright.py`** boots the built page on twelve viewports,
   including the measured Fold windows at 475×751, 932×704 and 591×689,
   iPhone widths 375/393/430, desktop widths 1000/1440 and the older Fold
   samples. It fails on console errors outside the offline allowlist.

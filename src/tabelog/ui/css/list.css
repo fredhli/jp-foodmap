@@ -242,7 +242,7 @@ html[data-fold-cover][data-list-tab="results"] #list-root {
   --list-min-h-narrow: 84px; --c-list-row-pad: 6px;
   --c-list-text-gap: 2px; --c-list-before-awards: 4px;
 }
-html[data-fold-cover] .ls-head--cover { padding-block: 6px; gap: 0; }
+html[data-fold-cover] .ls-head--cover { padding-block: 4px; gap: 0; }
 html[data-fold-cover] .ls-cover-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; }
 html[data-fold-cover] .ls-cover-toolbar .ls-sub { flex: 1 1 80px; min-width: min-content; line-height: 1.25; display: flex; flex-wrap: wrap; column-gap: 8px; }
 html[data-fold-cover] .ls-cover-toolbar .ls-sub > span { white-space: nowrap; }
@@ -255,3 +255,35 @@ html[data-fold-cover] .ls-cover-booking > span { overflow-wrap: anywhere; }
 html[data-fold-cover][data-fs="200"] .ls-cover-toolbar { flex-wrap: wrap; }
 html[data-fold-cover][data-fs="200"] .ls-cover-toolbar .ls-sub { flex-basis: 100%; }
 html[data-fold-cover] #sheet-foot:has(> #list-foot:empty) { border-top: 0; }
+html[data-fold-cover] .ls-card { margin: 8px 12px; padding: 12px; gap: 4px; }
+
+/* Fold inner: one result toolbar and a 72px directory rhythm. Saved keeps its
+   grouping header and never receives the result-only online-booking control. */
+html[data-fold-inner][data-list-tab="results"] #list-root {
+  --list-min-h-column: 72px; --c-list-text-gap: 2px; --c-list-before-awards: 4px;
+}
+html[data-fold-inner][data-list-tab="results"] .ls-row-c .ls-open { padding-block: 6px; }
+html[data-fold-inner] .ls-head--inner { padding-block: 4px; gap: 0; }
+html[data-fold-inner] .ls-inner-toolbar {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-height: 44px;
+}
+html[data-fold-inner] .ls-inner-toolbar .ls-sub {
+  flex: 1 1 76px; min-width: 64px; line-height: 1.25;
+  display: flex; flex-wrap: wrap; column-gap: 8px;
+}
+html[data-fold-inner] .ls-inner-toolbar .ls-sub > span { white-space: nowrap; }
+html[data-fold-inner] .ls-inner-toolbar .ls-tools { flex: none; gap: 4px; flex-wrap: nowrap; }
+html[data-fold-inner] .ls-inner-toolbar .ls-sort,
+html[data-fold-inner] .ls-inner-toolbar .ls-multi {
+  width: 44px; min-width: 44px; min-height: 44px; padding: 0; flex: none; justify-content: center;
+}
+html[data-fold-inner] .ls-inner-toolbar .ls-multi > span { display: none; }
+html[data-fold-inner] .ls-inner-booking {
+  flex: 0 1 auto; min-width: 44px; min-height: 44px; max-width: 32%;
+  padding: 4px 8px; gap: 4px; white-space: normal; justify-content: center;
+}
+html[data-fold-inner] .ls-inner-booking > span { overflow-wrap: anywhere; }
+html[data-fold-inner][data-fs="130"] .ls-inner-toolbar,
+html[data-fold-inner][data-fs="200"] .ls-inner-toolbar { flex-wrap: wrap; }
+html[data-fold-inner][data-fs="130"] .ls-inner-toolbar .ls-sub,
+html[data-fold-inner][data-fs="200"] .ls-inner-toolbar .ls-sub { flex-basis: 100%; }

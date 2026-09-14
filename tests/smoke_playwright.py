@@ -72,17 +72,17 @@ from lib_browser import (  # noqa: E402
 # that is the engine those devices actually ship; a Chromium pass on 402x874
 # proves nothing about iOS Safari. The Fold and desktop rows are Chromium.
 VIEWPORTS = {
-    "fold-outer": {"width": 416, "height": 657, "mobile": True, "browser": "chromium", "dpr": 3},
-    "fold-inner": {"width": 616, "height": 816, "mobile": True, "browser": "chromium"},
+    "fold-outer": {"width": 416, "height": 657, "screen": {"width": 416, "height": 657}, "mobile": True, "browser": "chromium", "dpr": 3},
+    "fold-inner": {"width": 616, "height": 816, "screen": {"width": 616, "height": 816}, "mobile": True, "browser": "chromium", "dpr": 3},
     # A-2: the Fold's inner screen in a 60%-width split window. Was 'split';
     # is phone from 2.3.0 on. Kept as its own row because it is the narrowest
     # window the multi-window shell can hand the page and still be usable.
-    "fold-inner-60": {"width": 591, "height": 689, "mobile": True, "browser": "chromium"},
-    "fold-actual-outer": {"width": 475, "height": 751, "mobile": True, "browser": "chromium", "dpr": 2.625},
+    "fold-inner-60": {"width": 591, "height": 689, "screen": {"width": 932, "height": 704}, "mobile": True, "browser": "chromium", "dpr": 2.625},
+    "fold-actual-outer": {"width": 475, "height": 751, "screen": {"width": 475, "height": 751}, "mobile": True, "browser": "chromium", "dpr": 2.625},
     # M-027: the mid layout (top bar + left column + icon rail) exists between
     # 750 and 1279px, and the Fold's inner screen in landscape lives there.
-    "fold-inner-landscape": {"width": 816, "height": 616, "mobile": True, "browser": "chromium"},
-    "fold-actual-inner": {"width": 932, "height": 704, "mobile": True, "browser": "chromium", "dpr": 2.625},
+    "fold-inner-landscape": {"width": 816, "height": 616, "screen": {"width": 816, "height": 616}, "mobile": True, "browser": "chromium", "dpr": 3},
+    "fold-actual-inner": {"width": 932, "height": 704, "screen": {"width": 932, "height": 704}, "mobile": True, "browser": "chromium", "dpr": 2.625},
     "iphone-small": {"width": 375, "height": 667, "mobile": True, "browser": "webkit"},
     "iphone": {"width": 393, "height": 852, "mobile": True, "browser": "webkit"},
     "iphone-large": {"width": 430, "height": 932, "mobile": True, "browser": "webkit"},
@@ -873,7 +873,7 @@ def check_workbench(page, name):
       const close = title && title.querySelector('[data-ct="close-detail"]');
       const tr = title && title.getBoundingClientRect(), cr = close && close.getBoundingClientRect();
       const nr = name && name.getBoundingClientRect();
-      return {mode: App.state.layout.mode,
+      return {mode: App.state.layout.mode, foldInner:!!App.state.layout.foldInner,
               titlePad: nr ? nr.left - d.getBoundingClientRect().left : -1,
               titleTop: nr ? nr.top - d.getBoundingClientRect().top : -1,
               closeHit: cr ? [cr.width, cr.height] : null,
@@ -890,7 +890,7 @@ def check_workbench(page, name):
     # 16px side padding and 8px top padding, alongside the 44px controls.
     z = ui_z(page)
     if opened["mode"] == "mid":
-        if (opened["titlePad"] < 16 * z - 0.25 or opened["titleTop"] < 8 * z - 0.25
+        if (opened["titlePad"] < 16 * z - 0.25 or opened["titleTop"] < (6 if opened["foldInner"] else 8) * z - 0.25
                 or not opened["closeInTitle"] or not opened["closeHit"]
                 or min(opened["closeHit"]) < 44 * z - 0.25):
             raise AssertionError(f"compact title lost spacing or close target: {opened}")
@@ -1160,6 +1160,7 @@ def main(argv: list[str] | None = None) -> int:
             errors: list[str] = []
             ctx = browser.new_context(
                 viewport={"width": vp["width"], "height": vp["height"]},
+                screen=vp.get("screen", {"width": vp["width"], "height": vp["height"]}),
                 is_mobile=vp["mobile"],
                 has_touch=vp["mobile"],
                 device_scale_factor=vp.get("dpr", 2 if vp["mobile"] else 1),

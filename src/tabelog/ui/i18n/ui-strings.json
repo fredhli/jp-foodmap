@@ -1700,6 +1700,10 @@
     "en": "Cover screen dimensions match",
     "ja": "カバー画面サイズが一致しました"
   },
+  "内屏尺寸匹配": {
+    "en": "Inner screen dimensions match",
+    "ja": "メイン画面サイズが一致しました"
+  },
   "附近模式": {
     "en": "Nearby mode",
     "ja": "周辺モード"

@@ -220,3 +220,89 @@ html[data-mode="wide"] #filters-foot .ft-foot { padding-left: var(--pad-panel-wi
 /* a restricted cuisine child reads as selected, like the budget rows do */
 .ft-cui.is-on { background: var(--accent-soft); }
 .ft-cui.is-on .opt-label { font-weight: 600; }
+
+/* 4.2.5 Fold cover: one compact reading rhythm inside the taller filter stop. */
+html[data-fold-cover] .ft-form { padding: 6px 12px 0; }
+html[data-fold-cover] .ft-sec + .ft-sec,
+html[data-fold-cover] .ft-sec + .ft-reset { margin-top: 8px; }
+html[data-fold-cover] .ft-head { margin-bottom: 4px; }
+html[data-fold-cover] .ft-sec-top { padding-bottom: 6px; }
+html[data-fold-cover] .ft-summary { font-size: var(--t-control-size); line-height: var(--t-control-line); display: flex; gap: 10px; white-space: nowrap; }
+html[data-fold-cover] .ft-chips {
+  flex-wrap: nowrap; align-items: center; gap: 4px; min-height: 44px;
+  margin-top: 4px; overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-x: contain; scrollbar-width: none;
+}
+html[data-fold-cover] .ft-chips::-webkit-scrollbar { display: none; }
+html[data-fold-cover] .ft-chips::after,
+html[data-fold-inner] .ft-chips::after { content: ""; flex: 0 0 12px; }
+html[data-fold-cover] .ft-chips[data-scroll]:not([data-end]),
+html[data-fold-inner] .ft-chips[data-scroll]:not([data-end]) {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+html[data-fold-cover] .ft-chips[data-scroll]:not([data-start]):not([data-end]),
+html[data-fold-inner] .ft-chips[data-scroll]:not([data-start]):not([data-end]) {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 20px), transparent);
+}
+html[data-fold-cover] .ft-chips[data-scroll][data-end]:not([data-start]),
+html[data-fold-inner] .ft-chips[data-scroll][data-end]:not([data-start]) {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 20px);
+  mask-image: linear-gradient(to right, transparent, #000 20px);
+}
+html[data-fold-cover] .ft-chip { flex: 0 0 auto; max-width: min(260px, calc(100% - 24px)); min-height: 44px; }
+html[data-fold-cover] .ft-chip .chip-x { width: 44px; height: 44px; margin-block: -4px; margin-right: -4px; }
+html[data-fold-cover] .ft-chip .chip-x::after { display: none; }
+html[data-fold-cover] [data-section="region"] .ft-head { display: none; }
+html[data-fold-cover] .ft-rows { gap: 2px; }
+html[data-fold-cover] .ft-switches { gap: 0; }
+html[data-fold-cover] .ft-quick { gap: 4px; margin-top: 4px; }
+html[data-fold-cover] .ft-scale { display: none; }
+html[data-fold-cover] #filters-foot .ft-foot { padding: 4px 12px calc(4px + var(--safe-bottom)); }
+html[data-fold-cover] #sheet-foot:has(> #filters-foot) { padding-bottom: 0; }
+
+/* 4.2.5 Fold inner: structural density, scoped to the physical inner panel. */
+html[data-fold-inner] #filters-root { container-type: inline-size; }
+html[data-fold-inner] .ft-form { padding: 8px 12px 0; }
+html[data-fold-inner] .ft-sec + .ft-sec,
+html[data-fold-inner] .ft-sec + .ft-reset { margin-top: 14px; }
+html[data-fold-inner] .ft-head { margin-bottom: 8px; }
+html[data-fold-inner] .ft-sec-top { padding-bottom: 8px; }
+html[data-fold-inner] .ft-summary { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; line-height: 20px; }
+html[data-fold-inner] .ft-chips {
+  flex-wrap: nowrap; align-items: center; gap: 4px; min-height: 44px;
+  margin-top: 4px; overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-x: contain; scrollbar-width: none;
+}
+html[data-fold-inner] .ft-chips::-webkit-scrollbar { display: none; }
+html[data-fold-inner] .ft-chip { flex: 0 0 auto; max-width: min(260px, calc(100% - 24px)); min-height: 44px; }
+html[data-fold-inner] .ft-chip .chip-x { width: 44px; height: 44px; margin-block: -4px; margin-right: -4px; }
+html[data-fold-inner] .ft-chip .chip-x::after,
+html[data-fold-inner] .ft-help-btn::after { display: none; }
+html[data-fold-inner] .ft-help-btn { width: 40px; height: 40px; margin-block: -6px; }
+html[data-fold-inner] .ft-rows { gap: 4px; }
+html[data-fold-inner] .ft-switches { gap: 0; }
+html[data-fold-inner] .ft-budget,
+html[data-fold-inner] .ft-cui,
+html[data-fold-inner] .ft-award,
+html[data-fold-inner] .ft-grp-row,
+html[data-fold-inner] .ft-all-row,
+html[data-fold-inner] .ft-sw-row,
+html[data-fold-inner] .ft-region { min-height: 40px; }
+html[data-fold-inner] .ft-slider-wrap { height: 40px; position: relative; }
+html[data-fold-inner] .ft-slider-wrap .slider { height: 40px; }
+html[data-fold-inner] .ft-scale {
+  position: absolute; left: 0; right: 0; bottom: 0; margin: 0;
+  font-size: 11px; line-height: 12px; pointer-events: none;
+}
+html[data-fold-inner] .ft-quick { gap: 4px; margin-top: 6px; }
+html[data-fold-inner] #filters-foot .ft-foot { padding: 3px 12px calc(3px + var(--safe-bottom)); }
+html[data-fold-inner] #sheet-foot:has(> #filters-foot) { padding-bottom: 0; }
+
+@container (min-width: 360px) {
+  html[data-fold-inner]:not([data-fs="130"]):not([data-fs="200"]) .ft-budget-rows,
+  html[data-fold-inner]:not([data-fs="130"]):not([data-fs="200"]) .ft-awards {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px;
+  }
+}
