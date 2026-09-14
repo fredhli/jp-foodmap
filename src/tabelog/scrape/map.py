@@ -2420,7 +2420,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.2.3"
+APP_VERSION = "4.2.4"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -8317,6 +8317,57 @@ def read_ui(rel: str) -> str:
             f"ends the tag. Split the literal (e.g. '<\\/script>')."
         )
     return text
+
+
+# 4.2.4 UI density. The Fold inner screen and desktops draw the interface at
+# 95% — what Chrome's 95% page zoom showed — while phones and the Fold cover
+# stay at 100%. The switch is html[data-ui-z="95"] → --ui-z: .95 (tokens.css);
+# the sources keep writing plain px and densify_css() makes every one of them
+# follow the variable at build time. Left alone: 0px and +-1px (hairlines,
+# which 95% page zoom still drew as one device pixel), comments, and @media
+# preludes, which cannot read a variable — the layout-mode breakpoints stay
+# where DESIGN.md puts them.
+_CSS_PX_RE = re.compile(r"(?<![\w.#-])(-?)(\d*\.?\d+)px\b")
+_CSS_SKIP_RE = re.compile(r"/\*.*?\*/|@media[^{]*\{", re.S)
+
+
+def densify_css(css: str) -> str:
+    def scale(m: re.Match) -> str:
+        if float(m.group(2)) <= 1:
+            return m.group(0)
+        return f"calc({m.group(1)}{m.group(2)}px * var(--ui-z, 1))"
+
+    out: list[str] = []
+    pos = 0
+    for skip in _CSS_SKIP_RE.finditer(css):
+        out.append(_CSS_PX_RE.sub(scale, css[pos:skip.start()]))
+        out.append(skip.group(0))
+        pos = skip.end()
+    out.append(_CSS_PX_RE.sub(scale, css[pos:]))
+    return "".join(out)
+
+
+# Runs in <head> before the first stylesheet so the first paint is already at
+# the right density. core.js layout.measure() calls window.__jpfmUiZ() again on
+# every resize: unfolding a Fold changes the screen, not just the window. The
+# screen's short side decides, never the window, so a keyboard, a split window
+# or a rotation cannot flip it. ?uiz=95 / ?uiz=100 force either value.
+UI_DENSITY_HEAD = """<script>
+(function () {
+  function uiZ() {
+    try {
+      var q = /[?&]uiz=(95|100)(?:&|$)/.exec(location.search);
+      if (q) return q[1] === '95' ? 0.95 : 1;
+      var sc = window.screen || {}, a = sc.width, b = sc.height;
+      if (!(a > 0 && b > 0)) return 1;
+      return Math.min(a, b) >= 560 ? 0.95 : 1;
+    } catch (e) { return 1; }
+  }
+  window.__jpfmUiZ = uiZ;
+  if (uiZ() !== 1) document.documentElement.setAttribute('data-ui-z', '95');
+})();
+</script>
+"""
 
 
 def ui_js_syntax_report(bundles: dict[str, str]) -> list[str]:
@@ -22971,8 +23022,9 @@ def main(argv: list[str] | None = None) -> None:
     ui_head_css = ""
     ui_body = ""
     if UI_40:
-        ui_head_css = "".join(
-            f"<style>\n{read_ui(f'css/{name}.css')}\n</style>\n" for name in UI_CSS_ORDER
+        ui_head_css = UI_DENSITY_HEAD + "".join(
+            f"<style>\n{densify_css(read_ui(f'css/{name}.css'))}\n</style>\n"
+            for name in UI_CSS_ORDER
         )
         latest = latest_scrape_date(all_rows) or "暂无逐条记录"
         shell = (

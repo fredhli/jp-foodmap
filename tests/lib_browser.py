@@ -184,6 +184,15 @@ def reload_and_wait(page, timeout_ms: int = 60000) -> None:
     wait_ready(page, timeout_ms)
 
 
+def ui_z(page) -> float:
+    """4.2.4 UI density: 0.95 on a screen whose short side is >= 560 CSS px
+    (Fold inner, desktops), else 1. A designed length the page used to draw
+    at N px is N * ui_z(page) now, so a minimum-size assertion scales by it.
+    A pre-4.2.4 page has no App.layout.z and reads as 1."""
+    return float(page.evaluate(
+        "() => (window.App && App.layout && typeof App.layout.z === 'function') ? App.layout.z() : 1"))
+
+
 def total_count(page) -> int:
     """Rows in the corpus. 3.2.x read the `.ff-total` counter in the filter FAB;
     4.0 has no such element, and the number that counter displayed is

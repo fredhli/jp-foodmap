@@ -9,14 +9,14 @@
 /* ---- reset --------------------------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; }
 html {
-  font-size: 100%;               /* App.i18n.setFontScale → 100% / 115% / 130% */
+  font-size: calc(100% * var(--ui-z, 1));   /* App.i18n.setFontScale → 100% / 115% / 130%, times the UI density */
   -webkit-text-size-adjust: 100%;
   color-scheme: light only;      /* VIS-02: light only, no dark theme */
   height: 100%;
   overflow: hidden;              /* the app owns scrolling; body never scrolls */
 }
-html[data-fs="115"] { font-size: 115%; }
-html[data-fs="130"] { font-size: 130%; }
+html[data-fs="115"] { font-size: calc(115% * var(--ui-z, 1)); }
+html[data-fs="130"] { font-size: calc(130% * var(--ui-z, 1)); }
 body {
   margin: 0;
   height: 100%;

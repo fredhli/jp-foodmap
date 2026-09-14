@@ -68,7 +68,9 @@
   var curScroller = null, offScroll = null;
   var winStart = -1, winEnd = -1;
   var scrollRaf = false;
-  var OVERSCAN = 700;          // px of extra rows kept above and below the viewport
+  var OVERSCAN = 700;          // px of extra rows kept above and below the viewport (design px, read through px())
+  /** a designed CSS length at the current UI density (core layout.px) */
+  function px(n) { return ctx.layout.px(n); }
 
   /* photos: popups slot 7, lazily fetched ------------------------------- */
   var photoCache = Object.create(null);   // ref → url | '' (known-missing)
@@ -336,7 +338,7 @@
     if (a && a.id) parkedAnchor = a;
   }
   function listIsLaidOut() {
-    return !!(vp && vp.isConnected && vp.clientWidth >= 120 && scroller());
+    return !!(vp && vp.isConnected && vp.clientWidth >= px(120) && scroller());
   }
   function restoreAfterPark() {
     var laid = listIsLaidOut();
@@ -359,7 +361,7 @@
   var _restoreH = -1;
   function restoreNow(anchor, triggerId, tries) {
     var sc = scroller();
-    var laid = sc && vp && vp.isConnected && vp.clientWidth >= 120 && sc.clientHeight > 40;
+    var laid = sc && vp && vp.isConnected && vp.clientWidth >= px(120) && sc.clientHeight > px(40);
     // The panel's HEIGHT is still animating when afterGeometry fires on a
     // detail -> browse return: the sheet shrinks from the detail stop to the
     // browse stop. Restoring against a viewport that is about to change puts
@@ -424,8 +426,8 @@
           var visible = te && te.getBoundingClientRect().bottom > vr0.top + 1
                            && te.getBoundingClientRect().top < vr0.bottom - 1;
           if (!visible) {
-            scrollToIndex(sc, ti, Math.max(0, (sc.clientHeight - 120) / 3));
-            scrollToIndex(sc, ti, Math.max(0, (sc.clientHeight - 120) / 3));
+            scrollToIndex(sc, ti, Math.max(0, (sc.clientHeight - px(120)) / 3));
+            scrollToIndex(sc, ti, Math.max(0, (sc.clientHeight - px(120)) / 3));
           }
         }
       }
@@ -435,7 +437,7 @@
       if (btn) {
         btn.focus({ preventScroll: true });
         var br = btn.getBoundingClientRect(), vr2 = sc.getBoundingClientRect();
-        if (br.bottom <= vr2.top || br.top >= vr2.bottom) sc.scrollTop += (br.top - vr2.top) - 12;
+        if (br.bottom <= vr2.top || br.top >= vr2.bottom) sc.scrollTop += (br.top - vr2.top) - px(12);
         // The panel is still finishing its height transition here, and anything
         // that re-inserts or repaints the row afterwards sends the caret to
         // <body>. Both known paths now carry focus across the move, but a slow
@@ -889,7 +891,7 @@
     var idsSig = L.length + '#' + _mEpoch + '|' + (L.length ? L[0] + '|' + L[L.length - 1] : '') +
       '|' + s.sort + '|' + s.sheet.tab + '|' + s.saved.groupBy;
     var sig = [
-      s.layout.mode, s.layout.foldCover, D.scopeKey(D.resultScope(s)), JSON.stringify(D.locationOrigin(s)), s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
+      s.layout.mode, s.layout.foldCover, s.layout.z, D.scopeKey(D.resultScope(s)), JSON.stringify(D.locationOrigin(s)), s.sheet.tab, s.selected.id || '', idsSig, M.length, mvCount,
       s.multi.active ? '1' : '0', Array.from(s.multi.ids).sort().join(','), s.multi.scope,
       s.sort, s.saved.groupBy, s.saved.openGroups ? Array.from(s.saved.openGroups).sort().join(',') : '*',
       s.saved.onlyList || '', rev, s.lang, s.fontScale,
@@ -986,8 +988,8 @@
     return (it.cover ? 'cover:' : it.narrow ? 'n:' : 'c:') + it.kind;
   }
   function defaultH(it) {
-    if (it.t === 'g') return 44 + (it.first ? 8 : it.afterRows ? 24 : 0) + (it.hasRows ? 12 : 0);
-    return it.cover && it.kind === 'rst' ? 85 : it.narrow ? 97 : 77;
+    if (it.t === 'g') return px(44 + (it.first ? 8 : it.afterRows ? 24 : 0) + (it.hasRows ? 12 : 0));
+    return px(it.cover && it.kind === 'rst' ? 85 : it.narrow ? 97 : 77);
   }
   function estH(it) {
     var b = avgH[bucketOf(it)];
@@ -1130,13 +1132,15 @@
     }
     var vpW = vp.clientWidth;
     // the measurement key: anything that changes a row's rendered height
-    var mKey = vpW + ':' + App.state.fontScale + ':' + (App.state.multi.active ? 'm' : '') + ':' + App.state.sheet.tab + ':' + App.state.lang + ':' + !!App.state.layout.foldCover;
-    if (vpW >= 120 && widthChanged(mKey)) force = true;
+    var mKey = vpW + ':' + App.state.fontScale + ':' + (App.state.multi.active ? 'm' : '') + ':' + App.state.sheet.tab + ':' + App.state.lang + ':' + !!App.state.layout.foldCover + ':' + App.state.layout.z;
+    var minW = px(120);
+    if (vpW >= minW && widthChanged(mKey)) force = true;
     var offs = offsets();
     var vpTop = vpOffset(sc);
     var viewH = sc.clientHeight || App.state.layout.H || 480;
-    var from = sc.scrollTop - vpTop - OVERSCAN;
-    var to = sc.scrollTop - vpTop + viewH + OVERSCAN;
+    var over = px(OVERSCAN);
+    var from = sc.scrollTop - vpTop - over;
+    var to = sc.scrollTop - vpTop + viewH + over;
     var start = lowerBound(offs, Math.max(0, from));
     var end = start;
     while (end < items.length && offs[end] < to) end += 1;
@@ -1147,7 +1151,7 @@
     // painted band already reaches OVERSCAN past the viewport, so only rebuild
     // once the viewport comes within KEEP px of its edge.
     var needFrom = sc.scrollTop - vpTop, needTo = needFrom + viewH;
-    var KEEP = 220;
+    var KEEP = px(220);
     if (!force && winStart >= 0 &&
         (winStart === 0 || offs[winStart] + KEEP <= needFrom) &&
         (winEnd >= items.length || offs[winEnd] - KEEP >= needTo)) return;
@@ -1176,7 +1180,7 @@
     // yet (boot, a column mid-transition): rendering is fine, measuring is not.
     var changedH = false;
     var nodes = vp.children;
-    if (vpW >= 120) {
+    if (vpW >= minW) {
       for (var k = 1; k < nodes.length - 1; k++) {
         var idx = start + k - 1, node = nodes[k];
         if (idx >= items.length) break;
@@ -1192,7 +1196,7 @@
       if (Math.abs(delta) > 0.5) sc.scrollTop = Math.max(0, sc.scrollTop + delta);
       if ((depth || 0) < 2) paintWindow(true, (depth || 0) + 1);
     }
-    if (vpW >= 120) calibrate(s);
+    if (vpW >= minW) calibrate(s);
     paintPhotos();
   }
 

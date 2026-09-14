@@ -80,7 +80,8 @@ with lib_browser.serve_docs(8993) as base, sync_playwright() as p:
                     check(not data['stack'],f'{name}/{scale}/{lang}: actions stacked')
                     check(data['header']['h']==0,f'{name}/{scale}/{lang}: separate back header')
                     check(data['back'] is not None,f'{name}/{scale}/{lang}: missing back')
-                    check(all(a['label'] and a['box']['w']>=43.9 and a['box']['h']>=43.9 and not a['overflow'] and a['glyph'] for a in data['actions']),f'{name}/{scale}/{lang}: action target/name/overflow')
+                    touch=44*lib_browser.ui_z(page)-0.1  # 4.2.4 UI density
+                    check(all(a['label'] and a['box']['w']>=touch and a['box']['h']>=touch and not a['overflow'] and a['glyph'] for a in data['actions']),f'{name}/{scale}/{lang}: action target/name/overflow')
                     check(max(a['box']['y'] for a in data['actions'])-min(a['box']['y'] for a in data['actions'])<1,f'{name}/{scale}/{lang}: action rows')
             if scale in (100,200) or (name=='inner932' and scale==130):
                 page.evaluate("()=>App.i18n.setLang('zh')")

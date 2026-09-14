@@ -7,6 +7,16 @@
    ========================================================================== */
 
 :root {
+  /* ---- UI density (4.2.4) ------------------------------------------------
+     1 on phones and the Fold cover; .95 once the <head> snippet has set
+     html[data-ui-z="95"] (a screen whose short side is >= 560 CSS px — the
+     Fold inner screen, tablets, desktops). map.py's densify_css() rewrites
+     every px length above 1px in these stylesheets into
+     calc(Npx * var(--ui-z, 1)) at build time, and html{font-size} carries
+     it into every rem, so the numbers below stay the 100% design values.
+     The width breakpoints in @media rules are not rewritten. */
+  --ui-z: 1;
+
   /* ---- colors ---------------------------------------------------------- */
   --surface: #FFFFFF;
   --surface-subtle: #F7FAFF;
@@ -194,6 +204,8 @@
   --z-modal: 60;
   --z-lightbox: 70;
 }
+
+:root[data-ui-z="95"] { --ui-z: .95; }
 
 @media (prefers-reduced-motion: reduce) {
   :root {

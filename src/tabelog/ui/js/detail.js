@@ -222,7 +222,7 @@
       if (name === 'top') { sc.scrollTop = 0; return; }
       var el = root.querySelector('[data-section="' + name + '"]');
       if (!el) return;
-      var top = sc.scrollTop + el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 8;
+      var top = sc.scrollTop + el.getBoundingClientRect().top - sc.getBoundingClientRect().top - ctx.layout.px(8);
       sc.scrollTop = Math.max(0, top);
     });
   };
@@ -709,7 +709,8 @@
       var style = getComputedStyle(row);
       var available = row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       var gap = parseFloat(style.columnGap) || 0;
-      var minimum = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--touch-min')) || 44;
+      // --touch-min is calc(44px * var(--ui-z)) after densify, which parseFloat cannot read
+      var minimum = ctx.layout.px(44);
       stacked = available < 3 * minimum + 2 * gap;
       row.classList.toggle('is-stack', stacked);
       Array.prototype.forEach.call(row.querySelectorAll('.dt-act'), function (button) {
@@ -760,8 +761,8 @@
     if (!row || s.layout.mode === 'wide') return;
     row.classList.remove('is-compact-tools');
     var title = row.querySelector('.dt-title');
-    var font = parseFloat(getComputedStyle(title).fontSize) || 24;
-    if (title.clientWidth < font * 5 || title.offsetHeight > 88) row.classList.add('is-compact-tools');
+    var font = parseFloat(getComputedStyle(title).fontSize) || ctx.layout.px(24);
+    if (title.clientWidth < font * 5 || title.offsetHeight > ctx.layout.px(88)) row.classList.add('is-compact-tools');
     var height = s.layout.mode + '|' + row.offsetHeight;
     if (height !== measuredTitleH) {
       measuredTitleH = height;
@@ -810,7 +811,7 @@
 
   function paintBody(s, r) {
     var entry = ensureDetail(r.id, s.lang);
-    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.detail.translation,
+    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.layout.z, s.detail.translation,
       s.user.black.has(r.id) ? 1 : 0, matches(s, r) ? 1 : 0, s.overlay.kind === 'more' ? 1 : 0,
       entry.st, jaMap ? 1 : 0, jaErr ? 1 : 0, s.user.fav.has(r.id) ? 1 : 0,
       (s.user.bookmarks || []).length,
@@ -838,7 +839,7 @@
   function paintFoot(s) {
     var r = ctx.Data.byId(s.selected.id);
     if (!r) { foot.innerHTML = ''; footSig = null; return; }
-    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.user.fav.has(r.id) ? 1 : 0,
+    var sig = [r.id, s.lang, s.fontScale, modeOf(s), s.layout.z, s.user.fav.has(r.id) ? 1 : 0,
       stacked ? 1 : 0, shareInline ? 1 : 0, s.overlay.kind === 'more' ? 1 : 0].join('|');
     if (sig === footSig) return;
     footSig = sig;
@@ -868,14 +869,14 @@
           bindPhotoFallbacks(card);
         }).catch(function () {});
       });
-    }, { root: track, rootMargin: '0px 180px', threshold: 0 });
+    }, { root: track, rootMargin: '0px ' + Math.round(ctx.layout.px(180)) + 'px', threshold: 0 });   // about one card ahead
     Array.prototype.forEach.call(track.children, function (card) { candidateObserver.observe(card); });
   }
   function paintCandidates(s) {
     var host = s.layout.mode === 'mid' && s.selected.id;
     if (!host) { if (candSig !== '') { cand.innerHTML = ''; candSig = ''; } return; }
     if (!s.detail.candidatesOpen) {
-      var csig = 'collapsed|' + s.lang + '|' + s.fontScale + '|' + Dm.candidates(s).length;
+      var csig = 'collapsed|' + s.lang + '|' + s.fontScale + '|' + s.layout.z + '|' + Dm.candidates(s).length;
       if (candSig === csig) return;
       candSig = csig;
       cand.innerHTML = '<div class="dt-cand dt-cand--collapsed"><button class="dt-cand-reopen" type="button" data-act="cand-open">' +
@@ -885,7 +886,7 @@
       return;
     }
     var ids = Dm.candidates(s);
-    var sig = [s.lang, s.fontScale, s.selected.id, ids.length, ids.slice(0, 60).join(',')].join('|');
+    var sig = [s.lang, s.fontScale, s.layout.z, s.selected.id, ids.length, ids.slice(0, 60).join(',')].join('|');
     if (sig === candSig) return;
     candSig = sig;
     cand.innerHTML = candidateHtml(s);
@@ -1004,7 +1005,7 @@
     function scrollCand(dir) {
       var track = cand.querySelector('.dt-cand-track');
       if (!track) return;
-      track.scrollBy({ left: dir * Math.max(160, track.clientWidth * 0.8), behavior: ctx.motion.reduced ? 'auto' : 'smooth' });
+      track.scrollBy({ left: dir * Math.max(ctx.layout.px(160), track.clientWidth * 0.8), behavior: ctx.motion.reduced ? 'auto' : 'smooth' });
     }
     function openLightbox(i) {
       lastPhotoIndex = i;
@@ -1026,7 +1027,8 @@
     var idChanged = !bodySig || bodySig.split('|')[0] !== r.id;
     var modeChanged = !bodySig || bodySig.split('|')[3] !== modeOf(s);
     if (idChanged || modeChanged || (bodySig && bodySig.split('|')[1] !== s.lang) ||
-        (bodySig && bodySig.split('|')[2] !== String(s.fontScale))) {
+        (bodySig && bodySig.split('|')[2] !== String(s.fontScale)) ||
+        (bodySig && bodySig.split('|')[4] !== String(s.layout.z))) {
       stacked = false; shareInline = true;
     }
     var repainted = paintBody(s, r);

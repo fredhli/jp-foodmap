@@ -100,9 +100,12 @@ with lib_browser.serve_docs(8992) as base, sync_playwright() as p:
         result = page.evaluate(probe)
         check(result['profile'] == expected, name + ': profile identity')
         check(not result['overflow'], name + ': page overflow')
+        z = lib_browser.ui_z(page)   # 4.2.4: the cover and phones are 1, a split Fold inner screen or a desktop .95
+        check(z == (0.95 if min(sw, sh) >= 560 else 1), name + ': ui density follows the screen')
+        dpx = lambda value, design: abs(float(value[:-2]) - design * z) < 0.05
         if result['row']:
-            check(result['row']['min'] == ('84px' if expected else '96px' if w<750 else '76px'),name+': row min')
-            if w<750: check(result['row']['pad'] == ('6px' if expected else '12px'), name+': row padding')
+            check(dpx(result['row']['min'], 84 if expected else 96 if w<750 else 76),name+': row min')
+            if w<750: check(dpx(result['row']['pad'], 6 if expected else 12), name+': row padding')
         if expected and result['profile']:
             buttons = [result[k] for k in ['search','region','nearby','avatar']]
             check(max(b['y']+b['h']/2 for b in buttons)-min(b['y']+b['h']/2 for b in buttons)<1,name+': header same row')
@@ -141,7 +144,7 @@ with lib_browser.serve_docs(8992) as base, sync_playwright() as p:
         saved = page.evaluate(probe)
         check(saved['booking'] is None,name+': no saved booking filter')
         if saved['row'] and w<750:
-            check(saved['row']['min']=='96px' and saved['row']['pad']=='12px',name+': saved geometry unchanged')
+            check(dpx(saved['row']['min'], 96) and dpx(saved['row']['pad'], 12),name+': saved geometry unchanged')
         if name in ('cover751', 'cover-dpr3.5', 'old-false-positive') and not args.baseline:
             check(page.locator('.ov-layout-diagnostics').count()==0,name+': no ordinary page diagnostics')
             page.evaluate('''() => {
@@ -159,7 +162,8 @@ with lib_browser.serve_docs(8992) as base, sync_playwright() as p:
             diagnostic.locator('summary').press('Space')
             check(diagnostic.evaluate('(e)=>e.open'),name+': diagnostic keyboard opens')
             reading = json.loads(diagnostic.locator('pre').text_content())
-            check(set(reading)=={'appVersion','screen','availableScreen','layoutViewport','innerViewport','visualViewport','devicePixelRatio','physicalScreen','touch','foldCover'},name+': diagnostic whitelist')
+            check(set(reading)=={'appVersion','screen','availableScreen','layoutViewport','innerViewport','visualViewport','devicePixelRatio','physicalScreen','touch','foldCover','uiDensity'},name+': diagnostic whitelist')
+            check(reading['uiDensity']['z']==(0.95 if min(sw,sh)>=560 else 1) and reading['uiDensity']['screenShortSide']==min(sw,sh),name+': diagnostic density')
             check(reading['devicePixelRatio']==dpr and reading['screen']=={'width':sw,'height':sh},name+': diagnostic dimensions')
             check(reading['foldCover']['matched']==expected and reading['foldCover']['enabled']==expected and reading['foldCover']['attributeApplied']==expected and bool(reading['foldCover']['reason']),name+': diagnostic match/applied/reason')
             check(reading['appVersion']==page.evaluate('App.state.buildMeta.appVersion'),name+': diagnostic version')

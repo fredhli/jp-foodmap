@@ -116,7 +116,8 @@ def run_viewport(browser, base, name, ctx_opts):
     kanto = next(r for r in rs if r["head"] and r["text"] == "关东")
     check(kanto["all"]["list"] == "7,8,9,10,11,12", f"Kanto's select-all leaves Tokyo out: {kanto['all']}")
     check(all(r["hidden"] for r in rs if r["ov"] == "area"), "district rows are search-only on the root page")
-    check(all(r["h"] >= 43.5 for r in vis if not r["head"]), "rows keep the touch minimum")
+    touch = 44 * lib_browser.ui_z(page) - 0.5   # 4.2.4: 41.8 on large screens
+    check(all(r["h"] >= touch for r in vis if not r["head"]), "rows keep the touch minimum")
     check(page.is_visible(".ov-rg-done"), "Done button")
     shot("root")
 

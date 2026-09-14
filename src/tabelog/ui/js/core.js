@@ -370,12 +370,12 @@
     var hit = _emjMemo[mk];
     if (hit !== undefined) return hit;
     var src = emoji.src(ch);
-    var style = size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '';
+    var style = size ? ' style="width:' + layout.cssPx(size) + ';height:' + layout.cssPx(size) + '"' : '';
     var extra = cls ? ' ' + cls : '';
     var cors = (src && !emoji.isLocal(ch)) ? ' crossorigin="anonymous"' : '';
     var out = src
       ? '<img class="emj' + extra + '" alt="" draggable="false"' + cors + ' src="' + src + '"' + style + '>'
-      : '<span class="emj-text' + extra + '" aria-hidden="true"' + (size ? ' style="font-size:' + Math.round(size * .85) + 'px"' : '') + '>' + util.esc(ch) + '</span>';
+      : '<span class="emj-text' + extra + '" aria-hidden="true"' + (size ? ' style="font-size:' + layout.cssPx(Math.round(size * .85)) + '"' : '') + '>' + util.esc(ch) + '</span>';
     _emjMemo[mk] = out;
     return out;
   };
@@ -487,7 +487,7 @@
       lang: 'zh',
       fontScale: 100,
       demo: null,                       // 'offline' | 'update' | null (URL ?demo=)
-      layout: { mode: 'narrow', W: 402, H: 874, U: { x: 0, y: 0, w: 402, h: 874 }, occ: 0, mapRect: { x: 0, y: 0, w: 402, h: 794 }, compact: false, severe: false },
+      layout: { mode: 'narrow', W: 402, H: 874, U: { x: 0, y: 0, w: 402, h: 874 }, occ: 0, mapRect: { x: 0, y: 0, w: 402, h: 794 }, compact: false, severe: false, z: 1 },
       sheet: { state: 'collapsed', tab: 'results', dragging: false, height: 80 },
       columns: { leftOpen: true, userLeftPreference: null, autoCollapsed: false, detailOpen: false, detailPaused: false },
       selected: { id: null, origin: null, anchor: null },
@@ -682,6 +682,38 @@
   };
   layout.CFG = CFG;
 
+  /* UI density (4.2.4). A screen whose short side is at least 560 CSS px (the
+     Fold inner screen in either orientation, tablets, desktops) draws the whole
+     interface at 95%, the size Chrome's 95% page zoom used to give it; phones
+     and the Fold cover stay at 100%. The rule lives in the <head> snippet
+     (window.__jpfmUiZ, map.py UI_DENSITY_HEAD) so the first paint already has
+     it; measure() re-reads it because opening a Fold changes the screen.
+     CSS gets it as --ui-z: map.py rewrites every CSS px length above 1px into
+     calc(Npx * var(--ui-z, 1)). JS geometry uses px(n) for the same lengths.
+     CFG keeps the 100% design values. What does NOT scale: the width
+     breakpoints that pick the layout mode (narrowLt / wideGte, mirrored by
+     CSS @media rules that cannot read a variable) and ratios. */
+  var _z = 1;
+  function readUiZ() {
+    var z = 1;
+    try { if (typeof window.__jpfmUiZ === 'function') z = Number(window.__jpfmUiZ()); } catch (e) { z = 1; }
+    return z > 0 && z <= 1 ? z : 1;
+  }
+  /** z() → the current UI density factor (1 or .95). */
+  layout.z = function () { return _z; };
+  /** px(n) → a designed CSS length at the current density, as a number. */
+  function px(n) { return n * _z; }
+  layout.px = px;
+  /** cssPx(n) → the same length as a CSS value that follows --ui-z live. */
+  layout.cssPx = function (n) { return n === 0 ? '0px' : 'calc(' + n + 'px * var(--ui-z, 1))'; };
+  _z = readUiZ();                        // the <head> snippet already set data-ui-z to match
+  function applyUiZ(z) {
+    _z = z;
+    var root = document.documentElement;
+    if (z === 1) root.removeAttribute('data-ui-z');
+    else root.setAttribute('data-ui-z', String(Math.round(z * 100)));
+  }
+
   layout.mode = function (W) {
     W = W === undefined ? App.state.layout.W : W;
     return W < CFG.narrowLt ? 'narrow' : (W < CFG.wideGte ? 'mid' : 'wide');
@@ -783,11 +815,13 @@
     // moves at rest; the safe-area inset is deliberately NOT folded in (the
     // fixed rows already pay it through their own `padding-bottom`).
     var occ = Math.round(Math.max(0, Hfull - (y + h)));
+    var z = readUiZ();
+    if (z !== _z || document.documentElement.hasAttribute('data-ui-z') !== (z !== 1)) applyUiZ(z);
     var cur = App.state.layout, foldCover = layout.isFoldCover(W);
-    var same = !!cur.foldCover === foldCover && cur.W === W && cur.H === U.h && cur.occ === occ &&
+    var same = !!cur.foldCover === foldCover && cur.z === z && cur.W === W && cur.H === U.h && cur.occ === occ &&
                cur.U && cur.U.x === U.x && cur.U.y === U.y && cur.U.w === U.w && cur.U.h === U.h;
     if (same) return false;
-    App.set({ layout: { W: W, H: U.h, U: U, occ: occ, mode: layout.mode(W), foldCover: foldCover, compact: U.h <= CFG.compactHLte, severe: U.h <= CFG.severeHLte } });
+    App.set({ layout: { W: W, H: U.h, U: U, occ: occ, mode: layout.mode(W), foldCover: foldCover, z: z, compact: U.h <= px(CFG.compactHLte), severe: U.h <= px(CFG.severeHLte) } });
     App.emit('layout:changed', App.state.layout);
     return true;
   };
@@ -799,24 +833,25 @@
     if (mode === 'narrow') return { leftW: 0, detailW: 0, railW: 0, topbarH: 0, detailPaused: false, autoCollapsed: false, leftVisible: false };
     var cl = mode === 'wide' ? CFG.wideLeft : CFG.midLeft;
     var cd = mode === 'wide' ? CFG.wideDetail : CFG.midDetail;
-    var fullLeft = util.clamp(Math.round(W * cl.ratio), cl.min, cl.max);
-    var detailW = C.detailOpen ? util.clamp(Math.round(W * cd.ratio), cd.min, cd.max) : 0;
+    var fullLeft = util.clamp(Math.round(W * cl.ratio), px(cl.min), px(cl.max));
+    var detailW = C.detailOpen ? util.clamp(Math.round(W * cd.ratio), px(cd.min), px(cd.max)) : 0;
+    var rail = px(CFG.rail);
     var wantLeft = C.userLeftPreference === null ? true : C.userLeftPreference === 'open';
     var autoCollapsed = false, detailPaused = false, leftW;
-    if (!wantLeft) leftW = CFG.rail;
+    if (!wantLeft) leftW = rail;
     else if (!C.detailOpen) leftW = fullLeft;
     else if (mode === 'mid') {
       // mid: opening detail collapses the full left column by default (LAY-02)
       if (C.userLeftPreference === 'open') { detailPaused = true; leftW = fullLeft; detailW = 0; }
-      else { leftW = CFG.rail; autoCollapsed = true; }
+      else { leftW = rail; autoCollapsed = true; }
     } else {
-      if (W - fullLeft - detailW >= CFG.fullThreeColumnMapMin) leftW = fullLeft;
+      if (W - fullLeft - detailW >= px(CFG.fullThreeColumnMapMin)) leftW = fullLeft;
       else if (C.userLeftPreference === 'open') { detailPaused = true; leftW = fullLeft; detailW = 0; }
-      else { leftW = CFG.rail; autoCollapsed = true; }
+      else { leftW = rail; autoCollapsed = true; }
     }
-    return { leftW: leftW, detailW: detailW, railW: CFG.rail, fullLeft: fullLeft,
-             topbarH: Math.max(mode === 'wide' ? CFG.topbarWide : CFG.topbarMid, _topbarH),
-             detailPaused: detailPaused, autoCollapsed: autoCollapsed, leftVisible: leftW > CFG.rail };
+    return { leftW: leftW, detailW: detailW, railW: rail, fullLeft: fullLeft,
+             topbarH: Math.max(px(mode === 'wide' ? CFG.topbarWide : CFG.topbarMid), _topbarH),
+             detailPaused: detailPaused, autoCollapsed: autoCollapsed, leftVisible: leftW > rail };
   };
 
   /**
@@ -828,13 +863,13 @@
     var H = state.layout.H, W = state.layout.W, compact = state.layout.compact, S = CFG.sheet;
     var target;
     switch (sheetState) {
-      case 'collapsed': target = S.collapsed; break;
+      case 'collapsed': target = Math.ceil(px(S.collapsed) - 1e-6); break;
       case 'browse': target = H * (compact ? S.resultsCompact : S.resultsNormal); break;
       case 'detail': target = compact ? H * S.detailCompact : H * (W < CFG.detailRatioSwitch ? S.detailSmall : S.detailLarge); break;
       case 'filter': target = H * (compact ? S.filterCompact : S.filterNormal); break;
-      case 'expanded': target = H - S.expandedMap; break;
+      case 'expanded': target = H - px(S.expandedMap); break;
       case 'full': target = H; break;
-      default: target = S.collapsed;
+      default: target = Math.ceil(px(S.collapsed) - 1e-6);
     }
     if (state.layout.foldCover && ['browse', 'detail', 'filter'].indexOf(sheetState) >= 0) target = H * .62;
     target = Math.round(target);
@@ -869,7 +904,7 @@
     // publish a legal inset and still add up to one, so clamp here where both are
     // visible: first try to give the band its 44px back from the top inset, and if
     // the screen truly cannot afford it, drop the band to zero instead of a sliver.
-    var MIN_BAND = 44;
+    var MIN_BAND = px(44);
     if (mode === 'narrow' && h > 0 && h < MIN_BAND) {
       var give = Math.min(top, MIN_BAND - h);
       top -= give; h += give;

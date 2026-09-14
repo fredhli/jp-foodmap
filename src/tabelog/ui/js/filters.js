@@ -119,7 +119,7 @@
       var target = root.querySelector('[data-section="' + sec + '"]');
       if (!target || sec === 'top') { sc.scrollTop = 0; return; }
       var a = target.getBoundingClientRect(), b = sc.getBoundingClientRect();
-      sc.scrollTop = Math.max(0, sc.scrollTop + (a.top - b.top) - 8);
+      sc.scrollTop = Math.max(0, sc.scrollTop + (a.top - b.top) - ctx.layout.px(8));
     });
   };
 

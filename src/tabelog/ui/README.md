@@ -89,6 +89,29 @@ and to `shell.html`:
 | `__APP_VERSION__` / `__DATA_SCRAPED_AT__` / `__LATEST_SCRAPE__` | release, corpus baseline, latest row-level scrape date | `shell.html` `#build-meta` |
 | `__TEXT_TRAD_MAP__` / `__TEXT_EN_MAP__` / `__TEXT_JA_MAP__` | **second pass** over the saved HTML: CJK runs actually on the page × `data/i18n/*.json` | business.js `TEXT_*_MAP` (the runtime localizer) |
 
+## UI density (4.2.4)
+
+Large screens draw everything at 95%: `<head>` sets `html[data-ui-z="95"]` when
+`min(screen.width, screen.height) >= 560` (the Fold inner screen, tablets,
+desktops; never a phone or the Fold cover), and `tokens.css` turns that into
+`--ui-z: .95`. Three rules keep one factor everywhere:
+
+- **CSS: write plain px.** `map.py densify_css()` rewrites each length above
+  1px into `calc(Npx * var(--ui-z, 1))` when it inlines the stylesheets
+  (comments and `@media` preludes are left alone). `rem` follows through
+  `html { font-size: calc(100% * var(--ui-z, 1)) }`. A consequence: a px
+  custom property now reads back as a `calc(...)` string, so never
+  `parseFloat()` one — use `App.layout.px(designValue)`.
+- **JS: a designed length goes through `App.layout.px(n)`** for math and
+  `App.layout.cssPx(n)` for an inline style. `layout.CFG` keeps the 100%
+  values. Breakpoints (750 / 1100), ratios, counts, zoom levels, metres and
+  measured sizes stay as they are.
+- **Caches key on `layout.z`.** Opening a Fold changes the screen, so z can
+  change at runtime; a render signature or row-height cache that includes
+  `fontScale` or `foldCover` includes `layout.z` too.
+
+`?uiz=95` / `?uiz=100` force either density for a side-by-side check.
+
 ## What the build refuses to ship
 
 `map.py`'s emission is not a copy — it is the last place anything can be

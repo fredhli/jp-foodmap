@@ -284,7 +284,7 @@
   function renderSearch(s) {
     var mode = s.layout.mode, active = !!s.search.active;
     var nb = nearbyState(s);
-    var key = [mode, active, s.layout.foldCover, s.layout.foldCover && s.layout.W < 450, s.fontScale, s.lang, s.account.signedIn, Data.regionKey(s.filters),
+    var key = [mode, active, s.layout.foldCover, s.layout.foldCover && s.layout.W < 450, s.fontScale, s.layout.z, s.lang, s.account.signedIn, Data.regionKey(s.filters),
                s.search.placeFilter, !!nb.fix, !!nb.active, !!nb.pending, nb.radiusM, nb.needsLocation,
                s.overlay.kind === 'regionPicker', s.overlay.kind === 'account'].join('|');
     if (sig.search !== key) {
@@ -726,9 +726,10 @@
   function placeSearchPanel(s) {
     var panel = el('ov-search-panel');
     if (!panel) return;
-    var U = s.layout.U, cols = layout.columns(s), top = U.y + cols.topbarH + 8;
+    var px = layout.px;                  // designed lengths follow the UI density
+    var U = s.layout.U, cols = layout.columns(s), top = U.y + cols.topbarH + px(8);
     if (s.layout.mode === 'mid') {
-      var w = Math.min(Math.max(cols.fullLeft || 344, 344), U.w - 32);
+      var w = Math.min(Math.max(cols.fullLeft || px(344), px(344)), U.w - px(32));
       panel.style.left = (U.x) + 'px';
       panel.style.top = top + 'px';
       panel.style.width = w + 'px';
@@ -737,12 +738,12 @@
     } else {
       var field = R.search.querySelector('.ov-sfield');
       var fr = field ? field.getBoundingClientRect() : null;
-      var pw = fr && fr.width ? Math.max(fr.width, 360) : 480;
+      var pw = fr && fr.width ? Math.max(fr.width, px(360)) : px(480);
       panel.style.width = pw + 'px';
-      panel.style.left = clamp(fr ? fr.left : U.x + 24, U.x + 16, U.x + U.w - 16 - pw) + 'px';
+      panel.style.left = clamp(fr ? fr.left : U.x + px(24), U.x + px(16), U.x + U.w - px(16) - pw) + 'px';
       panel.style.top = top + 'px';
       panel.style.height = '';
-      panel.style.maxHeight = Math.min(560, U.y + U.h - top - 24) + 'px';
+      panel.style.maxHeight = Math.min(px(560), U.y + U.h - top - px(24)) + 'px';
     }
   }
 
@@ -753,10 +754,10 @@
     if (narrow && !s.search.active) {
       var r = R.search.getBoundingClientRect();
       v = Math.round(Math.max(0, r.bottom - s.layout.U.y));
-      noticeTop = v ? (v + s.layout.U.y + 8) + 'px' : '';
+      noticeTop = v ? (v + s.layout.U.y + layout.px(8)) + 'px' : '';
     } else if (narrow) {
       var head = R.search.querySelector('.ov-shead');
-      if (head) noticeTop = Math.round(head.getBoundingClientRect().bottom + 8) + 'px';
+      if (head) noticeTop = (Math.round(head.getBoundingClientRect().bottom) + layout.px(8)) + 'px';
     }
     if (R.notice && R.notice.style.top !== noticeTop) R.notice.style.top = noticeTop;
     if (Math.abs(v - lastInset) < 2) return;
@@ -806,7 +807,7 @@
   function renderPopover(s) {
     var k = s.overlay.kind;
     var isPop = k && nav.SECONDARY_KINDS.indexOf(k) >= 0;
-    var key = isPop ? [k, s.lang, s.layout.mode, s.layout.W, s.layout.H, popState(s), transient && transient.kind].join('|') : 'none';
+    var key = isPop ? [k, s.lang, s.layout.mode, s.layout.W, s.layout.H, s.layout.z, popState(s), transient && transient.kind].join('|') : 'none';
     if (sig.pop === key) { if (k === 'regionPicker') syncRegionPicker(s); return; }
     sig.pop = key;
     var panel = el('ov-search-panel');
@@ -1006,7 +1007,8 @@
   function placePopover(s) {
     var node = el('ov-pop');
     if (!node) return;
-    var k = s.overlay.kind, U = s.layout.U, M = 16;
+    var px = layout.px;                  // designed lengths follow the UI density
+    var k = s.overlay.kind, U = s.layout.U, M = px(16), G = px(8), MIN_SPACE = px(100);
     var bottomSheet = isBottomSheetKind(s, k);
     node.classList.toggle('ov-pop--bottom', bottomSheet);
     node.classList.toggle('ov-pop--full', k === 'layers' && layersFallback.full);
@@ -1017,7 +1019,7 @@
     }
     if (k === 'layers' && layersFallback.full) { node.style.cssText = ''; return; }
 
-    var wPref = k === 'layers' ? 360 : (k === 'account' ? 360 : (k === 'regionPicker' ? 420 : (k === 'memberPicker' || k === 'share' || k === 'help' ? 340 : 248)));
+    var wPref = px(k === 'layers' ? 360 : (k === 'account' ? 360 : (k === 'regionPicker' ? 420 : (k === 'memberPicker' || k === 'share' || k === 'help' ? 340 : 248))));
     var w = Math.min(wPref, U.w - 2 * M);
     node.style.width = w + 'px';
     node.style.maxHeight = 'none';
@@ -1031,21 +1033,21 @@
     }
     var h = node.offsetHeight;
     var above = k === 'layers';                 // the FAB group opens upward first
-    var spaceAbove = a.top - 8 - (U.y + M);
-    var spaceBelow = (U.y + U.h - M) - (a.bottom + 8);
+    var spaceAbove = a.top - G - (U.y + M);
+    var spaceBelow = (U.y + U.h - M) - (a.bottom + G);
     var side;
     if (above) side = (h <= spaceAbove || spaceAbove >= spaceBelow) ? 'above' : 'below';
     else side = (h <= spaceBelow || spaceBelow >= spaceAbove) ? 'below' : 'above';
     var space = side === 'above' ? spaceAbove : spaceBelow;
 
-    if (k === 'layers' && space < 100) { layersFallbackStep(s); return; }
+    if (k === 'layers' && space < MIN_SPACE) { layersFallbackStep(s); return; }
 
-    var used = Math.min(h, Math.max(100, space));
+    var used = Math.min(h, Math.max(MIN_SPACE, space));
     node.style.maxHeight = used + 'px';
     var left = a.right - w;
     if (a.left < U.x + U.w / 2) left = a.left;
     left = clamp(left, U.x + M, U.x + U.w - M - w);
-    var top = side === 'above' ? (a.top - 8 - used) : (a.bottom + 8);
+    var top = side === 'above' ? (a.top - G - used) : (a.bottom + G);
     top = clamp(top, U.y + M, U.y + U.h - M - Math.min(used, h));
     node.style.left = Math.round(left) + 'px';
     node.style.top = Math.round(top) + 'px';
@@ -1078,7 +1080,8 @@
     if (kind === 'layers') {
       var r = R.fab && R.fab.getBoundingClientRect();
       if (r && r.width) return r;
-      return { left: U.x + U.w - 64, right: U.x + U.w - 16, top: U.y + U.h - 64, bottom: U.y + U.h - 16, width: 48, height: 48 };
+      var px = layout.px;                // estimated FAB rect at the current density
+      return { left: U.x + U.w - px(64), right: U.x + U.w - px(16), top: U.y + U.h - px(64), bottom: U.y + U.h - px(16), width: px(48), height: px(48) };
     }
     if (kind === 'placeMenu') {
       var p = s.overlay.payload || {};
@@ -1415,8 +1418,8 @@
       '<div class="ov-pop-body"><div class="field"><label class="field-label" for="ov-share-in">' + esc(t('链接')) + '</label>' +
       '<input class="input" id="ov-share-in" readonly value="' + esc(link) + '" lang="en"></div>' +
       '<p class="ov-sub">' + esc(t('复制失败时可以手动选中上面的链接。')) + '</p>' +
-      '<button class="btn btn-primary" data-ov="share-copy" style="width:100%;margin-top:8px">' + ic('copy') + esc(t('复制链接')) + '</button>' +
-      (canNative ? '<button class="btn btn-secondary" data-ov="share-native" style="width:100%;margin-top:8px">' + ic('share') + esc(t('系统分享')) + '</button>' : '') +
+      '<button class="btn btn-primary" data-ov="share-copy" style="width:100%;margin-top:' + layout.cssPx(8) + '">' + ic('copy') + esc(t('复制链接')) + '</button>' +
+      (canNative ? '<button class="btn btn-secondary" data-ov="share-native" style="width:100%;margin-top:' + layout.cssPx(8) + '">' + ic('share') + esc(t('系统分享')) + '</button>' : '') +
       '</div>';
   }
 
@@ -1541,7 +1544,7 @@
     } else {
       steps = '<p class="t-long-body">' + esc(t('在浏览器菜单里找添加到主屏幕或安装')) + '</p>';
     }
-    return (inst.canPrompt ? '<button class="btn btn-primary" data-ov="install-now" style="width:100%;margin-bottom:8px">' +
+    return (inst.canPrompt ? '<button class="btn btn-primary" data-ov="install-now" style="width:100%;margin-bottom:' + layout.cssPx(8) + '">' +
         ic('download') + esc(t('安装')) + '</button>' : '') +
       steps + '<p class="ov-sub">' + esc(t('装好之后离线也能看地图')) + '</p>';
   }
@@ -1560,7 +1563,9 @@
       physicalScreen: { width: info.physicalWidth, height: info.physicalHeight },
       touch: { detected: info.touch, maxTouchPoints: info.maxTouchPoints, coarsePointer: info.coarsePointer },
       foldCover: { matched: info.matched, enabled: !!s.layout.foldCover,
-        attributeApplied: doc.hasAttribute('data-fold-cover'), reason: t(info.reason) }
+        attributeApplied: doc.hasAttribute('data-fold-cover'), reason: t(info.reason) },
+      uiDensity: { z: finite(s.layout.z), attribute: doc.getAttribute('data-ui-z'),
+        screenShortSide: finite(Math.min(sc.width, sc.height)) }
     }, null, 2);
   }
   function helpBody(s) {
@@ -1715,9 +1720,9 @@
             '<input class="ov-emoji-input" id="ov-emoji" maxlength="8" autocomplete="off" value="' + esc(d.emoji || '') + '" aria-describedby="ov-emoji-err">' +
             '<button type="button" class="icon-btn ov-sclear" data-ov="emoji-clear" aria-label="' + esc(t('清空')) + '">' + ic('x') + '</button></span></div>' +
         '<p class="field-error" id="ov-emoji-err" role="alert" hidden></p>' +
-        '<div><div class="field-label" style="margin-bottom:6px">' + esc(t('常用')) + '</div>' +
+        '<div><div class="field-label" style="margin-bottom:' + layout.cssPx(6) + '">' + esc(t('常用')) + '</div>' +
           emojiChips(Data.config.BOOKMARK_QUICK_EMOJI, d.emoji, true) + '</div>' +
-        (lists.length ? '<div><div class="field-label" style="margin-bottom:6px">' + esc(t('加入收藏夹')) + '</div>' +
+        (lists.length ? '<div><div class="field-label" style="margin-bottom:' + layout.cssPx(6) + '">' + esc(t('加入收藏夹')) + '</div>' +
           '<div class="ov-pick-lists">' + lists.map(function (l) {
             var on = (d.lists || []).indexOf(l.id) >= 0;
             return '<button type="button" class="ov-pick-list" data-ov="form-list" data-list="' + esc(l.id) + '" aria-pressed="' + on + '">' +
@@ -1777,7 +1782,7 @@
           '<input class="input" id="ov-list-name" maxlength="24" autocomplete="off" value="' + esc(d.name || '') + '" ' +
             'aria-describedby="ov-list-err" aria-invalid="' + (!!draftErr.name) + '" placeholder="' + esc(t('例如：东京美食周末')) + '"></div>' +
         '<p class="field-error" id="ov-list-err" role="alert"' + (draftErr.name ? '' : ' hidden') + '>' + esc(draftErr.name || '') + '</p>' +
-        '<div><div class="field-label" style="margin-bottom:6px">' + esc(t('图标')) + '</div>' +
+        '<div><div class="field-label" style="margin-bottom:' + layout.cssPx(6) + '">' + esc(t('图标')) + '</div>' +
           emojiChips(Data.config.LIST_QUICK_EMOJI, d.emoji, false) + '</div>' +
         (d.members && d.members.length ? '<p class="ov-sub">' + esc(t('将加入 {n} 家餐厅', { n: d.members.length })) + '</p>' : '') +
       '</div>';
@@ -2080,10 +2085,11 @@
     // the menu opens, so the element that was clicked is already detached.
     var trig = (R.topRight && R.topRight.querySelector('[data-ov="lang-menu"]')) || (lastTrigger && document.contains(lastTrigger) ? lastTrigger : null);
     var U = s.layout.U, a = trig ? trig.getBoundingClientRect() : null;
-    var w = 200;
+    var px = layout.px;                  // designed lengths follow the UI density
+    var w = px(200);
     node.style.width = w + 'px';
-    node.style.left = clamp(a ? a.right - w : U.x + U.w - 16 - w, U.x + 12, U.x + U.w - 12 - w) + 'px';
-    node.style.top = (a ? a.bottom + 8 : U.y + 64) + 'px';
+    node.style.left = clamp(a ? a.right - w : U.x + U.w - px(16) - w, U.x + px(12), U.x + U.w - px(12) - w) + 'px';
+    node.style.top = (a ? a.bottom + px(8) : U.y + px(64)) + 'px';
   }
 
   /* ----------------------------------------------------------------------

@@ -46,14 +46,17 @@
   var _lastCols = null;
   var _route = null;              // narrow results ↔ detail horizontal transition
 
-  var SHEET_MIN = 80;
+  /** px(n) → a designed CSS length at the current UI density (core layout.px). */
+  function px(n) { return ctx.layout.px(n); }
+  /** the collapsed sheet height, read at use time: the density can change. */
+  function sheetMin() { return px(CFG.sheet.collapsed); }
 
   /* ======================================================================
      init
      ==================================================================== */
   C.init = function (c) {
     ctx = c; App = c.App; util = c.util; t = c.t; D = c.Data; roots = c.roots;
-    CFG = c.layout.CFG; SHEET_MIN = CFG.sheet.collapsed;
+    CFG = c.layout.CFG;
 
     ['app', 'narrow-top', 'sheet', 'sheet-handle', 'sheet-head', 'sheet-body', 'sheet-toast', 'sheet-foot',
       'topbar', 'topbar-brand', 'topbar-search', 'topbar-right',
@@ -189,7 +192,7 @@
     var now = (window.performance && performance.now) ? performance.now() : Date.now();
     var dy = _drag.y0 - e.clientY;
     if (Math.abs(dy) > 4) _drag.moved = true;
-    var h = util.clamp(_drag.h0 + dy, SHEET_MIN, s.layout.H);
+    var h = util.clamp(_drag.h0 + dy, sheetMin(), s.layout.H);
     var dt = now - _drag.lastT;
     if (dt > 0) _drag.v = ((_drag.lastY - e.clientY) / dt) * 0.5 + _drag.v * 0.5;   // px/ms, up = +
     _drag.lastY = e.clientY; _drag.lastT = now;
@@ -209,7 +212,7 @@
     if (!d.moved) {
       target = tapTarget(s, cands);
     } else {
-      var projected = util.clamp(d.h + d.v * 120, SHEET_MIN, s.layout.H);
+      var projected = util.clamp(d.h + d.v * 120, sheetMin(), s.layout.H);
       var best = cands[0], bd = Infinity;
       cands.forEach(function (k) {
         var th = ctx.layout.sheetTarget(k, s).h;
@@ -295,7 +298,7 @@
     else if (sheetState === 'detail') Cmin = S.minText;
     else if (state && state.selected && state.selected.id) Cmin = S.minText;
     else Cmin = S.minControl;
-    return { F: Math.round(F), C: Cmin };
+    return { F: Math.round(F), C: Math.round(px(Cmin)) };
   };
 
   /* ======================================================================
@@ -698,7 +701,7 @@
       var h = c.scrollHeight || c.getBoundingClientRect().height;
       if (h > need) need = h;
     });
-    ctx.layout.setTopbarH(need > 0 ? need + 12 : 0);
+    ctx.layout.setTopbarH(need > 0 ? need + px(12) : 0);
   }
 
   function fitTabs(scope) {

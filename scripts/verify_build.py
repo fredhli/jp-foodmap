@@ -37,6 +37,11 @@ Why each check exists (all from the 2026-09-05 audit):
                   meta). Any one of them coming back on its own leaves the
                   shell zooming the sidebar again, and the wheel guard has to
                   stay off the document or every scroll waits on JS.
+  ui density      4.2.4 draws the Fold inner screen and desktops at 95%. The
+                  switch is decided in <head> before the first stylesheet, and
+                  every CSS px length above 1px must follow --ui-z; one bare
+                  length left behind is a control that stays 100% while its
+                  neighbours shrink.
   about           the 关于本站 sheet must carry the real APP_VERSION and
                   DATA_SCRAPED_AT, not an unsubstituted placeholder (M-119).
   i18n            missing EN/JA translation counts must not grow past the
@@ -87,7 +92,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.2.3"
+EXPECTED_APP_VERSION = "4.2.4"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -982,6 +987,69 @@ def check_page_zoom() -> None:
        "three gesture guards are on document, the wheel guard is not")
 
 
+UI_CSS_NAMES = ("tokens", "base", "map", "containers", "list", "detail", "filters", "overlays")
+
+
+def check_ui_density() -> None:
+    """4.2.4: large screens draw the UI at 95% through --ui-z."""
+    if not MAP_HTML.exists():
+        fail("ui density", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    problems = []
+
+    head = html.find("window.__jpfmUiZ = uiZ")
+    tokens = html.find("css/tokens.css")
+    if head < 0:
+        problems.append("the <head> density snippet (window.__jpfmUiZ) is gone")
+    elif tokens < 0 or head > tokens:
+        problems.append("the density snippet runs after the first UI stylesheet, "
+                        "so the first paint is at the wrong size")
+    if head >= 0 and "Math.min(a, b) >= 560" not in html:
+        problems.append("the density rule no longer reads the screen's short side "
+                        "against 560 — phones and the Fold cover must stay at 100%")
+    if not re.search(r':root\[data-ui-z="95"\]\s*\{\s*--ui-z:\s*\.95;', html):
+        problems.append(':root[data-ui-z="95"] no longer sets --ui-z: .95')
+    for fs in ("100%", "115%", "130%"):
+        if f"calc({fs} * var(--ui-z, 1))" not in html:
+            problems.append(f"html font-size {fs} does not follow --ui-z, so rem text stays 100%")
+    if "window.__jpfmUiZ" not in html.split("css/tokens.css", 1)[-1]:
+        problems.append("core.js no longer re-reads window.__jpfmUiZ on measure "
+                        "(opening a Fold would keep the cover's density)")
+
+    blocks = re.findall(r"<style>\s*(.*?)</style>", html, re.S)
+    seen = set()
+    bare = []
+    for css in blocks:
+        first = re.search(r"css/(\w+)\.css", css[:400])
+        name = first.group(1) if first else None
+        if name not in UI_CSS_NAMES:
+            continue
+        seen.add(name)
+        body = re.sub(r"/\*.*?\*/|@media[^{]*\{", "", css, flags=re.S)
+        body = body.replace("var(--ui-z, 1)", "")
+        for m in re.finditer(r"(?<![\w.#-])-?(\d*\.?\d+)px\b", body):
+            if float(m.group(1)) <= 1:
+                continue
+            before = body[max(0, m.start() - 5):m.start()]
+            if before.endswith("calc("):
+                continue
+            bare.append(f"{name}.css …{body[max(0, m.start() - 30):m.end()].strip()}")
+    missing = [n for n in UI_CSS_NAMES if n not in seen]
+    if missing:
+        problems.append(f"UI stylesheets not found on the page: {missing}")
+    if bare:
+        problems.append(f"{len(bare)} CSS px length(s) do not follow --ui-z "
+                        f"(densify_css did not run?): {bare[:4]}")
+
+    if problems:
+        fail("ui density", "; ".join(problems))
+        return
+    ok("ui density",
+       "the <head> switch precedes tokens.css, --ui-z reaches html font-size, and "
+       f"every px length above 1px in the {len(seen)} UI stylesheets follows it")
+
+
 def check_service_worker() -> None:
     if not SW_JS.exists():
         fail("sw", f"{SW_JS} does not exist — run map.py first")
@@ -1265,6 +1333,7 @@ def main(argv: list[str] | None = None) -> int:
         check_ui_bundle()            # 4.0.0
         check_tokyo_areas()          # 4.2.3
         check_page_zoom()            # 3.2.3
+        check_ui_density()           # 4.2.4
         check_service_worker()
         check_manifest_identity()    # M-145
         check_about_stamps()         # M-119

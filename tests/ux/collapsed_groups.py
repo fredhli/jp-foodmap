@@ -62,10 +62,11 @@ def geometry(page, name):
     """Compare each mounted heading against the full business group sequence."""
     data = page.evaluate("""() => {
       const s=App.state, groups=ListMod.groupsFor(s), open=s.saved.openGroups;
+      const z=(App.layout && App.layout.z) ? App.layout.z() : 1;   // 4.2.4 UI density
       let seq=[], expected={}, afterRows=false;
       for(const g of groups){
         let hasRows=(!open||open.has(g.key)) && g.items.length>0;
-        expected[g.key]={top:seq.length===0?8:afterRows?24:0,bottom:hasRows?12:0};
+        expected[g.key]={top:(seq.length===0?8:afterRows?24:0)*z,bottom:(hasRows?12:0)*z};
         seq.push({key:g.key,t:'g'});
         if(hasRows)for(const it of g.items)seq.push({key:it.ref,t:'r'});
         afterRows=hasRows;
@@ -78,9 +79,9 @@ def geometry(page, name):
           problems.push('row gap/overlap at '+idx);
         const b=el.querySelector('[data-group]'); if(!b)return;
         const key=b.dataset.group, exp=expected[key], st=getComputedStyle(el), br=b.getBoundingClientRect();
-        if(parseFloat(st.paddingTop)!==exp.top||parseFloat(st.paddingBottom)!==exp.bottom)
+        if(Math.abs(parseFloat(st.paddingTop)-exp.top)>0.05||Math.abs(parseFloat(st.paddingBottom)-exp.bottom)>0.05)
           problems.push(key+': padding '+st.paddingTop+'/'+st.paddingBottom+' expected '+exp.top+'/'+exp.bottom);
-        if(br.height<43.9)problems.push(key+': touch target '+br.height);
+        if(br.height<44*z-0.1)problems.push(key+': touch target '+br.height);
         for(const emoji of b.querySelectorAll(':scope > .emj'))
           if(Math.abs(emoji.getBoundingClientRect().width-parseFloat(emoji.style.width))>.5)
             problems.push(key+': emoji width changed before image decode');
@@ -211,7 +212,7 @@ try:
                       const box=document.querySelector('.dt-cand--collapsed'),button=box.querySelector('button');
                       return {box:box.getBoundingClientRect().height,button:button.getBoundingClientRect().height};
                     }""")
-                    check(cand['button'] >= 44 and abs(cand['box']-cand['button']) < 1,
+                    check(cand['button'] >= 44 * lib_browser.ui_z(page) - 0.25 and abs(cand['box']-cand['button']) < 1,
                           case + ': collapsed candidate padding ' + str(cand))
                     page.locator('[data-act="cand-open"]').click()
                     page.wait_for_timeout(150)

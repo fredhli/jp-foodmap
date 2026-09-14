@@ -52,6 +52,7 @@ from lib_browser import (  # noqa: E402
     serve_docs,
     shown_count,
     total_count,
+    ui_z,
     wait_ready,
 )
 
@@ -327,8 +328,9 @@ def check_marker_actions(page, name):
     page.wait_for_timeout(350)
     actions = _detail_action_geometry(page)
     first_actions = page.evaluate("() => window.__smokeFirstMarkerActions")
+    touch = 44 * ui_z(page) - 0.25      # 4.2.4: 41.8 on the Fold inner screen and desktops
     bad = lambda data: any(
-        a is None or a["h"] < 44 or not a["inView"] or not a["hit"]
+        a is None or a["h"] < touch or not a["inView"] or not a["hit"]
         for a in data["items"]
     )
     if bad(first_actions) or bad(actions):
@@ -648,8 +650,9 @@ def check_segmented_pill(page, name):
     if {e["tab"] for e in state["segments"]} != {"results", "saved", "filters"}:
         raise AssertionError(f"unexpected segments: {state['segments']}")
     # 44px is the touch minimum; the segments sit in a row, so each one only
-    # has to be 44 tall.
-    if any(e["h"] < 44 or e["w"] < 28 or not e["inView"] or not e["hit"]
+    # has to be 44 tall (times the 4.2.4 UI density).
+    z = ui_z(page)
+    if any(e["h"] < 44 * z - 0.25 or e["w"] < 28 * z or not e["inView"] or not e["hit"]
            for e in state["segments"]):
         raise AssertionError(f"an entry segment is unreachable: {state['segments']}")
     # The entry bar and the FAB column share the bottom of the screen and must
@@ -764,7 +767,8 @@ def check_chrome(page, name):
     out = []
     if g["phone"] and g["cover"]:
         controls = [g[k] for k in ["input", "region", "nearby", "avatar"]]
-        if not all(c and c["w"] >= 44 and c["h"] >= 44 for c in controls):
+        touch = 44 * ui_z(page) - 0.25
+        if not all(c and c["w"] >= touch and c["h"] >= touch for c in controls):
             raise AssertionError(f"Fold header controls need 44px touch bounds: {g}")
         centres = [c["t"] + c["h"] / 2 for c in controls]
         if max(centres) - min(centres) > 1 or any(a["r"] > b["l"] for a,b in zip(controls,controls[1:])):
@@ -884,10 +888,11 @@ def check_workbench(page, name):
         raise AssertionError(f"detail column did not slide in: {opened}")
     # The 4.2.0 sticky title background reaches both edges; the name retains
     # 16px side padding and 8px top padding, alongside the 44px controls.
+    z = ui_z(page)
     if opened["mode"] == "mid":
-        if (opened["titlePad"] < 16 or opened["titleTop"] < 8
+        if (opened["titlePad"] < 16 * z - 0.25 or opened["titleTop"] < 8 * z - 0.25
                 or not opened["closeInTitle"] or not opened["closeHit"]
-                or min(opened["closeHit"]) < 44):
+                or min(opened["closeHit"]) < 44 * z - 0.25):
             raise AssertionError(f"compact title lost spacing or close target: {opened}")
     elif opened["gap"] < 10:
         raise AssertionError(
@@ -910,7 +915,8 @@ def check_workbench(page, name):
               saved: JSON.parse(localStorage.getItem('tabelog.listView') || '{}')
                        .leftCollapsed};
     }""")
-    if coll["left"] != "56px" or coll["rail"] == "none" or not coll["railVisible"]:
+    if (not coll["left"].endswith("px") or abs(float(coll["left"][:-2]) - 56 * z) > 0.5
+            or coll["rail"] == "none" or not coll["railVisible"]):
         raise AssertionError(f"collapsing the left column did not land: {coll}")
     if coll["saved"] is not True:
         raise AssertionError(

@@ -13,6 +13,30 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.4] - 2026-09-14
+
+On the Fold's inner screen and on desktops the interface is drawn at 95% of
+its former size: text, buttons, rows, panels, column widths, popovers and map
+markers all match what 4.2.3 looked like with Chrome's page zoom at 95%, while
+the browser itself stays at 100%. iPhones and the Fold cover screen are
+unchanged.
+
+A screen counts as large when its short side is at least 560 CSS px, so the
+decision follows the device and not the window: the inner screen is large in
+both orientations and in a split window, a phone stays at 100% in landscape,
+and opening or closing a Fold switches it on the spot. A `<head>` snippet sets
+`html[data-ui-z="95"]` before the first stylesheet; `--ui-z` then scales
+`html { font-size }` (every rem) and `map.py`'s new `densify_css()` rewrites
+every CSS px length above 1px into `calc(Npx * var(--ui-z, 1))` at build time,
+so the sources keep plain px. JS geometry that stands for a designed length —
+column clamps, the rail and top bar, sheet heights, popover widths and
+margins, the virtual list's row estimates, cluster icons — goes through the
+new `App.layout.px()`. The width breakpoints that pick the narrow / mid / wide
+layout (750 / 1100) do not move, and neither do the map tiles. `?uiz=100` or
+`?uiz=95` forces either density, and 关于本站's layout diagnostics report it.
+`verify_build.py` gains a `ui density` check. No storage key, sync field or
+Worker call changed.
+
 ## [4.2.3] - 2026-09-14
 
 The region filter picks several places at once. Every prefecture row is a

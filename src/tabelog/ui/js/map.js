@@ -55,12 +55,17 @@
   var programDepth = 0, moveRaf = 0, lastMV = -1, lastSig = '', lastMapRectSig = '';
   var lastRenderedIds = null, lastSelected = null, lastFavSig = '', lastLang = '';
 
-  var farScale = null;
+  var farScale = null, lastZ = null;
+  // Design px at 100% density; wrap every one in px() at use time (4.2.4).
   var CLUSTER_S = 32, CLUSTER_M = 40, CLUSTER_L = 44;
   var LONGPRESS_MS = 700;
   var BUBBLE_MIN_MAP_H = 210;         // §6.3 / LAY-04: no name bubble in a short map strip
   var BUBBLE_HALF_W = 150;            // half the widest name bubble, for reveal keep-out
   var BUBBLE_KEEPOUT_TOP = 108;       // bubble height + its offset above the marker
+  var SHORT_MAP_H = 80;               // below this the selected marker lays out in a row
+
+  /** px(n) → a designed CSS length at the current UI density (core layout.px). */
+  function px(n) { return layoutApi.px(n); }
 
   /* ======================================================================
      init — adopt folium's map, never create one
@@ -250,9 +255,9 @@
     var n = cl.getChildCount();
     var sz = n < 10 ? CLUSTER_S : (n < 50 ? CLUSTER_M : CLUSTER_L);
     return L.divIcon({
-      html: '<span class="mp-cluster mp-cluster-' + (n < 10 ? 's' : (n < 50 ? 'm' : 'l')) + ' num" style="width:' + sz + 'px;height:' + sz + 'px">' + util.fmtCount(n) + '</span>',
+      html: '<span class="mp-cluster mp-cluster-' + (n < 10 ? 's' : (n < 50 ? 'm' : 'l')) + ' num" style="width:' + layoutApi.cssPx(sz) + ';height:' + layoutApi.cssPx(sz) + '">' + util.fmtCount(n) + '</span>',
       className: 'mp-cluster-wrap',
-      iconSize: L.point(sz, sz)
+      iconSize: L.point(px(sz), px(sz))
     });
   }
 
@@ -345,7 +350,7 @@
   var _tagProbe = null, _tagW = {};
   function tagWidth(label) {
     var fs = App.state.fontScale;
-    var k = fs + '|' + label;
+    var k = fs + '|' + App.state.layout.z + '|' + label;
     if (_tagW[k] !== undefined) return _tagW[k];
     if (!_tagProbe) {
       _tagProbe = document.createElement('span');
@@ -353,7 +358,7 @@
       mapRoot.appendChild(_tagProbe);
     }
     _tagProbe.textContent = label;
-    var w = _tagProbe.getBoundingClientRect().width || (label.length * 8 + 14);
+    var w = _tagProbe.getBoundingClientRect().width || px(label.length * 8 + 14);
     _tagW[k] = w;
     return w;
   }
@@ -386,19 +391,19 @@
         if (seen[cid]) continue;
         seen[cid] = 1;
         var cn = vp.getChildCount ? vp.getChildCount() : 1;
-        var csz = cn < 10 ? CLUSTER_S : (cn < 50 ? CLUSTER_M : CLUSTER_L);
+        var csz = px(cn < 10 ? CLUSTER_S : (cn < 50 ? CLUSTER_M : CLUSTER_L));
         var cp = map.latLngToContainerPoint(vp.getLatLng());
         obstacles.push({ x: cp.x - csz / 2, y: cp.y - csz / 2, w: csz, h: csz });
         continue;
       }
       var p = map.latLngToContainerPoint(mk.getLatLng());
       var far = farScale && id !== s.selected.id;
-      var radius = far ? 10 : 14;
+      var radius = px(far ? 10 : 14);
       obstacles.push({ x: p.x - radius, y: p.y - radius, w: radius * 2, h: radius * 2 });
-      var w = far ? 6 : tagWidth(priceLabel(r));
+      var w = far ? px(6) : tagWidth(priceLabel(r));
       items.push({
         mk: mk, id: id, far: far,
-        rect: { x: p.x - w / 2, y: p.y + (far ? 12 : 16), w: w, h: far ? 6 : 22 },
+        rect: { x: p.x - w / 2, y: p.y + px(far ? 12 : 16), w: w, h: px(far ? 6 : 22) },
         pri: (id === s.selected.id ? 0 : (s.user.fav.has(id) ? 1 : 2)),
         award: Data.bestAwardRank(r),
         rating: r.rating === null || r.rating === undefined ? -1 : r.rating
@@ -406,7 +411,7 @@
     }
     items.sort(function (a, b) { return a.pri - b.pri || a.award - b.award || b.rating - a.rating; });
     var placed = [];
-    var OFFSETS = [0, -20, 20, -38, 38];
+    var OFFSETS = [0, -20, 20, -38, 38].map(function (n) { return px(n); });
     function fits(rect) {
       var i;
       for (i = 0; i < obstacles.length; i++) if (overlaps(rect, obstacles[i])) return false;
@@ -515,7 +520,7 @@
     if (!map || !plateMarks.length) return;
     var z = map.getZoom(), placed = [], i;
     var U = mapOrigin(), rect = App.state.layout.mapRect;
-    var x0 = rect.x - U.x - 60, x1 = x0 + rect.w + 120, y0 = rect.y - U.y - 60, y1 = y0 + rect.h + 120;
+    var x0 = rect.x - U.x - px(60), x1 = x0 + rect.w + px(120), y0 = rect.y - U.y - px(60), y1 = y0 + rect.h + px(120);
     var list = plateMarks.slice().sort(function (a, b) { return a.pri - b.pri; });   // pins first
     for (i = 0; i < list.length; i++) {
       var el = list[i].mk.getElement();
@@ -527,8 +532,8 @@
       var p = map.latLngToContainerPoint([list[i].lat, list[i].lon]);
       if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) { inner.classList.remove('is-plateless'); continue; }
       inner.classList.remove('is-plateless');
-      var w = plate.offsetWidth || 60, h = plate.offsetHeight || 16;
-      var r = { x: p.x - w / 2, y: p.y + 14, w: w, h: h };
+      var w = plate.offsetWidth || px(60), h = plate.offsetHeight || px(16);
+      var r = { x: p.x - w / 2, y: p.y + px(14), w: w, h: h };
       var hit = false;
       for (var k = 0; k < placed.length && !hit; k++) if (overlaps(r, placed[k])) hit = true;
       if (hit) inner.classList.add('is-plateless'); else placed.push(r);
@@ -604,7 +609,7 @@
     var id = s.selected.id;
     var r = id ? Data.byId(id) : null;
     var rect = s.layout.mapRect;
-    var allow = !!r && bubbleSuppressedId !== id && rect.h >= BUBBLE_MIN_MAP_H && rect.w >= 220 && !s.search.active;
+    var allow = !!r && bubbleSuppressedId !== id && rect.h >= px(BUBBLE_MIN_MAP_H) && rect.w >= px(220) && !s.search.active;
     if (!allow) { hideBubble(); return; }
     if (!bubbleEl) {
       bubbleAnchor = document.createElement('div');
@@ -637,15 +642,17 @@
     var U = mapOrigin();
     var ll = L.latLng(r.lat, r.lon);
     L.DomUtil.setPosition(bubbleAnchor, map.latLngToLayerPoint(ll));
-    var bw = bubbleEl.offsetWidth || 220, bh = bubbleEl.offsetHeight || 56;
+    var bw = bubbleEl.offsetWidth || px(220), bh = bubbleEl.offsetHeight || px(56);
     var p = map.latLngToContainerPoint(ll);
-    var x0 = rect.x - U.x + 8, y0 = rect.y - U.y + 8;
-    var x1 = rect.x - U.x + rect.w - 8, y1 = rect.y - U.y + rect.h - 8;
+    var inset = px(8), side = px(24);
+    var x0 = rect.x - U.x + inset, y0 = rect.y - U.y + inset;
+    var x1 = rect.x - U.x + rect.w - inset, y1 = rect.y - U.y + rect.h - inset;
+    // offsets mirror the .mp-bubble.is-* transforms in css/map.css
     var cands = [
-      { cls: 'is-above', x: p.x - bw / 2, y: p.y - 22 - bh, slide: true },
-      { cls: 'is-right', x: p.x + 24, y: p.y - bh / 2, slide: false },
-      { cls: 'is-left', x: p.x - 24 - bw, y: p.y - bh / 2, slide: false },
-      { cls: 'is-below', x: p.x - bw / 2, y: p.y + 42, slide: true }
+      { cls: 'is-above', x: p.x - bw / 2, y: p.y - px(22) - bh, slide: true },
+      { cls: 'is-right', x: p.x + side, y: p.y - bh / 2, slide: false },
+      { cls: 'is-left', x: p.x - side - bw, y: p.y - bh / 2, slide: false },
+      { cls: 'is-below', x: p.x - bw / 2, y: p.y + px(42), slide: true }
     ];
     var pick = cands[0], dx = 0;
     for (var i = 0; i < cands.length; i++) {
@@ -953,7 +960,8 @@
     }); });
   }
   function visibleFrames(gap) {
-    gap = gap === undefined ? 4 : gap;
+    gap = gap === undefined ? px(4) : gap;
+    var minSide = px(36);
     var s = App.state, r = s.layout.mapRect, U = mapOrigin();
     var box = { left: r.x - U.x, top: r.y - U.y, right: r.x - U.x + r.w, bottom: r.y - U.y + r.h };
     var search = document.getElementById('search-root');
@@ -978,9 +986,9 @@
         next.push({ left: f.left, top: f.top, right: f.right, bottom: Math.min(f.bottom, o.top) });
         next.push({ left: f.left, top: Math.max(f.top, o.bottom), right: f.right, bottom: f.bottom });
       });
-      frames = next.filter(function (f) { return f.right - f.left >= 36 && f.bottom - f.top >= 36; });
+      frames = next.filter(function (f) { return f.right - f.left >= minSide && f.bottom - f.top >= minSide; });
     });
-    return frames.filter(function (f) { return f.right - f.left >= 36 && f.bottom - f.top >= 36; });
+    return frames.filter(function (f) { return f.right - f.left >= minSide && f.bottom - f.top >= minSide; });
   }
   function visibleFrame() {
     var frames = visibleFrames();
@@ -995,7 +1003,7 @@
     job(b);
   }
   function fitOptions(box, zoom) {
-    var size = map.getSize(), pad = Math.min(24, (box.bottom - box.top) / 4, (box.right - box.left) / 4);
+    var size = map.getSize(), pad = Math.min(px(24), (box.bottom - box.top) / 4, (box.right - box.left) / 4);
     return { animate: !motion.reduced, maxZoom: zoom,
       paddingTopLeft: [box.left + pad, box.top + pad],
       paddingBottomRight: [size.x - box.right + pad, size.y - box.bottom + pad] };
@@ -1075,10 +1083,11 @@
     var st = App.state, rect = st.layout.mapRect, U = mapOrigin();
     var selectedEl = mapRoot.querySelector('.mp-mk.is-selected');
     var dot = selectedEl && selectedEl.querySelector('.mp-dot'), tag = selectedEl && selectedEl.querySelector('.mp-tag');
+    var ring = px(4);                       // the selected ring's inset: -4px in css/map.css
     if (dot && tag) {
       var dr = dot.getBoundingClientRect(), tr = tag.getBoundingClientRect();
-      var actual = { left: Math.min(dr.left - 4, tr.left) - U.x, top: Math.min(dr.top - 4, tr.top) - U.y,
-                     right: Math.max(dr.right + 4, tr.right) - U.x, bottom: Math.max(dr.bottom + 4, tr.bottom) - U.y };
+      var actual = { left: Math.min(dr.left - ring, tr.left) - U.x, top: Math.min(dr.top - ring, tr.top) - U.y,
+                     right: Math.max(dr.right + ring, tr.right) - U.x, bottom: Math.max(dr.bottom + ring, tr.bottom) - U.y };
       if (dr.width && tr.width && visibleFrames(0).some(function (f) {
         return actual.left >= f.left && actual.top >= f.top && actual.right <= f.right && actual.bottom <= f.bottom;
       })) { renderBubble(st); return; }
@@ -1089,21 +1098,22 @@
       return;
     }
     var p = map.latLngToContainerPoint([r.lat, r.lon]);
-    var short = rect.h < 80;
-    var padLeft = 18, padRight = 18, padTop = 18, padBottom = short ? 18 : 42;
+    var short = rect.h < px(SHORT_MAP_H);
+    var padLeft = px(18), padRight = px(18), padTop = px(18), padBottom = px(short ? 18 : 42);
     if (selectedEl) {
       var mr = selectedEl.getBoundingClientRect();
-      padLeft = Math.max(padLeft, p.x + U.x - mr.left + 4);
-      padRight = Math.max(padRight, mr.right - p.x - U.x + 4);
-      padTop = Math.max(padTop, p.y + U.y - mr.top + 4);
-      padBottom = Math.max(short ? 18 : 42, mr.bottom - p.y - U.y + 4);
+      padLeft = Math.max(padLeft, p.x + U.x - mr.left + ring);
+      padRight = Math.max(padRight, mr.right - p.x - U.x + ring);
+      padTop = Math.max(padTop, p.y + U.y - mr.top + ring);
+      padBottom = Math.max(px(short ? 18 : 42), mr.bottom - p.y - U.y + ring);
     }
-    var wantBubble = rect.h >= BUBBLE_MIN_MAP_H && rect.w >= 220;
+    var wantBubble = rect.h >= px(BUBBLE_MIN_MAP_H) && rect.w >= px(220);
+    var halfW = px(BUBBLE_HALF_W), keepTop = px(BUBBLE_KEEPOUT_TOP);
     function choose(withBubble) {
       var best = null;
       frames.forEach(function (f) {
         var l = padLeft, rr = padRight, tt = padTop;
-        if (withBubble) { l = Math.max(l, BUBBLE_HALF_W); rr = Math.max(rr, BUBBLE_HALF_W); tt = Math.max(tt, BUBBLE_KEEPOUT_TOP); }
+        if (withBubble) { l = Math.max(l, halfW); rr = Math.max(rr, halfW); tt = Math.max(tt, keepTop); }
         var x0 = f.left + l, x1 = f.right - rr, y0 = f.top + tt, y1 = f.bottom - padBottom;
         if (x1 < x0 || y1 < y0) return;
         var dx = p.x - util.clamp(p.x, x0, x1), dy = p.y - util.clamp(p.y, y0, y1);
@@ -1216,6 +1226,11 @@
       { enableHighAccuracy: true, maximumAge: 600000, timeout: 15000 });
     } catch (_) { finish(null, '无法取得位置'); }
   };
+  // The icon box is in real px, so it is rebuilt when the UI density changes.
+  function locationIcon() {
+    var d = layoutApi.cssPx(16), box = px(22);
+    return L.divIcon({ className: 'mp-location-marker', html: '<span style="display:block;width:' + d + ';height:' + d + ';background:#2563eb;border:' + layoutApi.cssPx(3) + ' solid white;border-radius:50%;box-shadow:0 0 0 1px #2563eb"></span>', iconSize: [box, box], iconAnchor: [box / 2, box / 2] });
+  }
   function paintLocation(s) {
     var fix = Data.locationOrigin(s), nb = s.nearby;
     if (!fix) {
@@ -1224,9 +1239,14 @@
     }
     var ll = [fix.lat, fix.lon];
     if (!locationMarker) {
-      locationMarker = L.marker(ll, { keyboard: true, title: t('显示我的位置'), alt: t('显示我的位置'),
-        icon: L.divIcon({ className: 'mp-location-marker', html: '<span style="display:block;width:16px;height:16px;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 0 0 1px #2563eb"></span>', iconSize: [22, 22], iconAnchor: [11, 11] }) });
+      locationMarker = L.marker(ll, { keyboard: true, title: t('显示我的位置'), alt: t('显示我的位置'), icon: locationIcon() });
+      locationMarker._z = layoutApi.z();
       locationMarker.bindTooltip(t('显示我的位置'));
+    } else if (locationMarker._z !== layoutApi.z()) {
+      locationMarker._z = layoutApi.z();
+      // re-added below, so the tooltip's focus listeners reach the new element
+      if (map.hasLayer(locationMarker)) map.removeLayer(locationMarker);
+      locationMarker.setIcon(locationIcon());
     }
     locationMarker.setLatLng(ll).addTo(map);
     if (!accuracyCircle) accuracyCircle = L.circle(ll, { interactive: false, color: '#2563eb', weight: 1, fillOpacity: .06 });
@@ -1265,8 +1285,9 @@
   function fabSig(s) {
     var on = ['long', 'city', 'landmarks', 'pins'].filter(function (k) { return s.layers[k]; }).length;
     var nb = nearbyOf(s);
+    // layout.z: the stack is re-measured when the UI density changes
     return [s.layout.mode, s.layout.W >= 700 ? 'z' : '', on, s.overlay.kind === 'layers' ? 'o' : '',
-            nb.pending ? 'p' : (nb.active ? 'n' : ''), s.lang].join('|');
+            nb.pending ? 'p' : (nb.active ? 'n' : ''), s.lang, s.layout.z].join('|');
   }
 
   var lastFab = '', lastFabHide = null;
@@ -1298,8 +1319,8 @@
     if (sigChanged || hide !== lastFabHide) {            // measure only when the stack really changed
       lastFabHide = hide;
       var rect = fabEl.getBoundingClientRect();
-      layoutApi.setFabWidth(hide ? 0 : (rect.width || 44));
-      document.documentElement.style.setProperty('--fab-h', Math.round(hide ? 0 : rect.height || 44) + 'px');
+      layoutApi.setFabWidth(hide ? 0 : (rect.width || px(44)));
+      document.documentElement.style.setProperty('--fab-h', Math.round(hide ? 0 : rect.height || px(44)) + 'px');
     }
   }
   function btn(key, ic, label) {
@@ -1311,13 +1332,13 @@
     fabEl.classList.remove('is-horizontal');
     fabEl.style.top = ''; fabEl.style.bottom = '';
     if (fabEl.classList.contains('is-hidden')) return;
-    var r = s.layout.mapRect, b = fabEl.getBoundingClientRect(), gap = 4;
+    var r = s.layout.mapRect, b = fabEl.getBoundingClientRect(), gap = px(4);
     if (!r || !b.width || !b.height) return;
     if (b.top >= r.y + gap && b.bottom <= r.y + r.h - gap) return;
     var locate = fabEl.querySelector('[data-fab="locate"]'), layers = fabEl.querySelector('[data-fab="layers"]');
     if (!locate || !layers) return;
     var a = locate.getBoundingClientRect(), c = layers.getBoundingClientRect();
-    var rowGap = parseFloat(getComputedStyle(fabEl).gap) || 8;
+    var rowGap = parseFloat(getComputedStyle(fabEl).gap) || px(8);
     var w = a.width + c.width + rowGap, h = Math.max(a.height, c.height);
     if (r.w < w + gap * 2 || r.h < h + gap * 2) return;
     fabEl.classList.add('is-horizontal');
@@ -1341,6 +1362,14 @@
       _tagW = {};
     }
 
+    // UI density changed (a Fold opened or closed): cluster icons carry a real
+    // px iconSize, so rebuild them; the location icon follows in paintLocation.
+    var zChanged = s.layout.z !== lastZ;
+    if (zChanged) {
+      if (lastZ !== null && cluster) { try { cluster.refreshClusters(); } catch (_) {} }
+      lastZ = s.layout.z;
+    }
+
     if (full || any(changed, ['notices'])) {
       var wantOffline = !!s.notices.offline;
       if (wantOffline !== offline || (wantOffline && !offlineNote)) M.setTilesOffline(wantOffline);
@@ -1355,10 +1384,10 @@
     var rectSig = [s.layout.W, s.layout.H, s.layout.U.x, s.layout.U.y, s.layout.U.w, s.layout.U.h].join(',');
     if (rectSig !== lastMapRectSig) { lastMapRectSig = rectSig; if (!full) invalidateGeometry(); }
 
-    document.documentElement.toggleAttribute('data-map-short', s.layout.mapRect.h < 80);
+    document.documentElement.toggleAttribute('data-map-short', s.layout.mapRect.h < px(SHORT_MAP_H));
     renderFab(s);
     layoutFab(s);
-    if (full || any(changed, ['nearby', 'lang'])) paintLocation(s);
+    if (full || zChanged || any(changed, ['nearby', 'lang'])) paintLocation(s);
 
     if (markersChanged || full || any(changed, ['layout', 'sheet', 'columns', 'search', 'selected', 'mapView', 'fontScale', 'lang'])) {
       layoutTags();
