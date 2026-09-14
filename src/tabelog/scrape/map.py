@@ -73,6 +73,7 @@ from tabelog.paths import (
     CACHE_DIR,
     I18N_EN_JSON,
     I18N_JA_JSON,
+    TABELOG_AREAS_TOKYO_JSON,
 )
 from tabelog.scrape.map_data import (
     DEFAULT_OFF_GENRES,
@@ -80,7 +81,11 @@ from tabelog.scrape.map_data import (
     GENRE_CATEGORIES,
     GENRE_EMOJI,
     MEAL_GROUPS,
+    TOKYO_ZONE_ALIASES,
+    TOKYO_ZONE_GROUPS,
+    TOKYO_ZONES,
     genre_tokens,
+    tokyo_zone_of,
     unwrap_genre,
 )
 from tabelog.scrape.search_norm import build_han_variants, canon_str
@@ -228,12 +233,15 @@ _COUNT_TPL_LITERAL_RE = re.compile(
 # an English value may legitimately contain ';'.
 _UI_I18N_LITERAL_RE = re.compile(r"window\.UI_I18N_TABLES\s*=[^\n]*?/\*__UI_I18N_END__\*/")
 _MEAL_GROUPS_LITERAL_RE = re.compile(r"window\.MEAL_GROUPS\s*=[^\n]*?/\*__MEAL_GROUPS_END__\*/")
+# 4.2.3: the Tokyo district table carries its own four languages per name.
+_TOKYO_AREAS_LITERAL_RE = re.compile(r"window\.TOKYO_AREAS\s*=[^\n]*?/\*__TOKYO_AREAS_END__\*/")
 
 
 def _scan_cjk_runs(html: str) -> set[str]:
     scanned = _HAN_VARIANTS_LITERAL_RE.sub("", html)
     scanned = _UI_I18N_LITERAL_RE.sub("", scanned)  # 4.0.0
     scanned = _MEAL_GROUPS_LITERAL_RE.sub("", scanned)  # 4.0.0
+    scanned = _TOKYO_AREAS_LITERAL_RE.sub("", scanned)  # 4.2.3
     scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
     scanned = _PREFS_LITERAL_RE.sub("", scanned)  # M-023
     scanned = _PREF_GROUPS_LITERAL_RE.sub("", scanned)  # M-023 (C1)
@@ -868,6 +876,78 @@ def pref_l10n_table(counts: dict[int, int] | None = None) -> list[dict]:
             {"ja": ja, "sc": sc, "tc": tc, "en": _PREF_EN[i], "n": counts.get(i, 0)}
         )
     return out
+
+
+# 4.2.3: the Tokyo district table. Rows are not given a new field — the page
+# reads the small-area code straight out of detail_url with this same pattern.
+TOKYO_AREA_URL_RE = re.compile(r"^https://tabelog\.com/tokyo/A13\d{2}/(A13\d{4})/\d+/?$")
+
+
+def build_tokyo_areas(rows: list[dict]) -> dict | None:
+    """window.TOKYO_AREAS: map_data's curated districts joined with Tabelog's
+    own small-area names (data/tabelog_areas/tokyo.json). Keys are the UI
+    language codes (zh / tw / en / ja) the page already uses for PREFS.
+
+    Returns None when the name table has not been scraped; the page then shows
+    no district picker. Raises when a small area has no district, because that
+    restaurant would silently belong to none."""
+    if not TABELOG_AREAS_TOKYO_JSON.exists():
+        print(f"  WARNING {TABELOG_AREAS_TOKYO_JSON} missing — Tokyo districts disabled "
+              f"(run scrape_all.py --tokyo-district)")
+        return None
+    names = json.loads(TABELOG_AREAS_TOKYO_JSON.read_text(encoding="utf-8"))
+    small_names = names.get("small") or {}
+
+    unmapped = sorted(c for c in small_names if tokyo_zone_of(c) is None)
+    if unmapped:
+        raise SystemExit(
+            f"Tokyo small area(s) with no district: {', '.join(unmapped)} — add them to "
+            f"TOKYO_ZONES in map_data.py"
+        )
+
+    def four(entry: dict) -> dict:
+        zh = entry["zh"]
+        return {"zh": zh, "tw": to_trad(zh), "en": entry["en"], "ja": entry["ja"]}
+
+    small = {}
+    for code in sorted(small_names):
+        v = small_names[code]
+        small[code] = {
+            "z": tokyo_zone_of(code),
+            "zh": v.get("sc") or v.get("ja", ""),
+            # Tabelog's own Traditional names keep 台 (高輪台) where s2twp would
+            # write 臺, so they are used as they are.
+            "tw": v.get("tc") or to_trad(v.get("sc") or ""),
+            "en": v.get("en") or "",
+            "ja": v.get("ja") or "",
+        }
+
+    tokyo_pref = _PREFECTURES.index("東京都")
+    urls = [r.get("detail_url") or "" for r in rows if r.get("pref") == tokyo_pref]
+    codes = [m.group(1) for u in urls if (m := TOKYO_AREA_URL_RE.match(u))]
+    unknown = sorted({c for c in codes if c not in small})
+    per_zone: dict[str, int] = {}
+    for c in codes:
+        if c in small:
+            per_zone[small[c]["z"]] = per_zone.get(small[c]["z"], 0) + 1
+    print(
+        f"  tokyo districts:  {len(TOKYO_ZONES)} districts / {len(small)} small areas, "
+        f"{len(codes)}/{len(urls)} Tokyo rows placed "
+        f"(smallest {min(per_zone.values(), default=0)}, largest {max(per_zone.values(), default=0)})"
+    )
+    if len(codes) != len(urls):
+        print(f"  WARNING {len(urls) - len(codes)} Tokyo row(s) have a detail_url the district "
+              f"pattern does not match; they appear only under 東京都 as a whole")
+    if unknown:
+        print(f"  WARNING small area code(s) not in {TABELOG_AREAS_TOKYO_JSON.name}: {unknown}")
+
+    return {
+        "pref": tokyo_pref,
+        "groups": [dict(four(g), id=g["id"]) for g in TOKYO_ZONE_GROUPS],
+        "zones": [dict(four(z), id=z["id"], group=z["group"]) for z in TOKYO_ZONES],
+        "small": small,
+        "aliases": dict(TOKYO_ZONE_ALIASES),
+    }
 
 
 # After the prefecture is stripped, repeated tokens of the form "<name><suffix>"
@@ -2340,7 +2420,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.2.2"
+APP_VERSION = "4.2.3"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -22908,7 +22988,10 @@ def main(argv: list[str] | None = None) -> None:
             + ";/*__MEAL_GROUPS_END__*/\n"
             "window.UI_I18N_TABLES = "
             + json.dumps(ui_i18n_tables, ensure_ascii=False, separators=(",", ":"))
-            + ";/*__UI_I18N_END__*/"
+            + ";/*__UI_I18N_END__*/\n"
+            "window.TOKYO_AREAS = "
+            + json.dumps(build_tokyo_areas(core_rows), ensure_ascii=False, separators=(",", ":"))
+            + ";/*__TOKYO_AREAS_END__*/"
             "</script>\n"
         )
         ui_js_filled = {
@@ -23364,7 +23447,7 @@ def _postprocess_page(
     # failure, before the write, so docs/index.html is never the broken one.
     # The sentinel comments that end the two one-line literals are the
     # deliberate exception, and so is documentation naming a token.
-    _PLACEHOLDER_SENTINELS = {"__MEAL_GROUPS_END__", "__UI_I18N_END__"}
+    _PLACEHOLDER_SENTINELS = {"__MEAL_GROUPS_END__", "__UI_I18N_END__", "__TOKYO_AREAS_END__"}
     _stranded = sorted(
         tok
         for tok in set(re.findall(r"__[A-Z][A-Z0-9_]{2,}__", saved_html))

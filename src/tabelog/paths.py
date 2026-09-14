@@ -110,6 +110,12 @@ GEOCODE_CACHE = CACHE_DIR / "geocode_cache.json"
 # JSON directly; there's no separate build step.
 FAVORITES_BUILTIN_JSON = DATA / "favorites_builtin.json"
 
+# Tabelog's own area names for a prefecture — large areas (A1301) and small
+# areas (A130101), each in ja / zh-CN / zh-TW / en. Written by
+# `scrape_all.py --tokyo-district`; committed, so the build never fetches it.
+TABELOG_AREAS_DIR = DATA / "tabelog_areas"
+TABELOG_AREAS_TOKYO_JSON = TABELOG_AREAS_DIR / "tokyo.json"
+
 # UI translation tables. en.json is hand-edited Chinese-to-English
 # {cn_run: en_text} pairs covering every CJK run that appears as a text
 # node on the rendered page. map.py loads it at build time, intersects

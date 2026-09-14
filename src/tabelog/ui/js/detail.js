@@ -424,6 +424,9 @@
     var addr = det && det.address
       ? jaRun(det.address) + '<button type="button" class="link-btn dt-copy t-control" data-act="copy-addr">' + ic('copy', { cls: 'ic-sm' }) + esc(t('复制')) + '</button>'
       : quiet(loading ? t('正在载入…') : t('未提供'));
+    // 4.2.3: the Tabelog neighbourhood a Tokyo restaurant is filed under.
+    var hood = ctx.Data.neighborhoodName ? ctx.Data.neighborhoodName(r, s.lang) : '';
+    if (hood) stationHtml = '<span class="dt-hood">' + esc(hood) + '</span><span class="t-secondary"> · </span>' + stationHtml;
     var rows = infoRow('pin', null, stationHtml) +
       infoRow('seat', '座位', seat) +
       infoRow('map', null, addr);

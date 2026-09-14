@@ -1,0 +1,6 @@
+{
+  "__note__": "4.2.3 tabelog.filterState with several regions: `regions` (prefecture indices) and `areas` (Tokyo district ids) are the selection, `region` is the single-value view a 4.2.2 tab reads. It carries a retired/unknown district id and a duplicate, which must be dropped silently.",
+  "localStorage": {
+    "tabelog.filterState": "{\"rating\":3.4,\"uncheckedPrices\":[],\"uncheckedGenres\":[],\"awards\":[],\"bookableOnly\":false,\"onlyFav\":false,\"hideBlack\":true,\"hideForeign\":true,\"region\":null,\"regions\":[26,26],\"areas\":[\"shibuya\",\"no-such-district\",\"ginza\"]}"
+  }
+}

@@ -87,7 +87,17 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.2.2"
+EXPECTED_APP_VERSION = "4.2.3"
+
+# Tokyo district ids that have shipped (4.2.3). They are persisted in
+# tabelog.filterState, so check_tokyo_areas fails if one disappears from the
+# page without an alias in map_data.TOKYO_ZONE_ALIASES. Append, never remove.
+TOKYO_RELEASED_ZONE_IDS = (
+    "ginza", "tokyo-station", "akihabara", "tsukiji", "roppongi", "akasaka", "kagurazaka",
+    "shinagawa", "shinjuku", "shibuya", "omotesando", "ikebukuro", "meguro", "nakameguro",
+    "setagaya", "kamata", "sugamo", "nerima", "ueno", "asakusa", "oshiage", "kitasenju",
+    "nakano", "kichijoji", "tama",
+)
 
 # map.py is the single source of both build-time facts the About sheet states.
 # Parsed as text rather than imported: importing map.py runs the whole render
@@ -786,7 +796,7 @@ def check_ui_bundle() -> None:
     # An unsubstituted placeholder is a syntax error in whichever script it
     # landed in. map.py fails the build on one; this is the second line of
     # defence for a page built by an older map.py or edited by hand.
-    sentinels = {"__MEAL_GROUPS_END__", "__UI_I18N_END__"}
+    sentinels = {"__MEAL_GROUPS_END__", "__UI_I18N_END__", "__TOKYO_AREAS_END__"}
     stranded = sorted(
         tok for tok in set(re.findall(r"__[A-Z][A-Z0-9_]{2,}__", html))
         if tok not in sentinels
@@ -829,6 +839,96 @@ def check_ui_bundle() -> None:
         f"{' → '.join(l for l, _ in UI_LOAD_ORDER)}, no stranded placeholders, "
         f"UI i18n tables present",
     )
+
+
+_TOKYO_URL_RE = re.compile(r"^https://tabelog\.com/tokyo/A13\d{2}/(A13\d{4})/\d+/?$")
+_ZONE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
+
+
+def check_tokyo_areas() -> None:
+    """4.2.3: the Tokyo district table the region picker reads. Every Tokyo row
+    must land in a district (the page derives it from detail_url, so a URL the
+    pattern misses is a restaurant no district can show), every district needs
+    four names, and a district id, once shipped, is persisted in visitors'
+    tabelog.filterState — so none may disappear without an alias."""
+    if not MAP_HTML.exists():
+        fail("tokyo-areas", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    found = re.findall(r"window\.TOKYO_AREAS\s*=\s*(.*?);/\*__TOKYO_AREAS_END__\*/", html)
+    if len(found) != 1:
+        fail("tokyo-areas", f"window.TOKYO_AREAS appears {len(found)} times (expected once)")
+        return
+    try:
+        table = json.loads(found[0])
+    except Exception as exc:  # noqa: BLE001
+        fail("tokyo-areas", f"window.TOKYO_AREAS is not valid JSON: {exc}")
+        return
+    rows = load_json(RESTAURANTS_JSON)
+    tokyo_urls = [r.get("detail_url") or "" for r in rows
+                  if isinstance(r, dict) and str(r.get("detail_url") or "").startswith("https://tabelog.com/tokyo/")]
+    if table is None:
+        if tokyo_urls:
+            fail("tokyo-areas", "window.TOKYO_AREAS is null but the corpus has Tokyo rows — "
+                 "data/tabelog_areas/tokyo.json is missing")
+        else:
+            ok("tokyo-areas", "no Tokyo rows in this corpus; district table not needed")
+        return
+
+    problems: list[str] = []
+    langs = ("zh", "tw", "en", "ja")
+    groups = {g.get("id") for g in table.get("groups") or []}
+    zones = table.get("zones") or []
+    zone_ids = [z.get("id") for z in zones]
+    if len(zone_ids) != len(set(zone_ids)):
+        problems.append("duplicate district ids")
+    for z in zones:
+        if not _ZONE_ID_RE.match(str(z.get("id"))):
+            problems.append(f"district id {z.get('id')!r} is not a slug")
+        if z.get("group") not in groups:
+            problems.append(f"district {z.get('id')} has unknown group {z.get('group')!r}")
+        missing = [l for l in langs if not z.get(l)]
+        if missing:
+            problems.append(f"district {z.get('id')} has no {missing} name")
+    for g in table.get("groups") or []:
+        missing = [l for l in langs if not g.get(l)]
+        if missing:
+            problems.append(f"group {g.get('id')} has no {missing} name")
+    small = table.get("small") or {}
+    orphans = sorted(c for c, v in small.items() if v.get("z") not in zone_ids)
+    if orphans:
+        problems.append(f"small area(s) mapped to no live district: {orphans[:8]}")
+    aliases = table.get("aliases") or {}
+    bad_alias = sorted(k for k, v in aliases.items() if v not in zone_ids or k in zone_ids)
+    if bad_alias:
+        problems.append(f"alias(es) not pointing a retired id at a live district: {bad_alias}")
+    released = set(TOKYO_RELEASED_ZONE_IDS)
+    gone = sorted(released - set(zone_ids) - set(aliases))
+    if gone:
+        problems.append(f"shipped district id(s) removed without an alias: {gone}")
+
+    unplaced = []
+    per_zone: dict[str, int] = {}
+    for u in tokyo_urls:
+        m = _TOKYO_URL_RE.match(u)
+        if not m or m.group(1) not in small:
+            if len(unplaced) < 5:
+                unplaced.append(u)
+            continue
+        per_zone[small[m.group(1)]["z"]] = per_zone.get(small[m.group(1)]["z"], 0) + 1
+    placed = sum(per_zone.values())
+    if placed != len(tokyo_urls):
+        problems.append(f"{len(tokyo_urls) - placed} Tokyo row(s) fall in no district, e.g. {unplaced}")
+    empty = sorted(set(zone_ids) - set(per_zone))
+    if empty:
+        note(f"tokyo-areas: district(s) with no restaurant in this corpus: {empty}")
+
+    if problems:
+        fail("tokyo-areas", "; ".join(problems))
+        return
+    ok("tokyo-areas", f"{len(zones)} districts in {len(groups)} groups, {len(small)} small areas; "
+       f"{placed}/{len(tokyo_urls)} Tokyo rows placed "
+       f"(smallest {min(per_zone.values(), default=0)}, largest {max(per_zone.values(), default=0)})")
 
 
 def check_page_zoom() -> None:
@@ -1163,6 +1263,7 @@ def main(argv: list[str] | None = None) -> int:
         check_subcollections()       # M-031 / E2
         check_breakpoints()          # M-3.2-01 / GW P3-P4
         check_ui_bundle()            # 4.0.0
+        check_tokyo_areas()          # 4.2.3
         check_page_zoom()            # 3.2.3
         check_service_worker()
         check_manifest_identity()    # M-145

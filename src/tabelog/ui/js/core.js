@@ -495,7 +495,7 @@
       filters: {
         // Seeded to the full key lists by the adapter once config is loaded; the
         // sets are literal from then on (empty = cleared = no results).
-        region: null, ratingMin: 3.4, budgets: new Set(),
+        region: null, regions: new Set(), areas: new Set(), ratingMin: 3.4, budgets: new Set(),
         cuisines: new Set(),
         awards: new Set(), bookableOnly: false, favOnly: false,
         hideBlack: true, hideForeign: true, gcalOnly: false

@@ -1771,5 +1771,41 @@
   "返回附近": {
     "en": "Back to nearby",
     "ja": "周辺に戻る"
+  },
+  "东京": {
+    "en": "Tokyo",
+    "ja": "東京"
+  },
+  "东京都（全部）": {
+    "en": "All of Tokyo",
+    "ja": "東京都（すべて）"
+  },
+  "按区选择（{n} 个区）": {
+    "en": "Choose a district ({n})",
+    "ja": "エリアから選ぶ（{n}）"
+  },
+  "东京都 · 按区选择": {
+    "en": "Tokyo · Districts",
+    "ja": "東京都 · エリア"
+  },
+  "搜索地区或街区": {
+    "en": "Search regions or neighbourhoods",
+    "ja": "地域・エリアを検索"
+  },
+  "{name} 等 {n} 个地区": {
+    "en": "{name} + {m} more",
+    "ja": "{name} ほか{m}件"
+  },
+  "已选 {n} 个区": {
+    "en": "{n} selected",
+    "ja": "{n} エリアを選択中"
+  },
+  "完成（{n} 家）": {
+    "en": "Done ({n})",
+    "ja": "完了（{n} 件）"
+  },
+  "全选：{name}": {
+    "en": "Select all: {name}",
+    "ja": "すべて選択：{name}"
   }
 }

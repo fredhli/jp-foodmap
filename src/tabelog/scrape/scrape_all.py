@@ -6,6 +6,11 @@ varies by that one path segment.
   uv run python src/tabelog/scrape/scrape_all.py hyogo --top-pct 0.5
   uv run python src/tabelog/scrape/scrape_all.py okayama --hard-cap 200
   uv run python src/tabelog/scrape/scrape_all.py tottori --top-pct 2 --hard-cap 100
+  uv run python src/tabelog/scrape/scrape_all.py --tokyo-district
+
+--tokyo-district scrapes no restaurants: it only collects Tabelog's Tokyo
+area names (large + small areas, four languages) into
+data/tabelog_areas/tokyo.json. See the section above parse_args().
 
 Phase 1 paginates the list (sorted by rating desc). On the first page it
 reads the region's total restaurant count (the "全 N 件" badge) and
@@ -48,9 +53,11 @@ from tabelog.browser import get_or_spawn_chrome
 from tabelog.paths import (
     INTERMEDIATE_DIR,
     SCRAPE_FAILED_LEDGER,
+    TABELOG_AREAS_TOKYO_JSON,
     TABELOG_CSV,
     TABELOG_DIR,
     atomic_write_csv,
+    atomic_write_json,
 )
 
 BASE_TEMPLATE = "https://tabelog.com/{region}/rstLst/{page}/?Srt=D&SrtT=rt&sort_mode=1"
@@ -678,9 +685,181 @@ def append_and_dedupe(new_rows: list[dict], csv_path: Path,
         record_failed_rows(rejected, "empty_address")
 
 
+# --- --tokyo-district: Tabelog's area names -----------------------------------
+#
+# Every detail_url already carries its large and small area code
+# (/tokyo/A1303/A130302/<id>/), so no restaurant needs re-scraping; only the
+# names are missing. /tokyo/ lists the large areas and /tokyo/A13xx/ lists that
+# area's small areas, and the /cn/, /tw/, /en/ versions of the same pages give
+# Tabelog's own translations. ~130 same-origin fetches from inside the page,
+# which is far lighter than navigating (no images, ads or scripts).
+
+AREA_ROOT = "https://tabelog.com"
+AREA_LANGS = (("ja", ""), ("sc", "/cn"), ("tc", "/tw"), ("en", "/en"))
+AREA_PAGE_DELAY_S = 1.0
+AREA_MIN_LARGE = 25   # Tokyo has 31; fewer means the page layout changed
+
+AREA_LINKS_JS = r"""
+async ({ url, pref }) => {
+    const res = await fetch(url, { credentials: 'include' });
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const re = new RegExp('^/(?:(?:cn|tw|en)/)?' + pref + '/(A\\d{4})/(?:(A\\d{6})/)?$');
+    const links = [];
+    for (const a of doc.querySelectorAll('a[href]')) {
+        let u;
+        try { u = new URL(a.getAttribute('href'), location.origin); } catch (e) { continue; }
+        if (u.host !== location.host) continue;
+        const m = u.pathname.match(re);
+        if (!m) continue;
+        // Some languages wrap the name in extra spans; textContent flattens them.
+        const text = (a.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text) links.push([m[1], m[2] || null, text]);
+    }
+    return { status: res.status, title: doc.title || '', links };
+}
+"""
+
+
+def _clean_area_name(text: str) -> str:
+    # Drop a trailing shop count such as "銀座 (1,234)" if a layout adds one.
+    return re.sub(r"\s*[（(][\d,]+[)）]$", "", text).strip()
+
+
+async def fetch_area_links(session: Session, url: str, pref: str) -> list:
+    last_err: Exception | None = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            if "tabelog.com" not in (session.page.url or ""):
+                # fetch() must run on the tabelog.com origin, after Cloudflare
+                # has let this browser in.
+                await session.page.goto(f"{AREA_ROOT}/{pref}/", wait_until="domcontentloaded")
+                await asyncio.sleep(AREA_PAGE_DELAY_S)
+            got = await session.page.evaluate(AREA_LINKS_JS, {"url": url, "pref": pref})
+            await asyncio.sleep(AREA_PAGE_DELAY_S)
+            if got["status"] != 200:
+                hint = " (Cloudflare challenge: open tabelog.com in the Chrome window once)" \
+                    if "moment" in got["title"].lower() else ""
+                raise RuntimeError(f"HTTP {got['status']} {got['title']!r}{hint}")
+            return got["links"]
+        except Exception as e:
+            last_err = e
+            if _is_session_dead(e):
+                print(f"    attempt {attempt}/{MAX_RETRIES} session dead: {e}")
+                await session.reconnect()
+            else:
+                print(f"    attempt {attempt}/{MAX_RETRIES} ERROR: {e}")
+                await asyncio.sleep(1.5 * attempt)
+    raise RuntimeError(f"{url}: gave up after {MAX_RETRIES} attempts: {last_err}")
+
+
+def _small_area_codes_in_corpus(pref: str) -> set[str]:
+    codes: set[str] = set()
+    if not TABELOG_CSV.exists():
+        return codes
+    pat = re.compile(rf"^https://tabelog\.com/{pref}/A\d{{4}}/(A\d{{6}})/")
+    with TABELOG_CSV.open(encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            m = pat.match(r.get("detail_url") or "")
+            if m:
+                codes.add(m.group(1))
+    return codes
+
+
+def _report_area_diff(old: dict, new: dict) -> None:
+    for level in ("big", "small"):
+        before, after = old.get(level, {}), new.get(level, {})
+        added = sorted(set(after) - set(before))
+        removed = sorted(set(before) - set(after))
+        renamed = [
+            (code, lang, before[code].get(lang), after[code].get(lang))
+            for code in sorted(set(before) & set(after))
+            for lang, _ in AREA_LANGS
+            if before[code].get(lang) != after[code].get(lang)
+        ]
+        if added:
+            print(f"  {level}: added {', '.join(added)}")
+        if removed:
+            print(f"  {level}: REMOVED {', '.join(removed)}")
+        for code, lang, a, b in renamed:
+            print(f"  {level}: {code} {lang} {a!r} -> {b!r}")
+
+
+async def scrape_area_names(pref: str, out_path: Path) -> None:
+    large: dict[str, dict] = {}
+    small: dict[str, dict] = {}
+    failed: list[str] = []
+
+    async with async_playwright() as p:
+        session = Session(p)
+        await session.connect()
+
+        for lang, prefix in AREA_LANGS:
+            url = f"{AREA_ROOT}{prefix}/{pref}/"
+            try:
+                links = await fetch_area_links(session, url, pref)
+            except Exception as e:
+                failed.append(str(e))
+                continue
+            for code, sub, text in links:
+                if sub is None:
+                    large.setdefault(code, {}).setdefault(lang, _clean_area_name(text))
+            print(f"  {prefix or '/'}{pref}/: {sum(lang in v for v in large.values())} large areas")
+
+        named = sorted(c for c, v in large.items() if "ja" in v)
+        if len(named) < AREA_MIN_LARGE:
+            sys.exit(f"only {len(named)} large areas found on {AREA_ROOT}/{pref}/ "
+                     f"(expected >= {AREA_MIN_LARGE}); nothing written")
+
+        for n, code in enumerate(named, 1):
+            for lang, prefix in AREA_LANGS:
+                url = f"{AREA_ROOT}{prefix}/{pref}/{code}/"
+                try:
+                    links = await fetch_area_links(session, url, pref)
+                except Exception as e:
+                    failed.append(str(e))
+                    continue
+                for parent, sub, text in links:
+                    if sub and parent == code:
+                        small.setdefault(sub, {"big": code}).setdefault(lang, _clean_area_name(text))
+            subs = [s for s, v in small.items() if v["big"] == code]
+            print(f"  [{n}/{len(named)}] {code} {large[code]['ja']}: {len(subs)} small areas")
+
+    if failed:
+        print(f"\n{len(failed)} page(s) failed; {out_path} left untouched:")
+        for msg in failed:
+            print(f"  - {msg}")
+        sys.exit(1)
+
+    out = {
+        "pref": pref,
+        "scraped_at": _now_iso(),
+        "source": f"{AREA_ROOT}/{{,cn/,tw/,en/}}{pref}/ and .../{pref}/<large area>/",
+        "big": {c: large[c] for c in sorted(large)},
+        "small": {c: small[c] for c in sorted(small)},
+    }
+
+    print(f"\n{len(out['big'])} large / {len(out['small'])} small areas")
+    for lang, _ in AREA_LANGS:
+        missing = [c for c, v in out["small"].items() if lang not in v]
+        if missing:
+            print(f"  {lang}: {len(missing)} small area(s) without a name, e.g. {missing[:5]}")
+    unknown = sorted(_small_area_codes_in_corpus(pref) - set(out["small"]))
+    if unknown:
+        print(f"  WARNING: {len(unknown)} small area code(s) used by {TABELOG_CSV.name} "
+              f"are not on Tabelog's area pages: {', '.join(unknown)}")
+
+    if out_path.exists():
+        print(f"Changes against the previous {out_path.name}:")
+        _report_area_diff(json.loads(out_path.read_text(encoding="utf-8")), out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(out_path, out, indent=1)
+    print(f"Wrote {out_path}")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("region", type=str,
+    ap.add_argument("region", type=str, nargs="?",
                     help="Tabelog region slug — the path segment between "
                          "'tabelog.com/' and '/rstLst/'. Examples: osaka, "
                          "hyogo, kyoto, okayama, tottori, kobe. Case-insensitive.")
@@ -703,11 +882,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--translate", action=argparse.BooleanOptionalAction, default=True,
                     help="translate reservation_policy -> reservation_policy_chinese "
                          "via Google (default: on). Use --no-translate to skip.")
+    ap.add_argument("--tokyo-district", action="store_true",
+                    help="scrape no restaurants; collect Tabelog's Tokyo area names "
+                         "(large + small areas, ja/zh-CN/zh-TW/en) into "
+                         "data/tabelog_areas/tokyo.json. Takes no region.")
     return ap.parse_args(argv)
 
 
 async def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.tokyo_district:
+        if args.region:
+            sys.exit("--tokyo-district takes no region")
+        await scrape_area_names("tokyo", TABELOG_AREAS_TOKYO_JSON)
+        return
+    if not args.region:
+        sys.exit("a region slug is required (e.g. osaka), or pass --tokyo-district")
     if args.top_pct <= 0:
         sys.exit(f"--top-pct must be > 0 (got {args.top_pct})")
     if args.hard_cap <= 0:

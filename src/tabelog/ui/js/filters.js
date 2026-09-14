@@ -78,7 +78,7 @@
 
   function stateKey(s) {
     var f = s.filters;
-    return [s.lang, D.scopeKey(D.resultScope(s)), f.region, f.ratingMin,
+    return [s.lang, D.scopeKey(D.resultScope(s)), D.regionKey(f), f.ratingMin,
       Array.from(f.budgets).sort().join(','), Array.from(f.cuisines).sort().join(','), Array.from(f.awards).sort().join(','),
       f.bookableOnly ? 1 : 0, f.favOnly ? 1 : 0, f.hideBlack ? 1 : 0, f.hideForeign ? 1 : 0, f.gcalOnly ? 1 : 0,
       _userRev, D.restaurants.length].join('~');
@@ -147,11 +147,18 @@
       '<button type="button" class="ft-region-opt is-all" data-region="">' +
       '<span class="ft-region-opt-n">' + esc(t('全部地区')) + '</span>' +
       '<span class="opt-count num" data-region-count="all"></span></button>';
+    // Tokyo is listed on its own ahead of the regional blocks, as in the picker.
+    var T = C.TOKYO && C.REGIONS[C.TOKYO.pref] ? C.TOKYO : null;
+    if (T) {
+      out += '<div class="ft-region-grp"><h4 class="ft-region-grp-t t-secondary">' + esc(t('东京')) + '</h4>' +
+        '<div class="ft-region-opts"><button type="button" class="ft-region-opt" data-region="' + T.pref + '">' +
+        '<span class="ft-region-opt-n"></span><span class="opt-count num" data-region-count="' + T.pref + '"></span></button></div></div>';
+    }
     C.REGION_GROUPS.forEach(function (g) {
       var opts = '';
       for (var i = g.from; i <= g.to; i++) {
         var p = C.REGIONS[i];
-        if (!p) continue;
+        if (!p || (T && i === T.pref)) continue;
         opts += '<button type="button" class="ft-region-opt" data-region="' + i + '">' +
           '<span class="ft-region-opt-n"></span>' +
           '<span class="opt-count num" data-region-count="' + i + '"></span></button>';
@@ -343,12 +350,12 @@
     setText(root.querySelector('[data-section="region"] .ft-title span'), t(nearby ? '附近范围' : '地区'));
     if (regionBtn) {
       regionBtn.toggleAttribute('data-radius-picker', nearby);
-      regionBtn.setAttribute('aria-label', t(nearby ? '附近范围：{radius}' : '地区：{name}', {radius: radius, name: f.region == null ? t('全部地区') : D.regionName(f.region, s.lang)}));
+      regionBtn.setAttribute('aria-label', t(nearby ? '附近范围：{radius}' : '地区：{name}', {radius: radius, name: D.scopeName(f, s.lang, true)}));
     }
     if (regionBtn) regionBtn.setAttribute('aria-expanded', (s.overlay.kind === 'regionPicker' || _regionOpen) ? 'true' : 'false');
     var regionTotal = 0; Object.keys(c.region).forEach(function (k) { regionTotal += c.region[k]; });
-    setText(root.querySelector('.ft-region-name'), nearby ? radius : f.region === null || f.region === undefined ? t('全部地区') : D.regionName(f.region, s.lang));
-    setText(root.querySelector('.ft-region-count'), nearby ? '' : '(' + num(f.region === null || f.region === undefined ? regionTotal : (c.region[f.region] || 0)) + ')');
+    setText(root.querySelector('.ft-region-name'), nearby ? radius : D.scopeName(f, s.lang, true));
+    setText(root.querySelector('.ft-region-count'), nearby ? '' : '(' + num(D.scopeCount(f, c)) + ')');
     syncRegionPanel(s, c, regionTotal);
 
     /* rating */
@@ -464,7 +471,7 @@
       var name = code === null ? t('全部地区') : D.regionName(code, s.lang);
       setText(b.querySelector('.ft-region-opt-n'), name);
       setText(b.querySelector('.opt-count'), num(code === null ? regionTotal : (c.region[code] || 0)));
-      var on = (code === null && (f.region === null || f.region === undefined)) || code === f.region;
+      var on = code === null ? D.regionKey(f) === '|' : D.regionState(f, code) !== 'off';
       b.classList.toggle('is-on', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
@@ -540,8 +547,9 @@
     u.delegate(root, 'click', '[data-region]', function (e, b) {
       if (App.state.nearby && App.state.nearby.active) return;
       var raw = b.getAttribute('data-region');
-      apply({ region: raw === '' ? null : Number(raw) });
-      _regionOpen = false;
+      // Several places at once (4.2.3), same as the picker: a prefecture toggles.
+      apply(raw === '' ? D.clearRegionsPatch() : D.toggleRegionPatch(App.state.filters, Number(raw)));
+      if (raw === '') _regionOpen = false;
       App.requestRender('filters:region');
     });
     u.delegate(root, 'click', '[data-quick]', function (e, b) { apply({ ratingMin: r2(b.dataset.quick) }); });

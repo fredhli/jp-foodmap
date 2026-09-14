@@ -22,6 +22,10 @@ data/*
 # map.py so a fresh clone rebuilds with the same translations baked in.
 !data/i18n/
 !data/i18n/*.json
+# Tabelog area names (scrape_all.py --tokyo-district). Small, and a build
+# input for the district filter, so versioned the same way.
+!data/tabelog_areas/
+!data/tabelog_areas/*.json
 
 # Editor / tool state
 .claude/

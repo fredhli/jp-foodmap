@@ -222,6 +222,42 @@
 .ov-rg-row .ov-rg-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ov-rg-row .ov-rg-n { color: var(--ink-secondary); font-variant-numeric: tabular-nums; font-size: var(--t-secondary-size); }
 .ov-rg-row[aria-checked="true"] .ov-rg-n { color: var(--accent-strong); }
+/* 4.2.3 Tokyo districts: the neighbourhoods on a second line, the row that
+   opens the district page, and that page's back button. */
+.ov-rg-row .ov-rg-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 6px 0; text-align: start; }
+.ov-rg-row .ov-rg-main .ov-rg-name { flex: none; }
+.ov-rg-row .ov-rg-sub { color: var(--ink-secondary); font-size: var(--t-secondary-size); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-rg-row[aria-checked="true"] .ov-rg-sub { color: var(--accent-strong); }
+.ov-rg-drill .ic { color: var(--ink-secondary); flex: none; }
+/* Several places at once: every row carries a checkbox drawn like .checkbox,
+   driven by the row's aria-checked, and each group heading its select-all. */
+.ov-rg-row[role="checkbox"][aria-checked="true"], .ov-rg-row[role="checkbox"][aria-checked="mixed"] { background: transparent; color: inherit; font-weight: inherit; }
+.ov-rg-row[role="checkbox"]:hover { background: var(--surface-subtle); }
+.ov-rg-row[role="checkbox"][aria-checked="true"] .ov-rg-n, .ov-rg-row[role="checkbox"][aria-checked="true"] .ov-rg-sub { color: var(--ink-secondary); }
+.ov-rg-box {
+  width: var(--checkbox-visual); height: var(--checkbox-visual); flex: none;
+  border: 2px solid var(--control-border); border-radius: 6px; background: var(--surface);
+  display: inline-grid; place-content: center;
+  transition: background-color var(--m-micro) var(--e-out), border-color var(--m-micro) var(--e-out);
+}
+.ov-rg-box::before {
+  content: ""; width: 10px; height: 6px; border: 2.5px solid #fff; border-top: 0; border-right: 0;
+  transform: translateY(-1px) rotate(-45deg) scale(0); transition: transform var(--m-micro) var(--e-out);
+}
+[aria-checked="true"] > .ov-rg-box, [aria-checked="mixed"] > .ov-rg-box { background: var(--accent); border-color: var(--accent); }
+[aria-checked="true"] > .ov-rg-box::before { transform: translateY(-1px) rotate(-45deg) scale(1); }
+[aria-checked="mixed"] > .ov-rg-box::before { width: 10px; height: 0; border: 0; border-top: 2.5px solid #fff; transform: none; }
+.ov-rg-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.ov-rg-head-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-rg-all {
+  flex: none; min-height: 32px; padding: 0 var(--sp-2); border-radius: var(--r-pill);
+  color: var(--accent-strong); font-size: var(--t-secondary-size); font-weight: 600;
+}
+.ov-rg-all:hover { background: var(--accent-soft); }
+.ov-rg-foot { display: flex; }
+.ov-rg-foot .ov-rg-done { flex: 1 1 auto; min-height: var(--touch-min); }
+.ov-pop-head .ov-pop-back { flex: none; margin-left: calc(-1 * var(--sp-3)); }
+.ov-pop-head .ov-pop-back + .t-group-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ==========================================================================
    3. Modals — bookmark form / collection form / import / lightbox

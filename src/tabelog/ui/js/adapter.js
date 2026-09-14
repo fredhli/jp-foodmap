@@ -197,6 +197,13 @@
     if (typeof s.gcalOnly === 'boolean') f.gcalOnly = s.gcalOnly;
     if (typeof s.region === 'number' && isFinite(s.region) && s.region === Math.floor(s.region)
         && s.region >= 0 && s.region <= 46) f.region = s.region; else f.region = null;
+    // 4.2.3, additive: the multi-select arrays win when present; a state from
+    // an older build (or rewritten by an older tab, which drops them) keeps
+    // its single region.
+    var sel = Array.isArray(s.regions)
+      ? Data.normalizeSelection(s.regions, Array.isArray(s.areas) ? s.areas : [])
+      : Data.normalizeSelection(f.region === null ? [] : [f.region], []);
+    f.regions = sel.regions; f.areas = sel.areas; f.region = sel.region;
     return f;
   };
   Prefs.writeFilterState = function (f) {
@@ -218,6 +225,8 @@
       hideBlack: !!f.hideBlack,
       hideForeign: !!f.hideForeign,
       region: f.region == null ? null : f.region,
+      regions: Array.from(f.regions || []).sort(function (a, b) { return a - b; }),
+      areas: Array.from(f.areas || []).sort(),
       gcalOnly: !!f.gcalOnly
     }));
   };
@@ -274,6 +283,14 @@
       var g = config.REGION_GROUPS.filter(function (gr) { return i >= gr.from && i <= gr.to; })[0];
       return { code: i, zh: p.sc, tw: p.tc, en: p.en, ja: p.ja, n: p.n || 0, group: g ? g.name : '' };
     });
+    // 4.2.3 Tokyo districts: map_data.TOKYO_ZONES joined with Tabelog's area
+    // names by map.py. null when the build had no name table, and then the
+    // picker simply has no district level.
+    var TA = window.TOKYO_AREAS;
+    config.TOKYO = (TA && typeof TA.pref === 'number' && Array.isArray(TA.zones) && Array.isArray(TA.groups) && TA.small)
+      ? { pref: TA.pref, groups: TA.groups, zones: TA.zones, small: TA.small, aliases: TA.aliases || {} } : null;
+    config.ZONE_BY_ID = {};
+    if (config.TOKYO) config.TOKYO.zones.forEach(function (z) { config.ZONE_BY_ID[z.id] = z; });
     config.SORTS = [
       { key: 'rating', label: '评分从高到低' }, { key: 'price', label: '价格从低到高' },
       { key: 'awards', label: '奖项优先' }, { key: 'distance', label: '距离最近', needsLocation: true },
@@ -305,7 +322,164 @@
     }
     Data.landmarks = B.constants.EMBEDDED_FAVORITES_BUILTIN;
     Data.places = [];                                // Nominatim results are async (overlays)
+    indexAreas(rows);
   }
+
+  // ---- Tokyo districts (4.2.3) --------------------------------------------
+  // No row carries a district: Tabelog's small-area code is already in every
+  // detail_url, so it is read from there (the same pattern map.py checks at
+  // build time). A cached restaurants.json from an older build works as is.
+  var TOKYO_URL_RE = /^https:\/\/tabelog\.com\/tokyo\/A13\d{2}\/(A13\d{4})\/\d+\/?$/;
+  var _smallOf = {}, _zoneOf = {}, _zoneCaption = {}, _zoneQuery = {};
+  function own(o, k) { return !!o && Object.prototype.hasOwnProperty.call(o, k); }
+  function indexAreas(rows) {
+    _smallOf = {}; _zoneOf = {}; _zoneCaption = {}; _zoneQuery = {};
+    var T = config.TOKYO;
+    if (!T) return;
+    var rowsIn = {};
+    for (var i = 0; i < rows.length; i++) {
+      var m = TOKYO_URL_RE.exec(rows[i].detail_url || '');
+      if (!m || !own(T.small, m[1])) continue;
+      _smallOf[rows[i].id] = m[1];
+      _zoneOf[rows[i].id] = T.small[m[1]].z;
+      rowsIn[m[1]] = (rowsIn[m[1]] || 0) + 1;
+    }
+    var members = {};
+    Object.keys(T.small).forEach(function (code) {
+      var z = T.small[code].z;
+      (members[z] = members[z] || []).push(code);
+    });
+    T.zones.forEach(function (z) {
+      var codes = members[z.id] || [];
+      // The caption lists the neighbourhoods that have restaurants, busiest
+      // first; the search text also knows the empty ones (Odaiba, Toyosu).
+      _zoneCaption[z.id] = codes.filter(function (c) { return rowsIn[c]; })
+        .sort(function (a, b) { return rowsIn[b] - rowsIn[a] || (a < b ? -1 : 1); });
+      _zoneQuery[z.id] = [z.zh, z.tw, z.en, z.ja].concat(codes.map(function (c) {
+        var s = T.small[c]; return [s.zh, s.tw, s.en, s.ja].join(' ');
+      })).join(' ').toLowerCase();
+    });
+  }
+  /* ---- region selection (4.2.3) -------------------------------------------
+     filters.regions (a Set of prefecture indices) and filters.areas (a Set of
+     Tokyo district ids) are the selection; empty both means every region. A
+     row passes when its prefecture is picked, or when it is in a picked
+     district. filters.region survives as the single-value view older pages
+     and callers understand: the one prefecture when exactly one is picked,
+     Tokyo when only Tokyo districts are, otherwise null — always a superset of
+     the real selection, which is what gets written for a 4.2.2 tab to read. */
+  function selEmpty(f) { return (!f.regions || !f.regions.size) && (!f.areas || !f.areas.size); }
+  function regionOk(r, f) {
+    if (selEmpty(f)) return true;
+    if (f.regions && f.regions.has(r.pref)) return true;
+    var z = _zoneOf[r.id];
+    return !!(z && f.areas && f.areas.has(z));
+  }
+  function allZoneIds() { return config.TOKYO ? config.TOKYO.zones.map(function (z) { return z.id; }) : []; }
+  /** normalizeSelection(regions, areas) → {regions, areas, region}: valid
+   *  prefecture indices, live district ids (retired ids resolved through the
+   *  aliases), no district next to its whole prefecture, and every district
+   *  picked collapses into the prefecture. */
+  Data.normalizeSelection = function (regions, areas) {
+    var T = config.TOKYO, R = new Set(), A = new Set();
+    (regions ? Array.from(regions) : []).forEach(function (n) { if (Number.isInteger(n) && n >= 0 && n <= 46) R.add(n); });
+    if (T) {
+      (areas ? Array.from(areas) : []).forEach(function (a) {
+        if (typeof a !== 'string') return;
+        if (!own(config.ZONE_BY_ID, a) && own(T.aliases, a)) a = T.aliases[a];
+        if (own(config.ZONE_BY_ID, a)) A.add(a);
+      });
+      if (A.size === T.zones.length) R.add(T.pref);
+      if (R.has(T.pref)) A = new Set();
+    }
+    var region = null;
+    if (R.size === 1 && !A.size) region = R.values().next().value;
+    else if (!R.size && A.size) region = T.pref;
+    return { regions: R, areas: A, region: region };
+  };
+  function selPatch(regions, areas) {
+    var sel = Data.normalizeSelection(regions, areas);
+    return { regions: sel.regions, areas: sel.areas, region: sel.region };
+  }
+  /** 'on' | 'off' | 'mixed' for a prefecture row (Tokyo is mixed with districts picked). */
+  Data.regionState = function (f, code) {
+    if (f.regions && f.regions.has(code)) return 'on';
+    return config.TOKYO && code === config.TOKYO.pref && f.areas && f.areas.size ? 'mixed' : 'off';
+  };
+  Data.areaChecked = function (f, id) {
+    return !!((config.TOKYO && f.regions && f.regions.has(config.TOKYO.pref)) || (f.areas && f.areas.has(id)));
+  };
+  Data.groupState = function (f, codes) {
+    var on = codes.filter(function (c) { return Data.regionState(f, c) === 'on'; }).length;
+    return on === codes.length ? 'on' : (on || codes.some(function (c) { return Data.regionState(f, c) === 'mixed'; }) ? 'mixed' : 'off');
+  };
+  Data.areaGroupState = function (f, ids) {
+    var on = ids.filter(function (id) { return Data.areaChecked(f, id); }).length;
+    return on === ids.length ? 'on' : (on ? 'mixed' : 'off');
+  };
+  /* The patches the picker applies. Each returns {regions, areas, region}. */
+  Data.clearRegionsPatch = function () { return selPatch([], []); };
+  Data.toggleRegionPatch = function (f, code) {
+    var R = new Set(f.regions || []);
+    if (R.has(code)) R.delete(code); else R.add(code);
+    var A = (config.TOKYO && code === config.TOKYO.pref) ? [] : f.areas;
+    return selPatch(R, A);
+  };
+  Data.toggleRegionGroupPatch = function (f, codes) {
+    var R = new Set(f.regions || []), all = Data.groupState(f, codes) === 'on';
+    var T = config.TOKYO, A = new Set(f.areas || []);
+    codes.forEach(function (c) { if (all) R.delete(c); else R.add(c); if (T && c === T.pref) A = new Set(); });
+    return selPatch(R, A);
+  };
+  Data.toggleAreaPatch = function (f, id) { return Data.toggleAreaGroupPatch(f, [id]); };
+  Data.toggleAreaGroupPatch = function (f, ids) {
+    var T = config.TOKYO;
+    if (!T) return selPatch(f.regions, f.areas);
+    var R = new Set(f.regions || []);
+    // Whole Tokyo picked means every district is; unpicking some of them
+    // turns it back into the explicit list of the rest.
+    var A = new Set(R.has(T.pref) ? allZoneIds() : (f.areas || []));
+    R.delete(T.pref);
+    var all = ids.every(function (id) { return A.has(id); });
+    ids.forEach(function (id) { if (all) A.delete(id); else A.add(id); });
+    return selPatch(R, A);
+  };
+  Data.regionKey = function (f) {
+    return Array.from(f.regions || []).sort(function (a, b) { return a - b; }).join('.') + '|' + Array.from(f.areas || []).sort().join('.');
+  };
+
+  Data.zoneOf = function (r) { return (r && _zoneOf[r.id]) || null; };
+  Data.zoneName = function (id, lang) { var z = config.ZONE_BY_ID[id]; return z ? (z[lang] || z.zh) : ''; };
+  Data.zoneGroupName = function (g, lang) { return g ? (g[lang] || g.zh) : ''; };
+  Data.zoneCaption = function (id, lang) {
+    var T = config.TOKYO;
+    if (!T || !_zoneCaption[id]) return '';
+    return _zoneCaption[id].map(function (c) { return T.small[c][lang] || T.small[c].zh; }).join(lang === 'en' ? ', ' : '、');
+  };
+  Data.zoneSearchText = function (id) { return _zoneQuery[id] || ''; };
+  Data.neighborhoodName = function (r, lang) {
+    var T = config.TOKYO, c = r && _smallOf[r.id];
+    return (T && c) ? (T.small[c][lang] || T.small[c].zh) : '';
+  };
+  /** scopeName(f, lang, long) — what the region controls say: all regions,
+   *  the one place picked, or the first of several with how many there are.
+   *  `long` prefixes a district with its prefecture. */
+  Data.scopeName = function (f, lang, long) {
+    if (selEmpty(f)) return window.t('全部地区');
+    var T = config.TOKYO, names = [];
+    Array.from(f.regions || []).sort(function (a, b) { return a - b; }).forEach(function (c) { names.push(Data.regionName(c, lang)); });
+    allZoneIds().forEach(function (id) {
+      if (f.areas && f.areas.has(id)) names.push(long ? Data.regionName(T.pref, lang) + ' · ' + Data.zoneName(id, lang) : Data.zoneName(id, lang));
+    });
+    return names.length === 1 ? names[0] : window.t('{name} 等 {n} 个地区', { name: names[0], n: names.length, m: names.length - 1 });
+  };
+  Data.scopeCount = function (f, c) {
+    var n = 0;
+    if (selEmpty(f)) { Object.keys(c.region).forEach(function (k) { n += c.region[k] || 0; }); return n; }
+    (f.regions || []).forEach(function (code) { n += c.region[code] || 0; });
+    (f.areas || []).forEach(function (id) { n += (c.area && c.area[id]) || 0; });
+    return n;
+  };
 
   // rowByUrl is a plain object keyed by a user-reachable string, so an id of
   // 'constructor' / 'toString' must not hand a module a function.
@@ -426,14 +600,14 @@
     (f.awards ? Array.from(f.awards) : []).forEach(function (a) { aSet[a] = 1; aAny = true; });
     return {
       minRating: typeof f.ratingMin === 'number' ? f.ratingMin : 3.4,
-      region: (f.region === null || f.region === undefined) ? null : f.region,
+      region: null,          // the region selection is checked by regionOk() here, not by Business
       pSet: pSet, gSet: gSet, gAny: gAny, aSet: aSet, aAny: aAny,
       bookableOnly: !!f.bookableOnly, onlyFav: !!f.favOnly, hideBlack: !!f.hideBlack,
       hideForeign: !!f.hideForeign, gcalOnly: !!f.gcalOnly
     };
   }
   function filterKey(f) {
-    return JSON.stringify([f.region, f.ratingMin, Array.from(f.budgets || []).sort(), Array.from(f.cuisines || []).sort(),
+    return JSON.stringify([Data.regionKey(f), f.ratingMin, Array.from(f.budgets || []).sort(), Array.from(f.cuisines || []).sort(),
       Array.from(f.awards || []).sort(), !!f.bookableOnly, !!f.favOnly, !!f.hideBlack, !!f.hideForeign, !!f.gcalOnly, _userSeq,
       App.state.saved && App.state.saved.onlyList]);
   }
@@ -469,7 +643,7 @@
   }
   Data.filterMatch = function (r, f, scope) {
     biz.setFilterState(toBizFilter(f));
-    return inScope(r, scope || Data.resultScope()) && biz.passesFilter(r);
+    return inScope(r, scope || Data.resultScope()) && biz.passesFilter(r) && regionOk(r, f);
   };
   Data.applyFilters = function (f, scope) {
     scope = scope && scope.mode ? scope : Data.resultScope();
@@ -477,7 +651,7 @@
     if (_M.ids && _M.key === key) return _M.ids;
     biz.setFilterState(toBizFilter(f));
     var out = [], rows = Data.restaurants;
-    for (var i = 0; i < rows.length; i++) if (inScope(rows[i], scope) && biz.passesFilter(rows[i])) out.push(rows[i].id);
+    for (var i = 0; i < rows.length; i++) if (inScope(rows[i], scope) && biz.passesFilter(rows[i]) && regionOk(rows[i], f)) out.push(rows[i].id);
     _M = { key: key, ids: out };
     return out;
   };
@@ -508,18 +682,24 @@
     scope = scope || Data.resultScope();
     var key = 'c' + filterKey(f) + '|' + Data.scopeKey(scope);
     if (_counts.out && _counts.key === key) return _counts.out;
-    var out = { total: 0, region: {}, budgets: {}, cuisines: {}, groups: {}, awards: {}, bookable: 0, fav: 0, gcal: 0, foreignBlocked: 0, hiddenBlack: 0, rating: {} };
+    var out = { total: 0, region: {}, area: {}, budgets: {}, cuisines: {}, groups: {}, awards: {}, bookable: 0, fav: 0, gcal: 0, foreignBlocked: 0, hiddenBlack: 0, rating: {} };
     var clone = function (over) { return Object.assign({}, f, over || {}); };
     var count = function (ff) {
       biz.setFilterState(toBizFilter(ff));
       var n = 0, rows = Data.restaurants;
-      for (var i = 0; i < rows.length; i++) if (inScope(rows[i], scope) && biz.passesFilter(rows[i])) n++;
+      for (var i = 0; i < rows.length; i++) if (inScope(rows[i], scope) && biz.passesFilter(rows[i]) && regionOk(rows[i], ff)) n++;
       return n;
     };
     out.total = count(f);
-    var fNoRegion = toBizFilter(clone({ region: null }));
-    biz.setFilterState(fNoRegion);
-    Data.restaurants.forEach(function (r) { if (inScope(r, scope) && biz.passesFilter(r) && r.pref != null) out.region[r.pref] = (out.region[r.pref] || 0) + 1; });
+    // Region and district counts are what that one place would show with the
+    // other conditions unchanged, so the selection itself is left out.
+    biz.setFilterState(toBizFilter(f));
+    Data.restaurants.forEach(function (r) {
+      if (r.pref == null || !inScope(r, scope) || !biz.passesFilter(r)) return;
+      out.region[r.pref] = (out.region[r.pref] || 0) + 1;
+      var z = _zoneOf[r.id];
+      if (z) out.area[z] = (out.area[z] || 0) + 1;
+    });
     config.PRICE_BUCKETS.forEach(function (b) { out.budgets[b.key] = count(clone({ budgets: new Set([b.key]) })); });
     config.ALL_CUISINES.forEach(function (c) { out.cuisines[c] = count(clone({ cuisines: new Set([c]) })); });
     config.MEAL_GROUPS.forEach(function (g) { out.groups[g.name] = count(clone({ cuisines: new Set(g.buckets) })); });
@@ -537,7 +717,7 @@
   };
   Data.summaryGroups = function (f, counts) {
     var g = [];
-    if (f.region !== null && f.region !== undefined) g.push({ key: 'region', label: '地区：{name}', params: { name: Data.regionName(f.region, App.state.lang) }, clear: { region: null } });
+    if (!selEmpty(f)) g.push({ key: 'region', label: '地区：{name}', params: { name: Data.scopeName(f, App.state.lang, true) }, clear: Data.clearRegionsPatch() });
     if (f.ratingMin > config.RATING_MIN + 1e-9) g.push({ key: 'rating', label: '评分 ≥ {n}', params: { n: f.ratingMin.toFixed(2) }, clear: { ratingMin: config.RATING_MIN } });
     if (f.budgets && f.budgets.size < config.PRICE_BUCKETS.length) g.push({ key: 'budgets', label: '预算：{n} 档', params: { n: f.budgets.size }, clear: { budgets: new Set(PRICE_KEYS) } });
     if (f.cuisines && f.cuisines.size < config.ALL_CUISINES.length) g.push({ key: 'cuisines', label: '菜系：{n} 类', params: { n: f.cuisines.size }, clear: { cuisines: new Set(ALL_CUISINES) } });
@@ -726,7 +906,7 @@
      act: the intents modules call. Business is the only writer of user data.
      ==================================================================== */
   function unrestrictedFilters() {
-    return { region: null, ratingMin: 3.4, budgets: new Set(PRICE_KEYS), cuisines: new Set(ALL_CUISINES),
+    return { region: null, regions: new Set(), areas: new Set(), ratingMin: 3.4, budgets: new Set(PRICE_KEYS), cuisines: new Set(ALL_CUISINES),
       awards: new Set(), bookableOnly: false, favOnly: false, hideBlack: false, hideForeign: false, gcalOnly: false };
   }
   function snapshotPlanning(s) {
@@ -757,6 +937,7 @@
   }
   function readSessionFilters(f) {
     if (!f || !(f.region === null || (Number.isInteger(f.region) && f.region >= 0 && f.region <= 46)) ||
+        !(f.regions === undefined || Array.isArray(f.regions)) || !(f.areas === undefined || Array.isArray(f.areas)) ||
         typeof f.ratingMin !== 'number' || !isFinite(f.ratingMin) ||
         !['budgets', 'cuisines', 'awards'].every(function (k) { return Array.isArray(f[k]); }) ||
         !['bookableOnly', 'favOnly', 'hideBlack', 'hideForeign', 'gcalOnly'].every(function (k) { return typeof f[k] === 'boolean'; })) return null;
@@ -765,7 +946,22 @@
     out.cuisines = new Set(f.cuisines.filter(function (k) { return ALL_CUISINES.indexOf(k) >= 0; }));
     out.awards = new Set(f.awards.filter(function (k) { return AWARD_SLUGS.indexOf(k) >= 0; }));
     out.ratingMin = util.clamp(f.ratingMin, 3.4, 4.5);
+    var sel = Array.isArray(f.regions) ? Data.normalizeSelection(f.regions, f.areas || [])
+      : Data.normalizeSelection(f.region === null ? [] : [f.region], []);
+    out.regions = sel.regions; out.areas = sel.areas; out.region = sel.region;
     return out;
+  }
+  // Every patch that touches the region selection leaves it normalized and
+  // with `region` recomputed. A bare {region: n} — what tests and pre-4.2.3
+  // callers send — means exactly that one prefecture.
+  function regionPatch(patch) {
+    if (!patch || typeof patch !== 'object') return patch;
+    var hasR = own(patch, 'regions'), hasA = own(patch, 'areas'), legacy = own(patch, 'region');
+    if (!hasR && !hasA && !legacy) return patch;
+    var cur = App.state.filters;
+    var R = hasR ? patch.regions : (legacy ? (patch.region === null || patch.region === undefined ? [] : [patch.region]) : cur.regions);
+    var A = hasA ? patch.areas : (legacy && !hasR ? [] : cur.areas);
+    return Object.assign({}, patch, selPatch(R, A));
   }
   function validSearch(s) {
     return !!s && typeof s.query === 'string' && typeof s.dropLoc === 'boolean' &&
@@ -863,7 +1059,7 @@
     var applyFilters = act.applyFilters;
     act.applyFilters = function (patch) {
       if (!App.state.nearby.active && !nearbyTransaction) normalPrefsHeld = false;
-      applyFilters(patch);
+      applyFilters(regionPatch(patch));
     };
     act.resetFilters = function () {
       if (!App.state.nearby.active) normalPrefsHeld = false;
@@ -1150,6 +1346,8 @@
     // Old nearby state only saved these planning fields; combine with the persisted filters.
     if (lv.planningContext) {
       s.filters.region = lv.planningContext.region == null ? null : lv.planningContext.region;
+      var planned = selPatch(s.filters.region === null ? [] : [s.filters.region], []);
+      s.filters.regions = planned.regions; s.filters.areas = planned.areas; s.filters.region = planned.region;
       s.sort = SORT_TO_UI[lv.planningContext.sort] || 'rating';
       s.mapView = { center: lv.planningContext.center.slice(), zoom: lv.planningContext.zoom };
     }

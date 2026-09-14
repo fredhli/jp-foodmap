@@ -26,6 +26,8 @@ from tabelog.scrape import scrape_all
 
 async def _run(argv: list[str]) -> None:
     await scrape_all.main(argv)
+    if "--tokyo-district" in argv:
+        return  # area names only: nothing new to geocode or render
     print("\n" + "=" * 60)
     print("Scrape done. Geocoding new rows and rebuilding map ...")
     print("=" * 60 + "\n")

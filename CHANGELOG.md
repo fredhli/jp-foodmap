@@ -13,6 +13,39 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.3] - 2026-09-14
+
+The region filter picks several places at once. Every prefecture row is a
+checkbox, each regional block has a select-all, and the picker stays open
+while you choose, showing the result count on its Done button; closing it
+after a change moves the map to the selection.
+
+Tokyo is listed on its own above Hokkaido instead of inside Kanto, with an
+All of Tokyo row and a page of 25 districts in six groups (都心, 副都心,
+城南, 城北, 城東, 城西・多摩). The districts are regrouped from Tabelog's own
+small areas — its large areas range from 4 to 126 restaurants and four are
+named after railway companies — so every Tokyo restaurant lands in exactly
+one district of 17 to 126. Each district lists its neighbourhoods, the
+picker's search finds a district by any of them in four languages, and a
+restaurant's detail card names its neighbourhood. No restaurant was
+re-scraped: the district comes from the area code already in each Tabelog
+URL. Tabelog's area names are collected by `scrape_all.py --tokyo-district`
+into `data/tabelog_areas/tokyo.json`; the districts themselves are
+`map_data.TOKYO_ZONES`. Reasoning and the owner's decisions are in
+`audit_outputs/tokyo-areas-plan/`.
+
+`tabelog.filterState` gains `regions` and `areas`. It still writes `region`,
+which a 4.2.2 tab reads as one prefecture, Tokyo for districts only or all
+regions, always a superset of the selection. No storage key, sync field or
+Worker call changed.
+
+The language menu next to 筛选 in the top bar (wide and mid layouts, which
+includes the Fold's inner screen) opens again. The menu was appended one frame
+after the render it had queued, and that render cleared the popover layer, so
+it vanished about 10 ms after appearing. It is now drawn inside the render,
+anchored to the live chip, and closes on a second press of the chip, an
+outside press or Escape.
+
 ## [4.2.2] - 2026-09-13
 
 On phones, a detail opened from filtered Results now has one rightmost Back

@@ -352,6 +352,34 @@ def t06_filterstate_bad_region(page, base):
         raise AssertionError("an out-of-range region emptied the map")
 
 
+@case("10_filterstate_multiregion.json")
+def t10_filterstate_multiregion(page, base):
+    """4.2.3 multi-region state: arrays restored, junk dropped, and the single
+    `region` rewritten for older tabs is always a superset of the selection."""
+    sel = page.evaluate(
+        "() => ({ regions: Array.from(App.state.filters.regions), areas: Array.from(App.state.filters.areas).sort(),"
+        "  region: App.state.filters.region })")
+    eq(sel, {"regions": [26], "areas": ["ginza", "shibuya"], "region": None},
+       "regions/areas restored, the unknown district and the duplicate dropped")
+    shown = shown_count(page)
+    if shown <= 0:
+        raise AssertionError("a multi-region state emptied the map")
+    ok_rows = page.evaluate(
+        "() => Data.M(App.state).every(id => { const r = Data.byId(id);"
+        "  return r.pref === 26 || ['ginza', 'shibuya'].includes(Data.zoneOf(r)); })")
+    eq(ok_rows, True, "every result is in Osaka, Ginza or Shibuya")
+    # Tokyo districts only -> the stored single region is Tokyo (13), which a
+    # 4.2.2 tab turns into "all of Tokyo": more than picked, never less.
+    page.evaluate("() => App.act.applyFilters({ regions: new Set(), areas: new Set(['shibuya']) })")
+    page.wait_for_timeout(300)
+    saved = json.loads(page.evaluate("() => localStorage.getItem('tabelog.filterState')"))
+    eq((saved["region"], saved["regions"], saved["areas"]), (13, [], ["shibuya"]),
+       "districts only store region 13 beside the arrays")
+    # (A state an older tab rewrote without the arrays is covered by
+    # tests/ux/region_picker.py: this harness re-seeds the fixture on every
+    # load, so a reload here would only read the fixture back.)
+
+
 @case("07_bookmarks_with_meta.json")
 def t07_bookmarks_with_meta(page, base):
     """M-031 / E2 sub-collection rows share the bookmarks array with real

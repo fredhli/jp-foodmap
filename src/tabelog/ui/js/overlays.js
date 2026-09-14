@@ -50,6 +50,9 @@
   var layersFallback = { prevSheet: null, full: false };
   var lightboxFrom = null;
   var listFilter = '';        // region picker inline filter
+  var regionView = 'root';    // region picker page: 'root' or 'tokyo' (the district list)
+  var regionFocus = null;     // selector to focus after the picker switches page
+  var regionOpenKey = null;   // the region selection when the picker opened
   var lbCustom = false;
   var capRectBefore = null;
   var langGateDone = false;
@@ -81,8 +84,7 @@
   function radiusLabel(s) { var m = nearbyState(s).radiusM || 1000; return m < 1000 ? m + ' m' : (m / 1000) + ' km'; }
   function regionLabel(s) {
     if (nearbyState(s).active) return radiusLabel(s);
-    return (s.filters.region === null || s.filters.region === undefined)
-      ? t('全部地区') : Data.regionName(s.filters.region, s.lang);
+    return Data.scopeName(s.filters, s.lang);
   }
   function priceShort(r) {
     return (!r.bucket || r.bucket === 'na') ? t('未知') : u.fmtPrice(r.bucket, { short: true });
@@ -165,7 +167,15 @@
     // outside click closes a non-modal popover (SEARCH-03 / LAYER-01)
     document.addEventListener('pointerdown', function (e) {
       var s = S();
-      if (transient) return;
+      if (transient) {
+        // The language menu is a plain dropdown: a press anywhere else closes it.
+        if (transient.kind === 'langMenu') {
+          var menu = el('ov-lang-menu');
+          if ((menu && menu.contains(e.target)) || (e.target.closest && e.target.closest('[data-ov="lang-menu"]'))) return;
+          closeTransient();
+        }
+        return;
+      }
       if (s.overlay.kind && nav.SECONDARY_KINDS.indexOf(s.overlay.kind) >= 0) {
         if (R.pop.contains(e.target)) return;
         if (lastTrigger && lastTrigger.contains && lastTrigger.contains(e.target)) return;
@@ -205,7 +215,13 @@
     if (!lastTrigger) rememberTrigger();
     if (p.kind === 'bookmarkForm' || p.kind === 'listForm') initDraft(p.kind, p.payload);
     if (p.kind === 'account') { deleteArmedAt = 0; deleteMsg = null; signOutArmed = false; }
-    if (p.kind === 'regionPicker') listFilter = '';
+    if (p.kind === 'regionPicker') {
+      listFilter = '';
+      // Reopening with only Tokyo districts picked lands on the district list, where they are.
+      var f = S().filters;
+      regionView = Data.config.TOKYO && f.areas && f.areas.size && (!f.regions || !f.regions.size) ? 'tokyo' : 'root';
+      regionOpenKey = Data.regionKey(f);
+    }
     transient = null;
   }
   function onOverlayClosed(p) {
@@ -216,6 +232,8 @@
     draft = null; draftKey = null; draftErr = {}; saving = false;
     if (p && p.kind === 'layers') restoreLayersFallback();
     if (p && p.kind === 'importDialog') importPreview = null;
+    if (p && p.kind === 'regionPicker' && regionOpenKey !== null && Data.regionKey(S().filters) !== regionOpenKey) fitRegionSelection();
+    if (p && p.kind === 'regionPicker') regionOpenKey = null;
     var scopeSelector = p && p.kind === 'regionPicker' && lastTrigger
       ? (lastTrigger.classList.contains('ft-region') ? '.ft-region' : '[data-kind="regionPicker"]') : null;
     restoreTrigger();
@@ -266,7 +284,7 @@
   function renderSearch(s) {
     var mode = s.layout.mode, active = !!s.search.active;
     var nb = nearbyState(s);
-    var key = [mode, active, s.layout.foldCover, s.layout.foldCover && s.layout.W < 450, s.fontScale, s.lang, s.account.signedIn, s.filters.region,
+    var key = [mode, active, s.layout.foldCover, s.layout.foldCover && s.layout.W < 450, s.fontScale, s.lang, s.account.signedIn, Data.regionKey(s.filters),
                s.search.placeFilter, !!nb.fix, !!nb.active, !!nb.pending, nb.radiusM, nb.needsLocation,
                s.overlay.kind === 'regionPicker', s.overlay.kind === 'account'].join('|');
     if (sig.search !== key) {
@@ -582,7 +600,7 @@
   function renderSuggestions(s) {
     var list = el('ov-sugs');
     if (!list) return;
-    var memoKey = [s.filters.region, s.filters.ratingMin, s.filters.budgets.size, s.filters.cuisines.size,
+    var memoKey = [Data.regionKey(s.filters), s.filters.ratingMin, s.filters.budgets.size, s.filters.cuisines.size,
       s.filters.awards.size, s.filters.bookableOnly, s.filters.favOnly, s.filters.hideBlack, Data.scopeKey(Data.resultScope(s)),
       s.filters.hideForeign, s.filters.gcalOnly, s.user.fav.size, s.user.black.size].join('|');
     var key = [s.search.query, s.lang, s.search.dropLoc, s.layout.mode, memoKey,
@@ -753,7 +771,7 @@
     if (!R.topRight) return;
     if (isNarrow(s)) { if (sig.chips !== 'narrow') { sig.chips = 'narrow'; R.topRight.innerHTML = ''; } return; }
     var n = badgeCount(s);
-    var key = ['w', s.lang, s.filters.region, n, s.sheet.tab, s.account.signedIn, s.sync.dirty,
+    var key = ['w', s.lang, Data.regionKey(s.filters), n, s.sheet.tab, s.account.signedIn, s.sync.dirty,
                s.overlay.kind, transient && transient.kind,
                !!(s.nearby && s.nearby.active), !!(s.nearby && s.nearby.pending), (s.nearby || {}).radiusM].join('|');
     if (sig.chips === key) return;
@@ -789,11 +807,15 @@
     var k = s.overlay.kind;
     var isPop = k && nav.SECONDARY_KINDS.indexOf(k) >= 0;
     var key = isPop ? [k, s.lang, s.layout.mode, s.layout.W, s.layout.H, popState(s), transient && transient.kind].join('|') : 'none';
-    if (sig.pop === key) return;
+    if (sig.pop === key) { if (k === 'regionPicker') syncRegionPicker(s); return; }
     sig.pop = key;
     var panel = el('ov-search-panel');
     R.pop.innerHTML = '';
     if (panel) { R.pop.appendChild(panel); motion.afterGeometry(function () { placeSearchPanel(S()); }); }
+    // The language menu lives in #overlay-root too. It used to be appended out
+    // of band, one frame after openTransient() queued this very render, so the
+    // innerHTML reset above removed it about 10 ms after it appeared (4.2.3).
+    if (transient && transient.kind === 'langMenu') renderLangMenu(s);
     if (!isPop) return;
     var node = document.createElement('div');
     node.className = 'ov-pop scale-in';
@@ -807,6 +829,20 @@
     if (k === 'regionPicker' && nearbyState(s).active) {
       trapFocus(node);
       motion.afterGeometry(function () { var selected = node.querySelector('[data-ov="radius"][aria-checked="true"]'); if (selected) selected.focus({preventScroll:true}); });
+    } else if (k === 'regionPicker') {
+      filterRegionRows();
+      var focusSel = regionFocus;
+      regionFocus = null;
+      motion.afterGeometry(function () {
+        var body = node.querySelector('.ov-pop-body');
+        var picked = regionView === 'tokyo' && S().filters.areas && S().filters.areas.size && node.querySelector('[data-ov="area"][aria-checked="true"]');
+        if (body && picked) {
+          var br = body.getBoundingClientRect(), pr = picked.getBoundingClientRect();
+          body.scrollTop += pr.top - br.top - (br.height - pr.height) / 2;
+        }
+        var target = focusSel && node.querySelector(focusSel);
+        if (target) target.focus({ preventScroll: true });
+      });
     }
     if (k === 'account') mountSignIn(s, node);
     // DEVICE PASS (§5.3): temporary-task popovers lock background focus and take it.
@@ -843,7 +879,7 @@
     if (k === 'account') return [s.account.signedIn, s.account.email, s.account.message, s.sync.text, s.sync.kind,
       s.sync.retryVisible, s.sync.storageInfo, s.user.fav.size, s.user.black.size, s.user.bookmarks.length,
       deleteArmedAt ? 1 : 0, signOutArmed ? 1 : 0, deleteMsg && deleteMsg.text, (s.install || {}).standalone, (s.install || {}).canPrompt].join(',');
-    if (k === 'regionPicker') return [s.filters.region, listFilter, nearbyState(s).active, nearbyState(s).radiusM].join(',');
+    if (k === 'regionPicker') return [regionView, listFilter, nearbyState(s).active, nearbyState(s).radiusM].join(',');
     if (k === 'sortMenu') return s.sort + '|' + JSON.stringify(s.overlay.payload || {});
     if (k === 'memberPicker') return [s.user.bookmarks.length, s.user.fav.size, JSON.stringify(s.overlay.payload || {})].join(',');
     if (k === 'help') return JSON.stringify(s.overlay.payload || {}) + '|' + JSON.stringify(s.install || {}) + '|' + JSON.stringify(s.buildMeta || {});
@@ -853,6 +889,7 @@
 
   function popHead(title, opts) {
     return '<div class="ov-pop-head' + (opts && opts.plain ? ' is-plain' : '') + '">' +
+      (opts && opts.back ? '<button class="icon-btn ov-pop-back" data-ov="' + opts.back + '" aria-label="' + esc(t('返回')) + '">' + ic('back') + '</button>' : '') +
       '<span class="t-group-title"' + (opts && opts.ja ? ' lang="ja"' : '') + '>' + esc(title) + '</span>' +
       '<button class="icon-btn" data-ov="close" aria-label="' + esc(t('关闭')) + '">' + ic('x') + '</button></div>';
   }
@@ -1175,33 +1212,152 @@
       }).join('') + '</div>';
   }
 
-  function regionBody(s) {
-    var c = counts(s);
+  /* One picker row. `q` is the lower-cased text the inline search matches (all
+     four languages, plus a district's neighbourhoods); `only` is 'search' for a
+     row that appears only while a query matches it, 'browse' for one that
+     hides while there is a query. filterRegionRows() applies the same rule.
+     Selection is several places at once (4.2.3): rows are checkboxes and every
+     toggle applies immediately, like the rest of the filters; syncRegionPicker()
+     repaints the checks in place so the list keeps its scroll and focus. */
+  function rgRowHit(q, only, hay) {
+    return !q ? only !== 'search' : (only !== 'browse' && (hay || '').indexOf(q) >= 0);
+  }
+  function rgRow(o) {
     var q = (listFilter || '').toLowerCase();
-    var groups = Data.config.REGION_GROUPS.map(function (g) {
-      var rows = '';
-      for (var i = g.from; i <= g.to; i++) {
-        var name = Data.regionName(i, s.lang);
-        if (q && (name + ' ' + Data.config.REGIONS[i].en).toLowerCase().indexOf(q) < 0) continue;
-        var n = c.region[i] || 0;
-        rows += '<button class="ov-rg-row" role="radio" aria-checked="' + (s.filters.region === i) + '" data-ov="region" data-code="' + i + '">' +
-          '<span class="ov-rg-name">' + esc(name) + '</span><span class="ov-rg-n num">' + esc(u.fmtCount(n, s.lang)) + '</span></button>';
-      }
-      return rows ? '<div class="ov-rg-head">' + esc(Data.regionGroupName(g)) + '</div>' + rows : '';
-    }).join('');
+    var box = o.check === undefined ? '' : '<span class="ov-rg-box" aria-hidden="true"></span>';
+    return '<button class="ov-rg-row' + (o.cls ? ' ' + o.cls : '') + '"' +
+      (o.check === undefined ? '' : ' role="checkbox" aria-checked="' + o.check + '"') + ' ' + o.attrs +
+      ' data-q="' + esc(o.q) + '"' + (o.only ? ' data-only="' + o.only + '"' : '') +
+      (rgRowHit(q, o.only, o.q) ? '' : ' hidden') + '>' + box +
+      (o.sub !== undefined ? '<span class="ov-rg-main"><span class="ov-rg-name">' + esc(o.name) + '</span><span class="ov-rg-sub">' + esc(o.sub) + '</span></span>'
+                           : '<span class="ov-rg-name">' + esc(o.name) + '</span>') +
+      (o.n === undefined ? '' : '<span class="ov-rg-n num">' + esc(u.fmtCount(o.n, S().lang)) + '</span>') +
+      (o.chevron ? ic('chevronRight', { cls: 'ic-sm' }) : '') + '</button>';
+  }
+  function checkAttr(state) { return state === 'on' ? 'true' : (state === 'mixed' ? 'mixed' : 'false'); }
+  /** a group heading; `toggle` adds its select-all button ({ov, list, state, name}). */
+  function rgHead(label, toggle) {
+    return '<div class="ov-rg-head"><span class="ov-rg-head-t">' + esc(label) + '</span>' +
+      (toggle ? '<button class="ov-rg-all" role="checkbox" aria-checked="' + checkAttr(toggle.state) + '" data-ov="' + toggle.ov + '" data-list="' + esc(toggle.list.join(',')) + '" ' +
+        'aria-label="' + esc(t('全选：{name}', { name: label })) + '">' + esc(t(toggle.state === 'on' ? '全清' : '全选')) + '</button>' : '') +
+      '</div>';
+  }
+  function regionHay(code) {
+    var r = Data.config.REGIONS[code];
+    return r ? [r.zh, r.tw, r.en, r.ja].join(' ').toLowerCase() : '';
+  }
+  function regionSearch() {
+    return '<div class="ov-search-inline"><input class="input" id="ov-region-q" type="search" autocomplete="off" ' +
+      'placeholder="' + esc(t('搜索地区或街区')) + '" aria-label="' + esc(t('搜索地区或街区')) + '" value="' + esc(listFilter) + '"></div>';
+  }
+  function regionEmpty() {
+    return '<div class="ov-sug-empty t-body" data-rg-empty hidden>' + esc(t('没有找到相关结果')) + '</div>';
+  }
+  function regionFoot(s) {
+    return '<div class="ov-pop-foot ov-rg-foot"><button class="btn btn-primary ov-rg-done" data-ov="close">' +
+      esc(t('完成（{n} 家）', { n: u.fmtCount(Data.scopeCount(s.filters, counts(s)), s.lang) })) + '</button></div>';
+  }
+  function tokyoAllRow(s, c) {
+    var T = Data.config.TOKYO, label = t('东京都（全部）');
+    return rgRow({ attrs: 'data-ov="region" data-code="' + T.pref + '"', name: label, n: c.region[T.pref] || 0,
+      check: checkAttr(Data.regionState(s.filters, T.pref)), q: (label + ' ' + regionHay(T.pref)).toLowerCase() });
+  }
+  function drillSub(s) {
+    var n = s.filters.areas ? s.filters.areas.size : 0;
+    return n === 1 ? Data.zoneName(Array.from(s.filters.areas)[0], s.lang) : (n ? t('已选 {n} 个区', { n: n }) : '');
+  }
+  function zoneRow(s, c, z, only) {
+    return rgRow({ attrs: 'data-ov="area" data-zone="' + esc(z.id) + '"', cls: 'ov-rg-zone', only: only,
+      name: Data.zoneName(z.id, s.lang), sub: Data.zoneCaption(z.id, s.lang), n: (c.area && c.area[z.id]) || 0,
+      check: checkAttr(Data.areaChecked(s.filters, z.id) ? 'on' : 'off'), q: Data.zoneSearchText(z.id) });
+  }
+  function groupCodes(g) {
+    var T = Data.config.TOKYO, codes = [];
+    for (var i = g.from; i <= g.to; i++) if (!(T && i === T.pref)) codes.push(i);   // Tokyo has its own block
+    return codes;
+  }
+
+  function regionBody(s) {
+    var T = Data.config.TOKYO;
+    if (regionView === 'tokyo' && T) return tokyoBody(s);
+    var c = counts(s), f = s.filters;
     // counts.region is computed with the region condition cleared, so its sum
     // is what "all regions" would actually show — c.total is the *current*
-    // region's count and would be wrong the moment one is picked.
+    // selection's count and would be wrong the moment one is picked.
     var allN = 0;
     Object.keys(c.region).forEach(function (k) { allN += c.region[k] || 0; });
-    var all = (!q || t('全部地区').toLowerCase().indexOf(q) >= 0)
-      ? '<button class="ov-rg-row" role="radio" aria-checked="' + (s.filters.region === null) + '" data-ov="region" data-code="">' +
-        '<span class="ov-rg-name">' + esc(t('全部地区')) + '</span><span class="ov-rg-n num">' + esc(u.fmtCount(allN, s.lang)) + '</span></button>' : '';
-    return popHead(t('地区')) +
-      '<div class="ov-search-inline"><input class="input" id="ov-region-q" type="search" autocomplete="off" ' +
-        'placeholder="' + esc(t('搜索地区')) + '" aria-label="' + esc(t('搜索地区')) + '" value="' + esc(listFilter) + '"></div>' +
-      '<div class="ov-pop-body is-flush" role="radiogroup" aria-label="' + esc(t('地区')) + '">' + all + groups +
-      (!all && !groups ? '<div class="ov-sug-empty t-body">' + esc(t('没有找到相关结果')) + '</div>' : '') + '</div>';
+    var html = rgRow({ attrs: 'data-ov="region-all"', name: t('全部地区'), n: allN,
+      check: checkAttr((!f.regions || !f.regions.size) && (!f.areas || !f.areas.size) ? 'on' : 'off'), q: t('全部地区').toLowerCase() });
+    if (T) {
+      // Tokyo first, ahead of the regional blocks: the whole prefecture, the
+      // way into its districts, and every district as a search-only row so a
+      // neighbourhood typed here is found without opening the district page.
+      html += rgHead(t('东京')) + tokyoAllRow(s, c) +
+        rgRow({ attrs: 'data-ov="region-tokyo"', cls: 'ov-rg-drill', only: 'browse', chevron: true, q: '',
+          name: t('按区选择（{n} 个区）', { n: T.zones.length }), sub: drillSub(s) }) +
+        T.zones.map(function (z) { return zoneRow(s, c, z, 'search'); }).join('');
+    }
+    html += Data.config.REGION_GROUPS.map(function (g) {
+      var codes = groupCodes(g);
+      return rgHead(Data.regionGroupName(g), { ov: 'region-group', list: codes, state: Data.groupState(f, codes) }) +
+        codes.map(function (i) {
+          return rgRow({ attrs: 'data-ov="region" data-code="' + i + '"', name: Data.regionName(i, s.lang), n: c.region[i] || 0,
+            check: checkAttr(Data.regionState(f, i)), q: regionHay(i) });
+        }).join('');
+    }).join('');
+    return popHead(t('地区')) + regionSearch() +
+      '<div class="ov-pop-body is-flush" role="group" aria-label="' + esc(t('地区')) + '">' + html + regionEmpty() + '</div>' + regionFoot(s);
+  }
+
+  function tokyoBody(s) {
+    var T = Data.config.TOKYO, c = counts(s), html = tokyoAllRow(s, c);
+    T.groups.forEach(function (g) {
+      var ids = T.zones.filter(function (z) { return z.group === g.id; }).map(function (z) { return z.id; });
+      html += rgHead(Data.zoneGroupName(g, s.lang), { ov: 'area-group', list: ids, state: Data.areaGroupState(s.filters, ids) });
+      T.zones.forEach(function (z) { if (z.group === g.id) html += zoneRow(s, c, z, ''); });
+    });
+    return popHead(t('东京都 · 按区选择'), { back: 'region-back' }) + regionSearch() +
+      '<div class="ov-pop-body is-flush" role="group" aria-label="' + esc(t('东京都 · 按区选择')) + '">' + html + regionEmpty() + '</div>' + regionFoot(s);
+  }
+
+  /** syncRegionPicker(s) — checks, select-all buttons, the district summary
+   *  and the Done count, repainted on the existing rows. */
+  function syncRegionPicker(s) {
+    var node = el('ov-pop');
+    if (!node || nearbyState(s).active) return;
+    var f = s.filters, T = Data.config.TOKYO;
+    Array.prototype.forEach.call(node.querySelectorAll('[role="checkbox"]'), function (b) {
+      var ov = b.dataset.ov, state;
+      if (ov === 'region-all') state = (!f.regions || !f.regions.size) && (!f.areas || !f.areas.size) ? 'on' : 'off';
+      else if (ov === 'region') state = Data.regionState(f, Number(b.dataset.code));
+      else if (ov === 'area') state = Data.areaChecked(f, b.dataset.zone) ? 'on' : 'off';
+      else if (ov === 'region-group') state = Data.groupState(f, b.dataset.list.split(',').map(Number));
+      else if (ov === 'area-group') state = Data.areaGroupState(f, b.dataset.list.split(','));
+      else return;
+      b.setAttribute('aria-checked', checkAttr(state));
+      if (b.classList.contains('ov-rg-all')) b.textContent = t(state === 'on' ? '全清' : '全选');
+    });
+    var drill = node.querySelector('[data-ov="region-tokyo"] .ov-rg-sub');
+    if (drill && T) drill.textContent = drillSub(s);
+    var done = node.querySelector('.ov-rg-done');
+    if (done) done.textContent = t('完成（{n} 家）', { n: u.fmtCount(Data.scopeCount(f, counts(s)), s.lang) });
+  }
+
+  /* Closing the picker after changing the selection is a request to look at
+     it: fit the map to the matches, or to the picked places' restaurants when
+     the other filters leave none. */
+  function fitRegionSelection() {
+    var s = S(), f = s.filters;
+    if (!window.MapMod || typeof window.MapMod.fitBounds !== 'function' || !window.L) return;
+    if ((!f.regions || !f.regions.size) && (!f.areas || !f.areas.size)) return;
+    var pts = [];
+    function add(r) { if (r && typeof r.lat === 'number' && typeof r.lon === 'number') pts.push([r.lat, r.lon]); }
+    Data.M(s).forEach(function (id) { add(Data.byId(id)); });
+    if (!pts.length) Data.restaurants.forEach(function (r) {
+      if (f.regions.has(r.pref) || f.areas.has(Data.zoneOf(r))) add(r);
+    });
+    if (!pts.length) return;
+    try { window.MapMod.fitBounds(window.L.latLngBounds(pts), 16); } catch (e) { /* map not ready */ }
   }
 
   /* ---- sort menu -------------------------------------------------------- */
@@ -1897,7 +2053,6 @@
     sig.modal = null; sig.pop = null; sig.chips = null;
     nav.push(kind, function () { transient = null; sig.modal = null; sig.pop = null; sig.chips = null; App.requestRender('transient'); });
     App.requestRender('transient');
-    if (kind === 'langMenu') motion.afterGeometry(function () { renderLangMenu(S()); });
   };
   function closeTransient() {
     if (!transient) return;
@@ -1921,7 +2076,10 @@
         (s.lang === l.key ? ic('check') : '<span class="ic" aria-hidden="true"></span>') + esc(l.label) + '</button>';
     }).join('') + '</div>';
     R.pop.appendChild(node);
-    var U = s.layout.U, a = lastTrigger && document.contains(lastTrigger) ? lastTrigger.getBoundingClientRect() : null;
+    // Anchor to the chip as it is now: renderChips rebuilds #topbar-right when
+    // the menu opens, so the element that was clicked is already detached.
+    var trig = (R.topRight && R.topRight.querySelector('[data-ov="lang-menu"]')) || (lastTrigger && document.contains(lastTrigger) ? lastTrigger : null);
+    var U = s.layout.U, a = trig ? trig.getBoundingClientRect() : null;
     var w = 200;
     node.style.width = w + 'px';
     node.style.left = clamp(a ? a.right - w : U.x + U.w - 16 - w, U.x + 12, U.x + U.w - 12 - w) + 'px';
@@ -1982,21 +2140,20 @@
     var body = R.pop.querySelector('.ov-pop-body');
     if (!body) return;
     var q = (listFilter || '').toLowerCase();
-    var visibleInGroup = 0, lastHead = null;
+    var visibleInGroup = 0, lastHead = null, visible = 0;
     Array.prototype.forEach.call(body.children, function (node) {
       if (node.classList.contains('ov-rg-head')) {
         if (lastHead) lastHead.hidden = visibleInGroup === 0;
         lastHead = node; visibleInGroup = 0; node.hidden = false; return;
       }
       if (!node.classList.contains('ov-rg-row')) return;
-      var name = (node.textContent || '').toLowerCase();
-      var code = node.dataset.code;
-      var en = code === '' ? '' : (Data.config.REGIONS[Number(code)].en || '').toLowerCase();
-      var hit = !q || name.indexOf(q) >= 0 || en.indexOf(q) >= 0;
+      var hit = rgRowHit(q, node.dataset.only, node.dataset.q);
       node.hidden = !hit;
-      if (hit) visibleInGroup += 1;
+      if (hit) { visibleInGroup += 1; visible += 1; }
     });
     if (lastHead) lastHead.hidden = visibleInGroup === 0;
+    var empty = body.querySelector('[data-rg-empty]');
+    if (empty) empty.hidden = visible > 0;
   }
 
   /* ---- the one action table ------------------------------------------- */
@@ -2040,7 +2197,9 @@
       case 'close': act.closeOverlay('cancel'); break;
       case 'scrim': act.closeOverlay('scrim'); break;
       case 'tab': act.setTab(node.dataset.tab); break;
-      case 'lang-menu': rememberTrigger(); O.openTransient('langMenu'); break;
+      case 'lang-menu':
+        if (transient && transient.kind === 'langMenu') { closeTransient(); break; }
+        rememberTrigger(); O.openTransient('langMenu'); break;
       case 'lang': act.setLanguage(node.dataset.lang); break;      // full navigation (tabelog.langSwitch)
       case 'gate-lang': {
         // Always go through setLanguage: it is what writes tabelog.lang, and
@@ -2110,12 +2269,19 @@
       case 'install-never': act.neverInstall(); localNotices.snackDismissed = true; sig.notice = null; App.requestRender('notice'); break;
 
       /* region / sort / more / share */
-      case 'region': {
-        var code = node.dataset.code === '' ? null : Number(node.dataset.code);
-        act.applyFilters({ region: code });
-        act.closeOverlay('done');
+      case 'region-all': act.applyFilters(Data.clearRegionsPatch()); break;
+      case 'region': act.applyFilters(Data.toggleRegionPatch(s.filters, Number(node.dataset.code))); break;
+      case 'region-group': act.applyFilters(Data.toggleRegionGroupPatch(s.filters, node.dataset.list.split(',').map(Number))); break;
+      case 'area': act.applyFilters(Data.toggleAreaPatch(s.filters, node.dataset.zone)); break;
+      case 'area-group': act.applyFilters(Data.toggleAreaGroupPatch(s.filters, node.dataset.list.split(','))); break;
+      case 'region-tokyo':
+      case 'region-back':
+        regionView = name === 'region-tokyo' ? 'tokyo' : 'root';
+        listFilter = '';
+        regionFocus = name === 'region-tokyo' ? '.ov-pop-back' : '[data-ov="region-tokyo"]';
+        sig.pop = null;
+        App.requestRender('overlay');
         break;
-      }
       case 'sort': App.set({ sort: node.dataset.key }); act.closeOverlay('done'); break;
       case 'more-run': {
         var items = moreItemsFor(s);
