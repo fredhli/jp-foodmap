@@ -38,6 +38,9 @@ uv run python tests/pipeline/run.py
 uv run python tests/compat/run.py
 uv run python tests/smoke_playwright.py                    # the Chromium viewports
 uv run python tests/smoke_playwright.py --browser webkit   # the iPhone viewports
+uv run python tests/transit/station_payload_test.py         # station payload contract + size
+uv run python tests/ux/station_grid_layer.py --profiles fold-outer,desktop
+uv run python tests/ux/station_grid_layer.py --browser webkit --profiles iphone
 uv run python tests/feature_retention_playwright.py
 .venv-wsl/bin/python tests/ux/run.py --docs docs --browser webkit --output /tmp/jpfoodmap-ux
 .venv-wsl/bin/python tests/ux/run.py --docs docs --browser chromium --output /tmp/jpfoodmap-ux-cr

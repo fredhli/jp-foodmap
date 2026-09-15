@@ -55,6 +55,8 @@ scripts/verify_baseline.json so this file stays declarative.
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import json
 import re
 import sys
@@ -77,6 +79,17 @@ from tabelog.paths import (  # noqa: E402
     VERIFY_BASELINE_JSON,
     atomic_write_json,
 )
+from tabelog.scrape.station_payload import (  # noqa: E402
+    MAX_STATION_COUNT,
+    MIN_STATION_COUNT,
+    OUTPUT_FIELDS as STATION_FIELDS,
+    PAYLOAD_VERSION as STATION_PAYLOAD_VERSION,
+    PLACEMENT_VERSION,
+    STATION_SOURCE_JSON,
+    ZOOM_MAX as STATION_ZOOM_MAX,
+    ZOOM_MIN as STATION_ZOOM_MIN,
+    build_station_payload,
+)
 
 # --- constants ---------------------------------------------------------------
 
@@ -92,7 +105,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.2.8"
+EXPECTED_APP_VERSION = "4.3.2a"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -142,7 +155,9 @@ REQUIRED_LOCALSTORAGE_KEYS = [
     "tabelog.showAttractions",
     "tabelog.showTransitLong",
     "tabelog.showTransitCity",
+    "tabelog.showStations",
     "tabelog.showBookmarks",
+    "tabelog.basemapStyle",
 ]
 
 # All five versioned data URLs the service worker must keep in its GC
@@ -551,6 +566,161 @@ def check_restaurants(baseline: dict, update_baseline: bool) -> None:
         )
     else:
         ok("restaurants", "all coordinates inside the Japan bbox")
+
+
+def check_station_payload() -> None:
+    """Validate the reproducible, content-addressed station payload."""
+    if not MAP_HTML.exists():
+        fail("stations", f"{MAP_HTML} does not exist — run map.py first")
+        return
+    html = MAP_HTML.read_text(encoding="utf-8")
+    matches = re.findall(
+        r"stationUrl:\s*['\"](data/stations\.([0-9a-f]{12})\.json)['\"]",
+        html,
+    )
+    if len(matches) != 1:
+        fail("stations", f"expected one content-hashed stationUrl, found {len(matches)}")
+        return
+    relative, expected_hash = matches[0]
+    path = DOCS_DIR / relative
+    if not path.exists():
+        fail("stations", f"referenced payload is missing: {path}")
+        return
+    raw = path.read_bytes()
+    actual_hash = hashlib.sha256(raw).hexdigest()[:12]
+    if actual_hash != expected_hash:
+        fail("stations", f"filename hash {expected_hash} != content hash {actual_hash}")
+        return
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        fail("stations", f"payload is not valid JSON: {exc}")
+        return
+    try:
+        expected_raw, build_meta = build_station_payload(STATION_SOURCE_JSON)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        fail("stations", f"checked-in station source cannot reproduce payload: {exc}")
+        return
+    if raw != expected_raw:
+        fail("stations", "runtime payload differs from the checked-in source rebuild")
+        return
+    rows = payload.get("stations") if isinstance(payload, dict) else None
+    if (not isinstance(payload, dict) or payload.get("v") != STATION_PAYLOAD_VERSION or
+            payload.get("fields") != STATION_FIELDS or not isinstance(rows, list)):
+        fail("stations", "payload version or documented positional fields are wrong")
+        return
+    if not MIN_STATION_COUNT <= len(rows) <= MAX_STATION_COUNT:
+        fail("stations", f"station count is {len(rows):,}, expected "
+             f"{MIN_STATION_COUNT:,}–{MAX_STATION_COUNT:,}")
+        return
+    lat_min, lat_max, lon_min, lon_max = JAPAN_BBOX
+    bad = []
+    tiers = [0, 0, 0]
+    unnamed = 0
+    for i, row in enumerate(rows):
+        if (not isinstance(row, list) or len(row) != len(STATION_FIELDS) or
+                not isinstance(row[0], (int, float)) or
+                not isinstance(row[1], (int, float)) or
+                not (lon_min <= row[0] <= lon_max and lat_min <= row[1] <= lat_max) or
+                not isinstance(row[2], str) or
+                not isinstance(row[3], str) or
+                not isinstance(row[4], str) or
+                not isinstance(row[5], int) or row[5] < 0):
+            bad.append((i, row))
+            if len(bad) == 3:
+                break
+        else:
+            if not row[2]:
+                unnamed += 1
+            tiers[2 if row[5] >= 6 else 1 if row[5] >= 3 else 0] += 1
+    if bad:
+        fail("stations", f"malformed station rows: {bad}")
+        return
+    placement = payload.get("placement")
+    profiles = placement.get("profiles") if isinstance(placement, dict) else None
+    measurement = placement.get("measurement") if isinstance(placement, dict) else None
+    if (
+        not isinstance(placement, dict)
+        or placement.get("version") != PLACEMENT_VERSION
+        or placement.get("zoomMin") != STATION_ZOOM_MIN
+        or placement.get("zoomMax") != STATION_ZOOM_MAX
+        or not isinstance(profiles, dict)
+        or set(profiles) != {"local-max130", "en-max130"}
+        or not isinstance(measurement, dict)
+    ):
+        fail("stations", "placement version, zoom range or profile set is wrong")
+        return
+    mask_limit = (1 << (STATION_ZOOM_MAX - STATION_ZOOM_MIN + 1)) - 1
+    for profile_key, profile in profiles.items():
+        masks = profile.get("visibleMaskByItem") if isinstance(profile, dict) else None
+        widths = profile.get("labelWidthByItem") if isinstance(profile, dict) else None
+        if not isinstance(masks, list) or not isinstance(widths, list):
+            fail("stations", f"{profile_key} placement arrays are missing")
+            return
+        if len(masks) != len(rows) or len(widths) != len(rows):
+            fail("stations", f"{profile_key} placement arrays are not row-aligned")
+            return
+        if any(not isinstance(mask, int) or not 0 <= mask <= mask_limit for mask in masks):
+            fail("stations", f"{profile_key} contains an invalid visibility mask")
+            return
+        if any((mask & 1) and rows[i][5] < 6 for i, mask in enumerate(masks)):
+            fail("stations", f"{profile_key} labels a non-mega-hub station at z14")
+            return
+        if any(not isinstance(width, (int, float)) or width < 0 for width in widths):
+            fail("stations", f"{profile_key} contains an invalid label width")
+            return
+    if (
+        measurement.get("algorithm") != "unicode-eaw-upper-bound-v1"
+        or measurement.get("fontScaleEnvelope") != [100, 115, 130]
+        or measurement.get("uiDensityEnvelope") != [0.95, 1.0]
+        or measurement.get("measuredAtFontScale") != 130
+        or measurement.get("measuredAtUiDensity") != 1.0
+        or measurement.get("baseFontCssPx") != 11.0
+        or measurement.get("fontWeight") != 600
+        or measurement.get("emCssPx") != 14.3
+        or measurement.get("measurementCanvasFont")
+        != '600 14.3px system-ui,-apple-system,"Hiragino Sans","Noto Sans CJK JP",sans-serif'
+        or measurement.get("advanceEm")
+        != {
+            "eastAsianWideFullAmbiguous": 1.15,
+            "latinLetterDigit": 1.10,
+            "space": 0.50,
+            "otherPrintable": 1.15,
+        }
+        or measurement.get("haloCssPx") != 3.0
+        or measurement.get("labelGapCssPx") != 3.0
+        or measurement.get("iconGuardCssPx") != 2.0
+        or measurement.get("widthIncludesHalo") is not False
+    ):
+        fail("stations", "placement measurement envelope metadata is incomplete")
+        return
+    source = payload.get("source")
+    source_sha = hashlib.sha256(STATION_SOURCE_JSON.read_bytes()).hexdigest()
+    if (
+        not isinstance(source, dict)
+        or source.get("sha256") != source_sha
+        or source.get("sha256") != build_meta.get("sourceSha256")
+        or source.get("fields") != STATION_FIELDS
+        or source.get("stationCount") != len(rows)
+    ):
+        fail("stations", "source hash, source fields or source row count is wrong")
+        return
+    wire = len(gzip.compress(raw, compresslevel=9, mtime=0))
+    if wire > 210 * 1024:
+        fail("stations", f"deterministic gzip is {wire:,} bytes, exceeds 210 KiB")
+        return
+    if not all(tiers):
+        fail("stations", f"one of the three line-count tiers is empty: {tiers}")
+        return
+    if unnamed > 50:
+        fail("stations", f"{unnamed} unnamed rows exceed the 50-row tolerance")
+        return
+    visible = {
+        key: sum(1 for mask in profile["visibleMaskByItem"] if mask)
+        for key, profile in profiles.items()
+    }
+    ok("stations", f"{len(rows):,} rows ({unnamed} unnamed), sha {actual_hash}, "
+       f"{wire / 1024:.1f} KiB gzip, tiers {tiers}, labels {visible}")
 
 
 def check_localstorage_keys() -> None:
@@ -1327,6 +1497,7 @@ def main(argv: list[str] | None = None) -> int:
         check_popup_slots()          # M-029 / M-030
         check_restaurants(baseline, args.update_baseline)
         check_restaurant_fields()    # M-023 / B1
+        check_station_payload()      # 4.3.1a
         check_localstorage_keys()
         check_subcollections()       # M-031 / E2
         check_breakpoints()          # M-3.2-01 / GW P3-P4

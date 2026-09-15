@@ -1,8 +1,9 @@
 /* L.TransitLayer — a Leaflet overlay that renders Japan's railway network
-   from a precomputed GeoJSON (data/transit/japan.geojson).
+   and a separately loadable station layer.
 
    Usage:
      var layer = new L.TransitLayer({ geojsonUrl: 'transit/japan.geojson',
+                                      stationUrl: 'transit/japan-stations.json',
                                       opacity: 0.7 });
      layer.addTo(map);
      ...
@@ -42,18 +43,12 @@
     } catch (_) {}
     return 'zh-CN';
   })();
-  var LINES_SUFFIX = ACTIVE_LANG === 'en' ? ' lines'
-                   : ACTIVE_LANG === 'zh-TW' ? '線' : '线';
   function pickLineLabel(props) {
     if (ACTIVE_LANG === 'en') {
       return props.route_name_en || props.name_en
           || props.route_name    || props.name;
     }
     return props.route_name || props.name;
-  }
-  function pickStationName(props) {
-    if (ACTIVE_LANG === 'en') return props.name_en || props.name;
-    return props.name;
   }
 
   // Inject tooltip styles once.
@@ -208,6 +203,24 @@
   // expressed as "never go finer than this" without a pile of if/else.
   var LOD_RANK = { low: 0, mid: 1, high: 2 };
 
+  // Geometry mirrors docs/img/station-tunnel-v1.svg, vectorized from the
+  // user-provided tunnel/train reference. The flat two-color silhouette stays
+  // legible in the 14px tier and is cached as Path2D once per layer.
+  var STATION_TUNNEL_PATH = 'M5 18.5v-8C5 6.2 8 3.8 12 3.8s7 2.4 7 6.7v8';
+  var STATION_TRAIN_BODY_PATH = 'M8.2 8.2c0-1.1.9-2 2-2h3.6c1.1 0 2 .9 2 2v6.2c0 1.2-1 2.2-2.2 2.2h-3.2c-1.2 0-2.2-1-2.2-2.2z';
+  var STATION_RAIL_PATH = 'M9.9 16.1l-2 3.2m6.2-3.2 2 3.2';
+  var STATION_TIE_PATH = 'M9.35 18.05h5.3l.65 1.1H8.7z';
+  var STATION_BADGE_URL = 'img/station-icon-v2.png?v=c98b8c002d';
+  var STATION_BADGE_CROP = [185, 182, 885, 887];
+  var STATION_SIZES = [11, 14, 18];
+  var STATION_MIN_ZOOM = 13;
+  var STATION_DPR_MAX = 3;
+  var STATION_LABEL_BASE_PX = 11;
+  var STATION_LABEL_HALO_PX = 3;
+  var STATION_ICON_GUARD_PX = 2;
+  var STATION_FONT_STACK = 'system-ui,-apple-system,"Hiragino Sans","Noto Sans CJK JP",sans-serif';
+  var STATION_BOUNDS = [[20, 122], [46, 154]];
+
   // M-3.2.2-02: the line canvas is painted at one device pixel per CSS
   // pixel, where stock Leaflet always doubles it on a hidpi screen.
   //
@@ -241,10 +254,28 @@
     }
   });
 
+  var StationGridLayer = L.GridLayer.extend({
+    initialize: function(owner, options) {
+      this._owner = owner;
+      L.GridLayer.prototype.initialize.call(this, options);
+    },
+    createTile: function(coords) {
+      return this._owner._createStationTile(coords, this.getTileSize());
+    },
+    onRemove: function(map) {
+      L.GridLayer.prototype.onRemove.call(this, map);
+      this._owner = null;
+    }
+  });
+
   L.TransitLayer = L.Layer.extend({
     options: {
       // Legacy single-file mode. Used iff lodUrls is not set.
       geojsonUrl: 'transit/japan.geojson',
+      // Independent station payload. Production passes its content-addressed
+      // URL; the local name remains a development fallback.
+      stationUrl: 'transit/japan-stations.json',
+      stationPane: 'transitStations',
       // Multi-LOD mode. Map of { low, mid, high } -> URL. When set, the
       // layer loads only the LOD appropriate for the current zoom and
       // hot-swaps on zoom changes that cross a break point. lodBreaks
@@ -257,7 +288,16 @@
       cityOpacity: 0.45,    // city-bucket lines sit further back (see muteColor)
       casingOpacity: 0.45,  // white casing underneath, less prominent
       padding: 0.25,
-      grid: 0.4             // grid cell size in degrees
+      grid: 0.4,            // line-index cell size in degrees
+      stationGrid: 0.1,     // point-index cell size (~9-11 km in Japan)
+      stationMinZoom: STATION_MIN_ZOOM,
+      stationMaxZoom: null,
+      stationBounds: STATION_BOUNDS,
+      stationKeepBuffer: 2,
+      stationProfileKey: null,
+      stationUiDensity: 1,
+      stationFontScale: 100,
+      stationFont: STATION_FONT_STACK
     },
 
     initialize: function(options) {
@@ -268,6 +308,33 @@
       this._allLines = [];
       this._allStations = [];
       this._lineIndex = new Map();
+      this._stationIndex = new Map();
+      this._stationLoaded = false;
+      this._stationLoading = false;
+      this._stationInflight = null;
+      this._stationAbort = null;
+      this._stationError = null;
+      this._stationRequestGeneration = 0;
+      this._stationGridLayer = null;
+      this._stationPayloadMeta = null;
+      this._stationPlacement = null;
+      this._stationPlacementStatus = 'not-loaded';
+      this._stationSuppressLabels = false;
+      this._stationProfileKey = this.options.stationProfileKey ||
+        (ACTIVE_LANG === 'en' ? 'en-max130' : 'local-max130');
+      this._stationUiDensity = this._normaliseDensity(this.options.stationUiDensity, 1);
+      this._stationFontScale = this._normaliseFontScale(this.options.stationFontScale, 100);
+      this._stationFont = this.options.stationFont || STATION_FONT_STACK;
+      this._stationDpr = this._effectiveStationDpr();
+      this._stationSprites = {};
+      this._stationBadgeImage = null;
+      this._stationBadgeImageStatus = 'idle';
+      this._stationMaxLabelWidth = 0;
+      this._stationCounters = {
+        tileCreate: 0, tileDraw: 0, tileEmpty: 0, tileRemove: 0, redraw: 0
+      };
+      this._stationTileDrawDurationMs = [];
+      this._legacyAbort = null;
       // Per-LOD parsed-and-indexed data. Once an LOD is loaded it stays
       // in this map; switching back is just a pointer swap, no refetch.
       this._lodCache = {};
@@ -281,12 +348,9 @@
       // default on so a bare addTo() keeps the historical behavior; map.py
       // calls setVisibleBuckets({long, city}) from the FAB wiring to switch.
       this._buckets = { long: true, city: true };
+      this._stationsVisible = true;
       // Volatile (cleared on remove)
       this._onMap = new Set();
-      // station feature -> {marker, radius, showLabel, label}; lets a pan
-      // diff the visible set instead of destroying and recreating every
-      // circle + permanent label on each moveend.
-      this._stationsOn = new Map();
       this._lastZoom = null;
       this._lastDrawCasing = null;
       this._rafToken = 0;
@@ -297,8 +361,253 @@
     setVisibleBuckets: function(opts) {
       if (opts && typeof opts.long === 'boolean') this._buckets.long = opts.long;
       if (opts && typeof opts.city === 'boolean') this._buckets.city = opts.city;
-      if (this._map) this._scheduleRedraw();
+      if (this._map) {
+        if (this._buckets.long || this._buckets.city) {
+          this._loadRail();
+          this._syncLineHover(true);
+        } else {
+          this._releaseRailData();
+          this._syncLineHover(false);
+        }
+        this._scheduleRedraw();
+      }
       return this;
+    },
+
+    setStationsVisible: function(visible) {
+      visible = !!visible;
+      if (this._stationsVisible === visible) return this;
+      this._stationsVisible = visible;
+      if (!visible) {
+        this._stationRequestGeneration += 1;
+        if (this._stationAbort) {
+          try { this._stationAbort.abort(); } catch (_) {}
+        }
+        this._stationAbort = null;
+        this._stationInflight = null;
+        this._stationLoading = false;
+        this._clearStationMarkers();
+      } else if (this._map) {
+        this._maybeLoadStations();
+        this._syncStationGrid();
+      }
+      return this;
+    },
+
+    setStationProfile: function(profile) {
+      profile = profile || {};
+      var key = profile.key || this._stationProfileKey;
+      var density = this._normaliseDensity(profile.uiDensity, this._stationUiDensity || 1);
+      var fontScale = this._normaliseFontScale(profile.fontScale, this._stationFontScale || 100);
+      var font = profile.font || this._stationFont || STATION_FONT_STACK;
+      if (key === this._stationProfileKey && density === this._stationUiDensity &&
+          fontScale === this._stationFontScale && font === this._stationFont &&
+          this._stationDpr === this._effectiveStationDpr()) return this;
+      this._stationProfileKey = key;
+      this._stationUiDensity = density;
+      this._stationFontScale = fontScale;
+      this._stationFont = font;
+      this._selectStationPlacement();
+      this._refreshStationTiles();
+      return this;
+    },
+
+    refreshStations: function() {
+      this._selectStationPlacement();
+      this._refreshStationTiles();
+      return this;
+    },
+
+    stationsVisible: function() {
+      return this._stationsVisible;
+    },
+
+    stationCount: function() {
+      return this._stationLoaded ? this._allStations.length : null;
+    },
+
+    stationDetail: function() {
+      var live = this._stationTileStats();
+      return {
+        renderer: 'grid',
+        tileZoom: this._stationGridLayer && this._stationGridLayer._tileZoom != null
+          ? this._stationGridLayer._tileZoom : null,
+        count: this._stationVisibleCount(),
+        total: this.stationCount(),
+        loaded: this._stationLoaded,
+        loading: this._stationLoading,
+        visible: this._stationsVisible,
+        error: this._stationError,
+        dpr: this._stationDpr,
+        placementStatus: this._stationPlacementStatus,
+        badgeImageStatus: this._stationBadgeImageStatus,
+        profileKey: this._stationProfileKey,
+        labelsSuppressed: this._stationSuppressLabels,
+        liveCanvasCount: live.count,
+        liveCanvasBytes: live.bytes,
+        liveLevelCount: live.levels,
+        tileDrawDurationMs: this._stationTileDrawDurationMs.slice(),
+        counters: {
+          tileCreate: this._stationCounters.tileCreate,
+          tileDraw: this._stationCounters.tileDraw,
+          tileEmpty: this._stationCounters.tileEmpty,
+          tileRemove: this._stationCounters.tileRemove,
+          redraw: this._stationCounters.redraw
+        }
+      };
+    },
+
+    retryStations: function() {
+      this._stationRequestGeneration += 1;
+      this._stationError = null;
+      if (this._stationAbort) {
+        try { this._stationAbort.abort(); } catch (_) {}
+      }
+      this._clearStationMarkers();
+      this._allStations = [];
+      this._stationIndex = new Map();
+      this._stationLoaded = false;
+      this._stationPlacement = null;
+      this._stationPlacementStatus = 'not-loaded';
+      this._stationPayloadMeta = null;
+      this._stationInflight = null;
+      this._stationLoading = false;
+      this._ensureStationBadgeImage(true);
+      if (this._map && this._stationsVisible) return this._loadStations(true);
+      return Promise.resolve();
+    },
+
+    _normaliseScale: function(value, fallback) {
+      value = +value;
+      return isFinite(value) && value > 0 ? value : fallback;
+    },
+
+    _normaliseDensity: function(value, fallback) {
+      value = this._normaliseScale(value, fallback);
+      return value > 10 ? value / 100 : value;
+    },
+
+    _normaliseFontScale: function(value, fallback) {
+      value = this._normaliseScale(value, fallback);
+      return value <= 3 ? value * 100 : value;
+    },
+
+    _effectiveStationDpr: function() {
+      // Three device pixels per CSS pixel preserves high-density detail while
+      // bounding each 256px tile at 2.25 MiB of RGBA backing memory.
+      var value = +window.devicePixelRatio || 1;
+      return Math.min(STATION_DPR_MAX, Math.max(1, value));
+    },
+
+    _stationTileStats: function() {
+      var grid = this._stationGridLayer;
+      if (!grid) return {count: 0, bytes: 0, levels: 0};
+      var count = 0, bytes = 0;
+      var tiles = grid._tiles || {};
+      Object.keys(tiles).forEach(function(key) {
+        var tile = tiles[key] && tiles[key].el;
+        if (tile && tile.dataset && tile.dataset.stationTile === '1') {
+          count += 1;
+          bytes += +tile.dataset.stationTileBytes || 0;
+        }
+      });
+      return {count: count, bytes: bytes, levels: Object.keys(grid._levels || {}).length};
+    },
+
+    _stationStyleScale: function() {
+      return Math.max(0.75, Math.min(1, this._stationUiDensity || 1));
+    },
+
+    _stationFontPx: function() {
+      var scale = (this._stationFontScale || 100) / 100;
+      return STATION_LABEL_BASE_PX * this._stationStyleScale() * Math.max(0.75, Math.min(1.3, scale));
+    },
+
+    _stationName: function(station) {
+      return this._stationProfileKey === 'en-max130'
+        ? (station.name_en || station.name || '') : (station.name || '');
+    },
+
+    _selectStationPlacement: function() {
+      var payload = this._stationPayloadMeta;
+      var placement = payload && payload.placement;
+      var rowsLength = this._allStations.length;
+      this._stationPlacement = null;
+      this._stationSuppressLabels = false;
+      if (!payload || payload.v !== 2 || !placement) {
+        this._stationPlacementStatus = payload ? 'fallback-legacy-v1' : 'not-loaded';
+      } else if (placement.version !== 1 || placement.zoomMin !== 14 ||
+                 placement.zoomMax !== 19 || !placement.profiles) {
+        this._stationPlacementStatus = 'fallback-placement-version';
+        this._stationSuppressLabels = true;
+      } else if (!this._stationMeasurementValid(placement.measurement)) {
+        this._stationPlacementStatus = 'fallback-invalid-metadata';
+        this._stationSuppressLabels = true;
+      } else if (this._stationUiDensity > 1 || this._stationFontScale > 130 ||
+                 this._stationFont !== STATION_FONT_STACK) {
+        this._stationPlacementStatus = 'fallback-profile-range';
+        this._stationSuppressLabels = true;
+      } else {
+        var profile = placement.profiles[this._stationProfileKey];
+        if (!profile) {
+          this._stationPlacementStatus = 'fallback-profile-miss';
+          this._stationSuppressLabels = true;
+        } else if (!Array.isArray(profile.visibleMaskByItem) ||
+                   !Array.isArray(profile.labelWidthByItem) ||
+                   profile.visibleMaskByItem.length !== rowsLength ||
+                   profile.labelWidthByItem.length !== rowsLength) {
+          this._stationPlacementStatus = 'fallback-invalid-profile';
+          this._stationSuppressLabels = true;
+        } else {
+          var validProfile = true;
+          for (var pi = 0; pi < rowsLength; pi++) {
+            var mask = profile.visibleMaskByItem[pi];
+            var profileWidth = profile.labelWidthByItem[pi];
+            if (typeof mask !== 'number' || mask !== (mask | 0) || mask < 0 || mask > 63 ||
+                typeof profileWidth !== 'number' || !isFinite(profileWidth) || profileWidth < 0) {
+              validProfile = false;
+              break;
+            }
+          }
+          if (validProfile) {
+            this._stationPlacement = profile;
+            this._stationPlacementStatus = 'ready';
+          } else {
+            this._stationPlacementStatus = 'fallback-invalid-profile';
+            this._stationSuppressLabels = true;
+          }
+        }
+      }
+      var maxWidth = 0;
+      if (this._stationPlacement) {
+        var widths = this._stationPlacement.labelWidthByItem;
+        for (var i = 0; i < widths.length; i++) {
+          var width = +widths[i];
+          if (isFinite(width) && width > maxWidth) maxWidth = width;
+        }
+      } else {
+        var fontPx = this._stationFontPx();
+        for (var j = 0; j < this._allStations.length; j++) {
+          var text = this._stationName(this._allStations[j]);
+          var fallbackWidth = Array.from(text).length * fontPx * 1.2;
+          if (fallbackWidth > maxWidth) maxWidth = fallbackWidth;
+        }
+      }
+      this._stationMaxLabelWidth = maxWidth;
+    },
+
+    _stationMeasurementValid: function(measurement) {
+      if (!measurement || measurement.baseFontCssPx !== STATION_LABEL_BASE_PX ||
+          measurement.fontWeight !== 600 || measurement.measuredAtFontScale !== 130 ||
+          measurement.measuredAtUiDensity !== 1 ||
+          measurement.measurementCanvasFont !== '600 14.3px ' + STATION_FONT_STACK ||
+          measurement.haloCssPx !== STATION_LABEL_HALO_PX ||
+          measurement.labelGapCssPx !== 3 ||
+          measurement.iconGuardCssPx !== STATION_ICON_GUARD_PX ||
+          measurement.widthIncludesHalo !== false ||
+          !measurement.fontStacks) return false;
+      return measurement.fontStacks['local-max130'] === STATION_FONT_STACK &&
+             measurement.fontStacks['en-max130'] === STATION_FONT_STACK;
     },
 
     onAdd: function(map) {
@@ -310,27 +619,18 @@
       // canvas is insertion order, so the importance tiers are preserved
       // by (re)attaching polylines sorted whenever membership changes;
       // hover hit-testing is done in coordinate space (no hit canvas).
-      this._rLines = new LoResCanvas({ padding: this.options.padding }).addTo(map);
-      this._stationsLayer = L.layerGroup().addTo(map);
+      var stationPane = map.getPane(this.options.stationPane) || map.createPane(this.options.stationPane);
+      stationPane.style.zIndex = '450';
+      stationPane.style.pointerEvents = 'none';
       this._scheduleRedrawBound = this._scheduleRedraw.bind(this);
       map.on('moveend', this._scheduleRedrawBound);
+      this._stationResizeBound = this._onStationEnvironmentChange.bind(this);
+      map.on('resize', this._stationResizeBound);
       // Line-name hover, pointer devices only — touch never hovers, so
       // phones skip the listener (and its per-move segment math) entirely.
-      if (window.matchMedia && matchMedia('(hover: hover)').matches) {
-        this._onMouseMoveBound = this._onMouseMove.bind(this);
-        this._onMouseOutBound = this._hideHover.bind(this);
-        map.on('mousemove', this._onMouseMoveBound);
-        map.on('mouseout', this._onMouseOutBound);
-        this._hoverTip = L.tooltip({
-          className: 'transit-line-label', direction: 'top',
-          offset: [0, -8], opacity: 1
-        });
-      }
-      if (this._loaded) {
-        this._scheduleRedraw();
-      } else {
-        this._load();
-      }
+      this._syncLineHover(this._buckets.long || this._buckets.city);
+      this._load();
+      this._scheduleRedraw();
       return this;
     },
 
@@ -339,11 +639,26 @@
         map.off('moveend', this._scheduleRedrawBound);
         this._scheduleRedrawBound = null;
       }
+      if (this._stationResizeBound) {
+        map.off('resize', this._stationResizeBound);
+        this._stationResizeBound = null;
+      }
       if (this._onMouseMoveBound) {
         map.off('mousemove', this._onMouseMoveBound);
         map.off('mouseout', this._onMouseOutBound);
         this._onMouseMoveBound = this._onMouseOutBound = null;
       }
+      if (this._onStationMouseMoveBound) {
+        map.off('mousemove', this._onStationMouseMoveBound);
+        map.off('mouseout', this._onStationMouseOutBound);
+        this._onStationMouseMoveBound = this._onStationMouseOutBound = null;
+      }
+      if (this._onStationClickBound) {
+        map.off('click', this._onStationClickBound);
+        this._onStationClickBound = null;
+      }
+      if (this._stationHoverTip) this._stationHoverTip.remove();
+      this._stationHoverTip = null;
       this._hideHover();
       this._hoverTip = null;
       if (this._rafToken) {
@@ -352,8 +667,7 @@
       }
       this._teardownActiveLayers();
       if (this._rLines) this._rLines.remove();
-      if (this._stationsLayer) this._stationsLayer.remove();
-      this._rLines = this._stationsLayer = null;
+      this._rLines = null;
       this._lastZoom = null;
       this._lastDrawCasing = null;
       this._map = null;
@@ -365,11 +679,31 @@
       // re-opening re-reads them from the browser's HTTP cache: cheap enough
       // to trade for the heap.
       this._abortLods(null);
+      this._stationRequestGeneration += 1;
+      if (this._stationAbort) {
+        try { this._stationAbort.abort(); } catch (_) {}
+      }
+      this._stationAbort = null;
+      this._stationInflight = null;
+      if (this._legacyAbort) {
+        try { this._legacyAbort.abort(); } catch (_) {}
+      }
+      this._legacyAbort = null;
       this._lodCache = {};
       this._lodInflight = {};
       this._allLines = [];
       this._allStations = [];
       this._lineIndex = new Map();
+      this._stationIndex = new Map();
+      this._stationLoaded = false;
+      this._stationLoading = false;
+      this._stationError = null;
+      this._stationPlacement = null;
+      this._stationPlacementStatus = 'not-loaded';
+      this._stationPayloadMeta = null;
+      this._stationSprites = {};
+      this._stationMaxLabelWidth = 0;
+      this._stationTileDrawDurationMs = [];
       this._currentLodKey = null;
       this._loaded = false;
       this._loading = false;
@@ -390,53 +724,345 @@
       }
     },
 
-    // Detach polylines for everything currently on the map and drop the
-    // refs. The polylines belong to the renderer we may be about to throw
-    // away (onRemove) or to a soon-to-be-swapped LOD (LOD switch), so
-    // holding onto them would pin dead state. Station markers belong to
-    // the active LOD's features too, so the registry goes with them.
-    _teardownActiveLayers: function() {
+    _clearLineLayers: function() {
       var it = this._onMap.values(), v;
       while (!(v = it.next()).done) {
         var f = v.value;
-        if (f._pl) { f._pl.remove(); f._pl = null; }
+        if (f._pl) { if (f._pl._map) f._pl.remove(); f._pl = null; }
         if (f._pl_casing) {
           if (f._pl_casing._map) f._pl_casing.remove();
           f._pl_casing = null;
         }
       }
       this._onMap.clear();
-      if (this._stationsLayer) this._stationsLayer.clearLayers();
-      this._stationsOn.clear();
+      if (this._rLines) {
+        this._rLines.remove();
+        this._rLines = null;
+      }
       this._hideHover();
     },
 
+    _releaseRailData: function() {
+      this._abortLods(null);
+      if (this._legacyAbort) {
+        try { this._legacyAbort.abort(); } catch (_) {}
+        this._legacyAbort = null;
+      }
+      this._clearLineLayers();
+      this._lodCache = {};
+      this._lodInflight = {};
+      this._allLines = [];
+      this._lineIndex = new Map();
+      this._currentLodKey = null;
+      this._loaded = false;
+      this._loading = false;
+      this._lastZoom = null;
+      this._lastDrawCasing = null;
+    },
+
+    _syncLineHover: function(enabled) {
+      if (!this._map) return;
+      var canHover = window.matchMedia && matchMedia('(hover: hover)').matches;
+      if (enabled && canHover && !this._onMouseMoveBound) {
+        this._onMouseMoveBound = this._onMouseMove.bind(this);
+        this._onMouseOutBound = this._hideHover.bind(this);
+        this._map.on('mousemove', this._onMouseMoveBound);
+        this._map.on('mouseout', this._onMouseOutBound);
+        this._hoverTip = L.tooltip({
+          className: 'transit-line-label', direction: 'top',
+          offset: [0, -8], opacity: 1
+        });
+      } else if ((!enabled || !canHover) && this._onMouseMoveBound) {
+        this._map.off('mousemove', this._onMouseMoveBound);
+        this._map.off('mouseout', this._onMouseOutBound);
+        this._onMouseMoveBound = this._onMouseOutBound = null;
+        this._hideHover();
+        this._hoverTip = null;
+      }
+    },
+
+    // Detach polylines for everything currently on the map and drop the
+    // refs. The polylines belong to the renderer we may be about to throw
+    // away (onRemove) or to a soon-to-be-swapped LOD (LOD switch), so
+    // holding onto them would pin dead state. Station markers belong to
+    // the active LOD's features too, so the registry goes with them.
+    _teardownActiveLayers: function() {
+      this._clearLineLayers();
+      this._clearStationMarkers();
+      this._hideHover();
+    },
+
+    _clearStationMarkers: function() {
+      this._destroyStationGrid();
+      this._syncStationInteraction(false);
+      this._hideStationHover();
+    },
+
+    _destroyStationGrid: function() {
+      var grid = this._stationGridLayer;
+      if (!grid) return;
+      if (grid._map) grid.remove();
+      grid.off('tileunload', this._onStationTileUnload, this);
+      this._stationGridLayer = null;
+      this._stationSprites = {};
+    },
+
+    _baseTileOptions: function() {
+      var found = null;
+      if (this._map) {
+        this._map.eachLayer(function(layer) {
+          if (!found && L.TileLayer && layer instanceof L.TileLayer) found = layer.options || {};
+        });
+      }
+      return found || {};
+    },
+
+    _syncStationGrid: function() {
+      if (!this._map) return;
+      var zoom = this._map.getZoom();
+      if (!this._stationsVisible || !this._stationLoaded || zoom < this.options.stationMinZoom) {
+        this._destroyStationGrid();
+        this._syncStationInteraction(false);
+        return;
+      }
+      this._ensureStationBadgeImage(false);
+      this._onStationEnvironmentChange();
+      if (!this._stationGridLayer) {
+        var base = this._baseTileOptions();
+        var mapMax = this._map.getMaxZoom();
+        var maxZoom = this.options.stationMaxZoom;
+        if (maxZoom == null || !isFinite(maxZoom)) maxZoom = isFinite(mapMax) ? mapMax : 19;
+        var updateWhenIdle = typeof base.updateWhenIdle === 'boolean'
+          ? base.updateWhenIdle : !!L.Browser.mobile;
+        this._stationGridLayer = new StationGridLayer(this, {
+          pane: this.options.stationPane,
+          minZoom: this.options.stationMinZoom,
+          maxZoom: maxZoom,
+          bounds: this.options.stationBounds,
+          noWrap: true,
+          keepBuffer: Math.max(0, this.options.stationKeepBuffer | 0),
+          updateWhenIdle: updateWhenIdle,
+          updateWhenZooming: false
+        });
+        this._stationGridLayer.on('tileunload', this._onStationTileUnload, this);
+        this._stationGridLayer.addTo(this._map);
+      }
+      this._syncStationInteraction(true);
+    },
+
+    _refreshStationTiles: function() {
+      this._stationDpr = this._effectiveStationDpr();
+      this._stationSprites = {};
+      if (this._stationGridLayer) {
+        this._stationCounters.redraw += 1;
+        this._stationGridLayer.redraw();
+      } else {
+        this._syncStationGrid();
+      }
+    },
+
+    _onStationEnvironmentChange: function() {
+      var dpr = this._effectiveStationDpr();
+      if (dpr !== this._stationDpr) {
+        this._stationDpr = dpr;
+        this._stationSprites = {};
+        if (this._stationGridLayer) {
+          this._stationCounters.redraw += 1;
+          this._stationGridLayer.redraw();
+        }
+      }
+    },
+
     _load: function() {
+      if (this._buckets.long || this._buckets.city) this._loadRail();
+      this._maybeLoadStations();
+    },
+
+    _loadRail: function() {
       if (this.options.lodUrls && this.options.lodBreaks) {
         // LOD mode: figure out the current zoom's target LOD and load it.
         var target = this._targetLodKey() || 'low';
-        this._loadLod(target);
+        return this._loadLod(target);
       } else {
-        this._loadLegacy();
+        return this._loadLegacy();
       }
     },
 
     _loadLegacy: function() {
-      if (this._loaded || this._loading) return;
+      if (this._loaded || this._loading) return Promise.resolve();
       this._loading = true;
       var self = this;
-      fetch(this.options.geojsonUrl)
-        .then(function(r) { return r.json(); })
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      if (ctrl) this._legacyAbort = ctrl;
+      return fetch(this.options.geojsonUrl, ctrl ? { signal: ctrl.signal } : undefined)
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
         .then(function(gj) {
+          if (!self._map || (self._buckets &&
+              !self._buckets.long && !self._buckets.city)) return;
           self._parseInto(gj, self._allLines, self._allStations, self._lineIndex);
+          if (!self.options.stationUrl && self._allStations.length) {
+            self._indexStations(self._allStations);
+            self._stationLoaded = true;
+          }
           self._loaded = true;
           self._loading = false;
           if (self._map) self._scheduleRedraw();
         })
         .catch(function(e) {
+          if (e && e.name === 'AbortError') return;
           console.error('[TransitLayer] load failed:', e);
           self._loading = false;
+        })
+        .finally(function() {
+          if (self._legacyAbort === ctrl) self._legacyAbort = null;
         });
+    },
+
+    _maybeLoadStations: function() {
+      if (!this._map || !this._stationsVisible || this._stationLoaded ||
+          this._stationLoading) return;
+      // A nationwide cloud of points has no useful country-scale rendering.
+      // Delay both transfer and JSON.parse until markers can actually appear.
+      if (this._map.getZoom() < this.options.stationMinZoom) return;
+      this._loadStations(false);
+    },
+
+    _loadStations: function(force) {
+      if (!this.options.stationUrl) return Promise.resolve();
+      if (this._stationLoaded && !force) return Promise.resolve();
+      if (this._stationInflight) return this._stationInflight;
+      var self = this;
+      var generation = ++this._stationRequestGeneration;
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      if (ctrl) this._stationAbort = ctrl;
+      this._stationLoading = true;
+      this._stationError = null;
+      this.fire('stationloadstart');
+      var timer;
+      var deadline = new Promise(function(_, reject) {
+        timer = setTimeout(function() {
+          var error = new Error('Station request timed out'); error.name = 'TimeoutError';
+          reject(error);
+          if (ctrl) ctrl.abort();
+        }, 15000);
+      });
+      var request = fetch(
+        this.options.stationUrl,
+        ctrl ? { signal: ctrl.signal } : undefined
+      ).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+      var p = Promise.race([request, deadline])
+        .then(function(payload) {
+          if (generation !== self._stationRequestGeneration ||
+              !self._map || !self._stationsVisible) return;
+          var stations = self._parseStationPayload(payload);
+          self._allStations = stations;
+          self._indexStations(stations);
+          self._stationPayloadMeta = payload;
+          self._selectStationPlacement();
+          self._stationLoaded = true;
+          self._stationError = null;
+          self.fire('stationload', { count: stations.length });
+          self._scheduleRedraw();
+        })
+        .catch(function(error) {
+          if (generation !== self._stationRequestGeneration) return;
+          if (error && error.name === 'AbortError') return;
+          self._stationError = error;
+          console.error('[TransitLayer] station load failed:', error);
+          self.fire('stationloaderror', {
+            error: error,
+            hasData: self._stationLoaded && self._allStations.length > 0
+          });
+        })
+        .finally(function() {
+          clearTimeout(timer);
+          if (generation === self._stationRequestGeneration) {
+            self._stationLoading = false;
+            if (self._stationInflight === p) self._stationInflight = null;
+            if (self._stationAbort === ctrl) self._stationAbort = null;
+          }
+        });
+      this._stationInflight = p;
+      return p;
+    },
+
+    _parseStationPayload: function(payload) {
+      var out = [];
+      var rows = payload && payload.stations;
+      if (Array.isArray(rows)) {
+        var fields = Array.isArray(payload.fields) ? payload.fields : [];
+        var fieldIndex = {};
+        for (var fi = 0; fi < fields.length; fi++) {
+          if (typeof fields[fi] === 'string' && fieldIndex[fields[fi]] == null) {
+            fieldIndex[fields[fi]] = fi;
+          }
+        }
+        var isV2 = payload.v === 2;
+        var lonAt = isV2 ? fieldIndex.lon : (fieldIndex.lon != null ? fieldIndex.lon : 0);
+        var latAt = isV2 ? fieldIndex.lat : (fieldIndex.lat != null ? fieldIndex.lat : 1);
+        var nameAt = isV2 ? fieldIndex.name : (fieldIndex.name != null ? fieldIndex.name : 2);
+        var nameEnAt = isV2 ? fieldIndex.name_en : (fieldIndex.name_en != null ? fieldIndex.name_en : 3);
+        var railwayAt = isV2 ? fieldIndex.railway : (fieldIndex.railway != null ? fieldIndex.railway : 4);
+        var countAt = isV2 ? fieldIndex.line_count : (fieldIndex.line_count != null ? fieldIndex.line_count : 5);
+        if (lonAt == null || latAt == null || nameAt == null || nameEnAt == null ||
+            railwayAt == null || countAt == null) {
+          throw new Error('Invalid station fields');
+        }
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          if (!Array.isArray(r) || r.length < 2) {
+            if (isV2) throw new Error('Invalid station row');
+            continue;
+          }
+          var lon = +r[lonAt], lat = +r[latAt];
+          if (!isFinite(lon) || !isFinite(lat)) {
+            if (isV2) throw new Error('Invalid station coordinate');
+            continue;
+          }
+          out.push({
+            lon: lon, lat: lat, name: r[nameAt] || '', name_en: r[nameEnAt] || '',
+            railway: r[railwayAt] || 'station', line_count: Math.max(0, r[countAt] | 0),
+            _placementIndex: i
+          });
+        }
+        return out;
+      }
+      // Transitional compatibility for locally generated GeoJSON fixtures.
+      var features = payload && payload.features;
+      if (!Array.isArray(features)) throw new Error('Invalid station payload');
+      for (var j = 0; j < features.length; j++) {
+        var f = features[j];
+        if (!f.geometry || f.geometry.type !== 'Point') continue;
+        var c = f.geometry.coordinates || [];
+        var p = f.properties || {};
+        var x = +c[0], y = +c[1];
+        if (!isFinite(x) || !isFinite(y)) continue;
+        out.push({
+          lon: x, lat: y, name: p.name || '', name_en: p.name_en || '',
+          railway: p.railway || 'station', line_count: Math.max(0, p.line_count | 0)
+        });
+      }
+      return out;
+    },
+
+    _indexStations: function(stations) {
+      var index = new Map();
+      var grid = this.options.stationGrid;
+      for (var i = 0; i < stations.length; i++) {
+        var s = stations[i];
+        if (s._placementIndex == null) s._placementIndex = i;
+        var key = Math.floor(s.lon / grid) + ',' + Math.floor(s.lat / grid);
+        var cell = index.get(key);
+        if (!cell) { cell = []; index.set(key, cell); }
+        cell.push(s);
+      }
+      this._stationIndex = index;
     },
 
     // Walk a parsed GeoJSON FeatureCollection, sorting LineStrings into
@@ -466,14 +1092,14 @@
             var line = { geometry: f.geometry, properties: f.properties || {} };
             lines.push(line);
             this._indexLine(line);
-          } else if (f.geometry.type === 'Point') {
+          } else if (f.geometry.type === 'Point' && !this.options.stationUrl) {
             var p = f.properties || {};
             var c = f.geometry.coordinates || [];
             stations.push({
               lon: +c[0],
               lat: +c[1],
-              name: p.name,                     // pickStationName
-              name_en: p.name_en,               // pickStationName (en)
+              name: p.name,
+              name_en: p.name_en,
               railway: p.railway,               // tram_stop styling
               line_count: p.line_count | 0,     // hub sizing + label suffix
               // Left undefined when absent on purpose: _redraw's legacy
@@ -574,7 +1200,8 @@
           // M-010: the layer was removed while this was in flight (its
           // caches are already cleared) — parsing now would re-inflate the
           // heap we just gave back, for data nobody is looking at.
-          if (!self._map) { self.fire('lodload', { key: key }); return; }
+          if (!self._map || (self._buckets &&
+              !self._buckets.long && !self._buckets.city)) return;
           var data = { lines: [], stations: [], lineIndex: new Map() };
           self._parseInto(gj, data.lines, data.stations, data.lineIndex);
           self._lodCache[key] = data;
@@ -608,14 +1235,23 @@
     // Switch the active feature set to the given LOD. Tears down the
     // currently-rendered polylines (they belong to the previous LOD's
     // features and have to be rebuilt on the new geometry) and points
-    // _allLines / _allStations / _lineIndex at the cached LOD data.
+    // _allLines / _lineIndex at the cached LOD data. Station-only state is
+    // intentionally untouched.
     _activateLod: function(key) {
       var data = this._lodCache[key];
       if (!data || this._currentLodKey === key) return;
-      this._teardownActiveLayers();
+      // LOD switching is a rail-only operation. Never clear or replace the
+      // independently loaded station payload/point index here; production
+      // may keep using older R2 LODs that still contain ignored Point rows.
+      this._clearLineLayers();
       this._allLines = data.lines;
-      this._allStations = data.stations;
       this._lineIndex = data.lineIndex;
+      if (!this.options.stationUrl) {
+        this._clearStationMarkers();
+        this._allStations = data.stations;
+        this._indexStations(this._allStations);
+        this._stationLoaded = true;
+      }
       this._currentLodKey = key;
       this._loaded = true;
       // Force the next redraw to re-evaluate everything — the casing
@@ -632,6 +1268,7 @@
     // fetch. The redraw proceeds with the existing LOD; the fresh one
     // takes over when its fetch resolves and triggers another redraw.
     _maybeSwapLod: function() {
+      if (!this._buckets.long && !this._buckets.city) return;
       if (!this.options.lodUrls || !this.options.lodBreaks) return;
       var target = this._targetLodKey();
       if (!target || target === this._currentLodKey) return;
@@ -716,6 +1353,9 @@
 
     _ensurePolylines: function(f) {
       if (f._pl) return;
+      if (!this._rLines && this._map) {
+        this._rLines = new LoResCanvas({ padding: this.options.padding }).addTo(this._map);
+      }
       var cls = CLASSES[f._class];
       var op = this.options.opacity;
       var cop = this.options.casingOpacity;
@@ -742,7 +1382,9 @@
         // Check LOD first so a zoom crossing kicks off the right fetch.
         // No-op in legacy single-file mode.
         self._maybeSwapLod();
+        self._maybeLoadStations();
         self._redraw();
+        self._syncStationGrid();
       });
     },
 
@@ -755,8 +1397,9 @@
       var zoomBoost = Math.max(0, (zoom - 10) * 0.18);
 
       var desired = new Set();
-      var candidates = this._visibleLines();
       var bk = this._buckets;
+      var candidates = (bk.long || bk.city) && this._loaded
+        ? this._visibleLines() : [];
       for (var i = 0; i < candidates.length; i++) {
         var f = candidates[i];
         var cls = CLASSES[f._class];
@@ -821,109 +1464,389 @@
       this._lastZoom = zoom;
       this._lastDrawCasing = drawCasing;
 
-      // Stations: DIFFED against the previous frame — the old code did
-      // clearLayers() + full recreate on every moveend, which at z>=14 in
-      // central Tokyo destroyed and rebuilt 100+ SVG circles plus their
-      // permanent tooltip DOM nodes per pan (GC churn + a layout storm at
-      // the end of every drag). Now a pan only touches the stations that
-      // actually entered or left the viewport; existing dots get a cheap
-      // setRadius when the zoom band shifts, and only a permanent-label
-      // flip (z14 crossing) forces a rebind of that one marker.
-      // Transfer hubs get a noticeably bigger circle so they read at a
-      // glance: line_count >= 6 ("mega-hub" — 渋谷 / 新宿 / 上野 / 池袋 /
-      // 京都...) and >= 3 ("regular hub") are precomputed by
-      // transit_postprocess.py. Stations on the wrong bucket — e.g., a
-      // pure shinkansen-only halt while the 长途 toggle is off — get
-      // skipped entirely so the dots don't outlive their lines.
-      var want = new Map();
-      if (zoom >= 12) {
-        var b2 = this._map.getBounds().pad(0.1);
-        var W2 = b2.getWest(), E2 = b2.getEast(), S2 = b2.getSouth(), N2 = b2.getNorth();
-        // Permanent-label tiering: z14 labels only transfer hubs (the
-        // stations people navigate by); every station gets its label at
-        // z15+, and hover always works. Flat z14 labeling put 150-220
-        // white pills over central Tokyo — over the restaurant markers
-        // this was most of the "unreadable map" complaint.
-        var labelAll  = zoom >= 15;
-        var labelHubs = zoom >= 14;
-        for (var s = 0; s < this._allStations.length; s++) {
-          var stn = this._allStations[s];   // M-010: flat record from _parseInto
-          var lon = stn.lon;
-          var lat = stn.lat;
-          if (lon < W2 || lon > E2 || lat < S2 || lat > N2) continue;
-          // Hide the dot if its only nearby lines belong to a bucket that's
-          // off. Legacy stations without the per-bucket flags fall back to
-          // "show if any bucket is on" so old geojsons keep working.
-          var sHasLong = stn.has_long_line;
-          var sHasCity = stn.has_city_line;
-          var hasFlags = (typeof sHasLong !== 'undefined') ||
-                         (typeof sHasCity !== 'undefined');
-          var visibleByBucket = hasFlags
-            ? ((sHasLong && bk.long) || (sHasCity && bk.city))
-            : (bk.long || bk.city);
-          if (!visibleByBucket) continue;
-          var lc = stn.line_count | 0;
-          var radius;
-          if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;
-          else if (lc >= 3) radius = zoom >= 15 ? 6 : zoom >= 13 ? 5   : 4.2;
-          else              radius = zoom >= 15 ? 4 : zoom >= 13 ? 3.2 : 2.6;
-          var perm = labelAll || (labelHubs && lc >= 3);
-          want.set(stn, { radius: radius, showLabel: perm, lat: lat, lon: lon });
-        }
+    },
+
+    _roundRect: function(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+    },
+
+    _drawStationBadge: function(ctx, x, y, size) {
+      var l = x - size / 2, t = y - size / 2, u = size / 24;
+      if (this._stationBadgeImageStatus === 'ready' && this._stationBadgeImage) {
+        var crop = STATION_BADGE_CROP;
+        ctx.save();
+        this._roundRect(ctx, l, t, size, size, size * .23);
+        ctx.clip();
+        ctx.drawImage(this._stationBadgeImage, crop[0], crop[1], crop[2], crop[3],
+          l, t, size, size);
+        ctx.restore();
+        return;
       }
-      var stOn = this._stationsOn;
-      var stLayer = this._stationsLayer;
-      var stRemove = [];
-      stOn.forEach(function(rec, stn) { if (!want.has(stn)) stRemove.push(stn); });
-      for (var r2 = 0; r2 < stRemove.length; r2++) {
-        stLayer.removeLayer(stOn.get(stRemove[r2]).marker);
-        stOn.delete(stRemove[r2]);
+      this._roundRect(ctx, l + .5, t + .5, size - 1, size - 1, size * .23);
+      ctx.fillStyle = '#111a43'; ctx.fill();
+      if (typeof Path2D === 'function') {
+        if (!this._stationTunnelPath) {
+          this._stationTunnelPath = new Path2D(STATION_TUNNEL_PATH);
+          this._stationTrainBodyPath = new Path2D(STATION_TRAIN_BODY_PATH);
+          this._stationRailPath = new Path2D(STATION_RAIL_PATH);
+          this._stationTiePath = new Path2D(STATION_TIE_PATH);
+        }
+        ctx.save(); ctx.translate(l, t); ctx.scale(u, u);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.75;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.stroke(this._stationTunnelPath);
+        ctx.fillStyle = '#fff'; ctx.fill(this._stationTrainBodyPath);
+        ctx.fill(this._stationTiePath);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.25; ctx.stroke(this._stationRailPath);
+        ctx.fillStyle = '#111a43';
+        this._roundRect(ctx, 9.35, 9, 5.3, 3.25, .75); ctx.fill();
+        this._roundRect(ctx, 10.45, 7.15, 3.1, .7, .35); ctx.fill();
+        ctx.beginPath(); ctx.arc(10, 14.25, .72, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(14, 14.25, .72, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
       }
-      var op2 = this.options.opacity;
-      want.forEach(function(p, stn) {
-        var rec = stOn.get(stn);
-        if (rec && rec.showLabel === p.showLabel) {
-          if (rec.radius !== p.radius) {
-            rec.marker.setRadius(p.radius);
-            rec.radius = p.radius;
-          }
-          return;
+    },
+
+    _ensureStationBadgeImage: function(force) {
+      if (!force && (this._stationBadgeImageStatus === 'loading' ||
+          this._stationBadgeImageStatus === 'ready')) return;
+      var owner = this;
+      var image = new Image();
+      this._stationBadgeImage = image;
+      this._stationBadgeImageStatus = 'loading';
+      image.onload = function() {
+        if (owner._stationBadgeImage !== image) return;
+        owner._stationBadgeImageStatus = 'ready';
+        owner._stationSprites = {};
+        if (owner._map && owner._stationGridLayer) owner._refreshStationTiles();
+      };
+      image.onerror = function() {
+        if (owner._stationBadgeImage !== image) return;
+        owner._stationBadgeImageStatus = 'error';
+        owner._stationBadgeImage = null;
+      };
+      image.src = STATION_BADGE_URL;
+    },
+
+    _stationTier: function(station) {
+      var count = station.line_count | 0;
+      return count >= 6 ? 2 : count >= 3 ? 1 : 0;
+    },
+
+    _stationShown: function(station, zoom) {
+      if (zoom < this.options.stationMinZoom) return false;
+      return zoom >= 15 || (station.line_count | 0) >= 6;
+    },
+
+    _stationBadgeSize: function(station, zoom) {
+      if (zoom <= 14) return STATION_SIZES[0] * this._stationStyleScale();
+      return STATION_SIZES[this._stationTier(station)] * this._stationStyleScale();
+    },
+
+    _stationLabelVisible: function(station, zoom) {
+      if (this._stationSuppressLabels) return false;
+      if (this._stationPlacement) {
+        var placement = this._stationPayloadMeta.placement;
+        if (zoom < placement.zoomMin || zoom > placement.zoomMax) return false;
+        var bit = zoom - placement.zoomMin;
+        var mask = this._stationPlacement.visibleMaskByItem[station._placementIndex] | 0;
+        return bit >= 0 && bit < 31 && (mask & (1 << bit)) !== 0;
+      }
+      return zoom >= ((station.line_count | 0) >= 6 ? 14 : 15);
+    },
+
+    _stationLabelWidth: function(station) {
+      if (this._stationPlacement) {
+        var value = +this._stationPlacement.labelWidthByItem[station._placementIndex];
+        if (isFinite(value) && value >= 0) return value;
+      }
+      return Array.from(this._stationName(station)).length * this._stationFontPx() * 1.2;
+    },
+
+    _stationSprite: function(size) {
+      var dpr = this._stationDpr;
+      var key = size + '@' + dpr;
+      if (this._stationSprites[key]) return this._stationSprites[key];
+      var canvas = document.createElement('canvas');
+      var width = Math.max(1, Math.round(size * dpr));
+      canvas.width = width;
+      canvas.height = width;
+      var ctx = canvas.getContext && canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.scale(width / size, width / size);
+      this._drawStationBadge(ctx, size / 2, size / 2, size);
+      this._stationSprites[key] = canvas;
+      return canvas;
+    },
+
+    _rectIntersectsTile: function(rect, size) {
+      return rect[2] >= 0 && rect[0] <= size.x && rect[3] >= 0 && rect[1] <= size.y;
+    },
+
+    _createStationTile: function(coords, tileSize) {
+      var drawStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      this._stationCounters.tileCreate += 1;
+      var map = this._map;
+      if (!map || !this._stationsVisible || !this._stationLoaded) {
+        this._stationCounters.tileEmpty += 1;
+        var early = document.createElement('div');
+        early.className = 'transit-station-tile-empty';
+        return early;
+      }
+      var zoom = coords.z;
+      var scale = this._stationStyleScale();
+      var maxBadge = STATION_SIZES[STATION_SIZES.length - 1] * scale;
+      var fontPx = this._stationFontPx();
+      var mayDrawLabels = !this._stationSuppressLabels && zoom >= 14;
+      var margin = Math.ceil(mayDrawLabels
+        ? Math.max(maxBadge / 2 + 2,
+            this._stationMaxLabelWidth / 2 + STATION_LABEL_HALO_PX + 2,
+            maxBadge / 2 + 3 + fontPx + STATION_LABEL_HALO_PX)
+        : maxBadge / 2 + 2);
+      var origin = coords.scaleBy(tileSize);
+      var a = map.unproject([origin.x - margin, origin.y - margin], zoom);
+      var b = map.unproject([origin.x + tileSize.x + margin,
+                             origin.y + tileSize.y + margin], zoom);
+      var bounds = L.latLngBounds(a, b);
+      var candidates = this._visibleStations(bounds);
+      var entries = [];
+      for (var i = 0; i < candidates.length; i++) {
+        var station = candidates[i];
+        if (!this._stationShown(station, zoom)) continue;
+        var point = map.project([station.lat, station.lon], zoom).subtract(origin);
+        var tier = this._stationTier(station);
+        var badge = zoom <= 14 ? STATION_SIZES[0] * scale : STATION_SIZES[tier] * scale;
+        var iconRect = [point.x - badge / 2 - 1, point.y - badge / 2 - 1,
+                        point.x + badge / 2 + 1, point.y + badge / 2 + 1];
+        var text = this._stationName(station);
+        var showLabel = !!text && this._stationLabelVisible(station, zoom);
+        var labelRect = null;
+        if (showLabel) {
+          var labelWidth = this._stationLabelWidth(station);
+          var labelBottom = point.y - badge / 2 - 3;
+          labelRect = [point.x - labelWidth / 2 - STATION_LABEL_HALO_PX,
+                       labelBottom - fontPx - STATION_LABEL_HALO_PX,
+                       point.x + labelWidth / 2 + STATION_LABEL_HALO_PX,
+                       labelBottom + STATION_LABEL_HALO_PX];
         }
-        if (rec) {
-          // Label mode flipped (crossed z14) — rebuild just this marker so
-          // the tooltip's permanent-ness matches.
-          stLayer.removeLayer(rec.marker);
-          stOn.delete(stn);
-        }
-        var lc2 = stn.line_count | 0;
-        var isTram = stn.railway === 'tram_stop';
-        var isHub = lc2 >= 3;
-        var dot = L.circleMarker([p.lat, p.lon], {
-          radius: p.radius,
-          weight: isHub ? 2 : 1.5,
-          color: isTram ? '#c62828' : (isHub ? '#111' : '#222'),
-          fillColor: isHub ? '#fffbea' : '#ffffff',
-          fillOpacity: op2,
-          opacity: op2
-        });
-        var nm = pickStationName(stn);   // M-010: reads .name / .name_en
-        if (nm) {
-          var opts = { className: 'transit-station-label' };
-          if (p.showLabel) {
-            opts.permanent = true;
-            opts.direction = 'top';
-            opts.offset = [0, -4];
-          }
-          var label = nm;
-          if (lc2 >= 3) label = nm + '  (' + lc2 + LINES_SUFFIX + ')';
-          var labelNode = document.createElement('span');
-          if (/[\u3040-\u30ff\u3400-\u9fff]/.test(nm)) labelNode.lang = 'ja';
-          labelNode.textContent = label;
-          dot.bindTooltip(labelNode, opts);
-        }
-        stLayer.addLayer(dot);
-        stOn.set(stn, { marker: dot, radius: p.radius, showLabel: p.showLabel });
+        if (!this._rectIntersectsTile(iconRect, tileSize) &&
+            (!labelRect || !this._rectIntersectsTile(labelRect, tileSize))) continue;
+        entries.push({station: station, point: point, badge: badge,
+                      text: text, showLabel: showLabel});
+      }
+      if (!entries.length) {
+        this._stationCounters.tileEmpty += 1;
+        var empty = document.createElement('div');
+        empty.className = 'transit-station-tile-empty';
+        return empty;
+      }
+      entries.sort(function(left, right) {
+        return (left.station.line_count - right.station.line_count) ||
+          (left.station._placementIndex - right.station._placementIndex);
       });
+      var canvas = document.createElement('canvas');
+      canvas.className = 'transit-station-tile';
+      canvas.dataset.stationTile = '1';
+      canvas.style.width = tileSize.x + 'px';
+      canvas.style.height = tileSize.y + 'px';
+      canvas.style.pointerEvents = 'none';
+      var backingWidth = Math.max(1, Math.round(tileSize.x * this._stationDpr));
+      var backingHeight = Math.max(1, Math.round(tileSize.y * this._stationDpr));
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
+      var ctx = canvas.getContext && canvas.getContext('2d');
+      if (!ctx) {
+        this._stationCounters.tileEmpty += 1;
+        var noContext = document.createElement('div');
+        noContext.className = 'transit-station-tile-empty';
+        return noContext;
+      }
+      var contextScaleX = backingWidth / tileSize.x;
+      var contextScaleY = backingHeight / tileSize.y;
+      ctx.scale(contextScaleX, contextScaleY);
+      var snapX = function(value) { return Math.round(value * contextScaleX) / contextScaleX; };
+      var snapY = function(value) { return Math.round(value * contextScaleY) / contextScaleY; };
+      for (var j = 0; j < entries.length; j++) {
+        var entry = entries[j];
+        var sprite = this._stationSprite(entry.badge);
+        if (sprite) {
+          ctx.drawImage(sprite, snapX(entry.point.x - entry.badge / 2),
+            snapY(entry.point.y - entry.badge / 2), entry.badge, entry.badge);
+        }
+      }
+      ctx.font = '600 ' + fontPx + 'px ' + this._stationFont;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(255,255,255,.96)';
+      ctx.lineWidth = STATION_LABEL_HALO_PX;
+      ctx.fillStyle = '#3a4358';
+      for (var k = 0; k < entries.length; k++) {
+        var label = entries[k];
+        if (!label.showLabel) continue;
+        var tx = snapX(label.point.x);
+        var ty = snapY(label.point.y - label.badge / 2 - 3);
+        ctx.strokeText(label.text, tx, ty);
+        ctx.fillText(label.text, tx, ty);
+      }
+      var bytes = backingWidth * backingHeight * 4;
+      canvas.dataset.stationTileBytes = String(bytes);
+      this._stationCounters.tileDraw += 1;
+      var drawEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      this._stationTileDrawDurationMs.push(drawEnded - drawStarted);
+      if (this._stationTileDrawDurationMs.length > 128) this._stationTileDrawDurationMs.shift();
+      return canvas;
+    },
+
+    _onStationTileUnload: function(event) {
+      var tile = event && event.tile;
+      if (!tile || tile.dataset.stationTile !== '1') return;
+      tile.dataset.stationTile = '0';
+      this._stationCounters.tileRemove += 1;
+      tile.width = 0;
+      tile.height = 0;
+    },
+
+    _syncStationInteraction: function(enabled) {
+      if (!this._map) return;
+      if (enabled && !this._stationHoverTip) {
+        this._stationHoverTip = L.tooltip({className:'transit-station-label',direction:'top',offset:[0,-8],opacity:1});
+      }
+      if (enabled && !this._onStationClickBound) {
+        this._onStationClickBound = this._onStationClick.bind(this);
+        this._map.on('click', this._onStationClickBound);
+      } else if (!enabled && this._onStationClickBound) {
+        this._map.off('click', this._onStationClickBound);
+        this._onStationClickBound = null;
+      }
+      if (enabled && !this._onStationMoveStartBound) {
+        this._onStationMoveStartBound = this._hideStationHover.bind(this);
+        this._map.on('movestart', this._onStationMoveStartBound);
+        this._map.on('zoomstart', this._onStationMoveStartBound);
+      } else if (!enabled && this._onStationMoveStartBound) {
+        this._map.off('movestart', this._onStationMoveStartBound);
+        this._map.off('zoomstart', this._onStationMoveStartBound);
+        this._onStationMoveStartBound = null;
+      }
+      var canHover = window.matchMedia && matchMedia('(hover: hover)').matches;
+      if (enabled && canHover && !this._onStationMouseMoveBound) {
+        this._onStationMouseMoveBound = this._onStationMouseMove.bind(this);
+        this._onStationMouseOutBound = this._hideStationHover.bind(this);
+        this._map.on('mousemove', this._onStationMouseMoveBound);
+        this._map.on('mouseout', this._onStationMouseOutBound);
+      } else if ((!enabled || !canHover) && this._onStationMouseMoveBound) {
+        this._map.off('mousemove', this._onStationMouseMoveBound);
+        this._map.off('mouseout', this._onStationMouseOutBound);
+        this._onStationMouseMoveBound = this._onStationMouseOutBound = null;
+      }
+      if (!enabled && this._stationHoverTip) {
+        this._stationHoverTip.remove();
+        this._stationHoverTip = null;
+      }
+    },
+
+    _hideStationHover: function() {
+      if (this._stationHoverTip) this._stationHoverTip.remove();
+    },
+
+    _eventOwnedByInteractiveLayer: function(event) {
+      var node = event && event.originalEvent && event.originalEvent.target;
+      while (node && node !== this._map._container) {
+        if (node.classList && (node.classList.contains('leaflet-marker-icon') ||
+            node.classList.contains('leaflet-interactive') ||
+            node.classList.contains('marker-cluster'))) return true;
+        node = node.parentNode;
+      }
+      return false;
+    },
+
+    _hitStation: function(latlng) {
+      if (!this._map || !this._stationLoaded || !this._stationsVisible ||
+          this._map.getZoom() < this.options.stationMinZoom) return null;
+      var point = this._map.latLngToContainerPoint(latlng);
+      var tolerance = STATION_SIZES[2] * this._stationStyleScale() / 2 + 6;
+      var one = this._map.containerPointToLatLng([point.x - tolerance, point.y - tolerance]);
+      var two = this._map.containerPointToLatLng([point.x + tolerance, point.y + tolerance]);
+      var candidates = this._visibleStations(L.latLngBounds(one, two));
+      var zoom = Math.floor(this._map.getZoom());
+      var best = null, bestDistance = Infinity;
+      for (var i = 0; i < candidates.length; i++) {
+        var station = candidates[i];
+        if (!this._stationShown(station, zoom)) continue;
+        var projected = this._map.latLngToContainerPoint([station.lat, station.lon]);
+        var dx = projected.x - point.x, dy = projected.y - point.y;
+        var radius = this._stationBadgeSize(station, zoom) / 2 + 5;
+        var distance = dx * dx + dy * dy;
+        if (distance <= radius * radius && distance < bestDistance) {
+          best = station;
+          bestDistance = distance;
+        }
+      }
+      return best;
+    },
+
+    _showStationTooltip: function(station) {
+      if (!station || !this._stationHoverTip || !this._map) return;
+      var node = document.createElement('span');
+      var name = this._stationName(station);
+      if (/[^\x00-\x7f]/.test(name)) node.lang = 'ja';
+      node.textContent = name;
+      this._stationHoverTip.setContent(node)
+        .setLatLng([station.lat, station.lon]).addTo(this._map);
+    },
+
+    _onStationMouseMove: function(e) {
+      if (!this._stationHoverTip || !this._map || this._eventOwnedByInteractiveLayer(e)) {
+        this._hideStationHover(); return;
+      }
+      var hit = this._hitStation(e.latlng);
+      if (!hit) { this._hideStationHover(); return; }
+      this._showStationTooltip(hit);
+    },
+
+    _onStationClick: function(e) {
+      if (!this._stationHoverTip || !this._map || this._eventOwnedByInteractiveLayer(e)) return;
+      var hit = this._hitStation(e.latlng);
+      if (hit) this._showStationTooltip(hit);
+      else this._hideStationHover();
+    },
+
+    _stationVisibleCount: function() {
+      if (!this._map || !this._stationLoaded || !this._stationsVisible ||
+          this._map.getZoom() < this.options.stationMinZoom) return 0;
+      var zoom = Math.floor(this._map.getZoom());
+      var list = this._visibleStations(this._map.getBounds());
+      var count = 0;
+      for (var i = 0; i < list.length; i++) {
+        if (this._stationShown(list[i], zoom)) count += 1;
+      }
+      return count;
+    },
+
+    _visibleStations: function(bounds) {
+      var W = bounds.getWest(), E = bounds.getEast();
+      var S = bounds.getSouth(), N = bounds.getNorth();
+      var grid = this.options.stationGrid;
+      var gx0 = Math.floor(W / grid), gx1 = Math.floor(E / grid);
+      var gy0 = Math.floor(S / grid), gy1 = Math.floor(N / grid);
+      var out = [];
+      for (var gx = gx0; gx <= gx1; gx++) {
+        for (var gy = gy0; gy <= gy1; gy++) {
+          var cell = this._stationIndex.get(gx + ',' + gy);
+          if (!cell) continue;
+          for (var i = 0; i < cell.length; i++) {
+            var stn = cell[i];
+            if (stn.lon >= W && stn.lon <= E && stn.lat >= S && stn.lat <= N) {
+              out.push(stn);
+            }
+          }
+        }
+      }
+      return out;
     },
 
     // ---- line-name hover, no hit canvas ---------------------------------

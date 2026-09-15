@@ -231,6 +231,32 @@ uv run python scripts/verify_build.py
 .venv-wsl/bin/python -m http.server 8901 --bind 127.0.0.1   # then /docs/index.html
 ```
 
+## Station payload (4.3.2a)
+
+`src/tabelog/scrape/station_source_v1.json` is the checked-in six-field input
+with 8,954 stations. A normal `map.py` build calls `station_payload.py`, verifies
+that source and writes `docs/data/stations.<sha12>.json`. The
+adapter receives that exact hashed URL through `__STATION_URL__`; no unhashed or
+untracked station file is a build input.
+
+The runtime payload is v2. Its six positional fields retain the 4.3.0
+semantics and source order. `placement.version === 1` carries two profiles:
+`local-max130` uses the Japanese station name, and `en-max130` uses the English
+name with Japanese fallback. Each profile has a row-aligned
+`visibleMaskByItem` (bits 0–5 mean z14–z19) and `labelWidthByItem` in CSS px.
+Placement is computed independently for the whole country at each integer zoom,
+so every tile reads the same label set.
+
+The width envelope covers UI density .95/1 and text scale 100/115/130. It uses
+the renderer's 600-weight 11px system/CJK font stack at the maximum 130% scale,
+with upper bounds of 1.15em for East Asian glyphs, 1.10em for Latin letters
+and digits, and 1.15em for other printable glyphs. Collision rectangles add
+the 3px white halo and protect every other visible 11/14/18px station badge with a
+2px guard. This is a deterministic upper-bound model for the
+declared font stack and supported scale settings; an unknown placement profile
+or malformed metadata makes the renderer report a fallback status rather than
+claiming collision-free placement.
+
 ## Integration-pass additions (2026-09-12)
 
 New `Data` / `act` surface, all reached the way everything else is — a module

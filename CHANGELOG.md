@@ -13,6 +13,48 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.2a] - 2026-09-15
+
+Station density now follows the restaurant-first map hierarchy: stations are
+absent at z12 and below, z13–14 show only 6-line hubs at 11px, and z15+
+restores the three 11/14/18px tiers. The badge uses the supplied dark rounded
+train PNG through a cached Canvas sprite. Large hubs paint after smaller
+stations so they remain legible.
+
+Station tooltips close on blank-map clicks, pan and zoom. Viewport-only resize
+no longer destroys and fades every station tile; a real density, font-scale or
+DPR change still redraws once. The runtime payload drops unused coordinate-hash
+IDs and keeps source geographic order, reducing transfer size while retaining
+the deterministic label masks. Station tests are documented in the gate and
+the acceptance runner supports WebKit explicitly.
+
+Preferences now offers four CARTO basemaps: Voyager color, Positron neutral,
+and a no-place-label variant of each. Positron remains the default when no
+choice is saved. Selection updates the existing Leaflet TileLayer in place,
+preserves the view, key, DPR behavior and CORS fallback, and is restored before
+the first tile request on reload.
+
+## [4.3.1a] - 2026-09-15 (local preview)
+
+Railway stations return as an independent map layer, enabled by default until
+the user explicitly switches them off. Enabling either rail layer also enables
+stations; switching rail off leaves the station preference alone. The layers
+menu exposes loading, failure and retry state in all four interface languages.
+
+Stations now render through a Leaflet GridLayer, sharing the base map's tile
+movement and zoom animation. The 8,954-row station input is checked in and the
+normal map build creates a content-addressed runtime payload with stable station
+ids. Build-time placement records one nationwide label set per integer zoom and
+language profile from z14 through z19. It uses a conservative 130% text envelope
+and protects every other station badge, so tile order does not change label selection
+and the browser does not perform a nationwide collision pass. Zoom 14 labels
+transfer hubs only; zoom 15 and above may label every station that wins placement.
+
+The station payload remains lazy below z12 and does not request railway line
+data in station-only mode. Its hashed URL stays in the persistent data cache;
+it is not part of the install-time application shell. This preview has no new
+Android APK and carries no release-performance claim pending device validation.
+
 ## [4.2.8] - 2026-09-15
 
 Detail titles and their tool cluster now share one vertical centre line below

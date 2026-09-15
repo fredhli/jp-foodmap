@@ -89,6 +89,7 @@ from tabelog.scrape.map_data import (
     unwrap_genre,
 )
 from tabelog.scrape.search_norm import build_han_variants, canon_str
+from tabelog.scrape.station_payload import STATION_SOURCE_JSON, build_station_payload
 
 from opencc import OpenCC
 
@@ -2420,7 +2421,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.2.8"
+APP_VERSION = "4.3.2a"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -8253,11 +8254,20 @@ TILE_DPR_SWITCH_JS = r"""
 (function() {
   if (typeof L === 'undefined' || !L.TileLayer || !L.Util) return;
   var hi = true;
+  var basemapPaths = {
+    voyager: 'rastertiles/voyager', positron: 'light_all',
+    'voyager-nolabels': 'rastertiles/voyager_nolabels',
+    'positron-nolabels': 'light_nolabels'
+  };
+  var basemapStyle = 'positron';
   try {
     hi = !(localStorage.getItem('tabelog.showTransitLong') === '1'
         || localStorage.getItem('tabelog.showTransitCity') === '1');
+    var savedBasemap = localStorage.getItem('tabelog.basemapStyle');
+    if (basemapPaths[savedBasemap]) basemapStyle = savedBasemap;
   } catch (_) {}
   window.__tilesHiDpi = hi;
+  window.__cartoBasemapStyle = basemapStyle;
   L.TileLayer.prototype.getTileUrl = function(coords) {
     var data = {
       r: (L.Browser.retina && window.__tilesHiDpi !== false) ? '@2x' : '',
@@ -8271,7 +8281,12 @@ TILE_DPR_SWITCH_JS = r"""
       if (this.options.tms) { data['y'] = invertedY; }
       data['-y'] = invertedY;
     }
-    return L.Util.template(this._url, L.Util.extend(data, this.options));
+    var url = this._url;
+    if (/\.basemaps\.cartocdn\.com\//.test(url)) {
+      url = url.replace(/\/(?:rastertiles\/(?:voyager(?:_nolabels)?|light_(?:all|nolabels))|light_(?:all|nolabels))\//,
+        '/' + basemapPaths[window.__cartoBasemapStyle || 'positron'] + '/');
+    }
+    return L.Util.template(url, L.Util.extend(data, this.options));
   };
 })();
 </script>
@@ -22861,6 +22876,34 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  policy slot (M-029) zh-CN: {_fill_policy_slots(popups_map, 'zh-CN')}")
 
     DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # 4.3.1a: the runtime station file is derived from a checked-in compact
+    # source on every normal build.  Its filename is its SHA-256 prefix, so a
+    # new shell can cache it alongside an older shell's still-working payload.
+    station_payload_bytes, station_build = build_station_payload(STATION_SOURCE_JSON)
+    station_hash = str(station_build["payloadSha256"])
+    station_payload_path = DOCS_DATA_DIR / f"stations.{station_hash[:12]}.json"
+    station_url = f"data/{station_payload_path.name}"
+    if station_payload_path.exists():
+        existing_station_bytes = station_payload_path.read_bytes()
+        if hashlib.sha256(existing_station_bytes).hexdigest() != station_hash:
+            raise SystemExit(
+                f"station payload hash collision or corrupt file: {station_payload_path}"
+            )
+    else:
+        atomic_write_bytes(station_payload_path, station_payload_bytes)
+    station_counts = station_build["profileCounts"]
+    print(
+        f"  stations:         {station_build['stationCount']:,} rows, "
+        f"sha256 {station_hash[:12]}, {len(station_payload_bytes):,} bytes"
+    )
+    print(
+        "  station labels:   "
+        + "  ".join(
+            f"{profile} " + "/".join(str(counts[str(z)]) for z in range(14, 20))
+            for profile, counts in station_counts.items()
+        )
+        + " visible at z14..19"
+    )
     restaurants_bytes = json.dumps(
         core_rows, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -23002,6 +23045,7 @@ def main(argv: list[str] | None = None) -> None:
             .replace("__EMOJI_MANIFEST__", emoji_manifest_json)
             .replace("__HAN_VARIANTS__", han_variants_json)
             .replace("__KNOWN_LOCS__", known_locs_json)
+            .replace("__STATION_URL__", station_url)
             .replace("__GOOGLE_CLIENT_ID__", GOOGLE_CLIENT_ID)
             .replace("__HELP_COPY__", build_help_copy_json())
         )
@@ -23080,6 +23124,8 @@ def main(argv: list[str] | None = None) -> None:
         return hashlib.md5(b).hexdigest()[:10]
 
     transit_layer_bytes = (DOCS_DIR / "transit-layer.js").read_bytes()
+    station_icon_bytes = (DOCS_DIR / "img" / "station-icon-v2.png").read_bytes()
+    station_icon_v = _content_v(station_icon_bytes)
     data_vers = {
         "data/restaurants.json": _content_v(restaurants_bytes),
         "data/popups.json": _content_v(popups_bytes),
@@ -23112,6 +23158,7 @@ def main(argv: list[str] | None = None) -> None:
             )
         data_vers[_vp] = _content_v(_vf.read_bytes())
     all_versioned_urls = [f"{path}?v={v}" for path, v in data_vers.items()]
+    all_versioned_urls.append(f"img/station-icon-v2.png?v={station_icon_v}")
     # M-062: popups is one ~6.4MB file per UI language, and the language is
     # only known at runtime — precaching a build-time guess (zh-CN) made
     # every en/ja/tw visitor download a variant they will never open. The
@@ -23204,8 +23251,10 @@ def main(argv: list[str] | None = None) -> None:
         saved_html = html_scratch.read_text(encoding="utf-8")
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
-    saved_html = _postprocess_page(saved_html, data_vers, ui_i18n_covered, core_rows,
-                                   popups_map, build_version, all_rows, failed)
+    saved_html = _postprocess_page(
+        saved_html, data_vers, ui_i18n_covered, core_rows, popups_map,
+        build_version, all_rows, failed, station_url, station_build,
+    )
 
 
 def _assemble_legacy_page(m, panel_html: str, filter_js: str, all_rows: list[dict]) -> None:
@@ -23270,6 +23319,8 @@ def _postprocess_page(
     build_version: str,
     all_rows: list[dict],
     failed: list[dict],
+    station_url: str,
+    station_build: dict[str, object],
 ) -> str:
     """Every pass over the rendered HTML: dead-dep strip, vendor rewrite, the
     viewport / lang / Leaflet-font patches, ?v= stamping, the saved-view
@@ -23563,6 +23614,11 @@ def _postprocess_page(
             "popup_entries": len(popups_map),
             "csv_rows": len(all_rows),
             "geocode_failed": len(failed),
+            "station_payload": station_url,
+            "station_payload_sha256": station_build["payloadSha256"],
+            "station_source_sha256": station_build["sourceSha256"],
+            "station_rows": station_build["stationCount"],
+            "station_profile_counts": station_build["profileCounts"],
             "missing_en_count": len(missing_en),
             "missing_ja_count": len(missing_ja),
             "missing_en": missing_en,

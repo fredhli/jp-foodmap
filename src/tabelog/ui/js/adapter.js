@@ -9,8 +9,8 @@
 
    Rules this file enforces (CLAUDE.md "Backwards compatibility"):
      · every localStorage key is spelled exactly as before; the ones the
-       business layer does not own (mapView, lastLocation, listView, the four
-       tabelog.show* toggles, filterState, seenIntro, oovHintDismissed) are
+       business layer does not own (mapView, lastLocation, listView, the
+       tabelog.show* map-layer toggles, filterState, seenIntro, oovHintDismissed) are
        read and written HERE, in the shapes 3.2.x wrote, so a refresh after
        the deploy shows the same map, filters, sort and layers;
      · modules never touch state.user directly — act.toggleFav / act.setBlack /
@@ -53,16 +53,19 @@
   var KEY_SEEN_INTRO = 'tabelog.seenIntro';
   var KEY_OOV = 'tabelog.oovHintDismissed';
   var KEY_NEARBY = 'tabelog.nearbySession.v1';
+  var KEY_BASEMAP = 'tabelog.basemapStyle';
+  var BASEMAP_STYLES = ['voyager', 'positron', 'voyager-nolabels', 'positron-nolabels'];
   var normalPrefsHeld = false, nearbyTransaction = false;
   function normalPrefsAllowed() { return !normalPrefsHeld && !(App.state.nearby && App.state.nearby.active); }
   var LAYER_KEYS = {
     long: 'tabelog.showTransitLong',
     city: 'tabelog.showTransitCity',
+    stations: 'tabelog.showStations',
     landmarks: 'tabelog.showAttractions',
     pins: 'tabelog.showBookmarks'
   };
   var KEY_ATTRACTIONS = LAYER_KEYS.landmarks;
-  var LAYER_DEFAULTS = { long: false, city: false, landmarks: true, pins: true, hiddenLandmarks: false };
+  var LAYER_DEFAULTS = { long: false, city: false, stations: true, landmarks: true, pins: true, hiddenLandmarks: false };
 
   // tabelog.showAttractions is the one layer key that is NOT a boolean: 3.2.x
   // wired the landmarks FAB as a tri-state — '0' off, '1' on, '2' on and also
@@ -76,6 +79,9 @@
       var v = lsGet(LAYER_KEYS[k]);
       out[k] = v === null ? LAYER_DEFAULTS[k] : (v === '1');
     });
+    // Only an intentional, valid "off" survives. Missing or damaged values
+    // are not an explicit preference and adopt the 4.3 station-on default.
+    out.stations = lsGet(LAYER_KEYS.stations) !== '0';
     var a = lsGet(KEY_ATTRACTIONS);
     if (a === '0') { out.landmarks = false; out.hiddenLandmarks = false; }
     else if (a === '2') { out.landmarks = true; out.hiddenLandmarks = true; }
@@ -83,11 +89,18 @@
     return out;
   };
   Prefs.writeLayers = function (layers) {
-    ['long', 'city', 'pins'].forEach(function (k) {
+    ['long', 'city', 'stations', 'pins'].forEach(function (k) {
       if (typeof layers[k] === 'boolean') lsSet(LAYER_KEYS[k], layers[k] ? '1' : '0');
     });
     if (typeof layers.landmarks !== 'boolean') return;
     lsSet(KEY_ATTRACTIONS, !layers.landmarks ? '0' : (layers.hiddenLandmarks ? '2' : '1'));
+  };
+  Prefs.readBasemap = function () {
+    var value = lsGet(KEY_BASEMAP);
+    return BASEMAP_STYLES.indexOf(value) >= 0 ? value : 'positron';
+  };
+  Prefs.writeBasemap = function (value) {
+    if (BASEMAP_STYLES.indexOf(value) >= 0) lsSet(KEY_BASEMAP, value);
   };
 
   // {lat, lon, zoom} — restored before Leaflet by VIEW_RESTORE_SNIPPET (map.py);
@@ -308,6 +321,9 @@
         mid: 'https://assets.jpfoodmap.com/japan-mid.b12465fa7b.geojson',
         high: 'https://assets.jpfoodmap.com/japan.0f546984b1.geojson'
       },
+      // Independent of every line LOD: the default stations-only view must
+      // never pay for a multi-megabyte rail payload.
+      stationUrl: '__STATION_URL__',
       lodBreaks: { mid: 9, high: 14 }, opacity: 0.4, casingOpacity: 0.2
     };
     config.API_BASE = C.API_BASE;
@@ -1165,9 +1181,24 @@
     // followed straight by a tab close (or a pagehide) would otherwise be
     // lost. Both writes are idempotent.
     act.setLayers = function (patch) {
+      patch = Object.assign({}, patch || {});
+      // Stations are useful on their own and are therefore independent when
+      // rail is switched off. The inverse is not true: a visible rail bucket
+      // always carries its station context, including when a caller tries to
+      // turn stations off while that bucket is still active.
+      var nextLong = typeof patch.long === 'boolean' ? patch.long : !!App.state.layers.long;
+      var nextCity = typeof patch.city === 'boolean' ? patch.city : !!App.state.layers.city;
+      if (nextLong || nextCity) patch.stations = true;
       App.set({ layers: patch });
       persistLayers(App.state.layers, true);
       applyTileDpr(App.state.layers);
+    };
+    act.setBasemap = function (style) {
+      if (BASEMAP_STYLES.indexOf(style) < 0) return false;
+      Prefs.writeBasemap(style);
+      App.set({ basemap: style });
+      if (window.MapMod && typeof MapMod.setBasemap === 'function') MapMod.setBasemap(style);
+      return true;
     };
     // account / sync
     act.signIn = function (container) { biz.renderSignInButton(container); };
@@ -1220,7 +1251,7 @@
   }
 
   /**
-   * persistLayers(layers, fromUser) — the four tabelog.show* keys.
+   * persistLayers(layers, fromUser) — the tabelog.show* layer keys.
    *
    * A rail bucket that is off because its R2 overlay failed to load is NOT a
    * preference change: the map module turns the toggle off and raises
@@ -1331,8 +1362,12 @@
     var lv = Prefs.readListView();
     s.filters = Prefs.readFilterState(s.filters);
     s.sort = lv.sort;
+    s.basemap = Prefs.readBasemap();
     s.sheet.tab = lv.tab;
     s.layers = Object.assign(s.layers, Prefs.readLayers());
+    // Old installs can restore an enabled rail preference but have no station
+    // key yet. Preserve the rail choice while establishing the new invariant.
+    if (s.layers.long || s.layers.city) s.layers.stations = true;
     // tabelog.mapView is restored into Leaflet itself by map.py's
     // VIEW_RESTORE_SNIPPET, before any of this runs — so read it off the map
     // rather than off the key, and the two can never disagree.

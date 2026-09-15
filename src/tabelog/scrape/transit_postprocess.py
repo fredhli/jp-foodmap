@@ -46,6 +46,7 @@ GEOJSON_PATH = DOCS_DIR / "transit" / "japan.geojson"
 GEOJSON_LOW_PATH = DOCS_DIR / "transit" / "japan-low.geojson"
 GEOJSON_MID_PATH = DOCS_DIR / "transit" / "japan-mid.geojson"
 SUSPICIOUS_REPORT_PATH = DOCS_DIR / "transit" / "suspicious_lines.md"
+STATION_SOURCE_PATH = Path(__file__).with_name("station_source_v1.json")
 
 # LOD tolerances in degrees. ~111 km / degree latitude (less in longitude
 # off the equator, but visual simplification doesn't care about that level
@@ -843,6 +844,28 @@ def _write_lods(lines: list, stations: list) -> None:
           f"points {mp_before} -> {mp_after})")
 
 
+def _write_station_source(stations: list) -> None:
+    """Write the compact station input consumed by the normal map build."""
+    rows = []
+    for station in stations:
+        props = station.get("properties") or {}
+        lon, lat = station["geometry"]["coordinates"][:2]
+        rows.append([
+            lon, lat, props.get("name") or "", props.get("name_en") or "",
+            props.get("railway") or "station", int(props.get("line_count") or 0),
+        ])
+    payload = {
+        "v": 1,
+        "fields": ["lon", "lat", "name", "name_en", "railway", "line_count"],
+        "stations": rows,
+    }
+    STATION_SOURCE_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    print(f"  wrote {STATION_SOURCE_PATH} ({len(rows)} stations)")
+
+
 # ---- driver --------------------------------------------------------------
 
 def postprocess(in_path: Path, out_path: Path | None = None) -> None:
@@ -888,6 +911,7 @@ def postprocess(in_path: Path, out_path: Path | None = None) -> None:
     # platform centroid, so 120m catches all the tracks belonging to that
     # complex without bleeding into a parallel-but-separate station next door.
     _tag_line_count(stations, lines, proximity_m=120.0)
+    _write_station_source(stations)
 
     out = {"type": "FeatureCollection", "features": lines + stations}
     out_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
