@@ -13,6 +13,20 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.7] - 2026-09-15
+
+Column details now keep dinner price, lunch price and Tabelog booking status
+as three complete cells in one summary row. The booking cell has a fixed
+minimum width; dinner and lunch divide the remaining space evenly. All three
+cells share one height and centre their content, while long or missing values
+may wrap inside their own cell without overflowing. This applies to the Fold
+inner screen and desktop layouts; phone and Fold-cover summaries are unchanged.
+
+The Fold-inner fixed action dock also keeps Save, Google Maps and Tabelog in a
+single row. Short labels remain visible at normal width; under real text or
+width pressure an individual label may yield to its icon, but the action never
+becomes a separate row and its full accessible name remains available.
+
 ## [4.2.6] - 2026-09-15
 
 Details opened from a source list now have one exit on column layouts as well

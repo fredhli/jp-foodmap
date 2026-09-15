@@ -90,12 +90,13 @@ DETAIL_PROBE = """() => {
   const box=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,b:r.bottom}};
   const sc=Containers.scroller('detail'), sr=sc.getBoundingClientRect();
   const q=s=>document.querySelector(s), gallery=q('.dt-gallery'), summary=q('.dt-summary'), place=q('[data-section="address"] h2');
-  const actions=[...document.querySelectorAll('#detail-foot .dt-act')].map(e=>({label:e.getAttribute('aria-label')||e.textContent.trim(),box:box(e)}));
+  const actionRow=document.querySelector('#detail-foot .dt-actions');
+  const actions=[...document.querySelectorAll('#detail-foot .dt-act')].map(e=>{const l=e.querySelector('.dt-act-label'),c=l&&getComputedStyle(l);return {label:e.getAttribute('aria-label')||e.textContent.trim(),box:box(e),visual:!!(l&&c.display!=='none'&&l.getClientRects().length),iconOnly:e.classList.contains('is-icon-only')}});
   const cand=q('#candidates-root .dt-cand');
   return {map:{...App.state.layout.mapRect},gallery:box(gallery),summary:box(summary),place:box(place),body:box(sc),
     summaryFull:summary&&summary.getBoundingClientRect().bottom<=sr.bottom+1,
     placeVisible:place&&place.getBoundingClientRect().top<sr.bottom,
-    actions,candidate:cand?{collapsed:cand.classList.contains('dt-cand--collapsed'),box:box(cand)}:null,
+    actions,actionStack:actionRow&&actionRow.classList.contains('is-stack'),candidate:cand?{collapsed:cand.classList.contains('dt-cand--collapsed'),box:box(cand)}:null,
     pageOverflow:document.documentElement.scrollWidth>innerWidth+1,panelOverflow:sc.scrollWidth>sc.clientWidth+1};
 }"""
 
@@ -223,6 +224,9 @@ with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
                 check(abs(detail["gallery"]["h"] - (176 if h > 640 else 164) * z) < 1, name + ": gallery height")
                 check(detail["summaryFull"] and detail["placeVisible"], name + ": detail first screen density")
                 check(len(detail["actions"]) == 3 and all(a["label"] and a["box"]["h"] >= 44 * z - .25 for a in detail["actions"]), name + ": detail actions")
+                check(not detail["actionStack"] and max(a["box"]["y"] for a in detail["actions"])-min(a["box"]["y"] for a in detail["actions"]) < 1,
+                      name + ": detail actions left the single row")
+                check(all(a["visual"] for a in detail["actions"]), name + ": default Fold actions lost their short labels")
                 if name == "inner816":
                     check(detail["candidate"] and detail["candidate"]["collapsed"] and detail["candidate"]["box"]["h"] >= 44 * z - .25,
                           name + ": short-height candidate default")

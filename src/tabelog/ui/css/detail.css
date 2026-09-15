@@ -121,6 +121,28 @@ html:not([data-mode="narrow"]) .dt-gallery.is-empty { height: var(--gallery-h-co
 .dt-sum-label, .dt-sum-val { white-space: normal; overflow-wrap: anywhere; }
 .dt-sum-val { font-size: var(--t-body-size); line-height: var(--t-body-line); font-weight: 600; }
 
+/* 4.2.7 column detail summary: dinner, lunch and booking stay in one row.
+   Booking owns a real floor; the two price cells divide everything else.
+   Each cell stretches to the same height and centres its complete content. */
+@media (min-width: 750px) {
+  .dt-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(104px, .82fr);
+    align-items: stretch;
+  }
+  .dt-sum-budget {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: auto; max-width: none;
+  }
+  .dt-sum-budget .dt-sum-cell,
+  .dt-sum-book .dt-sum-cell {
+    min-width: 0; height: 100%; justify-content: center; text-align: center;
+  }
+  .dt-sum-book { display: grid; min-width: 0; }
+  .dt-sum-book .dt-sum-cell { padding-inline: 6px; }
+  .dt-sum-text, .dt-sum-label, .dt-sum-val { max-width: 100%; }
+}
+
 /* ---- reading groups ------------------------------------------------------ */
 .dt-sec { margin-top: var(--c-detail-reading-gap); }
 .dt-sec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
@@ -356,6 +378,13 @@ html[data-mode="wide"] #detail-foot .dt-actions { --dt-pad: var(--pad-panel-wide
   .dt-cand-title { white-space: normal; }
   .dt-cand-tools { gap: 2px; }
   .dt-cand-nav { display: none; }
+}
+/* Fold inner hard rule: the three core actions never become three rows.
+   JS may hide an individual label after the settled-width measurement, but
+   the action itself remains in this one-row grid with a full accessible name. */
+html[data-fold-inner] #detail-foot .dt-actions,
+html[data-fold-inner] #detail-foot .dt-actions.is-stack {
+  grid-template-columns: minmax(var(--touch-min), 1fr) minmax(var(--touch-min), 1.65fr) minmax(var(--touch-min), 1fr);
 }
 .dt-cand-card .dt-photo-failed { bottom: auto; height: 56px; }
 .dt-lb-fig { position: relative; }

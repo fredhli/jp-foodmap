@@ -711,12 +711,26 @@
     var row = foot.querySelector('.dt-actions');
     if (!row || !row.clientWidth) return;
     if (s.layout.mode !== 'wide') {
+      if (s.layout.foldInner && ctx.motion.isGeometryBusy()) {
+        // The detail column measures once while its width is still animating
+        // from zero. Never let that transient width turn the three actions into
+        // a persistent vertical stack or icon-only row; measure again at rest.
+        stacked = false;
+        row.classList.remove('is-stack');
+        Array.prototype.forEach.call(row.querySelectorAll('.dt-act'), function (button) {
+          button.classList.remove('is-icon-only');
+        });
+        if (pass < 2) ctx.motion.afterGeometry(function () {
+          if (ctx.App.state.selected.id) ctx.util.raf(function () { measureActions(ctx.App.state, pass + 1); });
+        });
+        return;
+      }
       var style = getComputedStyle(row);
       var available = row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       var gap = parseFloat(style.columnGap) || 0;
       // --touch-min is calc(44px * var(--ui-z)) after densify, which parseFloat cannot read
       var minimum = ctx.layout.px(44);
-      stacked = available < 3 * minimum + 2 * gap;
+      stacked = !s.layout.foldInner && available < 3 * minimum + 2 * gap;
       row.classList.toggle('is-stack', stacked);
       Array.prototype.forEach.call(row.querySelectorAll('.dt-act'), function (button) {
         button.classList.remove('is-icon-only');

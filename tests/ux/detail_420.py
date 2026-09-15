@@ -31,7 +31,9 @@ probe = """() => {
   header:box(q(App.state.layout.mode==='narrow'?'#sheet-head':'#col-detail-head')),
   back:box(back),backLabel:back?.getAttribute('aria-label'),summary:box(sum),
   values:[...sum.querySelectorAll('.dt-sum-label,.dt-sum-val')].map(e=>({text:e.textContent,w:e.clientWidth,sw:e.scrollWidth,overflow:getComputedStyle(e).overflow})),
-  budget:box(q('.dt-sum-budget')),booking:box(q('.dt-sum-book')),stack:row.classList.contains('is-stack'),
+  budget:box(q('.dt-sum-budget')),booking:box(q('.dt-sum-book')),
+  cells:[...sum.querySelectorAll('.dt-sum-cell')].map(e=>{const r=e.getBoundingClientRect(),kids=[...e.children].map(n=>n.getBoundingClientRect());const l=Math.min(...kids.map(x=>x.left)),rr=Math.max(...kids.map(x=>x.right));return {box:box(e),centerDelta:Math.abs((l+rr)/2-(r.left+r.right)/2)}}),
+  stack:row.classList.contains('is-stack'),
   actions:[...row.children].map(e=>({box:box(e),label:e.getAttribute('aria-label'),pressed:e.getAttribute('aria-pressed'),icon:e.classList.contains('is-icon-only'),glyph:glyph(e),overflow:e.scrollWidth>e.clientWidth+1})),
   viewportOverflow:document.documentElement.scrollWidth>innerWidth};
 }"""
@@ -74,6 +76,17 @@ with lib_browser.serve_docs(8993) as base, sync_playwright() as p:
                 records.append(data)
                 if name=='inner932' and scale==130 and lang=='zh':
                     check(abs(data['budget']['y']-data['booking']['y'])<1,'inner932/130: compact booking forces budget wrap')
+                if w>=750:
+                    cells=data['cells']
+                    check(len(cells)==3,f'{name}/{scale}/{lang}: summary cell count')
+                    check(max(c['box']['y'] for c in cells)-min(c['box']['y'] for c in cells)<=1.1,
+                          f'{name}/{scale}/{lang}: summary cells left the row')
+                    check(max(c['box']['h'] for c in cells)-min(c['box']['h'] for c in cells)<=2.1,
+                          f'{name}/{scale}/{lang}: summary cells lost equal height')
+                    check(max(c['centerDelta'] for c in cells)<=1,
+                          f'{name}/{scale}/{lang}: summary content not centered')
+                    check(data['booking']['w']>=104*lib_browser.ui_z(page)-1,
+                          f'{name}/{scale}/{lang}: booking column squeezed')
                 check(not data['viewportOverflow'],f'{name}/{scale}/{lang}: page overflow')
                 check(all(v['sw']<=v['w']+1 for v in data['values']),f'{name}/{scale}/{lang}: budget/status clipped')
                 if w<1100:
@@ -83,6 +96,21 @@ with lib_browser.serve_docs(8993) as base, sync_playwright() as p:
                     touch=44*lib_browser.ui_z(page)-0.1  # 4.2.4 UI density
                     check(all(a['label'] and a['box']['w']>=touch and a['box']['h']>=touch and not a['overflow'] and a['glyph'] for a in data['actions']),f'{name}/{scale}/{lang}: action target/name/overflow')
                     check(max(a['box']['y'] for a in data['actions'])-min(a['box']['y'] for a in data['actions'])<1,f'{name}/{scale}/{lang}: action rows')
+            if w>=750:
+                for combo in (['¥10k–20k','¥10k–20k','Link available'],
+                              ['Not provided','Not provided','No link']):
+                    synthetic=page.evaluate('''values=>{
+                      const nodes=[...document.querySelectorAll('.dt-summary .dt-sum-val')];
+                      nodes.forEach((n,i)=>n.textContent=values[i]);
+                      const sum=document.querySelector('.dt-summary'),cells=[...sum.querySelectorAll('.dt-sum-cell')];
+                      const box=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,b:r.bottom}};
+                      return {values:nodes.map(e=>({w:e.clientWidth,sw:e.scrollWidth})),cells:cells.map(box),overflow:sum.scrollWidth>sum.clientWidth+1};
+                    }''',combo)
+                    records.append({'case':name,'scale':scale,'synthetic':combo,**synthetic})
+                    check(not synthetic['overflow'] and all(v['sw']<=v['w']+1 for v in synthetic['values']),
+                          f'{name}/{scale}/{combo}: possible summary value overflow')
+                    check(max(c['y'] for c in synthetic['cells'])-min(c['y'] for c in synthetic['cells'])<=1.1,
+                          f'{name}/{scale}/{combo}: possible summary value left the row')
             if scale in (100,200) or (name=='inner932' and scale==130):
                 page.evaluate("()=>App.i18n.setLang('zh')")
                 page.wait_for_timeout(150)
