@@ -73,7 +73,7 @@ class StationPayloadContract(unittest.TestCase):
         placement = self.payload.get("placement")
         self.assertIsInstance(placement, dict)
         self.assertEqual(placement.get("version"), 1)
-        self.assertEqual(placement.get("zoomMin"), 14)
+        self.assertEqual(placement.get("zoomMin"), 12)
         self.assertEqual(placement.get("zoomMax"), 19)
         self.assertEqual(set(placement.get("profiles", {})), EXPECTED_PROFILES)
         self.assertIsInstance(placement.get("measurement"), dict)
@@ -85,18 +85,21 @@ class StationPayloadContract(unittest.TestCase):
             with self.subTest(profile=name):
                 self.assertEqual(len(masks), len(self.rows))
                 self.assertEqual(len(widths), len(self.rows))
-                self.assertTrue(all(isinstance(mask, int) and 0 <= mask <= 63 for mask in masks))
+                self.assertTrue(all(isinstance(mask, int) and 0 <= mask <= 255 for mask in masks))
                 self.assertTrue(all(
                     isinstance(width, (int, float)) and width >= 0
                     for width in widths
                 ))
 
-    def test_z14_label_candidates_are_hubs_only(self) -> None:
+    def test_distant_label_candidates_follow_station_tiers(self) -> None:
         for name, profile in self.payload["placement"]["profiles"].items():
             for i, (row, mask) in enumerate(zip(self.rows, profile["visibleMaskByItem"])):
                 if row[5] < 6:
                     with self.subTest(profile=name, row=i, station=row[2]):
                         self.assertEqual(mask & 1, 0)
+                if row[5] < 3:
+                    with self.subTest(profile=name, row=i, station=row[2]):
+                        self.assertEqual(mask & 2, 0)
 
 
 if __name__ == "__main__":

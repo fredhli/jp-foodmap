@@ -1,0 +1,33 @@
+{
+  "visibility": {
+    "12": {
+      "global": 72,
+      "scale": 3000,
+      "canvas": 7
+    },
+    "13": {
+      "global": 607,
+      "scale": 1000,
+      "canvas": 10
+    },
+    "14": {
+      "global": 8954,
+      "scale": 500,
+      "canvas": 10
+    }
+  },
+  "interaction": {
+    "tooltips": 0,
+    "clickBound": false,
+    "hoverBound": false,
+    "tip": false
+  },
+  "layerOrder": [
+    "stations",
+    "long",
+    "city",
+    "landmarks",
+    "pins"
+  ],
+  "stationRequestsBelowZ12": 0
+}

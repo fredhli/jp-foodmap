@@ -231,7 +231,7 @@ uv run python scripts/verify_build.py
 .venv-wsl/bin/python -m http.server 8901 --bind 127.0.0.1   # then /docs/index.html
 ```
 
-## Station payload (4.3.2a)
+## Station payload (4.3.3a)
 
 `src/tabelog/scrape/station_source_v1.json` is the checked-in six-field input
 with 8,954 stations. A normal `map.py` build calls `station_payload.py`, verifies
@@ -243,7 +243,7 @@ The runtime payload is v2. Its six positional fields retain the 4.3.0
 semantics and source order. `placement.version === 1` carries two profiles:
 `local-max130` uses the Japanese station name, and `en-max130` uses the English
 name with Japanese fallback. Each profile has a row-aligned
-`visibleMaskByItem` (bits 0–5 mean z14–z19) and `labelWidthByItem` in CSS px.
+`visibleMaskByItem` (bits 0–7 mean z12–z19) and `labelWidthByItem` in CSS px.
 Placement is computed independently for the whole country at each integer zoom,
 so every tile reads the same label set.
 

@@ -59,11 +59,7 @@
       '.leaflet-tooltip.transit-line-label{background:rgba(33,33,33,0.92);' +
       'border:none;color:#fff;border-radius:6px;padding:3px 8px;font-size:12px;' +
       'font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.18);white-space:nowrap;}' +
-      '.leaflet-tooltip.transit-line-label::before{display:none;}' +
-      '.leaflet-tooltip.transit-station-label{background:rgba(255,255,255,0.92);' +
-      'border:1px solid rgba(0,0,0,0.08);border-radius:6px;padding:2px 6px;' +
-      'font-size:11px;color:#333;box-shadow:0 1px 2px rgba(0,0,0,0.08);' +
-      'white-space:nowrap;}';
+      '.leaflet-tooltip.transit-line-label::before{display:none;}';
     document.head.appendChild(style);
   }
 
@@ -213,7 +209,7 @@
   var STATION_BADGE_URL = 'img/station-icon-v2.png?v=c98b8c002d';
   var STATION_BADGE_CROP = [185, 182, 885, 887];
   var STATION_SIZES = [11, 14, 18];
-  var STATION_MIN_ZOOM = 13;
+  var STATION_MIN_ZOOM = 12;
   var STATION_DPR_MAX = 3;
   var STATION_LABEL_BASE_PX = 11;
   var STATION_LABEL_HALO_PX = 3;
@@ -536,7 +532,7 @@
       this._stationSuppressLabels = false;
       if (!payload || payload.v !== 2 || !placement) {
         this._stationPlacementStatus = payload ? 'fallback-legacy-v1' : 'not-loaded';
-      } else if (placement.version !== 1 || placement.zoomMin !== 14 ||
+      } else if (placement.version !== 1 || placement.zoomMin !== 12 ||
                  placement.zoomMax !== 19 || !placement.profiles) {
         this._stationPlacementStatus = 'fallback-placement-version';
         this._stationSuppressLabels = true;
@@ -648,17 +644,6 @@
         map.off('mouseout', this._onMouseOutBound);
         this._onMouseMoveBound = this._onMouseOutBound = null;
       }
-      if (this._onStationMouseMoveBound) {
-        map.off('mousemove', this._onStationMouseMoveBound);
-        map.off('mouseout', this._onStationMouseOutBound);
-        this._onStationMouseMoveBound = this._onStationMouseOutBound = null;
-      }
-      if (this._onStationClickBound) {
-        map.off('click', this._onStationClickBound);
-        this._onStationClickBound = null;
-      }
-      if (this._stationHoverTip) this._stationHoverTip.remove();
-      this._stationHoverTip = null;
       this._hideHover();
       this._hoverTip = null;
       if (this._rafToken) {
@@ -794,8 +779,6 @@
 
     _clearStationMarkers: function() {
       this._destroyStationGrid();
-      this._syncStationInteraction(false);
-      this._hideStationHover();
     },
 
     _destroyStationGrid: function() {
@@ -822,7 +805,6 @@
       var zoom = this._map.getZoom();
       if (!this._stationsVisible || !this._stationLoaded || zoom < this.options.stationMinZoom) {
         this._destroyStationGrid();
-        this._syncStationInteraction(false);
         return;
       }
       this._ensureStationBadgeImage(false);
@@ -847,7 +829,6 @@
         this._stationGridLayer.on('tileunload', this._onStationTileUnload, this);
         this._stationGridLayer.addTo(this._map);
       }
-      this._syncStationInteraction(true);
     },
 
     _refreshStationTiles: function() {
@@ -1539,12 +1520,10 @@
 
     _stationShown: function(station, zoom) {
       if (zoom < this.options.stationMinZoom) return false;
-      return zoom >= 15 || (station.line_count | 0) >= 6;
-    },
-
-    _stationBadgeSize: function(station, zoom) {
-      if (zoom <= 14) return STATION_SIZES[0] * this._stationStyleScale();
-      return STATION_SIZES[this._stationTier(station)] * this._stationStyleScale();
+      var count = station.line_count | 0;
+      if (zoom === 12) return count >= 6;
+      if (zoom === 13) return count >= 3;
+      return zoom >= 14;
     },
 
     _stationLabelVisible: function(station, zoom) {
@@ -1556,7 +1535,8 @@
         var mask = this._stationPlacement.visibleMaskByItem[station._placementIndex] | 0;
         return bit >= 0 && bit < 31 && (mask & (1 << bit)) !== 0;
       }
-      return zoom >= ((station.line_count | 0) >= 6 ? 14 : 15);
+      var count = station.line_count | 0;
+      return zoom >= (count >= 6 ? 12 : count >= 3 ? 13 : 14);
     },
 
     _stationLabelWidth: function(station) {
@@ -1601,7 +1581,7 @@
       var scale = this._stationStyleScale();
       var maxBadge = STATION_SIZES[STATION_SIZES.length - 1] * scale;
       var fontPx = this._stationFontPx();
-      var mayDrawLabels = !this._stationSuppressLabels && zoom >= 14;
+      var mayDrawLabels = !this._stationSuppressLabels && zoom >= 12;
       var margin = Math.ceil(mayDrawLabels
         ? Math.max(maxBadge / 2 + 2,
             this._stationMaxLabelWidth / 2 + STATION_LABEL_HALO_PX + 2,
@@ -1709,110 +1689,6 @@
       this._stationCounters.tileRemove += 1;
       tile.width = 0;
       tile.height = 0;
-    },
-
-    _syncStationInteraction: function(enabled) {
-      if (!this._map) return;
-      if (enabled && !this._stationHoverTip) {
-        this._stationHoverTip = L.tooltip({className:'transit-station-label',direction:'top',offset:[0,-8],opacity:1});
-      }
-      if (enabled && !this._onStationClickBound) {
-        this._onStationClickBound = this._onStationClick.bind(this);
-        this._map.on('click', this._onStationClickBound);
-      } else if (!enabled && this._onStationClickBound) {
-        this._map.off('click', this._onStationClickBound);
-        this._onStationClickBound = null;
-      }
-      if (enabled && !this._onStationMoveStartBound) {
-        this._onStationMoveStartBound = this._hideStationHover.bind(this);
-        this._map.on('movestart', this._onStationMoveStartBound);
-        this._map.on('zoomstart', this._onStationMoveStartBound);
-      } else if (!enabled && this._onStationMoveStartBound) {
-        this._map.off('movestart', this._onStationMoveStartBound);
-        this._map.off('zoomstart', this._onStationMoveStartBound);
-        this._onStationMoveStartBound = null;
-      }
-      var canHover = window.matchMedia && matchMedia('(hover: hover)').matches;
-      if (enabled && canHover && !this._onStationMouseMoveBound) {
-        this._onStationMouseMoveBound = this._onStationMouseMove.bind(this);
-        this._onStationMouseOutBound = this._hideStationHover.bind(this);
-        this._map.on('mousemove', this._onStationMouseMoveBound);
-        this._map.on('mouseout', this._onStationMouseOutBound);
-      } else if ((!enabled || !canHover) && this._onStationMouseMoveBound) {
-        this._map.off('mousemove', this._onStationMouseMoveBound);
-        this._map.off('mouseout', this._onStationMouseOutBound);
-        this._onStationMouseMoveBound = this._onStationMouseOutBound = null;
-      }
-      if (!enabled && this._stationHoverTip) {
-        this._stationHoverTip.remove();
-        this._stationHoverTip = null;
-      }
-    },
-
-    _hideStationHover: function() {
-      if (this._stationHoverTip) this._stationHoverTip.remove();
-    },
-
-    _eventOwnedByInteractiveLayer: function(event) {
-      var node = event && event.originalEvent && event.originalEvent.target;
-      while (node && node !== this._map._container) {
-        if (node.classList && (node.classList.contains('leaflet-marker-icon') ||
-            node.classList.contains('leaflet-interactive') ||
-            node.classList.contains('marker-cluster'))) return true;
-        node = node.parentNode;
-      }
-      return false;
-    },
-
-    _hitStation: function(latlng) {
-      if (!this._map || !this._stationLoaded || !this._stationsVisible ||
-          this._map.getZoom() < this.options.stationMinZoom) return null;
-      var point = this._map.latLngToContainerPoint(latlng);
-      var tolerance = STATION_SIZES[2] * this._stationStyleScale() / 2 + 6;
-      var one = this._map.containerPointToLatLng([point.x - tolerance, point.y - tolerance]);
-      var two = this._map.containerPointToLatLng([point.x + tolerance, point.y + tolerance]);
-      var candidates = this._visibleStations(L.latLngBounds(one, two));
-      var zoom = Math.floor(this._map.getZoom());
-      var best = null, bestDistance = Infinity;
-      for (var i = 0; i < candidates.length; i++) {
-        var station = candidates[i];
-        if (!this._stationShown(station, zoom)) continue;
-        var projected = this._map.latLngToContainerPoint([station.lat, station.lon]);
-        var dx = projected.x - point.x, dy = projected.y - point.y;
-        var radius = this._stationBadgeSize(station, zoom) / 2 + 5;
-        var distance = dx * dx + dy * dy;
-        if (distance <= radius * radius && distance < bestDistance) {
-          best = station;
-          bestDistance = distance;
-        }
-      }
-      return best;
-    },
-
-    _showStationTooltip: function(station) {
-      if (!station || !this._stationHoverTip || !this._map) return;
-      var node = document.createElement('span');
-      var name = this._stationName(station);
-      if (/[^\x00-\x7f]/.test(name)) node.lang = 'ja';
-      node.textContent = name;
-      this._stationHoverTip.setContent(node)
-        .setLatLng([station.lat, station.lon]).addTo(this._map);
-    },
-
-    _onStationMouseMove: function(e) {
-      if (!this._stationHoverTip || !this._map || this._eventOwnedByInteractiveLayer(e)) {
-        this._hideStationHover(); return;
-      }
-      var hit = this._hitStation(e.latlng);
-      if (!hit) { this._hideStationHover(); return; }
-      this._showStationTooltip(hit);
-    },
-
-    _onStationClick: function(e) {
-      if (!this._stationHoverTip || !this._map || this._eventOwnedByInteractiveLayer(e)) return;
-      var hit = this._hitStation(e.latlng);
-      if (hit) this._showStationTooltip(hit);
-      else this._hideStationHover();
     },
 
     _stationVisibleCount: function() {

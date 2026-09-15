@@ -13,6 +13,17 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.3a] - 2026-09-15
+
+Station visibility moves one map level earlier: z12 shows 6-line hubs, z13
+adds 3-line hubs, and z14 and closer show every station. The distant z12–14
+badges remain 11px; z15+ retains the 11/14/18px tiers. Build-time label masks
+now cover z12–19 and use the same visibility thresholds.
+
+Canvas labels are now the only station-name presentation. Station click and
+hover hit testing, listeners and duplicate transient tooltips were removed.
+The Layers menu lists Stations before Long-distance and City rail.
+
 ## [4.3.2a] - 2026-09-15
 
 Station density now follows the restaurant-first map hierarchy: stations are

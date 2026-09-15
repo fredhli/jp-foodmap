@@ -245,7 +245,7 @@ def assert_fly_anchor_and_click_priority(page: Page) -> dict:
     }""")
     assert result["detail"]["tileZoom"] == 15, result
     assert result["sampled"] >= 1 and result["maxAlpha"] > 0, result
-    assert result["normalTip"] is True, result
+    assert result["normalTip"] is False, result
     assert result["markerTip"] is False, result
     assert result["blankClosed"] is True and result["moveClosed"] is True, result
     return result
@@ -305,7 +305,7 @@ def assert_long_label_overdraw(page: Page) -> dict:
         const text=transit._stationName(s),actual=measure.measureText(text).width;
         if(actual<45)continue;
         const p=map.project([s.lat,s.lon],z),rx=((p.x%ts.x)+ts.x)%ts.x;
-        const edge=Math.min(rx,ts.x-rx),badge=(s.line_count>=6?22:s.line_count>=3?18:14)*transit._stationStyleScale();
+        const edge=Math.min(rx,ts.x-rx),badge=(s.line_count>=6?18:s.line_count>=3?14:11)*transit._stationStyleScale();
         if(edge>badge/2+4&&edge<actual/2-5)candidates.push({s,p,edge,actual,badge,text});
       }
       candidates.sort((a,b)=>b.actual-a.actual);
@@ -388,15 +388,15 @@ def assert_payload_measurement_and_collisions(page: Page, payload: dict) -> dict
       const collision={};
       for(const [profileKey,p] of Object.entries(profiles)){
         const zooms={};
-        for(let z=14;z<=19;z++){
+        for(let z=12;z<=19;z++){
           const hash=new Map(), labels=[], violations=[];
           for(let i=0;i<rows.length;i++){
-            const row=rows[i], pt=project(row[0],row[1],z), size=row[5]>=6?22:row[5]>=3?18:14;
-            if(z>14||row[5]>=3){
+            const row=rows[i], pt=project(row[0],row[1],z), size=z<=14?11:(row[5]>=6?18:row[5]>=3?14:11);
+            if((z===12&&row[5]>=6)||(z===13&&row[5]>=3)||z>=14){
               const r=[pt[0]-size/2-2,pt[1]-size/2-2,pt[0]+size/2+2,pt[1]+size/2+2];
               add(hash,r,{kind:'badge',i,id:row[6]});
             }
-            if((p.visibleMaskByItem[i]&(1<<(z-14)))!==0){
+            if((p.visibleMaskByItem[i]&(1<<(z-12)))!==0){
               const baseline=pt[1]-size/2-3,w=p.labelWidthByItem[i];
               labels.push({i,id:row[6],r:[pt[0]-w/2-3,baseline-14.3-3,pt[0]+w/2+3,baseline+3]});
             }

@@ -2421,7 +2421,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.3.2a"
+APP_VERSION = "4.3.3a"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -22899,10 +22899,10 @@ def main(argv: list[str] | None = None) -> None:
     print(
         "  station labels:   "
         + "  ".join(
-            f"{profile} " + "/".join(str(counts[str(z)]) for z in range(14, 20))
+            f"{profile} " + "/".join(str(counts[str(z)]) for z in range(12, 20))
             for profile, counts in station_counts.items()
         )
-        + " visible at z14..19"
+        + " visible at z12..19"
     )
     restaurants_bytes = json.dumps(
         core_rows, ensure_ascii=False, separators=(",", ":")

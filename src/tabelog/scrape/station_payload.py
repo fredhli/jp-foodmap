@@ -20,7 +20,7 @@ SOURCE_FIELDS = ["lon", "lat", "name", "name_en", "railway", "line_count"]
 OUTPUT_FIELDS = SOURCE_FIELDS
 PAYLOAD_VERSION = 2
 PLACEMENT_VERSION = 1
-ZOOM_MIN = 14
+ZOOM_MIN = 12
 ZOOM_MAX = 19
 HIDDEN_MIN_ZOOM = ZOOM_MAX + 1
 MIN_STATION_COUNT = 8_000
@@ -81,6 +81,14 @@ def _icon_size(line_count: int, zoom: int) -> float:
     if zoom <= 14:
         return 11.0
     return 18.0 if line_count >= 6 else 14.0 if line_count >= 3 else 11.0
+
+
+def _shown(line_count: int, zoom: int) -> bool:
+    if zoom == 12:
+        return line_count >= 6
+    if zoom == 13:
+        return line_count >= 3
+    return zoom >= 14
 
 
 class _RectIndex:
@@ -158,16 +166,14 @@ def _placement_for(rows: list[list[object]], texts: list[str]) -> dict[str, list
         # Every tile at that zoom reads the same bit, so panning and tile load
         # order cannot change which labels are present.
         for row_index, row in enumerate(rows):
-            if zoom == ZOOM_MIN and int(row[5]) < 6:
+            if not _shown(int(row[5]), zoom):
                 continue
             x, y = _world_point(float(row[0]), float(row[1]), zoom)
             half = _icon_size(int(row[5]), zoom) / 2 + ICON_GUARD_PX
             index.add((x - half, y - half, x + half, y + half), owner=row_index)
 
         for i in priority:
-            # Preserve the prototype's level of detail: z14 labels hubs only;
-            # z15 and above may label every station that wins placement.
-            if not texts[i] or (zoom == ZOOM_MIN and int(rows[i][5]) < 6):
+            if not texts[i] or not _shown(int(rows[i][5]), zoom):
                 continue
             rect = _label_rect(rows[i], widths[i], zoom)
             # The label is anchored to its own badge and may touch its halo;

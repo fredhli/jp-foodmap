@@ -937,10 +937,10 @@
       : (stationCount ? t('{n} 个铁路车站', { n: u.fmtCount(stationCount, s.lang) }) : t('铁路车站'));
     return popHead(t('地图图层')) +
       '<div class="ov-pop-body">' +
-        layerRow({ key: 'long', icon: 'train', title: t('长途'), sub: t('新干线 / JR 特急'), on: L.long, loading: !!L.loading.long, error: !!L.error.long }) +
-        layerRow({ key: 'city', icon: 'rail', title: t('市内'), sub: t('地铁 / 私铁 / 城市轨道'), on: L.city, loading: !!L.loading.city, error: !!L.error.city }) +
         layerRow({ key: 'stations', icon: 'train', title: t('车站'), sub: stationSub, on: L.stations,
           loading: !!L.loading.stations, error: !!L.error.stations, disabled: stationLocked }) +
+        layerRow({ key: 'long', icon: 'train', title: t('长途'), sub: t('新干线 / JR 特急'), on: L.long, loading: !!L.loading.long, error: !!L.error.long }) +
+        layerRow({ key: 'city', icon: 'rail', title: t('市内'), sub: t('地铁 / 私铁 / 城市轨道'), on: L.city, loading: !!L.loading.city, error: !!L.error.city }) +
         layerRow({ key: 'landmarks', icon: 'landmark', title: t('景点'),
           sub: t('内置 {n} · 自建 {m}', { n: u.fmtCount(builtIn, s.lang), m: u.fmtCount(own, s.lang) }), on: L.landmarks }) +
         layerRow({ key: 'pins', icon: 'bookmark', title: t('书签标记'), sub: t('地图上的地点标记'), on: L.pins }) +

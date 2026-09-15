@@ -743,7 +743,6 @@
       railStatus.long = railStatus.city = 'ok';
       App.set({ layers: { loading: { long: false, city: false } } });
       App.emit('layers:load', { kind: 'long', status: 'ok' });
-      scheduleStationPolish();
     });
     rail.on('lodloaderror', function (e) {
       railLoading = false;
@@ -769,7 +768,6 @@
       stationTotal = e && Number.isFinite(e.count) ? e.count : stationCount(rail);
       App.set({ layers: { loading: { stations: false }, error: { stations: false } } });
       App.emit('layers:load', { kind: 'stations', status: 'ok', count: stationTotal });
-      scheduleStationPolish();
     });
     rail.on('stationloaderror', function (e) {
       stationStatus = e && e.hasData ? 'ok' : 'error';
@@ -815,7 +813,6 @@
       if (any && !map.hasLayer(r)) map.addLayer(r);
       if (!any && map.hasLayer(r)) map.removeLayer(r);
     }
-    if (wantStations) scheduleStationPolish();
   }
 
   function stationCount(r) {
@@ -911,33 +908,6 @@
       zoom: map ? map.getZoom() : null
     };
   };
-
-  /* §6.5: the permanent station names drop the "(N lines)" suffix — the count is a
-     nearby-lines estimate, not an official transfer number, and it is what made
-     the labels wide enough to bury restaurants. transit-layer.js binds the
-     tooltip text, so this trims the rendered labels after each paint; the hover
-     tooltip keeps the full string. */
-  // \u7ebf / \u7dda are escaped so the build's CJK-run scan does not read a
-  // regex alternation as page copy needing a translation entry.
-  var STN_SUFFIX_RE = /\s*[\uff08(]\s*\d+\s*(?:\u7ebf|\u7dda|lines)\s*[)\uff09]\s*$/;
-  var polishRaf = 0;
-  function scheduleStationPolish() {
-    if (polishRaf) return;
-    polishRaf = util.raf(function () {
-      polishRaf = 0;
-      var nodes = document.querySelectorAll('.leaflet-tooltip.transit-station-label');
-      for (var i = 0; i < nodes.length; i++) {
-        var el = nodes[i];
-        if (el._mpTrim) continue;
-        var txt = el.textContent || '';
-        var cut = txt.replace(STN_SUFFIX_RE, '');
-        var run = el.querySelector('[lang]');
-        if (run) el.lang = run.lang;
-        if (cut !== txt) el.textContent = cut;
-        el._mpTrim = 1;
-      }
-    });
-  }
 
   /* ======================================================================
      movement, bounds, reveal
@@ -1048,7 +1018,6 @@
     syncMarkers(s);
     layoutTags();
     layoutPlates();
-    if (s.layers.stations) scheduleStationPolish();
     if (s.selected.id) renderBubble(s);
     var vis = M.visibleIds();
     if (!silentEmit) App.emit('map:moveend', { bounds: M.bounds(), byUser: byUser, center: [c.lat, c.lng], zoom: z, visibleIds: vis });
