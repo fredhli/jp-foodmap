@@ -85,12 +85,11 @@ def set_list_scroll(page, v):
     page.evaluate("() => { delete window.__uxLast; delete window.__uxStable; }")
 
 def close_detail(page, w):
-    """3.2.x: below 750 the source-return link #ux-detail-back carried the tab
-    name ('← 结果' / '← 收藏'); the column layouts had no link and used
-    #bs-content .rst-close. 4.0's narrow sheet header has the same labelled
-    back control ([data-ct="back"]) and the columns have [data-ct="close-detail"]."""
-    if w < 750:
-        back = page.locator('[data-ct="back"]:visible').first
+    """Use the labelled source return whenever the detail has one. A card
+    opened directly from the map has no source list and keeps Close instead."""
+    back = page.locator('[data-ct="back"]:visible')
+    if back.count():
+        back = back.first
         label = back.get_attribute('aria-label') or back.inner_text().strip()
         back.click()
         return label
@@ -229,8 +228,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
             page.wait_for_timeout(400)
             record(page,prefix+'-detail')
             label=close_detail(page,w)
-            if w<750:
-                assert label and '结果' in label, label
+            assert label and '结果' in label, label
             page.wait_for_timeout(600)
             # NAV-02's promise, measured the way the module states it: the
             # ANCHOR row (the first one whose bottom was inside the viewport
@@ -286,8 +284,7 @@ with lib_browser.serve_docs(8976) as base, sync_playwright() as p:
             page.wait_for_function("() => !!App.state.selected.id")
             page.wait_for_timeout(400)
             label=close_detail(page,w)
-            if w<750:
-                assert label and '收藏' in label, label
+            assert label and '收藏' in label, label
             page.wait_for_timeout(400)
             assert page.evaluate('() => App.state.sheet.tab')=='saved'
             if w in (393,1440):

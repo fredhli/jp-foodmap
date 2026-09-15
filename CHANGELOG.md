@@ -13,6 +13,18 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.6] - 2026-09-15
+
+Details opened from a source list now have one exit on column layouts as well
+as phones. On the Fold inner screen and desktop, the labelled Back action
+replaces Close instead of appearing beside it; details opened directly from
+the map retain Close because there is no result list to return to.
+
+Fold-inner active-filter chips bring the remove icon closer to its label while
+retaining the full 44px button target, horizontal reveal behavior and edge
+cue. No iPhone, Fold cover, storage, sync, Worker or Android-shell behavior
+changed.
+
 ## [4.2.5] - 2026-09-14
 
 Galaxy Z Fold 8 cover and inner screens now use device-specific information

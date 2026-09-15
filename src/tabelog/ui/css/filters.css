@@ -277,7 +277,7 @@ html[data-fold-inner] .ft-chips {
 }
 html[data-fold-inner] .ft-chips::-webkit-scrollbar { display: none; }
 html[data-fold-inner] .ft-chip { flex: 0 0 auto; max-width: min(260px, calc(100% - 24px)); min-height: 44px; }
-html[data-fold-inner] .ft-chip .chip-x { width: 44px; height: 44px; margin-block: -4px; margin-right: -4px; }
+html[data-fold-inner] .ft-chip .chip-x { width: 44px; height: 44px; margin-block: -4px; margin-left: -8px; margin-right: -4px; }
 html[data-fold-inner] .ft-chip .chip-x::after,
 html[data-fold-inner] .ft-help-btn::after { display: none; }
 html[data-fold-inner] .ft-help-btn { width: 40px; height: 40px; margin-block: -6px; }

@@ -1,4 +1,4 @@
-"""4.2.2 mobile Results/detail hierarchy, controls, motion and focus."""
+"""Results/detail hierarchy, one-exit controls, motion and focus."""
 import argparse
 import json
 from pathlib import Path
@@ -99,6 +99,43 @@ with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
             'forwardStyles': forward_styles, 'backFrames': backward, 'backStyles': backward_styles,
             'restored': restored, 'errors': errors})
         page.screenshot(path=str(args.output / f'{args.browser}-{name}-restored.png'))
+        check(not errors, (name, errors))
+        context.close()
+
+    # 4.2.6: column layouts use the same one-exit rule. A source return
+    # replaces Close on the Fold inner screen and desktop; a map-opened card
+    # still has Close because it has no source list to return to.
+    for name, width, height, screen, dpr, mobile in [
+        ('inner932', 932, 704, {'width': 932, 'height': 704}, 2.625, True),
+        ('desktop1440', 1440, 900, {'width': 1440, 'height': 900}, 1, False),
+    ]:
+        context = browser.new_context(viewport={'width': width, 'height': height}, screen=screen,
+            device_scale_factor=dpr, has_touch=mobile, is_mobile=mobile, service_workers='block')
+        page = context.new_page(); errors = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.route('https://**/*', lambda route: route.abort())
+        lib_browser.seed_local_storage(page, {'tabelog.lang':'zh-CN','tabelog.seenIntro':'1'})
+        lib_browser.boot(page, base)
+        page.evaluate("App.act.setTab('results')")
+        page.wait_for_selector('#list-root .ls-row[data-id]:visible')
+        page.locator('#list-root .ls-row[data-id]:visible .ls-open').first.click()
+        page.wait_for_function("() => App.state.selected.origin==='results'")
+        page.wait_for_timeout(300)
+        head = page.locator('#detail-root .dt-title-row .dt-tools') if width < 1100 else page.locator('#col-detail-head')
+        check(head.locator('[data-ct="back"]').count() == 1, (name, 'result detail lost back'))
+        check(head.locator('[data-ct="close-detail"]').count() == 0, (name, 'result detail kept close'))
+        page.screenshot(path=str(args.output / f'{args.browser}-{name}-result-one-exit.png'))
+        head.locator('[data-ct="back"]').click()
+        page.wait_for_function("() => !App.state.selected.id && App.state.sheet.tab==='results'")
+
+        page.evaluate("() => App.act.openDetail(Data.restaurants[0].id,'map')")
+        page.wait_for_function("() => App.state.selected.origin==='map'")
+        page.wait_for_timeout(300)
+        head = page.locator('#detail-root .dt-title-row .dt-tools') if width < 1100 else page.locator('#col-detail-head')
+        check(head.locator('[data-ct="back"]').count() == 0, (name, 'map detail invented back'))
+        check(head.locator('[data-ct="close-detail"]').count() == 1, (name, 'map detail lost close'))
+        records.append({'case':name+'-one-exit','resultBack':1,'resultClose':0,'mapBack':0,'mapClose':1,'errors':errors})
+        page.screenshot(path=str(args.output / f'{args.browser}-{name}-map-close.png'))
         check(not errors, (name, errors))
         context.close()
 

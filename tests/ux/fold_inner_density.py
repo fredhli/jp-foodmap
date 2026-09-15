@@ -72,6 +72,7 @@ FILTER_PROBE = """() => {
     budgetFull:budgets.filter(full).length, chipHost:box(root.querySelector('.ft-chips')),
     chipRows:new Set(chips.map(e=>Math.round(e.getBoundingClientRect().top))).size,
     chipTargets:xs.map(box), hitOk,
+    chipVisualGaps:chips.map(e=>{const l=e.querySelector('.ft-chip-t').getBoundingClientRect(),i=e.querySelector('.chip-x .ic').getBoundingClientRect();return i.left-l.right}),
     chipOverflow:root.querySelector('.ft-chips').scrollWidth>root.querySelector('.ft-chips').clientWidth+1,
     chipCue:root.querySelector('.ft-chips').hasAttribute('data-scroll'),
     helpSliderClear:!help||!slider||help.bottom<=slider.top||slider.bottom<=help.top,
@@ -176,6 +177,7 @@ with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
             check(not density["chipOverflow"] or density["chipCue"], name + ": overflowing chips have no edge cue")
             check(density["helpSliderClear"], name + ": rating help overlaps slider")
             check(all(x["w"] >= 44 * z - .25 and x["h"] >= 44 * z - .25 for x in density["chipTargets"]), name + ": chip targets")
+            check(max(density["chipVisualGaps"]) <= 13 * z, name + ": chip label-to-close spacing")
             check(density["optionMin"] >= 40 * z - .25, name + ": secondary option target")
             check(all(x == "false" for x in density["groups"]), name + ": initial cuisine groups")
             page.evaluate("""() => {const h=document.querySelector('.ft-chips');h.scrollLeft=h.scrollWidth;h.dispatchEvent(new Event('scroll'))}""")

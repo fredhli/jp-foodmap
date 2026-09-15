@@ -619,7 +619,13 @@
   /** detailTools(state) — the ⋯ / expand / close cluster detail.js puts in its title row. */
   C.detailTools = function (s) {
     s = s || App.state;
-    if (s.layout.mode === 'mid') return '<button class="icon-btn" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
+    if (s.layout.mode === 'mid') {
+      // The source return already lives at the start of the title tools. It is
+      // the one exit for a result/search/saved detail; a second close button
+      // would give the same card two competing ways out.
+      if (detailBackButton(s, '')) return '';
+      return '<button class="icon-btn" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
+    }
     var expanded = s.sheet.state === 'expanded' || s.sheet.state === 'full';
     var endAction = s.selected.origin === 'results'
       ? detailBackButton(s, 'dt-back--end')
@@ -791,7 +797,7 @@
     var mode = s.layout.mode;
     var label = null;
     try { label = (window.Detail && window.Detail.backLabel) ? window.Detail.backLabel(s) : null; } catch (e) { label = null; }
-    var back = (mode === 'mid' && label)
+    var back = label
       ? '<button class="ct-back" data-ct="back">' + ctx.icon('back', { cls: 'ic-sm' }) + '<span>' + util.esc(t(label)) + '</span></button>'
       : '';
     var pager = '';
@@ -806,8 +812,10 @@
       }
     }
     if (mode === 'mid') return '';
+    var close = label ? '' :
+      '<button class="icon-btn ct-close" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button>';
     return '<div class="ct-detail-head">' + back + pager +
-      '<button class="icon-btn ct-close" data-ct="close-detail" aria-label="' + util.esc(t('关闭')) + '">' + ctx.icon('x') + '</button></div>';
+      close + '</div>';
   }
 
   /* ======================================================================
