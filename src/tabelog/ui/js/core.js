@@ -504,7 +504,8 @@
       user: { fav: new Set(), black: new Set(), bookmarks: [] },
       multi: { active: false, ids: new Set(), scope: 'results' },
       saved: { groupBy: 'city', openGroups: null, onlyList: null },
-      layers: { long: false, city: false, landmarks: true, pins: true, hiddenLandmarks: false, loading: {}, error: {} },
+      layers: { long: false, city: false, stations: true, landmarks: true, pins: true, hiddenLandmarks: false,
+        loading: { stations: false }, error: { stations: false } },
       overlay: { kind: null, payload: null },
       toast: null,                      // {id, kind, text, count, undo, action:{label,run}, remainingMs, paused}
       notices: { offline: false, newVersion: false, oov: { shown: false, dismissedForever: false, visible: false } },

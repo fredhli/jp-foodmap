@@ -13,6 +13,29 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-09-15
+
+Railway stations are now an independent map layer and are enabled by default
+until the user explicitly turns them off. Enabling either long-distance or
+city rail also enables stations; turning both rail layers off leaves the
+station layer unchanged. The layers menu reports station loading, errors and
+retry state in all four interface languages.
+
+The nationwide station payload contains 8,954 OSM-derived stations in a
+content-addressed 500 KiB file (about 183 KiB compressed). It is not requested
+below zoom 12 and never downloads or parses a railway LineString by itself.
+Zoom 12 shows transfer stations, zoom 13 and above shows all stations, and
+14/18/22px badges distinguish fewer than three, three-to-five and six-or-more
+nearby lines. The neutral tunnel-and-train badge is a flat SVG conversion of
+the user-selected reference, tuned to remain legible at the smallest tier.
+
+Station badges and labels use one 1x canvas below the restaurant marker pane,
+with desktop hover and touch tap hit testing. A full Fold-inner, Fold-cover and
+desktop performance matrix found no measurable frame-time, idle CPU or network
+regression; the layer adds about 1.6 MiB of heap and two DOM nodes. A paired
+Fold-cover 6x-CPU test placed the drag overhead confidence interval between
+-6.08% and +0.69%.
+
 ## [4.2.8] - 2026-09-15
 
 Detail titles and their tool cluster now share one vertical centre line below

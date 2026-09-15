@@ -1,0 +1,1469 @@
+{
+  "verdict": "DIAGNOSTIC",
+  "strict": false,
+  "generated_at": "2026-09-15T11:06:56Z",
+  "idle_seconds": 15,
+  "repeats": 3,
+  "pan_trials": 3,
+  "payload": {
+    "path": "docs/data/stations.b2b32cdfaeb0.json",
+    "stations": 8954,
+    "raw_bytes": 512544,
+    "gzip_bytes": 186897,
+    "sha256_name": "stations.b2b32cdfaeb0.json",
+    "mobile_latency_ms": 150,
+    "mobile_downlink_mbit_s": 1.6
+  },
+  "profiles": {
+    "fold-inner-4x": {
+      "viewport": {
+        "width": 932,
+        "height": 704
+      },
+      "device_scale_factor": 2.625,
+      "is_mobile": true,
+      "has_touch": true,
+      "cpu_rate": 4
+    },
+    "fold-outer-6x": {
+      "viewport": {
+        "width": 475,
+        "height": 751
+      },
+      "device_scale_factor": 2.625,
+      "is_mobile": true,
+      "has_touch": true,
+      "cpu_rate": 6
+    },
+    "desktop-4x": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "device_scale_factor": 1,
+      "is_mobile": false,
+      "has_touch": false,
+      "cpu_rate": 4
+    }
+  },
+  "cases": {
+    "fold-inner-4x": {
+      "on": {
+        "profile": "fold-inner-4x",
+        "stations": true,
+        "startup": {
+          "cold_ready_ms": [
+            2474.104,
+            2180.667,
+            1722.286
+          ],
+          "cold_ready_median_ms": 2180.667,
+          "warm_ready_ms": [
+            2014.706,
+            2391.546,
+            2012.147
+          ],
+          "warm_ready_median_ms": 2014.706,
+          "cold_station_usable_ms": [
+            18398.803,
+            17352.917,
+            16982.769
+          ],
+          "cold_station_usable_median_ms": 17352.917,
+          "warm_station_usable_ms": [
+            19120.499,
+            18785.205,
+            19273.659
+          ],
+          "warm_station_usable_median_ms": 19120.499
+        },
+        "navigations": [
+          {
+            "cache": "cold",
+            "repeat": 1,
+            "ready_ms": 2474.104,
+            "station_usable_ms": 18398.803,
+            "station_request_events": [
+              {
+                "requestId": "492283.445",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 1,
+            "ready_ms": 2014.706,
+            "station_usable_ms": 19120.499,
+            "station_request_events": [
+              {
+                "requestId": "492348.39",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 2,
+            "ready_ms": 2180.667,
+            "station_usable_ms": 17352.917,
+            "station_request_events": [
+              {
+                "requestId": "492434.445",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 2,
+            "ready_ms": 2391.546,
+            "station_usable_ms": 18785.205,
+            "station_request_events": [
+              {
+                "requestId": "492489.39",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 3,
+            "ready_ms": 1722.286,
+            "station_usable_ms": 16982.769,
+            "station_request_events": [
+              {
+                "requestId": "492606.429",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 3,
+            "ready_ms": 2012.147,
+            "station_usable_ms": 19273.659,
+            "station_request_events": [
+              {
+                "requestId": "492651.39",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          }
+        ],
+        "server_station_requests": 3,
+        "measurements": {
+          "heap_used_mib": 37.006,
+          "heap_total_mib": 37.93,
+          "nodes_metric": 3572,
+          "dom": {
+            "elements": 2245,
+            "stationMarkers": 0,
+            "stationLabels": 0,
+            "stationDetail": {
+              "count": 94,
+              "total": 8954,
+              "loaded": true,
+              "loading": false,
+              "visible": true,
+              "error": null,
+              "attached": true,
+              "status": "ok"
+            }
+          },
+          "pan_trials": [
+            {
+              "task_ms": 3098.599,
+              "script_ms": 414.2,
+              "layout_ms": 44.83,
+              "raf_n": 496,
+              "raf_p95_ms": 16.8,
+              "raf_max_ms": 116.7,
+              "long_task_count": 5,
+              "long_task_total_ms": 334,
+              "long_task_max_ms": 105,
+              "mutations": {
+                "adds": 237,
+                "removes": 212,
+                "current": 2270,
+                "peak": 2274
+              }
+            },
+            {
+              "task_ms": 3111.664,
+              "script_ms": 427.409,
+              "layout_ms": 43.12,
+              "raf_n": 516,
+              "raf_p95_ms": 16.8,
+              "raf_max_ms": 83.4,
+              "long_task_count": 4,
+              "long_task_total_ms": 272,
+              "long_task_max_ms": 89,
+              "mutations": {
+                "adds": 221,
+                "removes": 196,
+                "current": 2270,
+                "peak": 2274
+              }
+            },
+            {
+              "task_ms": 3126.746,
+              "script_ms": 405.049,
+              "layout_ms": 50.608,
+              "raf_n": 507,
+              "raf_p95_ms": 16.7,
+              "raf_max_ms": 83.3,
+              "long_task_count": 5,
+              "long_task_total_ms": 327,
+              "long_task_max_ms": 89,
+              "mutations": {
+                "adds": 221,
+                "removes": 196,
+                "current": 2270,
+                "peak": 2274
+              }
+            }
+          ],
+          "pan_median": {
+            "task_ms": 3111.664,
+            "raf_p95_ms": 16.8,
+            "long_task_total_ms": 327
+          },
+          "post_pan_heap_growth_mib": 0.426,
+          "idle": {
+            "seconds": 15,
+            "task_ms": 8.92,
+            "script_ms": 1.821,
+            "layout_ms": 0.0,
+            "station_network_requests": 0,
+            "tracker_start": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "tracker_end": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "draw_events": {
+              "AnimationFrame": 0,
+              "BeginFrame": 0,
+              "DrawFrame": 0,
+              "RequestMainThreadFrame": 0
+            },
+            "trace_gzip": "tests/perf/results/station-layer-4.3.0/traces/fold-inner-4x-stations-on-idle.json.gz"
+          }
+        }
+      },
+      "off": {
+        "profile": "fold-inner-4x",
+        "stations": false,
+        "startup": {
+          "cold_ready_ms": [
+            2226.648,
+            2301.403,
+            2275.725
+          ],
+          "cold_ready_median_ms": 2275.725,
+          "warm_ready_ms": [
+            1895.048,
+            1829.701,
+            1878.84
+          ],
+          "warm_ready_median_ms": 1878.84,
+          "cold_station_usable_ms": [],
+          "cold_station_usable_median_ms": null,
+          "warm_station_usable_ms": [],
+          "warm_station_usable_median_ms": null
+        },
+        "navigations": [
+          {
+            "cache": "cold",
+            "repeat": 1,
+            "ready_ms": 2226.648,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 1,
+            "ready_ms": 1895.048,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 2,
+            "ready_ms": 2301.403,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 2,
+            "ready_ms": 1829.701,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 3,
+            "ready_ms": 2275.725,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 3,
+            "ready_ms": 1878.84,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          }
+        ],
+        "server_station_requests": 0,
+        "measurements": {
+          "heap_used_mib": 35.418,
+          "heap_total_mib": 36.43,
+          "nodes_metric": 3570,
+          "dom": {
+            "elements": 2243,
+            "stationMarkers": 0,
+            "stationLabels": 0,
+            "stationDetail": {
+              "attached": false,
+              "visible": false,
+              "status": "idle",
+              "count": 0,
+              "total": 0
+            }
+          },
+          "pan_trials": [
+            {
+              "task_ms": 3042.202,
+              "script_ms": 431.962,
+              "layout_ms": 45.932,
+              "raf_n": 502,
+              "raf_p95_ms": 16.8,
+              "raf_max_ms": 83.3,
+              "long_task_count": 5,
+              "long_task_total_ms": 323,
+              "long_task_max_ms": 74,
+              "mutations": {
+                "adds": 237,
+                "removes": 212,
+                "current": 2268,
+                "peak": 2272
+              }
+            },
+            {
+              "task_ms": 3007.726,
+              "script_ms": 424.082,
+              "layout_ms": 47.852,
+              "raf_n": 498,
+              "raf_p95_ms": 16.8,
+              "raf_max_ms": 66.7,
+              "long_task_count": 5,
+              "long_task_total_ms": 327,
+              "long_task_max_ms": 73,
+              "mutations": {
+                "adds": 221,
+                "removes": 196,
+                "current": 2268,
+                "peak": 2272
+              }
+            },
+            {
+              "task_ms": 3121.72,
+              "script_ms": 394.213,
+              "layout_ms": 47.306,
+              "raf_n": 511,
+              "raf_p95_ms": 16.8,
+              "raf_max_ms": 66.7,
+              "long_task_count": 5,
+              "long_task_total_ms": 302,
+              "long_task_max_ms": 64,
+              "mutations": {
+                "adds": 221,
+                "removes": 196,
+                "current": 2268,
+                "peak": 2272
+              }
+            }
+          ],
+          "pan_median": {
+            "task_ms": 3042.202,
+            "raf_p95_ms": 16.8,
+            "long_task_total_ms": 323
+          },
+          "post_pan_heap_growth_mib": 0.4,
+          "idle": {
+            "seconds": 15,
+            "task_ms": 47.81,
+            "script_ms": 3.354,
+            "layout_ms": 0.0,
+            "station_network_requests": 0,
+            "tracker_start": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "tracker_end": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "draw_events": {
+              "AnimationFrame": 0,
+              "BeginFrame": 0,
+              "DrawFrame": 0,
+              "RequestMainThreadFrame": 0
+            },
+            "trace_gzip": "tests/perf/results/station-layer-4.3.0/traces/fold-inner-4x-stations-off-idle.json.gz"
+          }
+        }
+      }
+    },
+    "fold-outer-6x": {
+      "off": {
+        "profile": "fold-outer-6x",
+        "stations": false,
+        "startup": {
+          "cold_ready_ms": [
+            3076.793,
+            3041.97,
+            2650.046
+          ],
+          "cold_ready_median_ms": 3041.97,
+          "warm_ready_ms": [
+            2680.925,
+            2639.364,
+            2630.504
+          ],
+          "warm_ready_median_ms": 2639.364,
+          "cold_station_usable_ms": [],
+          "cold_station_usable_median_ms": null,
+          "warm_station_usable_ms": [],
+          "warm_station_usable_median_ms": null
+        },
+        "navigations": [
+          {
+            "cache": "cold",
+            "repeat": 1,
+            "ready_ms": 3076.793,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 1,
+            "ready_ms": 2680.925,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 2,
+            "ready_ms": 3041.97,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 2,
+            "ready_ms": 2639.364,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 3,
+            "ready_ms": 2650.046,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 3,
+            "ready_ms": 2630.504,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          }
+        ],
+        "server_station_requests": 0,
+        "measurements": {
+          "heap_used_mib": 43.532,
+          "heap_total_mib": 44.723,
+          "nodes_metric": 2400,
+          "dom": {
+            "elements": 1737,
+            "stationMarkers": 0,
+            "stationLabels": 0,
+            "stationDetail": {
+              "attached": false,
+              "visible": false,
+              "status": "idle",
+              "count": 0,
+              "total": 0
+            }
+          },
+          "pan_trials": [
+            {
+              "task_ms": 5362.027,
+              "script_ms": 870.545,
+              "layout_ms": 81.49,
+              "raf_n": 571,
+              "raf_p95_ms": 33.3,
+              "raf_max_ms": 116.7,
+              "long_task_count": 2,
+              "long_task_total_ms": 119,
+              "long_task_max_ms": 69,
+              "mutations": {
+                "adds": 319,
+                "removes": 315,
+                "current": 1741,
+                "peak": 1741
+              }
+            },
+            {
+              "task_ms": 5143.208,
+              "script_ms": 823.961,
+              "layout_ms": 71.903,
+              "raf_n": 584,
+              "raf_p95_ms": 33.3,
+              "raf_max_ms": 100,
+              "long_task_count": 1,
+              "long_task_total_ms": 52,
+              "long_task_max_ms": 52,
+              "mutations": {
+                "adds": 315,
+                "removes": 315,
+                "current": 1741,
+                "peak": 1741
+              }
+            },
+            {
+              "task_ms": 5075.914,
+              "script_ms": 813.406,
+              "layout_ms": 73.702,
+              "raf_n": 592,
+              "raf_p95_ms": 33.3,
+              "raf_max_ms": 66.7,
+              "long_task_count": 3,
+              "long_task_total_ms": 166,
+              "long_task_max_ms": 62,
+              "mutations": {
+                "adds": 315,
+                "removes": 315,
+                "current": 1741,
+                "peak": 1741
+              }
+            }
+          ],
+          "pan_median": {
+            "task_ms": 5143.208,
+            "raf_p95_ms": 33.3,
+            "long_task_total_ms": 119
+          },
+          "post_pan_heap_growth_mib": 0.444,
+          "idle": {
+            "seconds": 15,
+            "task_ms": 54.141,
+            "script_ms": 0.0,
+            "layout_ms": 0.0,
+            "station_network_requests": 0,
+            "tracker_start": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "tracker_end": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "draw_events": {
+              "AnimationFrame": 0,
+              "BeginFrame": 0,
+              "DrawFrame": 0,
+              "RequestMainThreadFrame": 0
+            },
+            "trace_gzip": "tests/perf/results/station-layer-4.3.0/traces/fold-outer-6x-stations-off-idle.json.gz"
+          }
+        }
+      },
+      "on": {
+        "profile": "fold-outer-6x",
+        "stations": true,
+        "startup": {
+          "cold_ready_ms": [
+            3175.825,
+            2878.587,
+            2826.709
+          ],
+          "cold_ready_median_ms": 2878.587,
+          "warm_ready_ms": [
+            2593.473,
+            2679.156,
+            2808.696
+          ],
+          "warm_ready_median_ms": 2679.156,
+          "cold_station_usable_ms": [
+            22088.869,
+            21662.039,
+            22130.963
+          ],
+          "cold_station_usable_median_ms": 22088.869,
+          "warm_station_usable_ms": [
+            22408.787,
+            21540.776,
+            23286.387
+          ],
+          "warm_station_usable_median_ms": 22408.787
+        },
+        "navigations": [
+          {
+            "cache": "cold",
+            "repeat": 1,
+            "ready_ms": 3175.825,
+            "station_usable_ms": 22088.869,
+            "station_request_events": [
+              {
+                "requestId": "494457.312",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 1,
+            "ready_ms": 2593.473,
+            "station_usable_ms": 22408.787,
+            "station_request_events": [
+              {
+                "requestId": "494574.31",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 2,
+            "ready_ms": 2878.587,
+            "station_usable_ms": 21662.039,
+            "station_request_events": [
+              {
+                "requestId": "494666.312",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 2,
+            "ready_ms": 2679.156,
+            "station_usable_ms": 21540.776,
+            "station_request_events": [
+              {
+                "requestId": "494759.31",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 3,
+            "ready_ms": 2826.709,
+            "station_usable_ms": 22130.963,
+            "station_request_events": [
+              {
+                "requestId": "494789.312",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 3,
+            "ready_ms": 2808.696,
+            "station_usable_ms": 23286.387,
+            "station_request_events": [
+              {
+                "requestId": "494900.31",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          }
+        ],
+        "server_station_requests": 3,
+        "measurements": {
+          "heap_used_mib": 45.11,
+          "heap_total_mib": 45.973,
+          "nodes_metric": 2402,
+          "dom": {
+            "elements": 1739,
+            "stationMarkers": 0,
+            "stationLabels": 0,
+            "stationDetail": {
+              "count": 63,
+              "total": 8954,
+              "loaded": true,
+              "loading": false,
+              "visible": true,
+              "error": null,
+              "attached": true,
+              "status": "ok"
+            }
+          },
+          "pan_trials": [
+            {
+              "task_ms": 5700.047,
+              "script_ms": 904.078,
+              "layout_ms": 81.125,
+              "raf_n": 576,
+              "raf_p95_ms": 33.4,
+              "raf_max_ms": 100,
+              "long_task_count": 8,
+              "long_task_total_ms": 454,
+              "long_task_max_ms": 66,
+              "mutations": {
+                "adds": 319,
+                "removes": 315,
+                "current": 1743,
+                "peak": 1743
+              }
+            },
+            {
+              "task_ms": 5520.597,
+              "script_ms": 937.973,
+              "layout_ms": 73.355,
+              "raf_n": 595,
+              "raf_p95_ms": 16.8,
+              "raf_max_ms": 66.7,
+              "long_task_count": 12,
+              "long_task_total_ms": 671,
+              "long_task_max_ms": 65,
+              "mutations": {
+                "adds": 315,
+                "removes": 315,
+                "current": 1743,
+                "peak": 1743
+              }
+            },
+            {
+              "task_ms": 5563.177,
+              "script_ms": 927.417,
+              "layout_ms": 75.198,
+              "raf_n": 594,
+              "raf_p95_ms": 33.3,
+              "raf_max_ms": 83.4,
+              "long_task_count": 11,
+              "long_task_total_ms": 614,
+              "long_task_max_ms": 75,
+              "mutations": {
+                "adds": 315,
+                "removes": 315,
+                "current": 1743,
+                "peak": 1743
+              }
+            }
+          ],
+          "pan_median": {
+            "task_ms": 5563.177,
+            "raf_p95_ms": 33.3,
+            "long_task_total_ms": 614
+          },
+          "post_pan_heap_growth_mib": 0.476,
+          "idle": {
+            "seconds": 15,
+            "task_ms": 9.994,
+            "script_ms": 0.0,
+            "layout_ms": 0.0,
+            "station_network_requests": 0,
+            "tracker_start": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "tracker_end": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "draw_events": {
+              "AnimationFrame": 0,
+              "BeginFrame": 0,
+              "DrawFrame": 0,
+              "RequestMainThreadFrame": 0
+            },
+            "trace_gzip": "tests/perf/results/station-layer-4.3.0/traces/fold-outer-6x-stations-on-idle.json.gz"
+          }
+        }
+      }
+    },
+    "desktop-4x": {
+      "on": {
+        "profile": "desktop-4x",
+        "stations": true,
+        "startup": {
+          "cold_ready_ms": [
+            2284.449,
+            2116.416,
+            2091.456
+          ],
+          "cold_ready_median_ms": 2116.416,
+          "warm_ready_ms": [
+            2255.737,
+            2255.705,
+            2231.452
+          ],
+          "warm_ready_median_ms": 2255.705,
+          "cold_station_usable_ms": [
+            18241.569,
+            17359.609,
+            17389.862
+          ],
+          "cold_station_usable_median_ms": 17389.862,
+          "warm_station_usable_ms": [
+            18182.793,
+            18485.114,
+            19073.615
+          ],
+          "warm_station_usable_median_ms": 18485.114
+        },
+        "navigations": [
+          {
+            "cache": "cold",
+            "repeat": 1,
+            "ready_ms": 2284.449,
+            "station_usable_ms": 18241.569,
+            "station_request_events": [
+              {
+                "requestId": "495245.670",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 1,
+            "ready_ms": 2255.737,
+            "station_usable_ms": 18182.793,
+            "station_request_events": [
+              {
+                "requestId": "495356.53",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 2,
+            "ready_ms": 2116.416,
+            "station_usable_ms": 17359.609,
+            "station_request_events": [
+              {
+                "requestId": "495452.670",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 2,
+            "ready_ms": 2255.705,
+            "station_usable_ms": 18485.114,
+            "station_request_events": [
+              {
+                "requestId": "495514.53",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 3,
+            "ready_ms": 2091.456,
+            "station_usable_ms": 17389.862,
+            "station_request_events": [
+              {
+                "requestId": "495572.670",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": false,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 225,
+                "encodedDataLength": 187122
+              }
+            ],
+            "server_station_requests": 1,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 3,
+            "ready_ms": 2231.452,
+            "station_usable_ms": 19073.615,
+            "station_request_events": [
+              {
+                "requestId": "495645.53",
+                "url": "http://127.0.0.1:42273/data/stations.b2b32cdfaeb0.json",
+                "fromDiskCache": true,
+                "fromServiceWorker": false,
+                "encodedDataLengthHeaders": 0,
+                "encodedDataLength": 0
+              }
+            ],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          }
+        ],
+        "server_station_requests": 3,
+        "measurements": {
+          "heap_used_mib": 37.737,
+          "heap_total_mib": 38.68,
+          "nodes_metric": 4668,
+          "dom": {
+            "elements": 3433,
+            "stationMarkers": 0,
+            "stationLabels": 0,
+            "stationDetail": {
+              "count": 151,
+              "total": 8954,
+              "loaded": true,
+              "loading": false,
+              "visible": true,
+              "error": null,
+              "attached": true,
+              "status": "ok"
+            }
+          },
+          "pan_trials": [
+            {
+              "task_ms": 7694.822,
+              "script_ms": 810.47,
+              "layout_ms": 98.521,
+              "raf_n": 531,
+              "raf_p95_ms": 50,
+              "raf_max_ms": 116.7,
+              "long_task_count": 35,
+              "long_task_total_ms": 2372,
+              "long_task_max_ms": 93,
+              "mutations": {
+                "adds": 470,
+                "removes": 305,
+                "current": 3598,
+                "peak": 3598
+              }
+            },
+            {
+              "task_ms": 7342.066,
+              "script_ms": 743.888,
+              "layout_ms": 100.078,
+              "raf_n": 550,
+              "raf_p95_ms": 50,
+              "raf_max_ms": 100.1,
+              "long_task_count": 31,
+              "long_task_total_ms": 2088,
+              "long_task_max_ms": 90,
+              "mutations": {
+                "adds": 465,
+                "removes": 305,
+                "current": 3598,
+                "peak": 3598
+              }
+            },
+            {
+              "task_ms": 7494.062,
+              "script_ms": 783.245,
+              "layout_ms": 105.203,
+              "raf_n": 543,
+              "raf_p95_ms": 50,
+              "raf_max_ms": 100,
+              "long_task_count": 31,
+              "long_task_total_ms": 2183,
+              "long_task_max_ms": 93,
+              "mutations": {
+                "adds": 465,
+                "removes": 305,
+                "current": 3598,
+                "peak": 3598
+              }
+            }
+          ],
+          "pan_median": {
+            "task_ms": 7494.062,
+            "raf_p95_ms": 50,
+            "long_task_total_ms": 2183
+          },
+          "post_pan_heap_growth_mib": 0.488,
+          "idle": {
+            "seconds": 15,
+            "task_ms": 4.923,
+            "script_ms": 0.0,
+            "layout_ms": 0.0,
+            "station_network_requests": 0,
+            "tracker_start": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "tracker_end": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "draw_events": {
+              "AnimationFrame": 0,
+              "BeginFrame": 0,
+              "DrawFrame": 0,
+              "RequestMainThreadFrame": 0
+            },
+            "trace_gzip": "tests/perf/results/station-layer-4.3.0/traces/desktop-4x-stations-on-idle.json.gz"
+          }
+        }
+      },
+      "off": {
+        "profile": "desktop-4x",
+        "stations": false,
+        "startup": {
+          "cold_ready_ms": [
+            2175.062,
+            2117.797,
+            2105.375
+          ],
+          "cold_ready_median_ms": 2117.797,
+          "warm_ready_ms": [
+            2112.311,
+            2183.209,
+            1580.43
+          ],
+          "warm_ready_median_ms": 2112.311,
+          "cold_station_usable_ms": [],
+          "cold_station_usable_median_ms": null,
+          "warm_station_usable_ms": [],
+          "warm_station_usable_median_ms": null
+        },
+        "navigations": [
+          {
+            "cache": "cold",
+            "repeat": 1,
+            "ready_ms": 2175.062,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 1,
+            "ready_ms": 2112.311,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 2,
+            "ready_ms": 2117.797,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 2,
+            "ready_ms": 2183.209,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "cold",
+            "repeat": 3,
+            "ready_ms": 2105.375,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          },
+          {
+            "cache": "warm",
+            "repeat": 3,
+            "ready_ms": 1580.43,
+            "station_usable_ms": null,
+            "station_request_events": [],
+            "server_station_requests": 0,
+            "rail_requests": [],
+            "errors": []
+          }
+        ],
+        "server_station_requests": 0,
+        "measurements": {
+          "heap_used_mib": 36.189,
+          "heap_total_mib": 37.18,
+          "nodes_metric": 4666,
+          "dom": {
+            "elements": 3431,
+            "stationMarkers": 0,
+            "stationLabels": 0,
+            "stationDetail": {
+              "attached": false,
+              "visible": false,
+              "status": "idle",
+              "count": 0,
+              "total": 0
+            }
+          },
+          "pan_trials": [
+            {
+              "task_ms": 7608.407,
+              "script_ms": 768.68,
+              "layout_ms": 118.664,
+              "raf_n": 547,
+              "raf_p95_ms": 50,
+              "raf_max_ms": 100.1,
+              "long_task_count": 32,
+              "long_task_total_ms": 2107,
+              "long_task_max_ms": 92,
+              "mutations": {
+                "adds": 470,
+                "removes": 305,
+                "current": 3596,
+                "peak": 3596
+              }
+            },
+            {
+              "task_ms": 7177.015,
+              "script_ms": 739.939,
+              "layout_ms": 106.631,
+              "raf_n": 559,
+              "raf_p95_ms": 50,
+              "raf_max_ms": 100.1,
+              "long_task_count": 31,
+              "long_task_total_ms": 2023,
+              "long_task_max_ms": 88,
+              "mutations": {
+                "adds": 465,
+                "removes": 305,
+                "current": 3596,
+                "peak": 3596
+              }
+            },
+            {
+              "task_ms": 7135.757,
+              "script_ms": 697.955,
+              "layout_ms": 106.707,
+              "raf_n": 554,
+              "raf_p95_ms": 50,
+              "raf_max_ms": 83.4,
+              "long_task_count": 26,
+              "long_task_total_ms": 1743,
+              "long_task_max_ms": 84,
+              "mutations": {
+                "adds": 465,
+                "removes": 305,
+                "current": 3596,
+                "peak": 3596
+              }
+            }
+          ],
+          "pan_median": {
+            "task_ms": 7177.015,
+            "raf_p95_ms": 50,
+            "long_task_total_ms": 2023
+          },
+          "post_pan_heap_growth_mib": 0.482,
+          "idle": {
+            "seconds": 15,
+            "task_ms": 7.212,
+            "script_ms": 0.0,
+            "layout_ms": 0.0,
+            "station_network_requests": 0,
+            "tracker_start": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "tracker_end": {
+              "raf": 0,
+              "intervals": 1,
+              "animations": 0
+            },
+            "draw_events": {
+              "AnimationFrame": 0,
+              "BeginFrame": 0,
+              "DrawFrame": 0,
+              "RequestMainThreadFrame": 0
+            },
+            "trace_gzip": "tests/perf/results/station-layer-4.3.0/traces/desktop-4x-stations-off-idle.json.gz"
+          }
+        }
+      }
+    }
+  },
+  "comparisons": {
+    "fold-inner-4x": {
+      "deltas": {
+        "cold_start_ms": -95.058,
+        "warm_start_ms": 135.866,
+        "pan_task_ms_per_10_drags": 69.462,
+        "pan_task_normalized_ms_per_10_drags": 17.365,
+        "pan_task_percent": 2.283,
+        "raf_p95_ms": 0.0,
+        "heap_mib": 1.588,
+        "dom_elements": 2,
+        "idle_task_ms": -38.89,
+        "idle_draw_events": 0
+      },
+      "checks": {
+        "cold_start_delta_le_100ms": true,
+        "warm_start_delta_le_100ms": false,
+        "station_one_request_per_cold_nav": true,
+        "station_zero_server_requests_warm": true,
+        "station_off_zero_requests": true,
+        "station_only_zero_rail_lod": true,
+        "pan_task_relative_le_8pct": true,
+        "pan_task_absolute_delta_le_15ms": false,
+        "raf_p95_delta_le_2ms": true,
+        "heap_delta_le_5mib": true,
+        "dom_delta_le_750": true,
+        "idle_task_delta_le_30ms": true,
+        "idle_zero_station_network": true,
+        "no_extra_pending_raf": true,
+        "no_extra_interval": true,
+        "no_extra_animation": true,
+        "no_extra_draw_frames": true,
+        "no_page_errors": true
+      },
+      "pass": false
+    },
+    "fold-outer-6x": {
+      "deltas": {
+        "cold_start_ms": -163.383,
+        "warm_start_ms": 39.792,
+        "pan_task_ms_per_10_drags": 419.969,
+        "pan_task_normalized_ms_per_10_drags": 69.995,
+        "pan_task_percent": 8.166,
+        "raf_p95_ms": 0.0,
+        "heap_mib": 1.578,
+        "dom_elements": 2,
+        "idle_task_ms": -44.147,
+        "idle_draw_events": 0
+      },
+      "checks": {
+        "cold_start_delta_le_100ms": true,
+        "warm_start_delta_le_100ms": true,
+        "station_one_request_per_cold_nav": true,
+        "station_zero_server_requests_warm": true,
+        "station_off_zero_requests": true,
+        "station_only_zero_rail_lod": true,
+        "pan_task_relative_le_8pct": false,
+        "pan_task_absolute_delta_le_15ms": false,
+        "raf_p95_delta_le_2ms": true,
+        "heap_delta_le_5mib": true,
+        "dom_delta_le_750": true,
+        "idle_task_delta_le_30ms": true,
+        "idle_zero_station_network": true,
+        "no_extra_pending_raf": true,
+        "no_extra_interval": true,
+        "no_extra_animation": true,
+        "no_extra_draw_frames": true,
+        "no_page_errors": true
+      },
+      "pass": false
+    },
+    "desktop-4x": {
+      "deltas": {
+        "cold_start_ms": -1.381,
+        "warm_start_ms": 143.394,
+        "pan_task_ms_per_10_drags": 317.047,
+        "pan_task_normalized_ms_per_10_drags": 79.262,
+        "pan_task_percent": 4.418,
+        "raf_p95_ms": 0,
+        "heap_mib": 1.548,
+        "dom_elements": 2,
+        "idle_task_ms": -2.289,
+        "idle_draw_events": 0
+      },
+      "checks": {
+        "cold_start_delta_le_100ms": true,
+        "warm_start_delta_le_100ms": false,
+        "station_one_request_per_cold_nav": true,
+        "station_zero_server_requests_warm": true,
+        "station_off_zero_requests": true,
+        "station_only_zero_rail_lod": true,
+        "pan_task_relative_le_8pct": true,
+        "pan_task_absolute_delta_le_15ms": false,
+        "raf_p95_delta_le_2ms": true,
+        "heap_delta_le_5mib": true,
+        "dom_delta_le_750": true,
+        "idle_task_delta_le_30ms": true,
+        "idle_zero_station_network": true,
+        "no_extra_pending_raf": true,
+        "no_extra_interval": true,
+        "no_extra_animation": true,
+        "no_extra_draw_frames": true,
+        "no_page_errors": true
+      },
+      "pass": false
+    }
+  }
+}

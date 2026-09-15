@@ -15,6 +15,10 @@
     "en": "Tabelog booking",
     "ja": "Tabelog予約"
   },
+  "{n} 个铁路车站": {
+    "en": "{n} rail stations",
+    "ja": "鉄道駅 {n}駅"
+  },
   "__doc__": "4.0.0 UI copy. Keys are the exact Simplified-Chinese strings the ui/js modules pass to t(); values give the English and Japanese renderings. zh-TW is generated at build time by map.py's to_trad() (OpenCC s2twp + _TRAD_FIXUPS), never hand-written here. map.py injects the whole table as __UI_I18N_TABLES__ and excludes the CJK runs of these keys from the 'missing EN/JA' punch list, because they are translated by this table rather than by the run-based TEXT_*_MAP. {n}-style placeholders are filled by t(key, params); never concatenate sentences. Keep en and ja filled for every key.",
   "{label}，共 {n}": {
     "en": "{label}, {n} total",
@@ -119,6 +123,22 @@
   "交通图层加载失败，请稍后再试": {
     "en": "The transit layer failed to load — please try again later.",
     "ja": "交通レイヤーを読み込めませんでした。後でもう一度お試しください。"
+  },
+  "车站图层加载失败，请稍后再试": {
+    "en": "The station layer failed to load. Please try again later.",
+    "ja": "駅レイヤーを読み込めませんでした。後でもう一度お試しください。"
+  },
+  "车站": {
+    "en": "Stations",
+    "ja": "駅"
+  },
+  "铁路车站": {
+    "en": "Rail stations",
+    "ja": "鉄道駅"
+  },
+  "铁路图层开启时保持显示": {
+    "en": "Kept on while a rail layer is visible",
+    "ja": "鉄道路線の表示中は常にオン"
   },
   "人均午餐": {
     "en": "Lunch / person",

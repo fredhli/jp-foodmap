@@ -1,8 +1,9 @@
 /* L.TransitLayer — a Leaflet overlay that renders Japan's railway network
-   from a precomputed GeoJSON (data/transit/japan.geojson).
+   and a separately loadable station layer.
 
    Usage:
      var layer = new L.TransitLayer({ geojsonUrl: 'transit/japan.geojson',
+                                      stationUrl: 'transit/japan-stations.json',
                                       opacity: 0.7 });
      layer.addTo(map);
      ...
@@ -208,6 +209,16 @@
   // expressed as "never go finer than this" without a pile of if/else.
   var LOD_RANK = { low: 0, mid: 1, high: 2 };
 
+  // Geometry mirrors docs/img/station-tunnel-v1.svg, vectorized from the
+  // user-provided tunnel/train reference. The flat two-color silhouette stays
+  // legible in the 14px tier and is cached as Path2D once per layer.
+  var STATION_TUNNEL_PATH = 'M5 18.5v-8C5 6.2 8 3.8 12 3.8s7 2.4 7 6.7v8';
+  var STATION_TRAIN_BODY_PATH = 'M8.2 8.2c0-1.1.9-2 2-2h3.6c1.1 0 2 .9 2 2v6.2c0 1.2-1 2.2-2.2 2.2h-3.2c-1.2 0-2.2-1-2.2-2.2z';
+  var STATION_RAIL_PATH = 'M9.9 16.1l-2 3.2m6.2-3.2 2 3.2';
+  var STATION_TIE_PATH = 'M9.35 18.05h5.3l.65 1.1H8.7z';
+  var STATION_SIZES = [14, 18, 22];
+  var STATION_MIN_ZOOM = 12;
+
   // M-3.2.2-02: the line canvas is painted at one device pixel per CSS
   // pixel, where stock Leaflet always doubles it on a hidpi screen.
   //
@@ -245,6 +256,10 @@
     options: {
       // Legacy single-file mode. Used iff lodUrls is not set.
       geojsonUrl: 'transit/japan.geojson',
+      // Independent compact v1 payload. The local unhashed name is a safe
+      // development default; production passes the immutable R2 URL.
+      stationUrl: 'transit/japan-stations.json',
+      stationPane: 'transitStations',
       // Multi-LOD mode. Map of { low, mid, high } -> URL. When set, the
       // layer loads only the LOD appropriate for the current zoom and
       // hot-swaps on zoom changes that cross a break point. lodBreaks
@@ -257,7 +272,9 @@
       cityOpacity: 0.45,    // city-bucket lines sit further back (see muteColor)
       casingOpacity: 0.45,  // white casing underneath, less prominent
       padding: 0.25,
-      grid: 0.4             // grid cell size in degrees
+      grid: 0.4,            // line-index cell size in degrees
+      stationGrid: 0.1,     // point-index cell size (~9-11 km in Japan)
+      stationMinZoom: STATION_MIN_ZOOM
     },
 
     initialize: function(options) {
@@ -268,6 +285,13 @@
       this._allLines = [];
       this._allStations = [];
       this._lineIndex = new Map();
+      this._stationIndex = new Map();
+      this._stationLoaded = false;
+      this._stationLoading = false;
+      this._stationInflight = null;
+      this._stationAbort = null;
+      this._stationError = null;
+      this._legacyAbort = null;
       // Per-LOD parsed-and-indexed data. Once an LOD is loaded it stays
       // in this map; switching back is just a pointer swap, no refetch.
       this._lodCache = {};
@@ -281,6 +305,7 @@
       // default on so a bare addTo() keeps the historical behavior; map.py
       // calls setVisibleBuckets({long, city}) from the FAB wiring to switch.
       this._buckets = { long: true, city: true };
+      this._stationsVisible = true;
       // Volatile (cleared on remove)
       this._onMap = new Set();
       // station feature -> {marker, radius, showLabel, label}; lets a pan
@@ -297,8 +322,66 @@
     setVisibleBuckets: function(opts) {
       if (opts && typeof opts.long === 'boolean') this._buckets.long = opts.long;
       if (opts && typeof opts.city === 'boolean') this._buckets.city = opts.city;
-      if (this._map) this._scheduleRedraw();
+      if (this._map) {
+        if (this._buckets.long || this._buckets.city) {
+          this._loadRail();
+          this._syncLineHover(true);
+        } else {
+          this._releaseRailData();
+          this._syncLineHover(false);
+        }
+        this._scheduleRedraw();
+      }
       return this;
+    },
+
+    setStationsVisible: function(visible) {
+      visible = !!visible;
+      if (this._stationsVisible === visible) return this;
+      this._stationsVisible = visible;
+      if (!visible) {
+        if (this._stationAbort) {
+          try { this._stationAbort.abort(); } catch (_) {}
+          this._stationAbort = null;
+          this._stationInflight = null;
+          this._stationLoading = false;
+        }
+        this._clearStationMarkers();
+      } else if (this._map) {
+        this._maybeLoadStations();
+        this._scheduleRedraw();
+      }
+      return this;
+    },
+
+    stationsVisible: function() {
+      return this._stationsVisible;
+    },
+
+    stationCount: function() {
+      return this._stationLoaded ? this._allStations.length : null;
+    },
+
+    stationDetail: function() {
+      return {
+        count: this._stationsOn.size,
+        total: this.stationCount(),
+        loaded: this._stationLoaded,
+        loading: this._stationLoading,
+        visible: this._stationsVisible,
+        error: this._stationError
+      };
+    },
+
+    retryStations: function() {
+      this._stationError = null;
+      if (this._stationAbort) {
+        try { this._stationAbort.abort(); } catch (_) {}
+      }
+      this._stationInflight = null;
+      this._stationLoading = false;
+      if (this._map && this._stationsVisible) return this._loadStations(true);
+      return Promise.resolve();
     },
 
     onAdd: function(map) {
@@ -310,27 +393,28 @@
       // canvas is insertion order, so the importance tiers are preserved
       // by (re)attaching polylines sorted whenever membership changes;
       // hover hit-testing is done in coordinate space (no hit canvas).
-      this._rLines = new LoResCanvas({ padding: this.options.padding }).addTo(map);
+      var stationPane = map.getPane(this.options.stationPane) ||
+                        map.createPane(this.options.stationPane);
+      stationPane.style.zIndex = '450';
+      // Rasterize the station subtree as one composited surface.  Without
+      // this hint Chromium promoted/painted each transformed DivIcon during a
+      // pan; on a 6x-throttled Fold that dominated even with zero DOM churn.
+      // The pane moves as a unit under Leaflet's mapPane transform, so its
+      // cached texture can be reused until membership actually changes.
+      stationPane.style.transform = 'translateZ(0)';
+      stationPane.style.willChange = 'transform';
+      stationPane.style.backfaceVisibility = 'hidden';
       this._stationsLayer = L.layerGroup().addTo(map);
+      /* Canvas allocation is deferred until the payload is usable.  At the
+         nationwide boot view stations intentionally do not load, so default-on
+         must not pay a surface/context startup cost. */
       this._scheduleRedrawBound = this._scheduleRedraw.bind(this);
       map.on('moveend', this._scheduleRedrawBound);
       // Line-name hover, pointer devices only — touch never hovers, so
       // phones skip the listener (and its per-move segment math) entirely.
-      if (window.matchMedia && matchMedia('(hover: hover)').matches) {
-        this._onMouseMoveBound = this._onMouseMove.bind(this);
-        this._onMouseOutBound = this._hideHover.bind(this);
-        map.on('mousemove', this._onMouseMoveBound);
-        map.on('mouseout', this._onMouseOutBound);
-        this._hoverTip = L.tooltip({
-          className: 'transit-line-label', direction: 'top',
-          offset: [0, -8], opacity: 1
-        });
-      }
-      if (this._loaded) {
-        this._scheduleRedraw();
-      } else {
-        this._load();
-      }
+      this._syncLineHover(this._buckets.long || this._buckets.city);
+      this._load();
+      this._scheduleRedraw();
       return this;
     },
 
@@ -344,6 +428,17 @@
         map.off('mouseout', this._onMouseOutBound);
         this._onMouseMoveBound = this._onMouseOutBound = null;
       }
+      if (this._onStationMouseMoveBound) {
+        map.off('mousemove', this._onStationMouseMoveBound);
+        map.off('mouseout', this._onStationMouseOutBound);
+        this._onStationMouseMoveBound = this._onStationMouseOutBound = null;
+      }
+      if (this._onStationClickBound) {
+        map.off('click', this._onStationClickBound);
+        this._onStationClickBound = null;
+      }
+      if (this._stationHoverTip) this._stationHoverTip.remove();
+      this._stationHoverTip = null;
       this._hideHover();
       this._hoverTip = null;
       if (this._rafToken) {
@@ -353,6 +448,11 @@
       this._teardownActiveLayers();
       if (this._rLines) this._rLines.remove();
       if (this._stationsLayer) this._stationsLayer.remove();
+      if (this._stationCanvas && this._stationCanvas.parentNode) {
+        this._stationCanvas.parentNode.removeChild(this._stationCanvas);
+      }
+      this._stationCanvas = this._stationCanvasCtx = null;
+      this._stationHits = [];
       this._rLines = this._stationsLayer = null;
       this._lastZoom = null;
       this._lastDrawCasing = null;
@@ -365,11 +465,24 @@
       // re-opening re-reads them from the browser's HTTP cache: cheap enough
       // to trade for the heap.
       this._abortLods(null);
+      if (this._stationAbort) {
+        try { this._stationAbort.abort(); } catch (_) {}
+      }
+      this._stationAbort = null;
+      this._stationInflight = null;
+      if (this._legacyAbort) {
+        try { this._legacyAbort.abort(); } catch (_) {}
+      }
+      this._legacyAbort = null;
       this._lodCache = {};
       this._lodInflight = {};
       this._allLines = [];
       this._allStations = [];
       this._lineIndex = new Map();
+      this._stationIndex = new Map();
+      this._stationLoaded = false;
+      this._stationLoading = false;
+      this._stationError = null;
       this._currentLodKey = null;
       this._loaded = false;
       this._loading = false;
@@ -390,53 +503,240 @@
       }
     },
 
-    // Detach polylines for everything currently on the map and drop the
-    // refs. The polylines belong to the renderer we may be about to throw
-    // away (onRemove) or to a soon-to-be-swapped LOD (LOD switch), so
-    // holding onto them would pin dead state. Station markers belong to
-    // the active LOD's features too, so the registry goes with them.
-    _teardownActiveLayers: function() {
+    _clearLineLayers: function() {
       var it = this._onMap.values(), v;
       while (!(v = it.next()).done) {
         var f = v.value;
-        if (f._pl) { f._pl.remove(); f._pl = null; }
+        if (f._pl) { if (f._pl._map) f._pl.remove(); f._pl = null; }
         if (f._pl_casing) {
           if (f._pl_casing._map) f._pl_casing.remove();
           f._pl_casing = null;
         }
       }
       this._onMap.clear();
-      if (this._stationsLayer) this._stationsLayer.clearLayers();
-      this._stationsOn.clear();
+      if (this._rLines) {
+        this._rLines.remove();
+        this._rLines = null;
+      }
       this._hideHover();
     },
 
+    _releaseRailData: function() {
+      this._abortLods(null);
+      if (this._legacyAbort) {
+        try { this._legacyAbort.abort(); } catch (_) {}
+        this._legacyAbort = null;
+      }
+      this._clearLineLayers();
+      this._lodCache = {};
+      this._lodInflight = {};
+      this._allLines = [];
+      this._lineIndex = new Map();
+      this._currentLodKey = null;
+      this._loaded = false;
+      this._loading = false;
+      this._lastZoom = null;
+      this._lastDrawCasing = null;
+    },
+
+    _syncLineHover: function(enabled) {
+      if (!this._map) return;
+      var canHover = window.matchMedia && matchMedia('(hover: hover)').matches;
+      if (enabled && canHover && !this._onMouseMoveBound) {
+        this._onMouseMoveBound = this._onMouseMove.bind(this);
+        this._onMouseOutBound = this._hideHover.bind(this);
+        this._map.on('mousemove', this._onMouseMoveBound);
+        this._map.on('mouseout', this._onMouseOutBound);
+        this._hoverTip = L.tooltip({
+          className: 'transit-line-label', direction: 'top',
+          offset: [0, -8], opacity: 1
+        });
+      } else if ((!enabled || !canHover) && this._onMouseMoveBound) {
+        this._map.off('mousemove', this._onMouseMoveBound);
+        this._map.off('mouseout', this._onMouseOutBound);
+        this._onMouseMoveBound = this._onMouseOutBound = null;
+        this._hideHover();
+        this._hoverTip = null;
+      }
+    },
+
+    // Detach polylines for everything currently on the map and drop the
+    // refs. The polylines belong to the renderer we may be about to throw
+    // away (onRemove) or to a soon-to-be-swapped LOD (LOD switch), so
+    // holding onto them would pin dead state. Station markers belong to
+    // the active LOD's features too, so the registry goes with them.
+    _teardownActiveLayers: function() {
+      this._clearLineLayers();
+      this._clearStationMarkers();
+      this._hideHover();
+    },
+
+    _clearStationMarkers: function() {
+      if (this._stationsLayer) this._stationsLayer.clearLayers();
+      this._stationsOn.clear();
+      this._stationHits = [];
+      if (this._stationCanvasCtx && this._stationCanvas) {
+        this._stationCanvasCtx.clearRect(0, 0, this._stationCanvas.width, this._stationCanvas.height);
+      }
+    },
+
     _load: function() {
+      if (this._buckets.long || this._buckets.city) this._loadRail();
+      this._maybeLoadStations();
+    },
+
+    _loadRail: function() {
       if (this.options.lodUrls && this.options.lodBreaks) {
         // LOD mode: figure out the current zoom's target LOD and load it.
         var target = this._targetLodKey() || 'low';
-        this._loadLod(target);
+        return this._loadLod(target);
       } else {
-        this._loadLegacy();
+        return this._loadLegacy();
       }
     },
 
     _loadLegacy: function() {
-      if (this._loaded || this._loading) return;
+      if (this._loaded || this._loading) return Promise.resolve();
       this._loading = true;
       var self = this;
-      fetch(this.options.geojsonUrl)
-        .then(function(r) { return r.json(); })
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      if (ctrl) this._legacyAbort = ctrl;
+      return fetch(this.options.geojsonUrl, ctrl ? { signal: ctrl.signal } : undefined)
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
         .then(function(gj) {
+          if (!self._map || (self._buckets &&
+              !self._buckets.long && !self._buckets.city)) return;
           self._parseInto(gj, self._allLines, self._allStations, self._lineIndex);
+          if (!self.options.stationUrl && self._allStations.length) {
+            self._indexStations(self._allStations);
+            self._stationLoaded = true;
+          }
           self._loaded = true;
           self._loading = false;
           if (self._map) self._scheduleRedraw();
         })
         .catch(function(e) {
+          if (e && e.name === 'AbortError') return;
           console.error('[TransitLayer] load failed:', e);
           self._loading = false;
+        })
+        .finally(function() {
+          if (self._legacyAbort === ctrl) self._legacyAbort = null;
         });
+    },
+
+    _maybeLoadStations: function() {
+      if (!this._map || !this._stationsVisible || this._stationLoaded ||
+          this._stationLoading) return;
+      // A nationwide cloud of points has no useful country-scale rendering.
+      // Delay both transfer and JSON.parse until markers can actually appear.
+      if (this._map.getZoom() < this.options.stationMinZoom) return;
+      this._loadStations(false);
+    },
+
+    _loadStations: function(force) {
+      if (!this.options.stationUrl) return Promise.resolve();
+      if (this._stationLoaded && !force) return Promise.resolve();
+      if (this._stationInflight) return this._stationInflight;
+      var self = this;
+      var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      if (ctrl) this._stationAbort = ctrl;
+      this._stationLoading = true;
+      this._stationError = null;
+      this.fire('stationloadstart');
+      var timer;
+      var deadline = new Promise(function(_, reject) {
+        timer = setTimeout(function() {
+          var error = new Error('Station request timed out'); error.name = 'TimeoutError';
+          reject(error);
+          if (ctrl) ctrl.abort();
+        }, 15000);
+      });
+      var request = fetch(
+        this.options.stationUrl,
+        ctrl ? { signal: ctrl.signal } : undefined
+      ).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+      var p = Promise.race([request, deadline])
+        .then(function(payload) {
+          if (!self._map || !self._stationsVisible) return;
+          var stations = self._parseStationPayload(payload);
+          self._allStations = stations;
+          self._indexStations(stations);
+          self._stationLoaded = true;
+          self._stationError = null;
+          self.fire('stationload', { count: stations.length });
+          self._scheduleRedraw();
+        })
+        .catch(function(error) {
+          if (error && error.name === 'AbortError') return;
+          self._stationError = error;
+          console.error('[TransitLayer] station load failed:', error);
+          self.fire('stationloaderror', {
+            error: error,
+            hasData: self._stationLoaded && self._allStations.length > 0
+          });
+        })
+        .finally(function() {
+          clearTimeout(timer);
+          self._stationLoading = false;
+          if (self._stationInflight === p) self._stationInflight = null;
+          if (self._stationAbort === ctrl) self._stationAbort = null;
+        });
+      this._stationInflight = p;
+      return p;
+    },
+
+    _parseStationPayload: function(payload) {
+      var out = [];
+      var rows = payload && payload.stations;
+      if (Array.isArray(rows)) {
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          if (!Array.isArray(r) || r.length < 2) continue;
+          var lon = +r[0], lat = +r[1];
+          if (!isFinite(lon) || !isFinite(lat)) continue;
+          out.push({
+            lon: lon, lat: lat, name: r[2] || '', name_en: r[3] || '',
+            railway: r[4] || 'station', line_count: Math.max(0, r[5] | 0)
+          });
+        }
+        return out;
+      }
+      // Transitional compatibility for locally generated GeoJSON fixtures.
+      var features = payload && payload.features;
+      if (!Array.isArray(features)) throw new Error('Invalid station payload');
+      for (var j = 0; j < features.length; j++) {
+        var f = features[j];
+        if (!f.geometry || f.geometry.type !== 'Point') continue;
+        var c = f.geometry.coordinates || [];
+        var p = f.properties || {};
+        var x = +c[0], y = +c[1];
+        if (!isFinite(x) || !isFinite(y)) continue;
+        out.push({
+          lon: x, lat: y, name: p.name || '', name_en: p.name_en || '',
+          railway: p.railway || 'station', line_count: Math.max(0, p.line_count | 0)
+        });
+      }
+      return out;
+    },
+
+    _indexStations: function(stations) {
+      var index = new Map();
+      var grid = this.options.stationGrid;
+      for (var i = 0; i < stations.length; i++) {
+        var s = stations[i];
+        var key = Math.floor(s.lon / grid) + ',' + Math.floor(s.lat / grid);
+        var cell = index.get(key);
+        if (!cell) { cell = []; index.set(key, cell); }
+        cell.push(s);
+      }
+      this._stationIndex = index;
     },
 
     // Walk a parsed GeoJSON FeatureCollection, sorting LineStrings into
@@ -466,7 +766,7 @@
             var line = { geometry: f.geometry, properties: f.properties || {} };
             lines.push(line);
             this._indexLine(line);
-          } else if (f.geometry.type === 'Point') {
+          } else if (f.geometry.type === 'Point' && !this.options.stationUrl) {
             var p = f.properties || {};
             var c = f.geometry.coordinates || [];
             stations.push({
@@ -574,7 +874,8 @@
           // M-010: the layer was removed while this was in flight (its
           // caches are already cleared) — parsing now would re-inflate the
           // heap we just gave back, for data nobody is looking at.
-          if (!self._map) { self.fire('lodload', { key: key }); return; }
+          if (!self._map || (self._buckets &&
+              !self._buckets.long && !self._buckets.city)) return;
           var data = { lines: [], stations: [], lineIndex: new Map() };
           self._parseInto(gj, data.lines, data.stations, data.lineIndex);
           self._lodCache[key] = data;
@@ -608,14 +909,23 @@
     // Switch the active feature set to the given LOD. Tears down the
     // currently-rendered polylines (they belong to the previous LOD's
     // features and have to be rebuilt on the new geometry) and points
-    // _allLines / _allStations / _lineIndex at the cached LOD data.
+    // _allLines / _lineIndex at the cached LOD data. Station-only state is
+    // intentionally untouched.
     _activateLod: function(key) {
       var data = this._lodCache[key];
       if (!data || this._currentLodKey === key) return;
-      this._teardownActiveLayers();
+      // LOD switching is a rail-only operation. Never clear or replace the
+      // independently loaded station payload/point index here; production
+      // may keep using older R2 LODs that still contain ignored Point rows.
+      this._clearLineLayers();
       this._allLines = data.lines;
-      this._allStations = data.stations;
       this._lineIndex = data.lineIndex;
+      if (!this.options.stationUrl) {
+        this._clearStationMarkers();
+        this._allStations = data.stations;
+        this._indexStations(this._allStations);
+        this._stationLoaded = true;
+      }
       this._currentLodKey = key;
       this._loaded = true;
       // Force the next redraw to re-evaluate everything — the casing
@@ -632,6 +942,7 @@
     // fetch. The redraw proceeds with the existing LOD; the fresh one
     // takes over when its fetch resolves and triggers another redraw.
     _maybeSwapLod: function() {
+      if (!this._buckets.long && !this._buckets.city) return;
       if (!this.options.lodUrls || !this.options.lodBreaks) return;
       var target = this._targetLodKey();
       if (!target || target === this._currentLodKey) return;
@@ -716,6 +1027,9 @@
 
     _ensurePolylines: function(f) {
       if (f._pl) return;
+      if (!this._rLines && this._map) {
+        this._rLines = new LoResCanvas({ padding: this.options.padding }).addTo(this._map);
+      }
       var cls = CLASSES[f._class];
       var op = this.options.opacity;
       var cop = this.options.casingOpacity;
@@ -734,7 +1048,8 @@
       // nothing on every pan.
     },
 
-    _scheduleRedraw: function() {
+    _scheduleRedraw: function(drawStations) {
+      if (drawStations !== false) this._stationDrawRequested = true;
       if (this._rafToken) return;
       var self = this;
       this._rafToken = requestAnimationFrame(function() {
@@ -742,11 +1057,14 @@
         // Check LOD first so a zoom crossing kicks off the right fetch.
         // No-op in legacy single-file mode.
         self._maybeSwapLod();
-        self._redraw();
+        self._maybeLoadStations();
+        var stationPass = !!self._stationDrawRequested;
+        self._stationDrawRequested = false;
+        self._redraw(stationPass);
       });
     },
 
-    _redraw: function() {
+    _redraw: function(drawStations) {
       if (!this._map) return;
       var zoom = this._map.getZoom();
       var drawCasing = zoom >= 9;
@@ -755,8 +1073,9 @@
       var zoomBoost = Math.max(0, (zoom - 10) * 0.18);
 
       var desired = new Set();
-      var candidates = this._visibleLines();
       var bk = this._buckets;
+      var candidates = (bk.long || bk.city) && this._loaded
+        ? this._visibleLines() : [];
       for (var i = 0; i < candidates.length; i++) {
         var f = candidates[i];
         var cls = CLASSES[f._class];
@@ -821,109 +1140,164 @@
       this._lastZoom = zoom;
       this._lastDrawCasing = drawCasing;
 
-      // Stations: DIFFED against the previous frame — the old code did
-      // clearLayers() + full recreate on every moveend, which at z>=14 in
-      // central Tokyo destroyed and rebuilt 100+ SVG circles plus their
-      // permanent tooltip DOM nodes per pan (GC churn + a layout storm at
-      // the end of every drag). Now a pan only touches the stations that
-      // actually entered or left the viewport; existing dots get a cheap
-      // setRadius when the zoom band shifts, and only a permanent-label
-      // flip (z14 crossing) forces a rebind of that one marker.
-      // Transfer hubs get a noticeably bigger circle so they read at a
-      // glance: line_count >= 6 ("mega-hub" — 渋谷 / 新宿 / 上野 / 池袋 /
-      // 京都...) and >= 3 ("regular hub") are precomputed by
-      // transit_postprocess.py. Stations on the wrong bucket — e.g., a
-      // pure shinkansen-only halt while the 长途 toggle is off — get
-      // skipped entirely so the dots don't outlive their lines.
-      var want = new Map();
-      if (zoom >= 12) {
-        var b2 = this._map.getBounds().pad(0.1);
-        var W2 = b2.getWest(), E2 = b2.getEast(), S2 = b2.getSouth(), N2 = b2.getNorth();
-        // Permanent-label tiering: z14 labels only transfer hubs (the
-        // stations people navigate by); every station gets its label at
-        // z15+, and hover always works. Flat z14 labeling put 150-220
-        // white pills over central Tokyo — over the restaurant markers
-        // this was most of the "unreadable map" complaint.
-        var labelAll  = zoom >= 15;
-        var labelHubs = zoom >= 14;
-        for (var s = 0; s < this._allStations.length; s++) {
-          var stn = this._allStations[s];   // M-010: flat record from _parseInto
-          var lon = stn.lon;
-          var lat = stn.lat;
-          if (lon < W2 || lon > E2 || lat < S2 || lat > N2) continue;
-          // Hide the dot if its only nearby lines belong to a bucket that's
-          // off. Legacy stations without the per-bucket flags fall back to
-          // "show if any bucket is on" so old geojsons keep working.
-          var sHasLong = stn.has_long_line;
-          var sHasCity = stn.has_city_line;
-          var hasFlags = (typeof sHasLong !== 'undefined') ||
-                         (typeof sHasCity !== 'undefined');
-          var visibleByBucket = hasFlags
-            ? ((sHasLong && bk.long) || (sHasCity && bk.city))
-            : (bk.long || bk.city);
-          if (!visibleByBucket) continue;
-          var lc = stn.line_count | 0;
-          var radius;
-          if (lc >= 6)      radius = zoom >= 15 ? 8 : zoom >= 13 ? 6.5 : 5.5;
-          else if (lc >= 3) radius = zoom >= 15 ? 6 : zoom >= 13 ? 5   : 4.2;
-          else              radius = zoom >= 15 ? 4 : zoom >= 13 ? 3.2 : 2.6;
-          var perm = labelAll || (labelHubs && lc >= 3);
-          want.set(stn, { radius: radius, showLabel: perm, lat: lat, lon: lon });
+      if (this._stationsVisible && this._stationLoaded && !this._stationCanvas) this._ensureStationCanvas();
+      if (this._stationCanvas) {
+        this._drawStationCanvas(zoom, zoomChanged);
+      }
+    },
+
+    _roundRect: function(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+    },
+
+    _ensureStationCanvas: function() {
+      if (this._stationCanvas || !this._map) return;
+      var canvas=document.createElement('canvas'), canvasCtx=canvas.getContext && canvas.getContext('2d');
+      if (!canvasCtx) return;
+      canvas.className='transit-station-canvas'; canvas.style.position='absolute'; canvas.style.pointerEvents='none';
+      this._map.getPane(this.options.stationPane).appendChild(canvas);
+      this._stationCanvas=canvas; this._stationCanvasCtx=canvasCtx; this._stationHits=[];
+    },
+
+    _drawStationBadge: function(ctx, x, y, size) {
+      var l = x - size / 2, t = y - size / 2, u = size / 24;
+      this._roundRect(ctx, l + .5, t + .5, size - 1, size - 1, size * .22);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.strokeStyle = '#9eacb5'; ctx.lineWidth = 1; ctx.stroke();
+      this._roundRect(ctx, l + 2 * u, t + 2 * u, 20 * u, 20 * u, 4.1 * u);
+      ctx.fillStyle = '#34566b'; ctx.fill();
+      if (typeof Path2D === 'function') {
+        if (!this._stationTunnelPath) {
+          this._stationTunnelPath = new Path2D(STATION_TUNNEL_PATH);
+          this._stationTrainBodyPath = new Path2D(STATION_TRAIN_BODY_PATH);
+          this._stationRailPath = new Path2D(STATION_RAIL_PATH);
+          this._stationTiePath = new Path2D(STATION_TIE_PATH);
+        }
+        ctx.save(); ctx.translate(l, t); ctx.scale(u, u);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.75;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.stroke(this._stationTunnelPath);
+        ctx.fillStyle = '#fff'; ctx.fill(this._stationTrainBodyPath);
+        ctx.fill(this._stationTiePath);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.25; ctx.stroke(this._stationRailPath);
+        ctx.fillStyle = '#34566b';
+        this._roundRect(ctx, 9.35, 9, 5.3, 3.25, .75); ctx.fill();
+        this._roundRect(ctx, 10.45, 7.15, 3.1, .7, .35); ctx.fill();
+        ctx.beginPath(); ctx.arc(10, 14.25, .72, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(14, 14.25, .72, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    },
+
+    _drawStationCanvas: function(zoom, zoomChanged) {
+      var canvas = this._stationCanvas, ctx = this._stationCanvasCtx, map = this._map;
+      if (!canvas || !ctx || !map) return;
+      var size = map.getSize();
+      if (canvas.width !== size.x || canvas.height !== size.y) {
+        canvas.width = size.x; canvas.height = size.y;
+        canvas.style.width = size.x + 'px'; canvas.style.height = size.y + 'px';
+      }
+      var origin = map.containerPointToLayerPoint([0, 0]);
+      if (L.DomUtil && L.DomUtil.setPosition) L.DomUtil.setPosition(canvas, origin);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      this._stationsOn.clear(); this._stationHits = [];
+      if (!this._stationsVisible || !this._stationLoaded || zoom < this.options.stationMinZoom) {
+        return;
+      }
+      var stations = this._visibleStations(map.getBounds().pad(0.1));
+      var labels = [], labelAll = zoom >= 15, labelHubs = zoom >= 14;
+      for (var i = 0; i < stations.length; i++) {
+        var stn = stations[i], lc = stn.line_count | 0;
+        if (zoom === this.options.stationMinZoom && lc < 3) continue;
+        var tier = lc >= 6 ? 2 : lc >= 3 ? 1 : 0;
+        var p = map.latLngToContainerPoint([stn.lat, stn.lon]);
+        var lp = map.latLngToLayerPoint([stn.lat, stn.lon]);
+        var badge = STATION_SIZES[tier];
+        this._drawStationBadge(ctx, p.x, p.y, badge);
+        this._stationHits.push({ station: stn, x: lp.x, y: lp.y, radius: badge/2 + 5 });
+        this._stationsOn.set(stn, { tier: tier, canvas: true });
+        if (labelAll || (labelHubs && lc >= 3)) labels.push({ station: stn, x: p.x, y: p.y, size: badge });
+      }
+      ctx.font = '11px system-ui,sans-serif'; ctx.textBaseline = 'middle';
+      for (var j = 0; j < labels.length; j++) {
+        var row = labels[j], name = pickStationName(row.station); if (!name) continue;
+        var tw = row.station._canvasLabelWidth;
+        if (!(tw >= 0)) tw = row.station._canvasLabelWidth = ctx.measureText(name).width;
+        var x = row.x - tw/2 - 4, y = row.y - row.size/2 - 18;
+        this._roundRect(ctx, x, y, tw + 8, 16, 5); ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,.08)'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = '#333'; ctx.fillText(name, row.x - tw/2, y + 8);
+      }
+      this._syncStationHover();
+    },
+
+    _syncStationHover: function() {
+      if (!this._map) return;
+      if (!this._stationHoverTip) this._stationHoverTip = L.tooltip({className:'transit-station-label',direction:'top',offset:[0,-8],opacity:1});
+      if (!this._onStationClickBound) {
+        this._onStationClickBound = this._onStationClick.bind(this);
+        this._map.on('click', this._onStationClickBound);
+      }
+      if (this._onStationMouseMoveBound || !window.matchMedia ||
+          !matchMedia('(hover: hover)').matches) return;
+      this._onStationMouseMoveBound = this._onStationMouseMove.bind(this);
+      this._onStationMouseOutBound = this._hideStationHover.bind(this);
+      this._map.on('mousemove', this._onStationMouseMoveBound);
+      this._map.on('mouseout', this._onStationMouseOutBound);
+    },
+
+    _hideStationHover: function() {
+      if (this._stationHoverTip) this._stationHoverTip.remove();
+    },
+
+    _onStationMouseMove: function(e) {
+      if (!this._stationHoverTip || !this._map) return;
+      var p = this._map.latLngToLayerPoint(e.latlng), hit = null;
+      for (var i = 0; i < this._stationHits.length; i++) {
+        var h = this._stationHits[i], dx=p.x-h.x, dy=p.y-h.y;
+        if (dx*dx + dy*dy <= h.radius*h.radius) { hit=h; break; }
+      }
+      if (!hit) { this._hideStationHover(); return; }
+      var node=document.createElement('span'); node.textContent=pickStationName(hit.station);
+      this._stationHoverTip.setContent(node).setLatLng(e.latlng).addTo(this._map);
+    },
+
+    _onStationClick: function(e) {
+      if (!this._stationHoverTip || !this._map) return;
+      var p=this._map.latLngToLayerPoint(e.latlng), hit=null;
+      for (var i=0;i<this._stationHits.length;i++) {
+        var h=this._stationHits[i], dx=p.x-h.x, dy=p.y-h.y;
+        if (dx*dx+dy*dy<=h.radius*h.radius) { hit=h; break; }
+      }
+      if (!hit) return;
+      var node=document.createElement('span'); node.textContent=pickStationName(hit.station);
+      this._stationHoverTip.setContent(node).setLatLng(e.latlng).addTo(this._map);
+    },
+
+    _visibleStations: function(bounds) {
+      var W = bounds.getWest(), E = bounds.getEast();
+      var S = bounds.getSouth(), N = bounds.getNorth();
+      var grid = this.options.stationGrid;
+      var gx0 = Math.floor(W / grid), gx1 = Math.floor(E / grid);
+      var gy0 = Math.floor(S / grid), gy1 = Math.floor(N / grid);
+      var out = [];
+      for (var gx = gx0; gx <= gx1; gx++) {
+        for (var gy = gy0; gy <= gy1; gy++) {
+          var cell = this._stationIndex.get(gx + ',' + gy);
+          if (!cell) continue;
+          for (var i = 0; i < cell.length; i++) {
+            var stn = cell[i];
+            if (stn.lon >= W && stn.lon <= E && stn.lat >= S && stn.lat <= N) {
+              out.push(stn);
+            }
+          }
         }
       }
-      var stOn = this._stationsOn;
-      var stLayer = this._stationsLayer;
-      var stRemove = [];
-      stOn.forEach(function(rec, stn) { if (!want.has(stn)) stRemove.push(stn); });
-      for (var r2 = 0; r2 < stRemove.length; r2++) {
-        stLayer.removeLayer(stOn.get(stRemove[r2]).marker);
-        stOn.delete(stRemove[r2]);
-      }
-      var op2 = this.options.opacity;
-      want.forEach(function(p, stn) {
-        var rec = stOn.get(stn);
-        if (rec && rec.showLabel === p.showLabel) {
-          if (rec.radius !== p.radius) {
-            rec.marker.setRadius(p.radius);
-            rec.radius = p.radius;
-          }
-          return;
-        }
-        if (rec) {
-          // Label mode flipped (crossed z14) — rebuild just this marker so
-          // the tooltip's permanent-ness matches.
-          stLayer.removeLayer(rec.marker);
-          stOn.delete(stn);
-        }
-        var lc2 = stn.line_count | 0;
-        var isTram = stn.railway === 'tram_stop';
-        var isHub = lc2 >= 3;
-        var dot = L.circleMarker([p.lat, p.lon], {
-          radius: p.radius,
-          weight: isHub ? 2 : 1.5,
-          color: isTram ? '#c62828' : (isHub ? '#111' : '#222'),
-          fillColor: isHub ? '#fffbea' : '#ffffff',
-          fillOpacity: op2,
-          opacity: op2
-        });
-        var nm = pickStationName(stn);   // M-010: reads .name / .name_en
-        if (nm) {
-          var opts = { className: 'transit-station-label' };
-          if (p.showLabel) {
-            opts.permanent = true;
-            opts.direction = 'top';
-            opts.offset = [0, -4];
-          }
-          var label = nm;
-          if (lc2 >= 3) label = nm + '  (' + lc2 + LINES_SUFFIX + ')';
-          var labelNode = document.createElement('span');
-          if (/[\u3040-\u30ff\u3400-\u9fff]/.test(nm)) labelNode.lang = 'ja';
-          labelNode.textContent = label;
-          dot.bindTooltip(labelNode, opts);
-        }
-        stLayer.addLayer(dot);
-        stOn.set(stn, { marker: dot, radius: p.radius, showLabel: p.showLabel });
-      });
+      return out;
     },
 
     // ---- line-name hover, no hit canvas ---------------------------------

@@ -46,6 +46,7 @@
 
   /* rail (docs/transit-layer.js) */
   var rail = null, railBuckets = { long: false, city: false }, railStatus = { long: 'idle', city: 'idle' };
+  var stationsVisible = false, stationStatus = 'idle', stationTotal = 0;
   var railLoading = false;
 
   /* bubble */
@@ -677,6 +678,7 @@
     var T = (Data.config && Data.config.TRANSIT) || {};
     rail = L.transitLayer({
       lodUrls: T.lodUrls, lodBreaks: T.lodBreaks,
+      stationUrl: T.stationUrl || 'transit/japan-stations.json',
       opacity: T.opacity, casingOpacity: T.casingOpacity
     });
     rail.on('lodloadstart', function () {
@@ -708,28 +710,60 @@
       act.showToast({ kind: 'error', text: t('交通图层加载失败，请稍后再试'),
         action: { label: t('重试'), run: function () { M.retryRail(); } } });
     });
+    rail.on('stationloadstart', function () {
+      stationStatus = 'loading';
+      App.set({ layers: { loading: { stations: true }, error: { stations: false } } });
+      App.emit('layers:load', { kind: 'stations', status: 'loading' });
+    });
+    rail.on('stationload', function (e) {
+      stationStatus = 'ok';
+      stationTotal = e && Number.isFinite(e.count) ? e.count : stationCount(rail);
+      App.set({ layers: { loading: { stations: false }, error: { stations: false } } });
+      App.emit('layers:load', { kind: 'stations', status: 'ok', count: stationTotal });
+      scheduleStationPolish();
+    });
+    rail.on('stationloaderror', function (e) {
+      stationStatus = e && e.hasData ? 'ok' : 'error';
+      App.set({ layers: { loading: { stations: false }, error: { stations: stationStatus === 'error' } } });
+      App.emit('layers:load', { kind: 'stations', status: stationStatus === 'error' ? 'error' : 'ok' });
+      if (stationStatus === 'error') act.showToast({ kind: 'error', text: t('车站图层加载失败，请稍后再试'),
+        action: { label: t('重试'), run: function () { M.retryStations(); } } });
+    });
     return rail;
   }
 
   function syncRail(s) {
     var want = { long: !!s.layers.long, city: !!s.layers.city };
-    var changed = want.long !== railBuckets.long || want.city !== railBuckets.city;
+    var wantStations = !!s.layers.stations;
+    var changed = want.long !== railBuckets.long || want.city !== railBuckets.city || wantStations !== stationsVisible;
     railBuckets = want;
-    var any = want.long || want.city;
+    stationsVisible = wantStations;
+    var any = want.long || want.city || wantStations;
     var r = any ? ensureRail() : rail;
     if (!r) {
       if (any) {
-        App.set({ layers: { error: { long: true, city: true } } });
-        App.emit('layers:load', { kind: 'long', status: 'error' });
+        var err = { long: !!(want.long || want.city), city: !!(want.long || want.city), stations: wantStations };
+        App.set({ layers: { error: err } });
+        App.emit('layers:load', { kind: wantStations ? 'stations' : 'long', status: 'error' });
       }
       return;
     }
     if (changed || !r._map) {
       r.setVisibleBuckets({ long: want.long, city: want.city });
+      if (typeof r.setStationsVisible === 'function') r.setStationsVisible(wantStations);
       if (any && !map.hasLayer(r)) map.addLayer(r);
       if (!any && map.hasLayer(r)) map.removeLayer(r);
     }
-    if (any) scheduleStationPolish();
+    if (wantStations) scheduleStationPolish();
+  }
+
+  function stationCount(r) {
+    if (!r) return 0;
+    try {
+      if (typeof r.stationCount === 'function') return Number(r.stationCount()) || 0;
+      if (r._allStations) return r._allStations.length || 0;
+    } catch (_) {}
+    return 0;
   }
 
   /** retryRail() — re-run the current LOD fetch after a failure, leaving the
@@ -749,6 +783,33 @@
     return true;
   };
 
+  M.retryStations = function () {
+    if (!stationsVisible) return false;
+    App.set({ layers: { loading: { stations: true }, error: { stations: false } } });
+    stationStatus = 'loading';
+    var r = ensureRail();
+    if (!r) {
+      stationStatus = 'error';
+      App.set({ layers: { loading: { stations: false }, error: { stations: true } } });
+      App.emit('layers:load', { kind: 'stations', status: 'error' });
+      return false;
+    }
+    try {
+      if (!map.hasLayer(r)) map.addLayer(r);
+      if (typeof r.retryStations === 'function') r.retryStations();
+      else {
+        if (typeof r.setStationsVisible === 'function') r.setStationsVisible(false);
+        if (typeof r.setStationsVisible === 'function') r.setStationsVisible(true);
+      }
+    } catch (err) {
+      console.error('[map] station retry', err);
+      stationStatus = 'error';
+      App.set({ layers: { loading: { stations: false }, error: { stations: true } } });
+      return false;
+    }
+    return true;
+  };
+
   /** setRail(kind, on) — also drivable from tests / the layers popover. */
   M.setRail = function (kind, on) {
     var patch = {}; patch[kind] = !!on;
@@ -756,6 +817,19 @@
   };
   M.setLayers = function (patch) { act.setLayers(patch || {}); };
   M.railStatus = function () { return { long: railStatus.long, city: railStatus.city, loading: railLoading }; };
+  M.stationStatus = function () { return { status: stationStatus, visible: stationsVisible, count: stationTotal || stationCount(rail) }; };
+  M.stationDetail = function () {
+    var detail = {};
+    try { if (rail && typeof rail.stationDetail === 'function') detail = rail.stationDetail() || {}; } catch (_) {}
+    var total = Number(detail.total);
+    if (!Number.isFinite(total)) total = stationTotal || stationCount(rail);
+    var count = Number(detail.count);
+    if (!Number.isFinite(count)) count = rail && rail._stationsOn ? rail._stationsOn.size : 0;
+    return Object.assign({}, detail, {
+      attached: !!(rail && map && map.hasLayer(rail)), visible: stationsVisible,
+      status: stationStatus, count: count, total: total
+    });
+  };
   M.railDetail = function () {
     var drawn = 0, byBucket = { long: 0, city: 0 }, byClass = {};
     try {
@@ -891,7 +965,9 @@
     App.on('map:reveal', function (p) { if (p && p.id) M.reveal(p.id, { reason: p.reason }); });
     App.on('map:locate-request', function () { act.locate(); });
     // overlays' 重试 on a failed rail row — refetch, toggles untouched.
-    App.on('layers:retry', function () { M.retryRail(); });
+    App.on('layers:retry', function (p) {
+      if (p && p.kind === 'stations') M.retryStations(); else M.retryRail();
+    });
     App.on('layout:settled', refreshGeometry);
     App.on('sheet:snapped', function () {
       App.set({ userDraggedMap: false }, { silent: true });
@@ -911,7 +987,7 @@
     syncMarkers(s);
     layoutTags();
     layoutPlates();
-    if (s.layers.long || s.layers.city) scheduleStationPolish();
+    if (s.layers.stations) scheduleStationPolish();
     if (s.selected.id) renderBubble(s);
     var vis = M.visibleIds();
     if (!silentEmit) App.emit('map:moveend', { bounds: M.bounds(), byUser: byUser, center: [c.lat, c.lng], zoom: z, visibleIds: vis });
@@ -1283,7 +1359,7 @@
   function nearbyOf(s) { return (s && s.nearby) || { active: false, planning: null, pending: false, fix: null }; }
 
   function fabSig(s) {
-    var on = ['long', 'city', 'landmarks', 'pins'].filter(function (k) { return s.layers[k]; }).length;
+    var on = ['long', 'city', 'stations', 'landmarks', 'pins'].filter(function (k) { return s.layers[k]; }).length;
     var nb = nearbyOf(s);
     // layout.z: the stack is re-measured when the UI density changes
     return [s.layout.mode, s.layout.W >= 700 ? 'z' : '', on, s.overlay.kind === 'layers' ? 'o' : '',
@@ -1300,7 +1376,7 @@
     var sigChanged = sig !== lastFab;
     if (sigChanged) {
       lastFab = sig;
-      var on = ['long', 'city', 'landmarks', 'pins'].filter(function (k) { return s.layers[k]; }).length;
+      var on = ['long', 'city', 'stations', 'landmarks', 'pins'].filter(function (k) { return s.layers[k]; }).length;
       var nb = nearbyOf(s);
       var showZoom = s.layout.W >= 700;                       // MAP-03: ± only when the protected area allows it
       var html = '';
