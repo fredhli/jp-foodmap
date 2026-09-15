@@ -153,7 +153,7 @@ collections, batch-removes them from one collection while preserving the
 other membership and favourites, adds them back, copies list text through an
 observed clipboard API, and deletes one collection without removing its
 restaurants or the other membership.
-It also checks access to all five map layers, custom bookmarks and attractions,
+It also checks access to all four map layers, custom bookmarks and attractions,
 sharing, Tabelog, and account backup/import/privacy controls. Those latter
 checks cover entry points, not full external-service operations. Interactions
 use isolated browser state and every external HTTPS request is blocked.

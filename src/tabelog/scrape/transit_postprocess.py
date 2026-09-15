@@ -11,10 +11,8 @@ directly). Four things:
     cases like 渋谷 ↔ 渋谷駅東口 where the JR / 京王 / メトロ entrances
     share the same physical complex but were tagged differently.
   - Tag each station with `line_count`: distinct route_name values whose
-    geometry passes within ~120m. Drives the three glyph sizes for <3,
-    3-5 and 6+ line stations in the renderer.
-  - Write a compact station-only v1 payload. This lets the default station
-    layer load without downloading or parsing any railway LineString.
+    geometry passes within ~80m. Drives the larger circle for 3-line and
+    6-line hubs in the renderer.
   - Tag each line with `is_longhaul`: True for shinkansen, JR limited
     express, and JR mainlines whose aggregate length is significant.
     Used by the renderer to split into a 长途 / 市内 layer pair.
@@ -26,8 +24,6 @@ won't find new pairs the second time).
   uv run python src/tabelog/scrape/transit_postprocess.py
 """
 
-import gzip
-import hashlib
 import json
 import math
 import re
@@ -49,7 +45,6 @@ from tabelog.paths import DOCS_DIR
 GEOJSON_PATH = DOCS_DIR / "transit" / "japan.geojson"
 GEOJSON_LOW_PATH = DOCS_DIR / "transit" / "japan-low.geojson"
 GEOJSON_MID_PATH = DOCS_DIR / "transit" / "japan-mid.geojson"
-STATIONS_PATH = DOCS_DIR / "transit" / "japan-stations.json"
 SUSPICIOUS_REPORT_PATH = DOCS_DIR / "transit" / "suspicious_lines.md"
 
 # LOD tolerances in degrees. ~111 km / degree latitude (less in longitude
@@ -833,77 +828,19 @@ def _write_lods(lines: list, stations: list) -> None:
           f"{len(low_lines)}/{len(long_lines)} long-haul lines, "
           f"points {lp_before} -> {lp_after})")
 
-    # Mid LOD: everything (both buckets) but moderately simplified. Stations
-    # live in their own compact payload, so opening the station layer never
-    # downloads or parses LineStrings and opening a rail layer does not pay
-    # for a duplicate station property/geometry tree.
+    # Mid LOD: everything (both buckets) but moderately simplified.
+    # Stations carry over verbatim — they're points, no geometry to
+    # simplify, and at z 9-13 they're already the primary thing.
     mid_lines, mp_before, mp_after = _simplify_lines(lines, LOD_MID_EPSILON)
-    mid = {"type": "FeatureCollection", "features": mid_lines}
+    mid = {"type": "FeatureCollection", "features": mid_lines + stations}
     GEOJSON_MID_PATH.write_text(
         json.dumps(mid, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
     print(f"  wrote {GEOJSON_MID_PATH.name} "
           f"({GEOJSON_MID_PATH.stat().st_size / 1024 / 1024:.1f} MB, "
-          f"{len(mid_lines)} lines, "
+          f"{len(mid_lines)} lines + {len(stations)} stations, "
           f"points {mp_before} -> {mp_after})")
-
-
-def _station_record(station: dict) -> list:
-    """Return the stable v1 station-array representation.
-
-    Positional records are intentional here: the nationwide payload is read
-    on every normal map session, so repeating six GeoJSON/property keys for
-    every point is wasted transfer and parse work. The top-level ``fields``
-    member keeps the wire format self-describing for tools and future builds.
-    """
-    props = station.get("properties") or {}
-    coords = (station.get("geometry") or {}).get("coordinates") or ()
-    if len(coords) < 2:
-        raise ValueError("station is missing [longitude, latitude]")
-    return [
-        round(float(coords[0]), 5),
-        round(float(coords[1]), 5),
-        props.get("name") or "",
-        props.get("name_en") or "",
-        props.get("railway") or "station",
-        max(0, int(props.get("line_count") or 0)),
-    ]
-
-
-def _write_stations(stations: list, path: Path = STATIONS_PATH) -> dict:
-    """Write the station-only v1 payload and return publication metadata.
-
-    R2 publication uses the returned ``object_name``. The renderer's
-    ``stationUrl`` must point at that immutable, content-hashed object; the
-    unhashed file is only the local build artifact.
-    """
-    records = [_station_record(station) for station in stations]
-    payload = {
-        "v": 1,
-        "fields": ["lon", "lat", "name", "name_en", "railway", "line_count"],
-        "stations": records,
-    }
-    encoded = json.dumps(
-        payload, ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encoded)
-    digest = hashlib.sha256(encoded).hexdigest()[:12]
-    gz_bytes = len(gzip.compress(encoded, compresslevel=9, mtime=0))
-    meta = {
-        "count": len(records),
-        "bytes": len(encoded),
-        "gzip_bytes": gz_bytes,
-        "sha256_12": digest,
-        "object_name": f"japan-stations.{digest}.json",
-    }
-    print(
-        f"  wrote {path.name} ({len(records)} stations, "
-        f"{len(encoded) / 1024:.1f} KiB raw, {gz_bytes / 1024:.1f} KiB gzip); "
-        f"R2 object {meta['object_name']}"
-    )
-    return meta
 
 
 # ---- driver --------------------------------------------------------------
@@ -960,7 +897,6 @@ def postprocess(in_path: Path, out_path: Path | None = None) -> None:
     # Pre-compute low/mid LODs so transit-layer.js can pick the right one
     # for the current zoom. The full file above stays the high LOD.
     _write_lods(lines, stations)
-    _write_stations(stations)
 
 
 if __name__ == "__main__":

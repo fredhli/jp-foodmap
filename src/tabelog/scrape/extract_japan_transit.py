@@ -19,8 +19,7 @@ Pipeline:
   4. pyosmium export .pbf     -> japan-rail.geojson    (with way IDs)
   5. python                    - parse OPL into way_id -> route info
                                - walk GeoJSON, augment, slim, round coords
-                               - write docs/transit/japan.geojson plus the
-                                 independent japan-stations.json payload
+                               - write docs/transit/japan.geojson
 
 All four PBF/OPL/GeoJSON steps run through pyosmium (the Python binding to
 libosmium). No system osmium-tool needed — wheels include libosmium itself,
@@ -546,10 +545,9 @@ def step_postprocess(way_route_map: dict[int, dict]) -> None:
     print(f"  wrote {FINAL_GEOJSON} ({size_mb:.1f} MB)")
 
     # Second pass: amusement-park / 廃線 blocklist, 200m cross-name station
-    # merge, line_count tagging for the three station-glyph sizes, independent
-    # station payload generation, and is_longhaul split for the 长途/市内 pair.
-    # See transit_postprocess.py for the rules.
-    print("  postprocessing (blocklist + cross-merge + line_count + stations + longhaul)...")
+    # merge, line_count tagging for transfer-hub circles, is_longhaul split
+    # for the 长途/市内 FAB pair. See transit_postprocess.py for the rules.
+    print("  postprocessing (blocklist + cross-merge + line_count + longhaul)...")
     from transit_postprocess import postprocess as transit_postprocess
     transit_postprocess(FINAL_GEOJSON)
 

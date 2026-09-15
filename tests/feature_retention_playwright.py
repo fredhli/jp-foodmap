@@ -309,13 +309,13 @@ def main(argv: list[str] | None = None) -> int:
             raise AssertionError("deleting a collection removed restaurant favorites")
         records.append({"case": "saved-lists-and-batch", "pass": True, "bulkRemoveReadd": True})
 
-        # Layer access: open the real layer popover, verify all five scopes,
+        # Layer access: open the real layer popover, verify all four scopes,
         # then toggle and restore Landmarks so the run changes nothing.
         show_map(page)
         assert_hit(page.locator('[data-fab="layers"]'), "layer menu")
         page.locator('[data-fab="layers"]').click()
         page.wait_for_selector('[data-ov="layer-toggle"]', timeout=10000)
-        for kind in ("long", "city", "stations", "landmarks", "pins"):
+        for kind in ("long", "city", "landmarks", "pins"):
             assert_hit(page.locator('[data-ov="layer-toggle"][data-layer="%s"]' % kind).first, kind)
         layer_before = page.evaluate("localStorage.getItem('tabelog.showAttractions') || '1'")
         page.eval_on_selector('[data-ov="layer-toggle"][data-layer="landmarks"]',
@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
         records.append({"case": "map-layers", "pass": True,
-                        "layers": ["long", "city", "stations", "landmarks", "pins"]})
+                        "layers": ["long", "city", "landmarks", "pins"]})
 
         # Context-menu path to user pins / landmarks. Switch the kind in the
         # real form, check the collection row, then cancel.

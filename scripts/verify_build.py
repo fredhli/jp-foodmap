@@ -55,8 +55,6 @@ scripts/verify_baseline.json so this file stays declarative.
 from __future__ import annotations
 
 import argparse
-import gzip
-import hashlib
 import json
 import re
 import sys
@@ -90,14 +88,11 @@ JAPAN_BBOX = (20.0, 46.2, 122.5, 154.5)  # lat_min, lat_max, lon_min, lon_max
 # build is considered broken.
 MAX_SHRINK_PCT = 5.0
 
-EXPECTED_STATION_COUNT = 8_954
-STATION_FIELDS = ["lon", "lat", "name", "name_en", "railway", "line_count"]
-
 # The release this tree is supposed to be. Kept here (not read blindly from
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.3.0"
+EXPECTED_APP_VERSION = "4.2.8"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -147,7 +142,6 @@ REQUIRED_LOCALSTORAGE_KEYS = [
     "tabelog.showAttractions",
     "tabelog.showTransitLong",
     "tabelog.showTransitCity",
-    "tabelog.showStations",
     "tabelog.showBookmarks",
 ]
 
@@ -557,77 +551,6 @@ def check_restaurants(baseline: dict, update_baseline: bool) -> None:
         )
     else:
         ok("restaurants", "all coordinates inside the Japan bbox")
-
-
-def check_station_payload() -> None:
-    """The default-on station layer must reference one compact hashed file."""
-    if not MAP_HTML.exists():
-        fail("stations", f"{MAP_HTML} does not exist — run map.py first")
-        return
-    html = MAP_HTML.read_text(encoding="utf-8")
-    matches = re.findall(
-        r"stationUrl:\s*['\"](data/stations\.([0-9a-f]{12})\.json)['\"]",
-        html,
-    )
-    if len(matches) != 1:
-        fail("stations", f"expected one content-hashed stationUrl, found {len(matches)}")
-        return
-    relative, expected_hash = matches[0]
-    path = DOCS_DIR / relative
-    if not path.exists():
-        fail("stations", f"referenced payload is missing: {path}")
-        return
-    raw = path.read_bytes()
-    actual_hash = hashlib.sha256(raw).hexdigest()[:12]
-    if actual_hash != expected_hash:
-        fail("stations", f"filename hash {expected_hash} != content hash {actual_hash}")
-        return
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        fail("stations", f"payload is not valid JSON: {exc}")
-        return
-    rows = payload.get("stations") if isinstance(payload, dict) else None
-    if (not isinstance(payload, dict) or payload.get("v") != 1 or
-            payload.get("fields") != STATION_FIELDS or not isinstance(rows, list)):
-        fail("stations", "payload must be v1 with the documented positional fields")
-        return
-    if len(rows) != EXPECTED_STATION_COUNT:
-        fail("stations", f"station count is {len(rows):,}, expected {EXPECTED_STATION_COUNT:,}")
-        return
-    lat_min, lat_max, lon_min, lon_max = JAPAN_BBOX
-    bad = []
-    tiers = [0, 0, 0]
-    unnamed = 0
-    for i, row in enumerate(rows):
-        if (not isinstance(row, list) or len(row) != 6 or
-                not isinstance(row[0], (int, float)) or
-                not isinstance(row[1], (int, float)) or
-                not (lon_min <= row[0] <= lon_max and lat_min <= row[1] <= lat_max) or
-                not isinstance(row[2], str) or
-                not isinstance(row[5], int) or row[5] < 0):
-            bad.append((i, row))
-            if len(bad) == 3:
-                break
-        else:
-            if not row[2]:
-                unnamed += 1
-            tiers[2 if row[5] >= 6 else 1 if row[5] >= 3 else 0] += 1
-    if bad:
-        fail("stations", f"malformed station rows: {bad}")
-        return
-    wire = len(gzip.compress(raw, compresslevel=9, mtime=0))
-    if wire > 512 * 1024:
-        fail("stations", f"deterministic gzip is {wire:,} bytes, exceeds 512 KiB")
-        return
-    if not all(tiers):
-        fail("stations", f"one of the three line-count tiers is empty: {tiers}")
-        return
-    if unnamed > 50:
-        fail("stations", f"{unnamed} unnamed rows exceed the 50-row tolerance")
-        return
-    ok("stations", f"{len(rows):,} rows ({unnamed} unnamed), sha {actual_hash}, "
-       f"{wire / 1024:.1f} KiB gzip, tiers {tiers}")
 
 
 def check_localstorage_keys() -> None:
@@ -1404,7 +1327,6 @@ def main(argv: list[str] | None = None) -> int:
         check_popup_slots()          # M-029 / M-030
         check_restaurants(baseline, args.update_baseline)
         check_restaurant_fields()    # M-023 / B1
-        check_station_payload()      # 4.3.0
         check_localstorage_keys()
         check_subcollections()       # M-031 / E2
         check_breakpoints()          # M-3.2-01 / GW P3-P4

@@ -875,9 +875,8 @@
 
   function popState(s) {
     var k = s.overlay.kind;
-    if (k === 'layers') return [s.layers.long, s.layers.city, s.layers.stations, s.layers.landmarks, s.layers.pins, s.layers.hiddenLandmarks,
-      s.layers.loading.long, s.layers.loading.city, s.layers.loading.stations,
-      s.layers.error.long, s.layers.error.city, s.layers.error.stations, stationLayerCount(), s.user.bookmarks.length].join(',');
+    if (k === 'layers') return [s.layers.long, s.layers.city, s.layers.landmarks, s.layers.pins, s.layers.hiddenLandmarks,
+      s.layers.loading.long, s.layers.loading.city, s.layers.error.long, s.layers.error.city, s.user.bookmarks.length].join(',');
     if (k === 'account') return [s.account.signedIn, s.account.email, s.account.message, s.sync.text, s.sync.kind,
       s.sync.retryVisible, s.sync.storageInfo, s.user.fav.size, s.user.black.size, s.user.bookmarks.length,
       deleteArmedAt ? 1 : 0, signOutArmed ? 1 : 0, deleteMsg && deleteMsg.text, (s.install || {}).standalone, (s.install || {}).canPrompt].join(',');
@@ -931,16 +930,10 @@
     var builtIn = (Data.landmarks || []).length;
     var hidden = Data.hiddenLandmarkIds().size;
     var own = (s.user.bookmarks || []).filter(function (b) { return b && b.category === 'attraction'; }).length;
-    var stationCount = stationLayerCount();
-    var stationLocked = !!(L.long || L.city);
-    var stationSub = stationLocked ? t('铁路图层开启时保持显示')
-      : (stationCount ? t('{n} 个铁路车站', { n: u.fmtCount(stationCount, s.lang) }) : t('铁路车站'));
     return popHead(t('地图图层')) +
       '<div class="ov-pop-body">' +
         layerRow({ key: 'long', icon: 'train', title: t('长途'), sub: t('新干线 / JR 特急'), on: L.long, loading: !!L.loading.long, error: !!L.error.long }) +
         layerRow({ key: 'city', icon: 'rail', title: t('市内'), sub: t('地铁 / 私铁 / 城市轨道'), on: L.city, loading: !!L.loading.city, error: !!L.error.city }) +
-        layerRow({ key: 'stations', icon: 'train', title: t('车站'), sub: stationSub, on: L.stations,
-          loading: !!L.loading.stations, error: !!L.error.stations, disabled: stationLocked }) +
         layerRow({ key: 'landmarks', icon: 'landmark', title: t('景点'),
           sub: t('内置 {n} · 自建 {m}', { n: u.fmtCount(builtIn, s.lang), m: u.fmtCount(own, s.lang) }), on: L.landmarks }) +
         layerRow({ key: 'pins', icon: 'bookmark', title: t('书签标记'), sub: t('地图上的地点标记'), on: L.pins }) +
@@ -951,17 +944,6 @@
             '<span class="ov-layer-sub">' + esc(t('已隐藏 {n}', { n: u.fmtCount(hidden, s.lang) })) + '</span></span>' +
         '</label>' +
       '</div>';
-  }
-
-  function stationLayerCount() {
-    try {
-      if (window.MapMod && typeof window.MapMod.stationDetail === 'function') {
-        var d = window.MapMod.stationDetail() || {};
-        var n = Number(d.total != null ? d.total : d.count);
-        if (Number.isFinite(n) && n > 0) return Math.floor(n);
-      }
-    } catch (_) {}
-    return 0;
   }
 
   // The rail layers really are fetched (three LOD files on R2), so the row's
@@ -997,8 +979,7 @@
     // The map handles layers:retry by refetching without touching the buckets.
     // Only when it cannot (no such method) do we fall back to cycling the
     // toggle — which writes the storage key twice and is what we want to avoid.
-    if (window.MapMod && kindKey === 'stations' && typeof window.MapMod.retryStations === 'function') return;
-    if (window.MapMod && kindKey !== 'stations' && typeof window.MapMod.retryRail === 'function') return;
+    if (window.MapMod && typeof window.MapMod.retryRail === 'function') return;
     act.setLayers(off);
     setTimeout(function () { act.setLayers(on); }, 0);
   }

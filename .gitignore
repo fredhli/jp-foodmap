@@ -68,12 +68,7 @@ src/tabelog/scrape/transit_audit.py
 # region-specific extracts (okayama, etc.) likewise stay local — none are
 # referenced by the build.
 docs/transit/japan*.geojson
-docs/transit/japan-stations.json
 docs/transit/okayama.geojson
-
-# Performance traces are reproducible and large; keep the compact JSON/Markdown
-# verdicts under tests/perf/results, but not the raw Chrome trace streams.
-tests/perf/results/**/*.json.gz
 
 # Audit / implementation reports and screenshots (hundreds of MB) — kept
 # local, never part of the deployed site.
