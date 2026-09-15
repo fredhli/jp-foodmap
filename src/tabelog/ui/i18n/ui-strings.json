@@ -1772,6 +1772,14 @@
     "en": "No link",
     "ja": "入口なし"
   },
+  "可网订": {
+    "en": "Bookable",
+    "ja": "予約可"
+  },
+  "不可网订": {
+    "en": "Not bookable",
+    "ja": "予約不可"
+  },
   "返回附近": {
     "en": "Back to nearby",
     "ja": "周辺に戻る"

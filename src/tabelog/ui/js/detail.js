@@ -394,8 +394,8 @@
       '</div>' +
       '<div class="dt-sum-book" role="group" aria-label="' + esc(t(r.bookable ? '有 Tabelog 预订入口' : '无 Tabelog 预订入口')) + '">' +
       '<div class="dt-sum-cell" aria-hidden="true">' + tabelogIcon() +
-      '<div class="dt-sum-text">' +
-      '<div class="dt-sum-val">' + esc(t(r.bookable ? '有入口' : '无入口')) + '</div></div></div></div></div>';
+      '<div class="dt-sum-text"><div class="dt-sum-label t-secondary">Tabelog</div>' +
+      '<div class="dt-sum-val">' + esc(t(r.bookable ? '可网订' : '不可网订')) + '</div></div></div></div></div>';
   }
 
   function infoRow(icon, label, valueHtml, opts) {

@@ -13,6 +13,17 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.2.8] - 2026-09-15
+
+Detail titles and their tool cluster now share one vertical centre line below
+1100px. The fix covers long and short restaurant names, every detail source,
+iPhones, the Fold cover, the Fold inner screen and ordinary mid-width layouts;
+wide desktop keeps its separate detail header and was not affected by the bug.
+
+The white Tabelog booking cell now mirrors the two-line price composition: its
+logo sits beside a small `Tabelog` label, with `可网订` or `不可网订` on the
+second line. The dinner, lunch and booking cells remain one balanced row.
+
 ## [4.2.7] - 2026-09-15
 
 Column details now keep dinner price, lunch price and Tabelog booking status

@@ -27,7 +27,7 @@ html[data-mode="wide"] #detail-root .dt { --dt-pad: var(--pad-panel-wide); }
 .dt-hidden-note .link-btn { margin-left: auto; min-height: var(--touch-min); }
 
 /* ---- identity (VIS-03: 8px inside the group) ----------------------------- */
-.dt-title-row { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.dt-title-row { display: flex; align-items: center; gap: var(--sp-2); }
 .dt-title { flex: 1 1 auto; min-width: 0; text-wrap: balance; }
 /* the 44px targets must not stretch the title row: VIS-03 keeps title→meta at 8px */
 .dt-more { flex: none; margin-block: -7px; }
@@ -398,7 +398,7 @@ html[data-fold-inner] #detail-foot .dt-actions.is-stack {
   #detail-root .dt { padding-top: var(--sp-2); }
   .dt-title-row {
     position: sticky; top: 0; z-index: 2; background: var(--surface);
-    align-items: flex-start; padding-block: var(--sp-2);
+    align-items: center; padding-block: var(--sp-2);
     margin-top: calc(-1 * var(--sp-2));
     margin-inline: calc(-1 * var(--dt-pad)); padding-inline: var(--dt-pad);
   }

@@ -22,12 +22,12 @@ cases = [('phone375',375,812,375,812,3), ('phone402',402,874,402,874,3),
 probe = """() => {
  const box=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,b:r.bottom}};
  const q=s=>document.querySelector(s), back=q('#detail-root [data-ct="back"]');
- const title=q('.dt-title-row'), sum=q('.dt-summary'), row=q('.dt-actions');
+ const title=q('.dt-title-row'), titleName=q('.dt-title'), titleTools=q('.dt-tools'), sum=q('.dt-summary'), row=q('.dt-actions');
  const sc=Containers.scroller('detail');
  const visible=e=>{const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>0&&r.height>0&&c.visibility==='visible'&&c.display!=='none'};
  const glyph=e=>[...e.querySelectorAll('.dt-act-label,svg,img')].some(n=>visible(n)&&(n.tagName!=='IMG'||n.complete&&n.naturalWidth>0));
  return {mode:App.state.layout.mode,minReading:App.layout.CFG.sheet.minText,rootFont:getComputedStyle(document.documentElement).fontSize,
-  title:box(title),compact:title.classList.contains('is-compact-tools'),body:box(sc),
+  title:box(title),titleName:box(titleName),titleTools:box(titleTools),compact:title.classList.contains('is-compact-tools'),body:box(sc),
   header:box(q(App.state.layout.mode==='narrow'?'#sheet-head':'#col-detail-head')),
   back:box(back),backLabel:back?.getAttribute('aria-label'),summary:box(sum),
   values:[...sum.querySelectorAll('.dt-sum-label,.dt-sum-val')].map(e=>({text:e.textContent,w:e.clientWidth,sw:e.scrollWidth,overflow:getComputedStyle(e).overflow})),
@@ -90,6 +90,8 @@ with lib_browser.serve_docs(8993) as base, sync_playwright() as p:
                 check(not data['viewportOverflow'],f'{name}/{scale}/{lang}: page overflow')
                 check(all(v['sw']<=v['w']+1 for v in data['values']),f'{name}/{scale}/{lang}: budget/status clipped')
                 if w<1100:
+                    check(data['titleTools'] is not None and abs((data['titleName']['y']+data['titleName']['h']/2)-(data['titleTools']['y']+data['titleTools']['h']/2))<=1,
+                          f'{name}/{scale}/{lang}: title and tools not center-aligned')
                     check(not data['stack'],f'{name}/{scale}/{lang}: actions stacked')
                     check(data['header']['h']==0,f'{name}/{scale}/{lang}: separate back header')
                     check(data['back'] is not None,f'{name}/{scale}/{lang}: missing back')

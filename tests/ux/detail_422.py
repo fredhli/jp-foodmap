@@ -22,6 +22,11 @@ def check(value, label):
     assert value, label
 
 
+def check_title_axis(page, label):
+    aligned = page.evaluate('''() => {const n=document.querySelector('.dt-title'),t=document.querySelector('.dt-tools');if(!n||!t)return false;const a=n.getBoundingClientRect(),b=t.getBoundingClientRect();return Math.abs((a.top+a.height/2)-(b.top+b.height/2))<=1}''')
+    check(aligned, (label, 'title/tools axis'))
+
+
 with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
     browser = getattr(p, args.browser).launch()
     for name, width, height, sw, sh, dpr in [
@@ -74,6 +79,7 @@ with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
             check(any(f['ghostX'] < -1 and f['sheetX'] > 1 for f in forward),
                   (name, 'forward painted direction', motion_info, forward))
         page.wait_for_selector('#detail-root .dt-title-row')
+        check_title_axis(page, name+'-results')
         tools = page.locator('#detail-root .dt-title-row .dt-tools')
         check(tools.locator('[data-ct="back"]').count() == 1, (name, 'one back'))
         check(tools.locator('[data-ct="close-detail"]').count() == 0, (name, 'close remains'))
@@ -124,6 +130,7 @@ with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
         head = page.locator('#detail-root .dt-title-row .dt-tools') if width < 1100 else page.locator('#col-detail-head')
         check(head.locator('[data-ct="back"]').count() == 1, (name, 'result detail lost back'))
         check(head.locator('[data-ct="close-detail"]').count() == 0, (name, 'result detail kept close'))
+        if width < 1100: check_title_axis(page, name+'-results')
         page.screenshot(path=str(args.output / f'{args.browser}-{name}-result-one-exit.png'))
         head.locator('[data-ct="back"]').click()
         page.wait_for_function("() => !App.state.selected.id && App.state.sheet.tab==='results'")
@@ -134,6 +141,7 @@ with lib_browser.serve_docs(8994) as base, sync_playwright() as p:
         head = page.locator('#detail-root .dt-title-row .dt-tools') if width < 1100 else page.locator('#col-detail-head')
         check(head.locator('[data-ct="back"]').count() == 0, (name, 'map detail invented back'))
         check(head.locator('[data-ct="close-detail"]').count() == 1, (name, 'map detail lost close'))
+        if width < 1100: check_title_axis(page, name+'-map')
         records.append({'case':name+'-one-exit','resultBack':1,'resultClose':0,'mapBack':0,'mapClose':1,'errors':errors})
         page.screenshot(path=str(args.output / f'{args.browser}-{name}-map-close.png'))
         check(not errors, (name, errors))
