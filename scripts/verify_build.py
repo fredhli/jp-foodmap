@@ -105,7 +105,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.3.3a"
+EXPECTED_APP_VERSION = "4.3.4a"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -663,11 +663,11 @@ def check_station_payload() -> None:
         if any(not isinstance(mask, int) or not 0 <= mask <= mask_limit for mask in masks):
             fail("stations", f"{profile_key} contains an invalid visibility mask")
             return
-        if any((mask & 1) and rows[i][5] < 6 for i, mask in enumerate(masks)):
-            fail("stations", f"{profile_key} labels a non-mega-hub station at z12")
+        if any(mask & 1 for mask in masks):
+            fail("stations", f"{profile_key} contains a fixed station label at z12")
             return
-        if any((mask & 2) and rows[i][5] < 3 for i, mask in enumerate(masks)):
-            fail("stations", f"{profile_key} labels a tier-1 station at z13")
+        if any((mask & 2) and rows[i][5] < 6 for i, mask in enumerate(masks)):
+            fail("stations", f"{profile_key} labels a non-mega-hub station at z13")
             return
         if any(not isinstance(width, (int, float)) or width < 0 for width in widths):
             fail("stations", f"{profile_key} contains an invalid label width")

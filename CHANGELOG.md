@@ -13,6 +13,22 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.4a] - 2026-09-16
+
+Station names render again. The z12–19 placement payload uses an 8-bit mask;
+the browser had retained the previous 6-bit upper bound, rejected valid masks
+above 63 and suppressed every fixed Canvas label. Runtime validation now derives
+the mask limit from the payload zoom range.
+
+Name presentation now follows the visibility scale. At z12 no name is fixed;
+hover or a normal phone tap shows a temporary label. At z13 only collision-safe
+6-line hub names stay fixed, while other visible stations use the temporary
+label. At z14 and closer, collision-safe names stay fixed and station hover/tap
+listeners are disabled. Temporary labels close on blank-map clicks, pan, zoom,
+or the transition into z14; restaurant and cluster targets keep priority. The
+z12/z13/z14 icon tiers, station-first Layers menu and four CARTO basemap choices
+from 4.3.3a remain unchanged.
+
 ## [4.3.3a] - 2026-09-15
 
 Station visibility moves one map level earlier: z12 shows 6-line hubs, z13

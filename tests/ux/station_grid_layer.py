@@ -245,7 +245,7 @@ def assert_fly_anchor_and_click_priority(page: Page) -> dict:
     }""")
     assert result["detail"]["tileZoom"] == 15, result
     assert result["sampled"] >= 1 and result["maxAlpha"] > 0, result
-    assert result["normalTip"] is False, result
+    assert result["normalTip"] is True, result
     assert result["markerTip"] is False, result
     assert result["blankClosed"] is True and result["moveClosed"] is True, result
     return result

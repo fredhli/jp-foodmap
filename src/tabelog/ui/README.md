@@ -231,7 +231,7 @@ uv run python scripts/verify_build.py
 .venv-wsl/bin/python -m http.server 8901 --bind 127.0.0.1   # then /docs/index.html
 ```
 
-## Station payload (4.3.3a)
+## Station payload (4.3.4a)
 
 `src/tabelog/scrape/station_source_v1.json` is the checked-in six-field input
 with 8,954 stations. A normal `map.py` build calls `station_payload.py`, verifies
@@ -246,6 +246,11 @@ name with Japanese fallback. Each profile has a row-aligned
 `visibleMaskByItem` (bits 0–7 mean z12–z19) and `labelWidthByItem` in CSS px.
 Placement is computed independently for the whole country at each integer zoom,
 so every tile reads the same label set.
+
+4.3.4a keeps bit 0 (z12) empty, limits bit 1 (z13) to collision-safe 6-line
+hubs, and allows every visible tier into collision placement from z14. Stations
+without a fixed name use click/hover labels only at z12–13; z14+ has no station
+tooltip interaction.
 
 The width envelope covers UI density .95/1 and text scale 100/115/130. It uses
 the renderer's 600-weight 11px system/CJK font stack at the maximum 130% scale,

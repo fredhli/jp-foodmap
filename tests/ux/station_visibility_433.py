@@ -77,7 +77,7 @@ def main() -> int:
             clickBound:!!transit._onStationClickBound,hoverBound:!!transit._onStationMouseMoveBound,
             tip:!!transit._stationHoverTip};
         }""")
-        assert interaction == {"tooltips": 0, "clickBound": False, "hoverBound": False, "tip": False}, interaction
+        assert interaction == {"tooltips": 1, "clickBound": True, "hoverBound": False, "tip": True}, interaction
 
         page.locator('[data-fab="layers"]').click()
         page.wait_for_selector('[data-ov="layer-toggle"][data-layer="stations"]')

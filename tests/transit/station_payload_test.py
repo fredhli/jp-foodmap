@@ -94,10 +94,9 @@ class StationPayloadContract(unittest.TestCase):
     def test_distant_label_candidates_follow_station_tiers(self) -> None:
         for name, profile in self.payload["placement"]["profiles"].items():
             for i, (row, mask) in enumerate(zip(self.rows, profile["visibleMaskByItem"])):
+                with self.subTest(profile=name, row=i, station=row[2], zoom=12):
+                    self.assertEqual(mask & 1, 0)
                 if row[5] < 6:
-                    with self.subTest(profile=name, row=i, station=row[2]):
-                        self.assertEqual(mask & 1, 0)
-                if row[5] < 3:
                     with self.subTest(profile=name, row=i, station=row[2]):
                         self.assertEqual(mask & 2, 0)
 

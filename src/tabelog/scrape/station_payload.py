@@ -91,6 +91,14 @@ def _shown(line_count: int, zoom: int) -> bool:
     return zoom >= 14
 
 
+def _label_shown(line_count: int, zoom: int) -> bool:
+    if zoom == 12:
+        return False
+    if zoom == 13:
+        return line_count >= 6
+    return zoom >= 14
+
+
 class _RectIndex:
     """Small deterministic uniform-grid index for collision rectangles."""
 
@@ -173,7 +181,7 @@ def _placement_for(rows: list[list[object]], texts: list[str]) -> dict[str, list
             index.add((x - half, y - half, x + half, y + half), owner=row_index)
 
         for i in priority:
-            if not texts[i] or not _shown(int(rows[i][5]), zoom):
+            if not texts[i] or not _label_shown(int(rows[i][5]), zoom):
                 continue
             rect = _label_rect(rows[i], widths[i], zoom)
             # The label is anchored to its own badge and may touch its halo;

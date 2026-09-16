@@ -190,6 +190,21 @@ html[data-search-active] #map-root .leaflet-control-container { display: none; }
 }
 .mp-st.is-major .mp-st-name, .mp-st.is-mega .mp-st-name { font-size: 12px; font-weight: 600; color: var(--ink); }
 
+/* Station click/hover names use a light label with a white halo. */
+#map-root .leaflet-pane .leaflet-tooltip.transit-station-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0 1px;
+  color: #3A4358;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 1px 2px #fff;
+  white-space: nowrap;
+}
+#map-root .leaflet-pane .leaflet-tooltip.transit-station-label::before { display: none; }
+
 /* the hover line label keeps its dark pill — it is transient and needs contrast */
 #map-root .leaflet-pane .leaflet-tooltip.transit-line-label { font-size: 12px; }
 
