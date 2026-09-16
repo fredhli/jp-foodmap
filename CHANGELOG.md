@@ -13,6 +13,47 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.6] - 2026-09-16
+
+Station importance is no longer hand-curated. The eighteen reviewed
+`display_tier` overrides and their loading code are gone entirely; every
+station's weight now comes from parsing OSM route relations for their
+stop/platform *node* members (4.3.5a's relation parser only followed `way`
+members, which is why it missed real service at real stations), grouped into
+distinct lines, operators and named limited-express/shinkansen services. The
+new `modes` bit — 电车/地铁, JR, 新干线 — is decided by three different
+strategies rather than one rule reused three ways: shinkansen from relation
+membership alone (geometry alone over-counts by 3x, since a shinkansen
+viaduct passes over unrelated local stations), JR from relation ∪ geometry
+with a same-station all-non-JR-relation veto, and rail from relation data
+first, falling back to geometry only when a station has no relation data at
+all. Importance is now a continuous score — line/operator/limited-express
+counts on a log scale plus a shinkansen bonus, halved-ish for a tram stop —
+instead of three fixed tiers, and the resulting three size tiers (162 / 522 /
+8,270 of the 8,954 stations) now apply starting at z12 instead of only z15+,
+so a hub reads as a hub at every zoom it appears in.
+
+Icon *type* (which of the tunnel-train, JR or shinkansen badges a station
+draws) and icon *size* (which of the three tiers) are now strictly
+orthogonal — icon type says what a station lets you board, size says how
+important it is, and neither field is allowed to leak into the other.
+Priority when a zoom can't fit every badge a station has is 新干线 > JR >
+电车, and all three badges share the same rounded-square ground and white
+glyph with no extra size or contrast advantage. Which icons actually draw at
+each zoom is now a deterministic Poisson-disk pass — highest importance
+first — rather than a fixed z12/z13/z14 cutoff. At z12/z13 a candidate needs
+140/110 px of clearance from every accepted station, except that two tier-3
+hubs only need their badge strips apart (a 140 px disc around 新宿 would
+otherwise hide 渋谷), and a restaurant-density floor keeps low-importance
+stations out of dense restaurant areas. From z14 the only rule is that badge
+strips never overlap, which keeps 4.3.5a's every-station-from-z14 density;
+a station that close to a bigger neighbour (梅田 next to 大阪) waits one zoom. The runtime payload moves to schema v4
+(`display_tier` / `modes` / `importance` per row, plus an `icons` block
+describing the exact size/gap/spacing model the renderer's own copy of those
+constants must match byte-for-byte); a v2/v3 payload still held by a
+visitor's service worker falls back to the 4.3.5a tier rule instead of
+breaking.
+
 ## [4.3.5a] - 2026-09-16
 
 Major station importance is now independent of the noisy nearby-route count.

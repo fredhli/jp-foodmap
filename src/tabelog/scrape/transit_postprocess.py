@@ -205,6 +205,30 @@ def _dist_sq_m(a, b):
     dy = (a[1] - b[1]) * M_PER_DEG_LAT
     return dx * dx + dy * dy
 
+def _point_seg_dist_sq_m(p, a, b):
+    """Squared metres from point p to the segment a-b (not to its endpoints).
+
+    Vertex-only distance misses elevated straight runs whose vertices are
+    hundreds of metres apart: 富山's nearest 北陸新幹線 vertex is >120 m away
+    while the segment itself passes 29 m from the station point."""
+    ax = (a[0] - p[0]) * M_PER_DEG_LON
+    ay = (a[1] - p[1]) * M_PER_DEG_LAT
+    bx = (b[0] - p[0]) * M_PER_DEG_LON
+    by = (b[1] - p[1]) * M_PER_DEG_LAT
+    dx = bx - ax
+    dy = by - ay
+    denom = dx * dx + dy * dy
+    if denom == 0.0:
+        return ax * ax + ay * ay
+    t = -(ax * dx + ay * dy) / denom
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    cx = ax + t * dx
+    cy = ay + t * dy
+    return cx * cx + cy * cy
+
 def _seg_len_m(coords):
     tot = 0.0
     for i in range(1, len(coords)):
@@ -230,12 +254,28 @@ def _banned(props):
 # ---- pass 2: long-haul tagging -------------------------------------------
 
 _PAREN_SUFFIX_RE = re.compile(r"\s*[（(][^)）]*[)）]\s*$")
+# 関東 (東京メトロ / 都営 / 東急) tags direction with a colon plus an arrow
+# instead of parentheses — `東京メトロ銀座線 : 浅草→渋谷`. 関西 does not, so
+# leaving these unstripped silently inflates 関東 stations only: 渋谷's 15
+# keys are really 8 lines counted 1-3 times each.
+_DIR_SUFFIX_RE = re.compile(r"\s*[:：]\s*\S+\s*(?:→|=>|⇒|->)\s*\S+\s*$")
+_ARROW_TAIL_RE = re.compile(r"\s*(?:→|=>|⇒)\s*\S+\s*$")
+_LEAD_RE = re.compile(r"^(?:列車|Stopping service)\s*")
+# `東京地下鉄の直通運転 - 副都心線` is the same physical line once more.
+_THROUGH_RE = re.compile(r"^.*直通運転\s*[-－]\s*")
+# Service class is not a line: 各駅停車 / 快速 / 急行 of one line are one key.
+_SVC_SUFFIX_RE = re.compile(
+    r"\s*(?:各駅停車|普通|快速急行|通勤快速|新快速|特別快速|区間快速|快速|急行|準急|特急|ライナー)\s*$"
+)
 # Strip JR-company prefixes so "予讃線" / "JR予讃線" / "JR四国予讃線" /
 # "JR西日本山陽本線" all collapse to one key. Without this OSM's mixed
 # naming splits a single physical line across multiple aggregation keys
 # and the long-haul flag ends up inconsistent within one line — exactly
 # the bug the user hit on 予讃線 around Matsuyama.
-_JR_PREFIX_RE = re.compile(r"^JR(?:北海道|東日本|東海|西日本|四国|九州|貨物)?")
+# `東海(?!道)` is load-bearing: without it `JR東海道本線` loses `JR東海` and
+# keys as `道本線`, which never matches the 138 bare `東海道本線` features,
+# so every station on the 東海道本線 counted that one line twice.
+_JR_PREFIX_RE = re.compile(r"^JR(?:北海道|東日本|東海(?!道)|西日本|四国|九州|貨物)?")
 
 def _route_key(props):
     """The label we group ways under for length aggregation and line_count.
@@ -243,7 +283,8 @@ def _route_key(props):
     OSM tags both directions of the same physical line as separate route
     relations (`JR内房線 (千葉 → 安房鴨川)` and `(安房鴨川 → 千葉)`), and
     sometimes attaches a parenthetical service class or English alias. We
-    repeatedly strip trailing parens so reciprocal pairs collapse to the
+    repeatedly strip trailing parens, directional suffixes, through-service
+    prefixes and service-class words so reciprocal pairs collapse to the
     same key. Without this, 金山 / 子安 / etc. end up counted as 10+ line
     transfer hubs purely from directional tagging."""
     s = (props.get("route_name") or props.get("name") or "").strip()
@@ -251,6 +292,11 @@ def _route_key(props):
     while s != prev:
         prev = s
         s = _PAREN_SUFFIX_RE.sub("", s).strip()
+        s = _DIR_SUFFIX_RE.sub("", s).strip()
+        s = _ARROW_TAIL_RE.sub("", s).strip()
+        s = _LEAD_RE.sub("", s).strip()
+        s = _THROUGH_RE.sub("", s).strip()
+        s = _SVC_SUFFIX_RE.sub("", s).strip()
     s = _JR_PREFIX_RE.sub("", s).strip()
     return s
 
@@ -720,8 +766,13 @@ def _tag_line_count(stations, lines, proximity_m):
         for key, li in candidates:
             if key in distinct:
                 continue
-            for c in lines[li]["geometry"]["coordinates"]:
-                if _dist_sq_m((sx, sy), c) < prox_sq:
+            coords = lines[li]["geometry"]["coordinates"]
+            if len(coords) == 1:
+                if _dist_sq_m((sx, sy), coords[0]) < prox_sq:
+                    distinct[key] = bool(lines[li]["properties"].get("is_longhaul"))
+                continue
+            for i in range(len(coords) - 1):
+                if _point_seg_dist_sq_m((sx, sy), coords[i], coords[i + 1]) < prox_sq:
                     distinct[key] = bool(lines[li]["properties"].get("is_longhaul"))
                     break
         s["properties"]["line_count"] = len(distinct)

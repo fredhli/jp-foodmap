@@ -4,20 +4,37 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "audit_output" / "4.3.5a"
+# 4.3.6: evidence moved out of the 4.3.5a directory so a rerun does not
+# overwrite the screenshots that release cites.
+OUT = ROOT / "audit_output" / "4.3.6"
 sys.path.insert(0, str(ROOT / "tests"))
 import lib_browser  # noqa: E402
 
 TOKYO = [35.681236, 139.767125]
 
 
+def published_payload() -> dict:
+    html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+    names = sorted(set(re.findall(r"data/(stations\.[0-9a-f]{12}\.json)", html)))
+    assert len(names) == 1, names
+    payload = json.loads((ROOT / "docs" / "data" / names[0]).read_bytes())
+    assert payload["v"] == 4, payload["v"]
+    return payload
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    payload = published_payload()
+    icon_counts = [
+        sum(1 for m in payload["icons"]["maskByItem"] if m & (1 << (z - 12)))
+        for z in (12, 13, 14)
+    ]
     with lib_browser.serve_docs(8996) as base, sync_playwright() as pw:
         browser = pw.chromium.launch()
         context = browser.new_context(
@@ -63,7 +80,11 @@ def main() -> int:
         assert not z12["drawn"] and z12["fixedMasks"] == 0, z12
         assert z12["maxMask"] > 63, z12
         assert z12["detail"]["placementStatus"] == "ready" and not z12["detail"]["labelsSuppressed"], z12
-        assert z12["tiers"] == [90, 610, 8954], z12
+        # Replaces `== [90, 610, 8954]` (4.3.5a's tier rule): 4.3.6 reads the
+        # build-time Poisson selection, so the page must agree with the
+        # payload's own icon bits, and z12 must be far denser than 4.3.5a.
+        assert z12["tiers"] == icon_counts, (z12["tiers"], icon_counts)
+        assert z12["tiers"][0] >= 1500, z12
         page.screenshot(path=str(OUT / "station-z12-names.png"), full_page=False)
 
         z12_lifecycle = page.evaluate("""async station => {
@@ -148,24 +169,47 @@ def main() -> int:
           const transit=Object.values(MapMod.map._layers).find(x=>x&&x._stationGridLayer);
           const wanted=['大阪','梅田','難波','なんば','札幌','仙台','博多','熊本'];
           return wanted.map(name=>{
-            const s=transit._allStations.find(x=>x.name===name&&x.display_tier===3);
-            if(!s)throw new Error('missing tier override: '+name);
+            const s=transit._allStations.find(x=>x.name===name&&x.display_tier>=1);
+            if(!s)throw new Error('missing station: '+name);
             const states=[12,13,14].map(z=>{
               const bit=z-transit._stationPayloadMeta.placement.zoomMin;
               const fixed=(transit._stationPlacement.visibleMaskByItem[s._placementIndex]&(1<<bit))!==0;
               return {zoom:z,shown:transit._stationShown(s,z),fixed,
                 temporary:transit._stationTemporaryNameAllowed(s,z)};
             });
-            return {name,raw:s.line_count,displayTier:s.display_tier,
+            return {name,raw:s.line_count,displayTier:s.display_tier,modes:s.modes,
+              iconMask:transit._stationPayloadMeta.icons.maskByItem[s._placementIndex],
               effectiveTier:transit._stationTier(s)+1,states};
           });
         }""")
+        # Replaces the 4.3.5a override check (all eight were forced to tier 3
+        # and therefore shown at z12). 4.3.6 has no overrides: the tier is the
+        # continuous-importance tier from the payload, and 梅田 legitimately
+        # lands in tier 2 as a rail-only station. Visibility is the payload's
+        # icon bit, so e.g. 大阪 yields z12 to 新大阪 3.5 km away.
+        expected_tier = {"大阪": 3, "梅田": 2, "難波": 3, "なんば": 3,
+                         "札幌": 3, "仙台": 3, "博多": 3, "熊本": 3}
+        expected_modes = {"大阪": 3, "梅田": 1, "難波": 1, "博多": 7}
         for station in importance:
-            assert station["effectiveTier"] == 3 and station["displayTier"] == 3, station
+            name = station["name"]
+            assert station["displayTier"] == expected_tier[name], station
+            assert station["effectiveTier"] == station["displayTier"], station
+            if name in expected_modes:
+                assert station["modes"] == expected_modes[name], station
+            for state in station["states"]:
+                bit = 1 << (state["zoom"] - 12)
+                assert state["shown"] == bool(station["iconMask"] & bit), station
+                assert not state["fixed"] or state["shown"], station
             z12_state, z13_state, z14_state = station["states"]
-            assert z12_state == {"zoom": 12, "shown": True, "fixed": False, "temporary": True}, station
-            assert z13_state["shown"] and (z13_state["fixed"] != z13_state["temporary"]), station
-            assert z14_state["shown"] and not z14_state["temporary"], station
+            assert not z12_state["fixed"] and z12_state["temporary"] == z12_state["shown"], station
+            if z13_state["shown"]:
+                assert z13_state["fixed"] != z13_state["temporary"], station
+            else:
+                assert not z13_state["fixed"] and not z13_state["temporary"], station
+            assert not z14_state["temporary"], station
+        # The mega-hubs that head their own spacing disc still show at z12.
+        for name in ("札幌", "仙台", "博多", "熊本"):
+            assert next(s for s in importance if s["name"] == name)["states"][0]["shown"], name
 
         page.locator('[data-fab="layers"]').click()
         page.wait_for_selector('[data-ov="layer-toggle"][data-layer="stations"]')

@@ -245,7 +245,12 @@ def assert_fly_anchor_and_click_priority(page: Page) -> dict:
     }""")
     assert result["detail"]["tileZoom"] == 15, result
     assert result["sampled"] >= 1 and result["maxAlpha"] > 0, result
-    assert result["normalTip"] is True, result
+    # Replaces `normalTip is True`. Already stale before 4.3.6 (it fails at
+    # abc0ed4 too): since 4.3.4a a station tap only shows a temporary name at
+    # z12-13 and every drawn station at z14+ either has its fixed label or
+    # none, so a z15 tap on 東京 must not open a tooltip. The click-priority
+    # half of the check (markerTip) is unchanged.
+    assert result["normalTip"] is False, result
     assert result["markerTip"] is False, result
     assert result["blankClosed"] is True and result["moveClosed"] is True, result
     return result
@@ -260,7 +265,9 @@ def assert_boundary_overdraw(page: Page) -> dict:
       const candidate=transit._allStations.map(s => {
         const p=map.project([s.lat,s.lon],z), rx=((p.x%ts.x)+ts.x)%ts.x, ry=((p.y%ts.y)+ts.y)%ts.y;
         return {s,p,edge:Math.min(rx,ts.x-rx,ry,ts.y-ry),rx,ry};
-      }).filter(x => x.edge<5 && (x.s.name||'').length>=2)
+      // 4.3.6: only a station whose icon the Poisson pass draws at z15 can
+      // paint into the seam (4.3.5a drew every station from z14).
+      }).filter(x => x.edge<5 && (x.s.name||'').length>=2 && transit._stationShown(x.s,z))
         .sort((a,b) => (transit._stationTier(b.s)-transit._stationTier(a.s))||
           (b.s.line_count-a.s.line_count)||a.edge-b.edge)[0];
       if(!candidate) throw new Error('no real station close to a tile boundary');
@@ -306,8 +313,12 @@ def assert_long_label_overdraw(page: Page) -> dict:
         const text=transit._stationName(s),actual=measure.measureText(text).width;
         if(actual<45)continue;
         const p=map.project([s.lat,s.lon],z),rx=((p.x%ts.x)+ts.x)%ts.x;
-        const edge=Math.min(rx,ts.x-rx),badge=[11,14,18][transit._stationTier(s)]*transit._stationStyleScale();
-        if(edge>badge/2+4&&edge<actual/2-5)candidates.push({s,p,edge,actual,badge,text});
+        // 4.3.6: the label must clear the whole icon strip (up to three badges
+        // side by side), not one badge; 4.3.5a used [11,14,18][tier] alone.
+        const badge=transit._stationBadgeSize(s,z);
+        const strip=transit._stationStripWidth(transit._stationBadgeKinds(s,z).length,badge);
+        const edge=Math.min(rx,ts.x-rx);
+        if(edge>strip/2+4&&edge<actual/2-5)candidates.push({s,p,edge,actual,badge,text});
       }
       candidates.sort((a,b)=>b.actual-a.actual);
       const c=candidates[0]; if(!c)throw new Error('no placed long label crosses a vertical tile seam');
@@ -344,9 +355,10 @@ def assert_payload_measurement_and_collisions(page: Page, payload: dict) -> dict
     compact = {
         "rows": payload["stations"],
         "profiles": payload["placement"]["profiles"],
+        "icons": payload["icons"]["maskByItem"],
     }
     result = page.evaluate("""data => {
-      const rows=data.rows, profiles=data.profiles;
+      const rows=data.rows, profiles=data.profiles, iconMasks=data.icons;
       const font='600 14.3px system-ui,-apple-system,"Hiragino Sans","Noto Sans CJK JP",sans-serif';
       const ctx=document.createElement('canvas').getContext('2d'); ctx.font=font;
       const measured={};
@@ -392,10 +404,18 @@ def assert_payload_measurement_and_collisions(page: Page, payload: dict) -> dict
         for(let z=12;z<=19;z++){
           const hash=new Map(), labels=[], violations=[];
           for(let i=0;i<rows.length;i++){
-            const row=rows[i],pt=project(row[0],row[1],z),tier=row[6]||(row[5]>=6?3:row[5]>=3?2:1);
-            const size=z<=14?11:[11,14,18][tier-1];
-            if((z===12&&tier>=3)||(z===13&&tier>=2)||z>=14){
-              const r=[pt[0]-size/2-2,pt[1]-size/2-2,pt[0]+size/2+2,pt[1]+size/2+2];
+            // 4.3.6 replaces the 4.3.5a model (11px through z14, one badge,
+            // drawn by the z12 tier>=3 / z13 tier>=2 / z14+ rule): size is
+            // [11,14,18][display_tier-1] at every zoom, the drawn set is the
+            // payload's icons.maskByItem, and the guard box covers the whole
+            // strip of min(badgeCount(z), popcount(modes)) badges 2px apart.
+            const row=rows[i],pt=project(row[0],row[1],z),tier=row[6];
+            const size=[11,14,18][tier-1];
+            let bits=0; for(let m=row[7]&7;m;m&=m-1)bits++;
+            const n=Math.min([1,1,2,3,3,3,3,3][z-12],Math.max(1,bits));
+            const strip=n*size+(n-1)*2;
+            if((iconMasks[i]&(1<<(z-12)))!==0){
+              const r=[pt[0]-strip/2-2,pt[1]-size/2-2,pt[0]+strip/2+2,pt[1]+size/2+2];
               add(hash,r,{kind:'badge',i,id:i});
             }
             if((p.visibleMaskByItem[i]&(1<<(z-12)))!==0){
@@ -588,7 +608,7 @@ def run_state_and_network(browser: Browser, base: str, payload_text: str) -> dic
     page.wait_for_function("() => MapMod.stationDetail().badgeImageStatus==='ready'")
     recovered = page.evaluate("() => MapMod.stationDetail()")
     assert icon_attempts["n"] == 2, (icon_attempts, fallback, recovered)
-    assert fallback["liveCanvasCount"] > 0 and recovered["liveCanvasCount"] > 0
+    assert fallback["liveCanvasCount"] > 0 and recovered["liveCanvasCount"] > 0, (fallback, recovered)
     report["badgeImageRetry"] = {
         "attempts": icon_attempts["n"], "fallbackRendered": True, "recovered": True
     }
@@ -738,7 +758,7 @@ def capture_real_basemap(browser: Browser, base: str, output: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--docs", type=Path, default=ROOT / "docs")
-    parser.add_argument("--output", type=Path, default=ROOT / "audit_output" / "4.3.5a")
+    parser.add_argument("--output", type=Path, default=ROOT / "audit_output" / "4.3.6")
     parser.add_argument("--profiles", default=",".join(PROFILES),
                         help="comma-separated: " + ",".join(PROFILES))
     parser.add_argument("--skip-state", action="store_true")

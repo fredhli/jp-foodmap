@@ -89,7 +89,11 @@ from tabelog.scrape.map_data import (
     unwrap_genre,
 )
 from tabelog.scrape.search_norm import build_han_variants, canon_str
-from tabelog.scrape.station_payload import STATION_SOURCE_JSON, build_station_payload
+from tabelog.scrape.station_payload import (
+    STATION_SOURCE_JSON,
+    build_station_payload,
+    restaurant_coords_from_rows,
+)
 
 from opencc import OpenCC
 
@@ -2421,7 +2425,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.3.5a"
+APP_VERSION = "4.3.6"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -22879,7 +22883,13 @@ def main(argv: list[str] | None = None) -> None:
     # 4.3.1a: the runtime station file is derived from a checked-in compact
     # source on every normal build.  Its filename is its SHA-256 prefix, so a
     # new shell can cache it alongside an older shell's still-working payload.
-    station_payload_bytes, station_build = build_station_payload(STATION_SOURCE_JSON)
+    # 4.3.6: the z12-z14 icon density floor counts restaurants around each
+    # station.  core_rows is final here (fan_out_coincident has run) and is
+    # exactly what restaurants.json publishes below, so verify_build can feed
+    # the published file back in and reproduce these bytes.
+    station_payload_bytes, station_build = build_station_payload(
+        STATION_SOURCE_JSON, restaurant_coords_from_rows(core_rows)
+    )
     station_hash = str(station_build["payloadSha256"])
     station_payload_path = DOCS_DATA_DIR / f"stations.{station_hash[:12]}.json"
     station_url = f"data/{station_payload_path.name}"
@@ -22903,6 +22913,12 @@ def main(argv: list[str] | None = None) -> None:
             for profile, counts in station_counts.items()
         )
         + " visible at z12..19"
+    )
+    print(
+        "  station icons:    "
+        + "/".join(str(station_build["iconCounts"][str(z)]) for z in range(12, 20))
+        + " visible at z12..19, tiers 1/2/3 "
+        + "/".join(str(n) for n in station_build["tierCounts"])
     )
     restaurants_bytes = json.dumps(
         core_rows, ensure_ascii=False, separators=(",", ":")

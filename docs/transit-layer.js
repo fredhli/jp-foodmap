@@ -220,6 +220,38 @@
   var STATION_ICON_GUARD_PX = 2;
   var STATION_FONT_STACK = 'system-ui,-apple-system,"Hiragino Sans","Noto Sans CJK JP",sans-serif';
   var STATION_BOUNDS = [[20, 122], [46, 154]];
+  // 4.3.6: gap between side-by-side badges in one station's icon strip, in
+  // CSS px before the UI density scale. Must equal the payload's icons.gapPx
+  // and station_payload.BADGE_GAP_PX, which model the same strip for label
+  // collision; a mismatch silently lets labels overlap a neighbour's badges.
+  var STATION_BADGE_GAP_PX = 2;
+  // Badges per station by whole zoom, index = zoom - STATION_MIN_ZOOM; the
+  // last entry covers every deeper zoom. Mirrors icons.badgeCountByZoom.
+  var STATION_BADGE_COUNT_BY_ZOOM = [1, 1, 2, 3, 3, 3, 3, 3];
+  // modes bit mask from the v4 payload.
+  var STATION_MODE_RAIL = 1;
+  var STATION_MODE_JR = 2;
+  var STATION_MODE_SHINKANSEN = 4;
+  // Draw priority, left to right, when a zoom allows fewer badges than a
+  // station has modes.
+  var STATION_BADGE_KINDS = [
+    { kind: 'shinkansen', bit: STATION_MODE_SHINKANSEN },
+    { kind: 'jr', bit: STATION_MODE_JR },
+    { kind: 'rail', bit: STATION_MODE_RAIL }
+  ];
+  // Copied verbatim from src/tabelog/ui/station-badge-paths.json (24-unit
+  // box, M/L/Z only, filled white on the ground colour). Keep each string
+  // whole: the sub-path winding is what cuts the holes.
+  var STATION_BADGE_GLYPHS = {
+    jr: {
+      ground: '#FC6101',
+      paths: ['M2.4 14.66L2.4 11.92L2.49 11.83L5.35 11.85L5.37 13.79L5.42 14.02L5.59 14.31L6.12 14.6L6.88 14.75L8.11 14.75L9.01 14.55L9.57 14.19L9.71 13.88L9.71 7.26L9.77 7.12L18.95 7.12L19.35 7.17L20.12 7.45L20.42 7.66L20.86 8.09L21.26 8.73L21.5 9.41L21.6 9.95L21.55 10.91L21.4 11.4L20.88 12.3L20.35 12.77L19.76 13.09L19.22 13.24L18.67 13.29L18.17 13.25L17.96 13.33L20.92 16.57L21.12 16.82L21.09 16.85L17.55 16.84L12.93 11.17L13.01 11.1L18.29 11.08L18.52 10.99L18.8 10.71L18.9 10.45L18.9 10.18L18.75 9.83L18.43 9.56L18.26 9.5L12.25 9.52L12.23 14.62L12.18 14.89L11.89 15.47L11.42 15.95L10.98 16.25L10.2 16.57L9.12 16.81L8.02 16.9L6.42 16.9L4.92 16.71L4.02 16.43L3.21 15.95L2.69 15.38Z']
+    },
+    shinkansen: {
+      ground: '#0164D2',
+      paths: ['M19.68 12.8L16.12 17.41L14.26 17.83L10.54 17.89L8.66 17.71L7.5 17.16L4.27 12.74L4.62 11.11L7.81 5.1L9.86 4.24L13.06 4.11L15.21 4.53L16.67 5.64L18.16 9.3L19.38 11.16ZM7.63 7.71L9.35 8.62L14.2 8.69L15.84 8.21L16.37 7.49L15.81 6.16L15.05 5.72L8.94 5.72L8.05 6.31ZM7.74 19.6L8.37 18.86L15.69 18.86L16.25 19.6ZM19.67 13.35L19.45 15.37L18.67 16.82L17.44 17.7L15.95 17.87L16.96 17.1ZM4.28 13.35L6.93 16.99L8 17.87L6.39 17.64L5.21 16.7L4.49 15.25ZM8.69 13.18L7.72 11.79L5.95 10.82L5.5 10.96L5.41 11.6L5.93 12.38ZM15.29 13.2L17.99 12.42L18.54 11.65L18.4 10.88L16.3 11.76ZM7.89 18.2L6.52 20.32L4.96 20.27L6.73 18.25ZM16.06 18.2L17.21 18.25L19 20.29L17.44 20.3Z']
+    }
+  };
 
   // M-3.2.2-02: the line canvas is painted at one device pixel per CSS
   // pixel, where stock Leaflet always doubles it on a hidpi screen.
@@ -319,6 +351,8 @@
       this._stationPayloadMeta = null;
       this._stationPlacement = null;
       this._stationPlacementStatus = 'not-loaded';
+      this._stationIconMasks = null;
+      this._stationIconStatus = 'not-loaded';
       this._stationSuppressLabels = false;
       this._stationProfileKey = this.options.stationProfileKey ||
         (ACTIVE_LANG === 'en' ? 'en-max130' : 'local-max130');
@@ -440,6 +474,7 @@
         error: this._stationError,
         dpr: this._stationDpr,
         placementStatus: this._stationPlacementStatus,
+        iconStatus: this._stationIconStatus,
         badgeImageStatus: this._stationBadgeImageStatus,
         profileKey: this._stationProfileKey,
         labelsSuppressed: this._stationSuppressLabels,
@@ -469,6 +504,8 @@
       this._stationLoaded = false;
       this._stationPlacement = null;
       this._stationPlacementStatus = 'not-loaded';
+      this._stationIconMasks = null;
+      this._stationIconStatus = 'not-loaded';
       this._stationPayloadMeta = null;
       this._stationInflight = null;
       this._stationLoading = false;
@@ -534,7 +571,7 @@
       var rowsLength = this._allStations.length;
       this._stationPlacement = null;
       this._stationSuppressLabels = false;
-      if (!payload || (payload.v !== 2 && payload.v !== 3) || !placement) {
+      if (!payload || (payload.v !== 2 && payload.v !== 3 && payload.v !== 4) || !placement) {
         this._stationPlacementStatus = payload ? 'fallback-legacy-v1' : 'not-loaded';
       } else if (placement.version !== 1 || placement.zoomMin !== 12 ||
                  placement.zoomMax !== 19 || !placement.profiles) {
@@ -595,6 +632,55 @@
         }
       }
       this._stationMaxLabelWidth = maxWidth;
+    },
+
+    // 4.3.6: build-time icon selection. A payload without a valid icons
+    // block (every v2/v3 payload still sitting in a service-worker cache)
+    // leaves _stationIconMasks null, and _stationShown falls back to the
+    // 4.3.5a tier rule.
+    _selectStationIcons: function() {
+      var payload = this._stationPayloadMeta;
+      var icons = payload && payload.icons;
+      var rowsLength = this._allStations.length;
+      this._stationIconMasks = null;
+      if (!payload) {
+        this._stationIconStatus = 'not-loaded';
+        return;
+      }
+      if (payload.v !== 4 || !icons) {
+        this._stationIconStatus = 'fallback-legacy-tier';
+        return;
+      }
+      if (icons.version !== 1 || icons.zoomMin !== STATION_MIN_ZOOM || icons.zoomMax !== 19 ||
+          !this._stationNumberListEquals(icons.sizesPx, STATION_SIZES) ||
+          icons.gapPx !== STATION_BADGE_GAP_PX ||
+          !this._stationNumberListEquals(icons.badgeCountByZoom, STATION_BADGE_COUNT_BY_ZOOM)) {
+        this._stationIconStatus = 'fallback-icons-version';
+        return;
+      }
+      var masks = icons.maskByItem;
+      if (!Array.isArray(masks) || masks.length !== rowsLength) {
+        this._stationIconStatus = 'fallback-invalid-icons';
+        return;
+      }
+      var maskLimit = (1 << (icons.zoomMax - icons.zoomMin + 1)) - 1;
+      for (var i = 0; i < rowsLength; i++) {
+        var mask = masks[i];
+        if (typeof mask !== 'number' || mask !== (mask | 0) || mask < 0 || mask > maskLimit) {
+          this._stationIconStatus = 'fallback-invalid-icons';
+          return;
+        }
+      }
+      this._stationIconMasks = masks;
+      this._stationIconStatus = 'ready';
+    },
+
+    _stationNumberListEquals: function(list, expected) {
+      if (!Array.isArray(list) || list.length !== expected.length) return false;
+      for (var i = 0; i < expected.length; i++) {
+        if (list[i] !== expected[i]) return false;
+      }
+      return true;
     },
 
     _stationMeasurementValid: function(measurement) {
@@ -701,6 +787,8 @@
       this._stationError = null;
       this._stationPlacement = null;
       this._stationPlacementStatus = 'not-loaded';
+      this._stationIconMasks = null;
+      this._stationIconStatus = 'not-loaded';
       this._stationPayloadMeta = null;
       this._stationSprites = {};
       this._stationMaxLabelWidth = 0;
@@ -965,6 +1053,7 @@
           self._allStations = stations;
           self._indexStations(stations);
           self._stationPayloadMeta = payload;
+          self._selectStationIcons();
           self._selectStationPlacement();
           self._stationLoaded = true;
           self._stationError = null;
@@ -1004,16 +1093,20 @@
             fieldIndex[fields[fi]] = fi;
           }
         }
-        var isCompact = payload.v === 2 || payload.v === 3;
+        var isCompact = payload.v === 2 || payload.v === 3 || payload.v === 4;
         var lonAt = isCompact ? fieldIndex.lon : (fieldIndex.lon != null ? fieldIndex.lon : 0);
         var latAt = isCompact ? fieldIndex.lat : (fieldIndex.lat != null ? fieldIndex.lat : 1);
         var nameAt = isCompact ? fieldIndex.name : (fieldIndex.name != null ? fieldIndex.name : 2);
         var nameEnAt = isCompact ? fieldIndex.name_en : (fieldIndex.name_en != null ? fieldIndex.name_en : 3);
         var railwayAt = isCompact ? fieldIndex.railway : (fieldIndex.railway != null ? fieldIndex.railway : 4);
         var countAt = isCompact ? fieldIndex.line_count : (fieldIndex.line_count != null ? fieldIndex.line_count : 5);
-        var tierAt = payload.v === 3 ? fieldIndex.display_tier : null;
+        var hasTier = payload.v === 3 || payload.v === 4;
+        var tierAt = hasTier ? fieldIndex.display_tier : null;
+        var modesAt = payload.v === 4 ? fieldIndex.modes : null;
+        var importanceAt = payload.v === 4 ? fieldIndex.importance : null;
         if (lonAt == null || latAt == null || nameAt == null || nameEnAt == null ||
-            railwayAt == null || countAt == null || (payload.v === 3 && tierAt == null)) {
+            railwayAt == null || countAt == null || (hasTier && tierAt == null) ||
+            (payload.v === 4 && modesAt == null)) {
           throw new Error('Invalid station fields');
         }
         for (var i = 0; i < rows.length; i++) {
@@ -1028,7 +1121,7 @@
             continue;
           }
           var displayTier = tierAt == null ? 0 : r[tierAt];
-          if (payload.v === 3 &&
+          if (hasTier &&
               (typeof displayTier !== 'number' || displayTier !== (displayTier | 0) ||
                displayTier < 0 || displayTier > 3)) {
             throw new Error('Invalid station display tier');
@@ -1037,6 +1130,8 @@
             lon: lon, lat: lat, name: r[nameAt] || '', name_en: r[nameEnAt] || '',
             railway: r[railwayAt] || 'station', line_count: Math.max(0, r[countAt] | 0),
             display_tier: displayTier | 0,
+            modes: this._stationModes(modesAt == null ? STATION_MODE_RAIL : r[modesAt]),
+            importance: this._stationImportance(importanceAt == null ? null : r[importanceAt]),
             _placementIndex: i
           });
         }
@@ -1059,6 +1154,18 @@
         });
       }
       return out;
+    },
+
+    // Unknown bits are dropped; a row with no known bit still draws the
+    // rail badge, as every pre-4.3.6 row does.
+    _stationModes: function(value) {
+      var modes = (typeof value === 'number' && isFinite(value) ? value | 0 : 0) &
+        (STATION_MODE_RAIL | STATION_MODE_JR | STATION_MODE_SHINKANSEN);
+      return modes || STATION_MODE_RAIL;
+    },
+
+    _stationImportance: function(value) {
+      return typeof value === 'number' && isFinite(value) && value > 0 ? value : 0;
     },
 
     _indexStations: function(stations) {
@@ -1485,8 +1592,29 @@
       ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
     },
 
-    _drawStationBadge: function(ctx, x, y, size) {
+    _drawStationBadge: function(ctx, x, y, size, kind) {
       var l = x - size / 2, t = y - size / 2, u = size / 24;
+      var glyph = kind ? STATION_BADGE_GLYPHS[kind] : null;
+      if (glyph) {
+        // JR / Shinkansen: same box, corner radius and white foreground as
+        // the rail badge, pure Path2D (no raster fast path).
+        this._roundRect(ctx, l + .5, t + .5, size - 1, size - 1, size * .23);
+        ctx.fillStyle = glyph.ground; ctx.fill();
+        if (typeof Path2D === 'function') {
+          if (!this._stationGlyphPaths) this._stationGlyphPaths = {};
+          var paths = this._stationGlyphPaths[kind];
+          if (!paths) {
+            paths = [];
+            for (var gi = 0; gi < glyph.paths.length; gi++) paths.push(new Path2D(glyph.paths[gi]));
+            this._stationGlyphPaths[kind] = paths;
+          }
+          ctx.save(); ctx.translate(l, t); ctx.scale(u, u);
+          ctx.fillStyle = '#fff';
+          for (var pi = 0; pi < paths.length; pi++) ctx.fill(paths[pi]);
+          ctx.restore();
+        }
+        return;
+      }
       if (this._stationBadgeImageStatus === 'ready' && this._stationBadgeImage) {
         var crop = STATION_BADGE_CROP;
         ctx.save();
@@ -1552,15 +1680,50 @@
 
     _stationShown: function(station, zoom) {
       if (zoom < this.options.stationMinZoom) return false;
+      var masks = this._stationIconMasks;
+      if (masks) {
+        var icons = this._stationPayloadMeta.icons;
+        var bit = Math.min(zoom, icons.zoomMax) - icons.zoomMin;
+        var mask = masks[station._placementIndex] | 0;
+        return bit >= 0 && bit < 31 && (mask & (1 << bit)) !== 0;
+      }
       var tier = this._stationTier(station);
       if (zoom === 12) return tier >= 2;
       if (zoom === 13) return tier >= 1;
       return zoom >= 14;
     },
 
+    // v4 payloads size by display_tier at every zoom. Older payloads keep the
+    // 4.3.5a rule (11 px through z14), which is what their build-time label
+    // placement was measured against.
     _stationBadgeSize: function(station, zoom) {
-      if (zoom <= 14) return STATION_SIZES[0] * this._stationStyleScale();
+      var payload = this._stationPayloadMeta;
+      if (zoom <= 14 && !(payload && payload.v === 4)) {
+        return STATION_SIZES[0] * this._stationStyleScale();
+      }
       return STATION_SIZES[this._stationTier(station)] * this._stationStyleScale();
+    },
+
+    _stationBadgeCount: function(zoom) {
+      var table = STATION_BADGE_COUNT_BY_ZOOM;
+      var index = Math.max(0, Math.min(table.length - 1, (zoom | 0) - STATION_MIN_ZOOM));
+      return table[index];
+    },
+
+    // Badge kinds drawn for a station at a whole zoom, in priority order.
+    _stationBadgeKinds: function(station, zoom) {
+      var modes = this._stationModes(station.modes);
+      var limit = this._stationBadgeCount(zoom);
+      var kinds = [];
+      for (var i = 0; i < STATION_BADGE_KINDS.length && kinds.length < limit; i++) {
+        if (modes & STATION_BADGE_KINDS[i].bit) kinds.push(STATION_BADGE_KINDS[i].kind);
+      }
+      return kinds;
+    },
+
+    _stationStripWidth: function(count, badge) {
+      var n = Math.max(1, count | 0);
+      return n * badge + (n - 1) * STATION_BADGE_GAP_PX * this._stationStyleScale();
     },
 
     _stationLabelVisible: function(station, zoom) {
@@ -1592,9 +1755,10 @@
       return Array.from(this._stationName(station)).length * this._stationFontPx() * 1.2;
     },
 
-    _stationSprite: function(size) {
+    _stationSprite: function(size, kind) {
       var dpr = this._stationDpr;
-      var key = size + '@' + dpr;
+      kind = kind || 'rail';
+      var key = kind + '|' + size + '@' + dpr;
       if (this._stationSprites[key]) return this._stationSprites[key];
       var canvas = document.createElement('canvas');
       var width = Math.max(1, Math.round(size * dpr));
@@ -1603,7 +1767,7 @@
       var ctx = canvas.getContext && canvas.getContext('2d');
       if (!ctx) return null;
       ctx.scale(width / size, width / size);
-      this._drawStationBadge(ctx, size / 2, size / 2, size);
+      this._drawStationBadge(ctx, size / 2, size / 2, size, kind === 'rail' ? null : kind);
       this._stationSprites[key] = canvas;
       return canvas;
     },
@@ -1625,13 +1789,14 @@
       var zoom = coords.z;
       var scale = this._stationStyleScale();
       var maxBadge = STATION_SIZES[STATION_SIZES.length - 1] * scale;
+      var maxStrip = this._stationStripWidth(this._stationBadgeCount(zoom), maxBadge);
       var fontPx = this._stationFontPx();
       var mayDrawLabels = !this._stationSuppressLabels && zoom >= 12;
       var margin = Math.ceil(mayDrawLabels
-        ? Math.max(maxBadge / 2 + 2,
+        ? Math.max(maxStrip / 2 + 2,
             this._stationMaxLabelWidth / 2 + STATION_LABEL_HALO_PX + 2,
             maxBadge / 2 + 3 + fontPx + STATION_LABEL_HALO_PX)
-        : maxBadge / 2 + 2);
+        : maxStrip / 2 + 2);
       var origin = coords.scaleBy(tileSize);
       var a = map.unproject([origin.x - margin, origin.y - margin], zoom);
       var b = map.unproject([origin.x + tileSize.x + margin,
@@ -1643,10 +1808,11 @@
         var station = candidates[i];
         if (!this._stationShown(station, zoom)) continue;
         var point = map.project([station.lat, station.lon], zoom).subtract(origin);
-        var tier = this._stationTier(station);
-        var badge = zoom <= 14 ? STATION_SIZES[0] * scale : STATION_SIZES[tier] * scale;
-        var iconRect = [point.x - badge / 2 - 1, point.y - badge / 2 - 1,
-                        point.x + badge / 2 + 1, point.y + badge / 2 + 1];
+        var badge = this._stationBadgeSize(station, zoom);
+        var kinds = this._stationBadgeKinds(station, zoom);
+        var strip = this._stationStripWidth(kinds.length, badge);
+        var iconRect = [point.x - strip / 2 - 1, point.y - badge / 2 - 1,
+                        point.x + strip / 2 + 1, point.y + badge / 2 + 1];
         var text = this._stationName(station);
         var showLabel = !!text && this._stationLabelVisible(station, zoom);
         var labelRect = null;
@@ -1661,6 +1827,7 @@
         if (!this._rectIntersectsTile(iconRect, tileSize) &&
             (!labelRect || !this._rectIntersectsTile(labelRect, tileSize))) continue;
         entries.push({station: station, point: point, badge: badge,
+                      kinds: kinds, strip: strip,
                       text: text, showLabel: showLabel});
       }
       if (!entries.length) {
@@ -1672,6 +1839,7 @@
       var owner = this;
       entries.sort(function(left, right) {
         return (owner._stationTier(left.station) - owner._stationTier(right.station)) ||
+          ((left.station.importance || 0) - (right.station.importance || 0)) ||
           (left.station.line_count - right.station.line_count) ||
           (left.station._placementIndex - right.station._placementIndex);
       });
@@ -1699,10 +1867,14 @@
       var snapY = function(value) { return Math.round(value * contextScaleY) / contextScaleY; };
       for (var j = 0; j < entries.length; j++) {
         var entry = entries[j];
-        var sprite = this._stationSprite(entry.badge);
-        if (sprite) {
-          ctx.drawImage(sprite, snapX(entry.point.x - entry.badge / 2),
-            snapY(entry.point.y - entry.badge / 2), entry.badge, entry.badge);
+        var step = entry.badge + STATION_BADGE_GAP_PX * scale;
+        var left = entry.point.x - entry.strip / 2;
+        for (var bi = 0; bi < entry.kinds.length; bi++) {
+          var sprite = this._stationSprite(entry.badge, entry.kinds[bi]);
+          if (sprite) {
+            ctx.drawImage(sprite, snapX(left + bi * step),
+              snapY(entry.point.y - entry.badge / 2), entry.badge, entry.badge);
+          }
         }
       }
       ctx.font = '600 ' + fontPx + 'px ' + this._stationFont;
@@ -1795,20 +1967,24 @@
       if (!this._map || !this._stationLoaded || !this._stationsVisible ||
           this._map.getZoom() < this.options.stationMinZoom) return null;
       var point = this._map.latLngToContainerPoint(latlng);
-      var tolerance = STATION_SIZES[2] * this._stationStyleScale() / 2 + 6;
+      var zoom = Math.floor(this._map.getZoom());
+      var tolerance = this._stationStripWidth(this._stationBadgeCount(zoom),
+        STATION_SIZES[2] * this._stationStyleScale()) / 2 + 6;
       var one = this._map.containerPointToLatLng([point.x - tolerance, point.y - tolerance]);
       var two = this._map.containerPointToLatLng([point.x + tolerance, point.y + tolerance]);
       var candidates = this._visibleStations(L.latLngBounds(one, two));
-      var zoom = Math.floor(this._map.getZoom());
       var best = null, bestDistance = Infinity;
       for (var i = 0; i < candidates.length; i++) {
         var station = candidates[i];
         if (!this._stationTemporaryNameAllowed(station, zoom)) continue;
         var projected = this._map.latLngToContainerPoint([station.lat, station.lon]);
         var dx = projected.x - point.x, dy = projected.y - point.y;
-        var radius = this._stationBadgeSize(station, zoom) / 2 + 5;
+        // Hit box = the drawn icon strip plus 5 px on every side.
+        var badge = this._stationBadgeSize(station, zoom);
+        var halfW = this._stationStripWidth(this._stationBadgeKinds(station, zoom).length, badge) / 2 + 5;
+        var halfH = badge / 2 + 5;
         var distance = dx * dx + dy * dy;
-        if (distance <= radius * radius && distance < bestDistance) {
+        if (Math.abs(dx) <= halfW && Math.abs(dy) <= halfH && distance < bestDistance) {
           best = station;
           bestDistance = distance;
         }

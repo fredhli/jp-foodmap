@@ -80,17 +80,37 @@ from tabelog.paths import (  # noqa: E402
     atomic_write_json,
 )
 from tabelog.scrape.station_payload import (  # noqa: E402
+    BADGE_COUNT_BY_ZOOM as STATION_BADGE_COUNT_BY_ZOOM,
+    BADGE_GAP_PX as STATION_BADGE_GAP_PX,
+    DENSITY_FLOOR_MAX_ZOOM,
+    DENSITY_FLOOR_STEPS,
+    DENSITY_GRID_DEG,
+    ICONS_VERSION,
+    IMPORTANCE_ALGORITHM,
+    IMPORTANCE_DIGITS,
     MAX_STATION_COUNT,
     MIN_STATION_COUNT,
+    MODE_ALL as STATION_MODE_ALL,
+    MODE_JR as STATION_MODE_JR,
+    MODE_SHINKANSEN as STATION_MODE_SHINKANSEN,
     OUTPUT_FIELDS as STATION_FIELDS,
     PAYLOAD_VERSION as STATION_PAYLOAD_VERSION,
     PLACEMENT_VERSION,
+    SHINKANSEN_BONUS,
     SOURCE_FIELDS as STATION_SOURCE_FIELDS,
-    STATION_IMPORTANCE_OVERRIDES_JSON,
+    SPACING_PX as STATION_SPACING_PX,
+    STATION_SIZES_PX,
     STATION_SOURCE_JSON,
+    TIER2_MIN_IMPORTANCE,
+    TIER3_MIN_IMPORTANCE,
+    TRAM_STOP_FACTOR,
+    W_LINES,
+    W_LTD,
+    W_OPERATORS,
     ZOOM_MAX as STATION_ZOOM_MAX,
     ZOOM_MIN as STATION_ZOOM_MIN,
     build_station_payload,
+    restaurant_coords_from_rows,
 )
 
 # --- constants ---------------------------------------------------------------
@@ -98,6 +118,26 @@ from tabelog.scrape.station_payload import (  # noqa: E402
 # Japan bounding box, generous at the edges (Yonaguni 122.9E / Minamitorishima
 # 153.99E / Okinotorishima 20.4N / Benten-jima 45.55N).
 JAPAN_BBOX = (20.0, 46.2, 122.5, 154.5)  # lat_min, lat_max, lon_min, lon_max
+
+# docs/transit-layer.js is a build output, but it embeds a second, hand-kept
+# copy of the icon-strip width model (STATION_SIZES / STATION_BADGE_GAP_PX)
+# that the v4 payload's icons.sizesPx/gapPx must agree with byte-for-byte --
+# a silent mismatch has the same symptom as no check at all: a label painted
+# over the neighbour's badge, with nothing in the console (4.3.6 spec §4).
+TRANSIT_LAYER_JS = DOCS_DIR / "transit-layer.js"
+
+# 4.3.6 grew the payload (per-row modes/importance, a whole icons block) well
+# past the 4.3.1a-era ceiling. Measured against the real corpus this lands
+# ~224 KiB gzip; the ceiling is not one of the spec's pinned numbers, just
+# this gate's regression guard, so it is raised with headroom rather than
+# left to fail on a correct build.
+STATION_GZIP_MAX_BYTES = 260 * 1024
+
+# 4.3.6 spec §1.2 / upstream handoff: modes bit counts, ±tolerance.
+STATION_SHINKANSEN_EXPECTED = 118
+STATION_SHINKANSEN_TOLERANCE = 5
+STATION_JR_EXPECTED = 4290
+STATION_JR_TOLERANCE_PCT = 0.03
 
 # How far restaurants.json may shrink versus the recorded baseline before the
 # build is considered broken.
@@ -107,7 +147,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.3.5a"
+EXPECTED_APP_VERSION = "4.3.6"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -570,8 +610,34 @@ def check_restaurants(baseline: dict, update_baseline: bool) -> None:
         ok("restaurants", "all coordinates inside the Japan bbox")
 
 
+_JS_NUMBER_RE = r"-?\d+(?:\.\d+)?"
+
+
+def _extract_js_number(text: str, name: str) -> float | int | None:
+    """The literal in a `var NAME = 123;` from docs/transit-layer.js, or None."""
+    m = re.search(rf"var\s+{name}\s*=\s*({_JS_NUMBER_RE})\s*;", text)
+    if not m:
+        return None
+    literal = m.group(1)
+    return float(literal) if "." in literal else int(literal)
+
+
+def _extract_js_number_list(text: str, name: str) -> list[float | int] | None:
+    """The literal in a `var NAME = [1, 2, 3];` from docs/transit-layer.js, or None."""
+    m = re.search(rf"var\s+{name}\s*=\s*\[([^\]]*)\]\s*;", text)
+    if not m:
+        return None
+    out: list[float | int] = []
+    for piece in m.group(1).split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        out.append(float(piece) if "." in piece else int(piece))
+    return out
+
+
 def check_station_payload() -> None:
-    """Validate the reproducible, content-addressed station payload."""
+    """Validate the reproducible, content-addressed v4 station payload."""
     if not MAP_HTML.exists():
         fail("stations", f"{MAP_HTML} does not exist — run map.py first")
         return
@@ -598,8 +664,20 @@ def check_station_payload() -> None:
     except json.JSONDecodeError as exc:
         fail("stations", f"payload is not valid JSON: {exc}")
         return
+
+    # 4.3.6 §2.4: the z12-z13 density floor is driven by the restaurant rows
+    # map.py is about to publish, passed into build_station_payload as an
+    # argument rather than read from disk inside it (so this module can stay
+    # a pure function of its inputs). Read the same published file back here
+    # so the gate reproduces the exact bytes map.py wrote.
+    restaurant_rows = load_json(RESTAURANTS_JSON)
+    if not isinstance(restaurant_rows, list):
+        fail("stations", f"{RESTAURANTS_JSON} is not a JSON array")
+        return
+    coords = restaurant_coords_from_rows(restaurant_rows)
+
     try:
-        expected_raw, build_meta = build_station_payload(STATION_SOURCE_JSON)
+        expected_raw, build_meta = build_station_payload(STATION_SOURCE_JSON, coords)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         fail("stations", f"checked-in station source cannot reproduce payload: {exc}")
         return
@@ -615,10 +693,17 @@ def check_station_payload() -> None:
         fail("stations", f"station count is {len(rows):,}, expected "
              f"{MIN_STATION_COUNT:,}–{MAX_STATION_COUNT:,}")
         return
+
+    # v4 fields: lon, lat, name, name_en, railway, line_count, display_tier,
+    # modes, importance (station_payload.OUTPUT_FIELDS). display_tier is
+    # always 1-3 now -- there is no 4.3.5a zero/fallback estimate left to
+    # special-case.
     lat_min, lat_max, lon_min, lon_max = JAPAN_BBOX
     bad = []
     tiers = [0, 0, 0]
     unnamed = 0
+    shinkansen_count = 0
+    jr_count = 0
     for i, row in enumerate(rows):
         if (not isinstance(row, list) or len(row) != len(STATION_FIELDS) or
                 not isinstance(row[0], (int, float)) or
@@ -628,18 +713,115 @@ def check_station_payload() -> None:
                 not isinstance(row[3], str) or
                 not isinstance(row[4], str) or
                 not isinstance(row[5], int) or row[5] < 0 or
-                not isinstance(row[6], int) or not 0 <= row[6] <= 3):
+                not isinstance(row[6], int) or not 1 <= row[6] <= 3 or
+                not isinstance(row[7], int) or not 1 <= row[7] <= STATION_MODE_ALL or
+                not isinstance(row[8], (int, float)) or row[8] < 0):
             bad.append((i, row))
             if len(bad) == 3:
                 break
         else:
             if not row[2]:
                 unnamed += 1
-            effective_tier = row[6] or (3 if row[5] >= 6 else 2 if row[5] >= 3 else 1)
-            tiers[effective_tier - 1] += 1
+            tiers[row[6] - 1] += 1
+            if row[7] & STATION_MODE_SHINKANSEN:
+                shinkansen_count += 1
+            if row[7] & STATION_MODE_JR:
+                jr_count += 1
     if bad:
         fail("stations", f"malformed station rows: {bad}")
         return
+
+    # 4.3.6 spec §1.2 / upstream self-check: modes bit distribution.
+    if abs(shinkansen_count - STATION_SHINKANSEN_EXPECTED) > STATION_SHINKANSEN_TOLERANCE:
+        fail(
+            "stations",
+            f"shinkansen (modes & 4) count is {shinkansen_count}, expected "
+            f"{STATION_SHINKANSEN_EXPECTED} ± {STATION_SHINKANSEN_TOLERANCE}",
+        )
+        return
+    jr_tolerance = STATION_JR_EXPECTED * STATION_JR_TOLERANCE_PCT
+    if abs(jr_count - STATION_JR_EXPECTED) > jr_tolerance:
+        fail(
+            "stations",
+            f"JR (modes & 2) count is {jr_count}, expected "
+            f"{STATION_JR_EXPECTED} ± {STATION_JR_TOLERANCE_PCT:.0%}",
+        )
+        return
+
+    # icons block (§2.4 / §2.6). The pairing the spec calls out by name: the
+    # payload's icon-strip width model has to agree with the renderer's own
+    # hand-kept copy of the same constants in transit-layer.js, or a label
+    # silently lands on top of the neighbour's badge with no error anywhere.
+    icons = payload.get("icons")
+    icon_masks = icons.get("maskByItem") if isinstance(icons, dict) else None
+    if (
+        not isinstance(icons, dict)
+        or icons.get("version") != ICONS_VERSION
+        or icons.get("zoomMin") != STATION_ZOOM_MIN
+        or icons.get("zoomMax") != STATION_ZOOM_MAX
+        or not isinstance(icon_masks, list)
+    ):
+        fail("stations", "icons block is missing or has the wrong version/zoom range")
+        return
+    if len(icon_masks) != len(rows):
+        fail(
+            "stations",
+            f"icons.maskByItem has {len(icon_masks)} entries, expected {len(rows)} "
+            "(one per station)",
+        )
+        return
+    icon_mask_limit = (1 << (STATION_ZOOM_MAX - STATION_ZOOM_MIN + 1)) - 1
+    if any(not isinstance(m, int) or not 0 <= m <= icon_mask_limit for m in icon_masks):
+        fail("stations", "icons.maskByItem contains an invalid mask")
+        return
+    if (
+        icons.get("sizesPx") != STATION_SIZES_PX
+        or icons.get("gapPx") != STATION_BADGE_GAP_PX
+        or icons.get("badgeCountByZoom") != STATION_BADGE_COUNT_BY_ZOOM
+        or icons.get("spacingPx") != {
+            str(z): STATION_SPACING_PX[z] for z in range(STATION_ZOOM_MIN, STATION_ZOOM_MAX + 1)
+        }
+        or icons.get("densityFloor") != {
+            "grid": DENSITY_GRID_DEG,
+            "steps": [[count, floor] for count, floor in DENSITY_FLOOR_STEPS],
+            "maxZoom": DENSITY_FLOOR_MAX_ZOOM,
+        }
+    ):
+        fail("stations", "icons block does not match station_payload.py's own constants")
+        return
+    if not TRANSIT_LAYER_JS.exists():
+        fail("stations", f"{TRANSIT_LAYER_JS} does not exist — run map.py first")
+        return
+    js = TRANSIT_LAYER_JS.read_text(encoding="utf-8")
+    js_sizes = _extract_js_number_list(js, "STATION_SIZES")
+    js_gap = _extract_js_number(js, "STATION_BADGE_GAP_PX")
+    js_badge_count = _extract_js_number_list(js, "STATION_BADGE_COUNT_BY_ZOOM")
+    js_zoom_min = _extract_js_number(js, "STATION_MIN_ZOOM")
+    if js_sizes is None or js_gap is None or js_badge_count is None or js_zoom_min is None:
+        fail(
+            "stations",
+            "could not find STATION_SIZES / STATION_BADGE_GAP_PX / "
+            "STATION_BADGE_COUNT_BY_ZOOM / STATION_MIN_ZOOM in transit-layer.js",
+        )
+        return
+    if (
+        icons.get("sizesPx") != js_sizes
+        or icons.get("gapPx") != js_gap
+        or icons.get("badgeCountByZoom") != js_badge_count
+        or icons.get("zoomMin") != js_zoom_min
+    ):
+        fail(
+            "stations",
+            f"icons sizesPx/gapPx/badgeCountByZoom/zoomMin "
+            f"{icons.get('sizesPx')}/{icons.get('gapPx')}/{icons.get('badgeCountByZoom')}/"
+            f"{icons.get('zoomMin')} disagree with transit-layer.js's STATION_SIZES/"
+            f"STATION_BADGE_GAP_PX/STATION_BADGE_COUNT_BY_ZOOM/STATION_MIN_ZOOM "
+            f"{js_sizes}/{js_gap}/{js_badge_count}/{js_zoom_min} — a build-time/render-time "
+            "icon-strip-width mismatch lets a label land on the neighbour's badge with no "
+            "error anywhere",
+        )
+        return
+
     placement = payload.get("placement")
     profiles = placement.get("profiles") if isinstance(placement, dict) else None
     measurement = placement.get("measurement") if isinstance(placement, dict) else None
@@ -670,8 +852,11 @@ def check_station_payload() -> None:
         if any(mask & 1 for mask in masks):
             fail("stations", f"{profile_key} contains a fixed station label at z12")
             return
+        # display_tier (row[6]) replaces the 4.3.5a effective-tier estimate
+        # (a fallback computed from raw line_count) -- §2.3 always writes the
+        # real tier, so the z13 mega-hub check reads it directly.
         if any(
-            (mask & 2) and (rows[i][6] or (3 if rows[i][5] >= 6 else 2 if rows[i][5] >= 3 else 1)) < 3
+            (mask & 2) and rows[i][6] < 3
             for i, mask in enumerate(masks)
         ):
             fail("stations", f"{profile_key} labels a non-mega-hub station at z13")
@@ -712,37 +897,73 @@ def check_station_payload() -> None:
         or source.get("sha256") != build_meta.get("sourceSha256")
         or source.get("fields") != STATION_SOURCE_FIELDS
         or source.get("stationCount") != len(rows)
+        or source.get("restaurantCount") != len(coords)
     ):
-        fail("stations", "source hash, source fields or source row count is wrong")
+        fail("stations", "source hash, source fields, row count or restaurant count is wrong")
         return
     importance = payload.get("importance")
-    importance_raw = STATION_IMPORTANCE_OVERRIDES_JSON.read_bytes()
     if (
         not isinstance(importance, dict)
-        or importance.get("version") != 1
-        or importance.get("reviewed") != "2026-09-16"
-        or importance.get("overrideCount") != 18
-        or importance.get("overrideCount") != build_meta.get("importance", {}).get("overrideCount")
-        or importance.get("configSha256") != hashlib.sha256(importance_raw).hexdigest()
+        or importance.get("algorithm") != IMPORTANCE_ALGORITHM
+        or importance.get("weights") != {
+            "lines": W_LINES, "operators": W_OPERATORS, "ltd": W_LTD,
+            "shinkansen": SHINKANSEN_BONUS,
+        }
+        or importance.get("tramStopFactor") != TRAM_STOP_FACTOR
+        or importance.get("roundDigits") != IMPORTANCE_DIGITS
+        or importance.get("tierMinImportance") != [0.0, TIER2_MIN_IMPORTANCE, TIER3_MIN_IMPORTANCE]
+        or importance.get("tierCounts") != tiers
     ):
-        fail("stations", "importance override metadata is missing or stale")
+        fail("stations", "importance block does not match the continuous-v1 algorithm constants")
         return
     wire = len(gzip.compress(raw, compresslevel=9, mtime=0))
-    if wire > 210 * 1024:
-        fail("stations", f"deterministic gzip is {wire:,} bytes, exceeds 210 KiB")
+    if wire > STATION_GZIP_MAX_BYTES:
+        fail(
+            "stations",
+            f"deterministic gzip is {wire:,} bytes, exceeds "
+            f"{STATION_GZIP_MAX_BYTES // 1024} KiB",
+        )
         return
     if not all(tiers):
-        fail("stations", f"one of the three line-count tiers is empty: {tiers}")
+        fail("stations", f"one of the three size tiers is empty: {tiers}")
         return
     if unnamed > 50:
         fail("stations", f"{unnamed} unnamed rows exceed the 50-row tolerance")
         return
+
+    # §2.1: the overrides file and every loader for it are gone.
+    overrides_path = STATION_SOURCE_JSON.parent / "station_importance_overrides.json"
+    if overrides_path.exists():
+        fail("stations", f"{overrides_path} should have been deleted in 4.3.6 (§2.1)")
+        return
+    stale_names = ("station_importance_overrides", "apply_importance_overrides",
+                    "STATION_IMPORTANCE_OVERRIDES")
+    stale_hits = []
+    for stale_path in (
+        STATION_SOURCE_JSON.parent / "station_payload.py",
+        MAP_PY,
+        TRANSIT_LAYER_JS,
+    ):
+        if not stale_path.exists():
+            continue
+        text = stale_path.read_text(encoding="utf-8", errors="ignore")
+        for name in stale_names:
+            if name in text:
+                stale_hits.append(f"{stale_path.relative_to(REPO)}: {name!r}")
+    if stale_hits:
+        fail("stations", f"stale importance-override reference(s): {stale_hits}")
+        return
+
     visible = {
         key: sum(1 for mask in profile["visibleMaskByItem"] if mask)
         for key, profile in profiles.items()
     }
-    ok("stations", f"{len(rows):,} rows ({unnamed} unnamed), sha {actual_hash}, "
-       f"{wire / 1024:.1f} KiB gzip, tiers {tiers}, labels {visible}")
+    ok(
+        "stations",
+        f"{len(rows):,} rows ({unnamed} unnamed), sha {actual_hash}, "
+        f"{wire / 1024:.1f} KiB gzip, tiers {tiers}, shinkansen {shinkansen_count}, "
+        f"JR {jr_count}, labels {visible}",
+    )
 
 
 def check_localstorage_keys() -> None:
