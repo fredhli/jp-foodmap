@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused 4.3.3a station visibility, tooltip and layer-order check."""
+"""Focused station visibility, tooltip and layer-order check."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "audit_output" / "4.3.3a"
+OUT = ROOT / "audit_output" / "4.3.5a"
 sys.path.insert(0, str(ROOT / "tests"))
 import lib_browser  # noqa: E402
 
@@ -49,7 +49,7 @@ def main() -> int:
         assert not station_requests, station_requests
 
         rows: dict[str, object] = {}
-        for zoom, expected in ((12, 72), (13, 607), (14, 8954)):
+        for zoom, expected in ((12, 90), (13, 610), (14, 8954)):
             page.evaluate("([c,z]) => MapMod.map.setView(c,z,{animate:false})", [TOKYO, zoom])
             page.wait_for_function("() => MapMod.stationDetail().loaded", timeout=60_000)
             page.wait_for_timeout(350)
@@ -77,7 +77,9 @@ def main() -> int:
             clickBound:!!transit._onStationClickBound,hoverBound:!!transit._onStationMouseMoveBound,
             tip:!!transit._stationHoverTip};
         }""")
-        assert interaction == {"tooltips": 1, "clickBound": True, "hoverBound": False, "tip": True}, interaction
+        assert interaction == {
+            "tooltips": 0, "clickBound": False, "hoverBound": False, "tip": False
+        }, interaction
 
         page.locator('[data-fab="layers"]').click()
         page.wait_for_selector('[data-ov="layer-toggle"][data-layer="stations"]')

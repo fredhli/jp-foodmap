@@ -534,7 +534,7 @@
       var rowsLength = this._allStations.length;
       this._stationPlacement = null;
       this._stationSuppressLabels = false;
-      if (!payload || payload.v !== 2 || !placement) {
+      if (!payload || (payload.v !== 2 && payload.v !== 3) || !placement) {
         this._stationPlacementStatus = payload ? 'fallback-legacy-v1' : 'not-loaded';
       } else if (placement.version !== 1 || placement.zoomMin !== 12 ||
                  placement.zoomMax !== 19 || !placement.profiles) {
@@ -1004,31 +1004,39 @@
             fieldIndex[fields[fi]] = fi;
           }
         }
-        var isV2 = payload.v === 2;
-        var lonAt = isV2 ? fieldIndex.lon : (fieldIndex.lon != null ? fieldIndex.lon : 0);
-        var latAt = isV2 ? fieldIndex.lat : (fieldIndex.lat != null ? fieldIndex.lat : 1);
-        var nameAt = isV2 ? fieldIndex.name : (fieldIndex.name != null ? fieldIndex.name : 2);
-        var nameEnAt = isV2 ? fieldIndex.name_en : (fieldIndex.name_en != null ? fieldIndex.name_en : 3);
-        var railwayAt = isV2 ? fieldIndex.railway : (fieldIndex.railway != null ? fieldIndex.railway : 4);
-        var countAt = isV2 ? fieldIndex.line_count : (fieldIndex.line_count != null ? fieldIndex.line_count : 5);
+        var isCompact = payload.v === 2 || payload.v === 3;
+        var lonAt = isCompact ? fieldIndex.lon : (fieldIndex.lon != null ? fieldIndex.lon : 0);
+        var latAt = isCompact ? fieldIndex.lat : (fieldIndex.lat != null ? fieldIndex.lat : 1);
+        var nameAt = isCompact ? fieldIndex.name : (fieldIndex.name != null ? fieldIndex.name : 2);
+        var nameEnAt = isCompact ? fieldIndex.name_en : (fieldIndex.name_en != null ? fieldIndex.name_en : 3);
+        var railwayAt = isCompact ? fieldIndex.railway : (fieldIndex.railway != null ? fieldIndex.railway : 4);
+        var countAt = isCompact ? fieldIndex.line_count : (fieldIndex.line_count != null ? fieldIndex.line_count : 5);
+        var tierAt = payload.v === 3 ? fieldIndex.display_tier : null;
         if (lonAt == null || latAt == null || nameAt == null || nameEnAt == null ||
-            railwayAt == null || countAt == null) {
+            railwayAt == null || countAt == null || (payload.v === 3 && tierAt == null)) {
           throw new Error('Invalid station fields');
         }
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           if (!Array.isArray(r) || r.length < 2) {
-            if (isV2) throw new Error('Invalid station row');
+            if (isCompact) throw new Error('Invalid station row');
             continue;
           }
           var lon = +r[lonAt], lat = +r[latAt];
           if (!isFinite(lon) || !isFinite(lat)) {
-            if (isV2) throw new Error('Invalid station coordinate');
+            if (isCompact) throw new Error('Invalid station coordinate');
             continue;
+          }
+          var displayTier = tierAt == null ? 0 : r[tierAt];
+          if (payload.v === 3 &&
+              (typeof displayTier !== 'number' || displayTier !== (displayTier | 0) ||
+               displayTier < 0 || displayTier > 3)) {
+            throw new Error('Invalid station display tier');
           }
           out.push({
             lon: lon, lat: lat, name: r[nameAt] || '', name_en: r[nameEnAt] || '',
             railway: r[railwayAt] || 'station', line_count: Math.max(0, r[countAt] | 0),
+            display_tier: displayTier | 0,
             _placementIndex: i
           });
         }
@@ -1046,7 +1054,8 @@
         if (!isFinite(x) || !isFinite(y)) continue;
         out.push({
           lon: x, lat: y, name: p.name || '', name_en: p.name_en || '',
-          railway: p.railway || 'station', line_count: Math.max(0, p.line_count | 0)
+          railway: p.railway || 'station', line_count: Math.max(0, p.line_count | 0),
+          display_tier: Math.max(0, Math.min(3, p.display_tier | 0))
         });
       }
       return out;
@@ -1103,6 +1112,7 @@
               name_en: p.name_en,
               railway: p.railway,               // tram_stop styling
               line_count: p.line_count | 0,     // hub sizing + label suffix
+              display_tier: Math.max(0, Math.min(3, p.display_tier | 0)),
               // Left undefined when absent on purpose: _redraw's legacy
               // fallback keys off `typeof ... === 'undefined'`.
               has_long_line: p.has_long_line,
@@ -1534,15 +1544,17 @@
     },
 
     _stationTier: function(station) {
+      var displayTier = station.display_tier | 0;
+      if (displayTier >= 1 && displayTier <= 3) return displayTier - 1;
       var count = station.line_count | 0;
       return count >= 6 ? 2 : count >= 3 ? 1 : 0;
     },
 
     _stationShown: function(station, zoom) {
       if (zoom < this.options.stationMinZoom) return false;
-      var count = station.line_count | 0;
-      if (zoom === 12) return count >= 6;
-      if (zoom === 13) return count >= 3;
+      var tier = this._stationTier(station);
+      if (zoom === 12) return tier >= 2;
+      if (zoom === 13) return tier >= 1;
       return zoom >= 14;
     },
 
@@ -1560,9 +1572,8 @@
         var mask = this._stationPlacement.visibleMaskByItem[station._placementIndex] | 0;
         return bit >= 0 && bit < 31 && (mask & (1 << bit)) !== 0;
       }
-      var count = station.line_count | 0;
       if (zoom === 12) return false;
-      if (zoom === 13) return count >= 6;
+      if (zoom === 13) return this._stationTier(station) >= 2;
       return zoom >= 14;
     },
 
@@ -1658,8 +1669,10 @@
         empty.className = 'transit-station-tile-empty';
         return empty;
       }
+      var owner = this;
       entries.sort(function(left, right) {
-        return (left.station.line_count - right.station.line_count) ||
+        return (owner._stationTier(left.station) - owner._stationTier(right.station)) ||
+          (left.station.line_count - right.station.line_count) ||
           (left.station._placementIndex - right.station._placementIndex);
       });
       var canvas = document.createElement('canvas');

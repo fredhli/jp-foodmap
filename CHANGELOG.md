@@ -13,6 +13,24 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.5a] - 2026-09-16
+
+Major station importance is now independent of the noisy nearby-route count.
+The station build preserves every source coordinate and raw `line_count`, then
+applies 18 reviewed nationwide `display_tier` overrides from a small declarative
+file. Each rule carries its reason, official source and review date, matches by
+name plus coordinate radius, and fails the build unless it identifies exactly
+one station.
+
+The effective tier now drives the complete station presentation path: z12/z13
+visibility, build-time label candidates and ordering, z15+ badge size, runtime
+draw order, and temporary-name eligibility. The 4.3.4a name behavior remains:
+z12 has temporary names only, z13 fixes collision-safe tier-3 names and offers
+temporary names for the rest, and z14+ uses fixed collision-placed names with
+temporary interaction disabled. The payload adds only one low-entropy numeric
+field; no station IDs, coordinates, line counts, CARTO styles or menu order
+change.
+
 ## [4.3.4a] - 2026-09-16
 
 Station names render again. The z12–19 placement payload uses an 8-bit mask;

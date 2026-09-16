@@ -172,7 +172,7 @@ html[data-search-active] #map-root .leaflet-control-container { display: none; }
   width: max-content;
   pointer-events: none;
 }
-/* --st-r is the diameter map.js computes per station (line_count tier x zoom band,
+/* --st-r is the diameter map.js computes per station (effective tier x zoom band,
    the production radii). §6.5's 4px normal / 6px major are the z15 values. */
 .mp-st-dot {
   width: var(--st-r, 8px); height: var(--st-r, 8px); flex: none;

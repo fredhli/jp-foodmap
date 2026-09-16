@@ -231,7 +231,7 @@ uv run python scripts/verify_build.py
 .venv-wsl/bin/python -m http.server 8901 --bind 127.0.0.1   # then /docs/index.html
 ```
 
-## Station payload (4.3.4a)
+## Station payload (4.3.5a)
 
 `src/tabelog/scrape/station_source_v1.json` is the checked-in six-field input
 with 8,954 stations. A normal `map.py` build calls `station_payload.py`, verifies
@@ -239,16 +239,19 @@ that source and writes `docs/data/stations.<sha12>.json`. The
 adapter receives that exact hashed URL through `__STATION_URL__`; no unhashed or
 untracked station file is a build input.
 
-The runtime payload is v2. Its six positional fields retain the 4.3.0
-semantics and source order. `placement.version === 1` carries two profiles:
+The runtime payload is v3. Its first six positional fields retain the 4.3.0
+semantics and source order; the seventh is a low-entropy `display_tier` number
+(`0` means use the legacy `line_count` thresholds). Reviewed rules live in
+`station_importance_overrides.json` and must each match exactly one source row
+by name and coordinate radius. `placement.version === 1` carries two profiles:
 `local-max130` uses the Japanese station name, and `en-max130` uses the English
 name with Japanese fallback. Each profile has a row-aligned
 `visibleMaskByItem` (bits 0–7 mean z12–z19) and `labelWidthByItem` in CSS px.
 Placement is computed independently for the whole country at each integer zoom,
 so every tile reads the same label set.
 
-4.3.4a keeps bit 0 (z12) empty, limits bit 1 (z13) to collision-safe 6-line
-hubs, and allows every visible tier into collision placement from z14. Stations
+4.3.5a keeps bit 0 (z12) empty, limits bit 1 (z13) to collision-safe effective
+tier-3 hubs, and allows every visible tier into collision placement from z14. Stations
 without a fixed name use click/hover labels only at z12–13; z14+ has no station
 tooltip interaction.
 

@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "reviewed": "2026-09-16",
+  "rules": [
+    {
+      "name": "札幌",
+      "near": [141.35092, 43.06864],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "北海道の広域鉄道玄関口で、隣接する地下鉄さっぽろ駅と南北線・東豊線に接続する主アンカー。",
+      "source": [
+        "https://www.jrhokkaido.co.jp/network/station/station.html",
+        "https://www.city.sapporo.jp/st/passageway.html"
+      ]
+    },
+    {
+      "name": "仙台",
+      "near": [140.8812, 38.26005],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "東北の新幹線・在来線・地下鉄結節点。地下鉄南北線の近接線分を現在の頂点距離計数が取りこぼす。",
+      "source": [
+        "https://www.kotsu.city.sendai.jp/subway/station/",
+        "https://www.kotsu.city.sendai.jp/sendai/"
+      ]
+    },
+    {
+      "name": "長野",
+      "near": [138.18858, 36.64339],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "北陸新幹線、信越・篠ノ井・飯山各線、しなの鉄道、長野電鉄を結ぶ地域の主要結節点。",
+      "source": [
+        "https://www.jreast.co.jp/estation/stations/1105.html"
+      ]
+    },
+    {
+      "name": "金沢",
+      "near": [136.64875, 36.57817],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "北陸新幹線、IRいしかわ鉄道、七尾線、北陸鉄道の地域の主要結節点。",
+      "source": [
+        "https://eki.jr-odekake.net/premises?id=0541449"
+      ]
+    },
+    {
+      "name": "富山",
+      "near": [137.21374, 36.70095],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "北陸新幹線、高山本線、あいの風とやま鉄道、富山地方鉄道・市内電車を結ぶ地域の主要結節点。",
+      "source": [
+        "https://eki.jr-odekake.net/premises?id=0541465",
+        "https://www.chitetsu.co.jp/english/jp/trams/"
+      ]
+    },
+    {
+      "name": "大阪",
+      "near": [135.49557, 34.70221],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "大阪・梅田駅群のJR主アンカー。JR各線と周辺私鉄・地下鉄を結ぶ全国級の主要結節点。",
+      "source": [
+        "https://eki.jr-odekake.net/premises?id=0610130"
+      ]
+    },
+    {
+      "name": "梅田",
+      "near": [135.49768, 34.70341],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "大阪梅田を含む阪急・阪神・Osaka Metro側の主アンカー。大阪駅と一体の全国級駅群。",
+      "source": [
+        "https://subway.osakametro.co.jp/station_guide/M/m16/map.php/map.php"
+      ]
+    },
+    {
+      "name": "難波",
+      "near": [135.50178, 34.66366],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "大阪難波駅群の南海側主アンカー。Metro・近鉄・阪神・JR側との広域結節点。",
+      "source": [
+        "https://subway.osakametro.co.jp/station_guide/Y/y15/map.php"
+      ]
+    },
+    {
+      "name": "なんば",
+      "near": [135.49849, 34.66688],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "大阪難波を含むMetro・近鉄・阪神側の主アンカー。御堂筋・四つ橋・千日前線の乗換駅。",
+      "source": [
+        "https://subway.osakametro.co.jp/station_guide/Y/y15/map.php"
+      ]
+    },
+    {
+      "name": "天王寺",
+      "near": [135.51468, 34.64762],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "JR、御堂筋線、谷町線、近鉄、阪堺を結ぶ大阪南部の主要結節点。固定半径計数は地下鉄線を十分反映しない。",
+      "source": [
+        "https://subway.osakametro.co.jp/station_guide/m/m23/joukouichi.php"
+      ]
+    },
+    {
+      "name": "新大阪",
+      "near": [135.5002, 34.73351],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "東海道・山陽新幹線、JR在来線、御堂筋線の全国級乗換駅。御堂筋線を固定半径計数が取りこぼす。",
+      "source": [
+        "https://subway.osakametro.co.jp/en/station_guide/M/m13/index.php"
+      ]
+    },
+    {
+      "name": "広島",
+      "near": [132.47536, 34.39737],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "山陽新幹線、山陽・可部・呉・芸備各線と広島電鉄を結ぶ中国地方の主要結節点。",
+      "source": [
+        "https://eki.jr-odekake.net/premises?id=0800613"
+      ]
+    },
+    {
+      "name": "高松",
+      "near": [134.04615, 34.35069],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "本州連絡と四国各方面列車が集まるJR四国の主要駅。複数ある同名駅は座標で香川県の主駅だけに限定。",
+      "source": [
+        "https://www.jr-shikoku.co.jp/01_trainbus/kakueki/takamatsu/"
+      ]
+    },
+    {
+      "name": "松山市",
+      "near": [132.76196, 33.83582],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "伊予鉄道の高浜・横河原・郡中三線と市内電車が集まる松山市中心部の主アンカー。JR松山は別の駅として扱う。",
+      "source": [
+        "https://www.iyotetsu.co.jp/information/station/station.html?t=shieki",
+        "https://www.iyotetsu.co.jp/rosen/map/"
+      ]
+    },
+    {
+      "name": "博多",
+      "near": [130.42052, 33.58999],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "山陽・九州新幹線、JR在来線、地下鉄空港線・七隈線の九州の主要結節点。",
+      "source": [
+        "https://subway.city.fukuoka.lg.jp/eki/stations/hakata.php",
+        "https://www.jrkyushu.co.jp/railway/station/1191771_1601.html"
+      ]
+    },
+    {
+      "name": "熊本",
+      "near": [130.68621, 32.79036],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "九州新幹線、鹿児島本線、豊肥本線、三角線の地域の主要結節点。現在の近接route-key数0は実態を表さない。",
+      "source": [
+        "https://www.jrkyushu.co.jp/railway/station/1191555_1601.html",
+        "https://www.jrkyushu.co.jp/railway/station/search.html?eki=%E7%94%B1%E5%B8%83%E9%99%A2"
+      ]
+    },
+    {
+      "name": "鹿児島中央",
+      "near": [130.54272, 31.58372],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "九州新幹線、鹿児島・日豊・指宿枕崎各線が集まる南九州の主要結節点。",
+      "source": [
+        "https://www.jrkyushu.co.jp/railway/station/search.html?eki=%E5%B0%8F%E5%80%89"
+      ]
+    },
+    {
+      "name": "長崎",
+      "near": [129.86888, 32.75217],
+      "radius_m": 120,
+      "display_tier": 3,
+      "reason": "西九州新幹線と長崎本線の地域終端主駅。県外の同名停留場は座標で除外。",
+      "source": [
+        "https://www.jrkyushu.co.jp/railway/station/1191726_1601.html",
+        "https://www.jrkyushu.co.jp/railway/station/search.html?eki=%E5%B0%8F%E5%80%89"
+      ]
+    }
+  ]
+}

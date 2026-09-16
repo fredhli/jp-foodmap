@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused 4.3.4a fixed-label and station-tooltip regression check."""
+"""Focused station fixed-label, tooltip and importance-tier regression check."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "audit_output" / "4.3.4a"
+OUT = ROOT / "audit_output" / "4.3.5a"
 sys.path.insert(0, str(ROOT / "tests"))
 import lib_browser  # noqa: E402
 
@@ -63,7 +63,7 @@ def main() -> int:
         assert not z12["drawn"] and z12["fixedMasks"] == 0, z12
         assert z12["maxMask"] > 63, z12
         assert z12["detail"]["placementStatus"] == "ready" and not z12["detail"]["labelsSuppressed"], z12
-        assert z12["tiers"] == [72, 607, 8954], z12
+        assert z12["tiers"] == [90, 610, 8954], z12
         page.screenshot(path=str(OUT / "station-z12-names.png"), full_page=False)
 
         z12_lifecycle = page.evaluate("""async station => {
@@ -104,7 +104,7 @@ def main() -> int:
           const bounds=MapMod.map.getBounds(),center=MapMod.map.getCenter();
           const visible=transit._allStations.filter(s=>bounds.contains([s.lat,s.lon])&&transit._stationShown(s,z));
           const fixed=visible.filter(s=>(transit._stationPlacement.visibleMaskByItem[s._placementIndex]&(1<<bit))!==0);
-          const tier2=visible.filter(s=>s.line_count>=3&&s.line_count<6);
+          const tier2=visible.filter(s=>transit._stationTier(s)===1);
           fixed.sort((a,b)=>center.distanceTo([a.lat,a.lon])-center.distanceTo([b.lat,b.lon]));
           tier2.sort((a,b)=>center.distanceTo([a.lat,a.lon])-center.distanceTo([b.lat,b.lon]));
           if(!fixed[0]||!tier2[0])throw new Error('z13 fixture lacks fixed tier3 or temporary tier2');
@@ -144,18 +144,42 @@ def main() -> int:
         assert z14["detail"]["placementStatus"] == "ready" and not z14["detail"]["labelsSuppressed"], z14
         page.screenshot(path=str(OUT / "station-z14-names.png"), full_page=False)
 
+        importance = page.evaluate("""() => {
+          const transit=Object.values(MapMod.map._layers).find(x=>x&&x._stationGridLayer);
+          const wanted=['大阪','梅田','難波','なんば','札幌','仙台','博多','熊本'];
+          return wanted.map(name=>{
+            const s=transit._allStations.find(x=>x.name===name&&x.display_tier===3);
+            if(!s)throw new Error('missing tier override: '+name);
+            const states=[12,13,14].map(z=>{
+              const bit=z-transit._stationPayloadMeta.placement.zoomMin;
+              const fixed=(transit._stationPlacement.visibleMaskByItem[s._placementIndex]&(1<<bit))!==0;
+              return {zoom:z,shown:transit._stationShown(s,z),fixed,
+                temporary:transit._stationTemporaryNameAllowed(s,z)};
+            });
+            return {name,raw:s.line_count,displayTier:s.display_tier,
+              effectiveTier:transit._stationTier(s)+1,states};
+          });
+        }""")
+        for station in importance:
+            assert station["effectiveTier"] == 3 and station["displayTier"] == 3, station
+            z12_state, z13_state, z14_state = station["states"]
+            assert z12_state == {"zoom": 12, "shown": True, "fixed": False, "temporary": True}, station
+            assert z13_state["shown"] and (z13_state["fixed"] != z13_state["temporary"]), station
+            assert z14_state["shown"] and not z14_state["temporary"], station
+
         page.locator('[data-fab="layers"]').click()
         page.wait_for_selector('[data-ov="layer-toggle"][data-layer="stations"]')
         order = page.locator('[data-ov="layer-toggle"]').evaluate_all("els=>els.map(x=>x.dataset.layer)")
         assert order[:3] == ["stations", "long", "city"], order
 
         report = {"z12": z12, "z12Lifecycle": z12_lifecycle, "z13": z13,
-                  "z13Interaction": z13_interaction, "z14": z14, "layerOrder": order}
+                  "z13Interaction": z13_interaction, "z14": z14,
+                  "importance": importance, "layerOrder": order}
         (OUT / "station-names.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         context.close(); browser.close()
-    print(f"station_names_434.py OK: {OUT / 'station-names.json'}")
+    print(f"station name regression OK: {OUT / 'station-names.json'}")
     return 0
 
 

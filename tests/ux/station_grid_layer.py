@@ -261,7 +261,8 @@ def assert_boundary_overdraw(page: Page) -> dict:
         const p=map.project([s.lat,s.lon],z), rx=((p.x%ts.x)+ts.x)%ts.x, ry=((p.y%ts.y)+ts.y)%ts.y;
         return {s,p,edge:Math.min(rx,ts.x-rx,ry,ts.y-ry),rx,ry};
       }).filter(x => x.edge<5 && (x.s.name||'').length>=2)
-        .sort((a,b) => (b.s.line_count-a.s.line_count)||a.edge-b.edge)[0];
+        .sort((a,b) => (transit._stationTier(b.s)-transit._stationTier(a.s))||
+          (b.s.line_count-a.s.line_count)||a.edge-b.edge)[0];
       if(!candidate) throw new Error('no real station close to a tile boundary');
       map.setView([candidate.s.lat,candidate.s.lon],z,{animate:false});
       await new Promise(resolve => setTimeout(resolve,450));
@@ -301,11 +302,11 @@ def assert_long_label_overdraw(page: Page) -> dict:
       const candidates=[];
       for(const s of transit._allStations){
         const i=s._placementIndex,mask=placement.visibleMaskByItem[i]|0;
-        if((mask&2)===0)continue;
+        if((mask&(1<<(z-transit._stationPayloadMeta.placement.zoomMin)))===0)continue;
         const text=transit._stationName(s),actual=measure.measureText(text).width;
         if(actual<45)continue;
         const p=map.project([s.lat,s.lon],z),rx=((p.x%ts.x)+ts.x)%ts.x;
-        const edge=Math.min(rx,ts.x-rx),badge=(s.line_count>=6?18:s.line_count>=3?14:11)*transit._stationStyleScale();
+        const edge=Math.min(rx,ts.x-rx),badge=[11,14,18][transit._stationTier(s)]*transit._stationStyleScale();
         if(edge>badge/2+4&&edge<actual/2-5)candidates.push({s,p,edge,actual,badge,text});
       }
       candidates.sort((a,b)=>b.actual-a.actual);
@@ -391,14 +392,15 @@ def assert_payload_measurement_and_collisions(page: Page, payload: dict) -> dict
         for(let z=12;z<=19;z++){
           const hash=new Map(), labels=[], violations=[];
           for(let i=0;i<rows.length;i++){
-            const row=rows[i], pt=project(row[0],row[1],z), size=z<=14?11:(row[5]>=6?18:row[5]>=3?14:11);
-            if((z===12&&row[5]>=6)||(z===13&&row[5]>=3)||z>=14){
+            const row=rows[i],pt=project(row[0],row[1],z),tier=row[6]||(row[5]>=6?3:row[5]>=3?2:1);
+            const size=z<=14?11:[11,14,18][tier-1];
+            if((z===12&&tier>=3)||(z===13&&tier>=2)||z>=14){
               const r=[pt[0]-size/2-2,pt[1]-size/2-2,pt[0]+size/2+2,pt[1]+size/2+2];
-              add(hash,r,{kind:'badge',i,id:row[6]});
+              add(hash,r,{kind:'badge',i,id:i});
             }
             if((p.visibleMaskByItem[i]&(1<<(z-12)))!==0){
               const baseline=pt[1]-size/2-3,w=p.labelWidthByItem[i];
-              labels.push({i,id:row[6],r:[pt[0]-w/2-3,baseline-14.3-3,pt[0]+w/2+3,baseline+3]});
+              labels.push({i,id:i,r:[pt[0]-w/2-3,baseline-14.3-3,pt[0]+w/2+3,baseline+3]});
             }
           }
           for(const label of labels){
@@ -736,7 +738,7 @@ def capture_real_basemap(browser: Browser, base: str, output: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--docs", type=Path, default=ROOT / "docs")
-    parser.add_argument("--output", type=Path, default=ROOT / "audit_output" / "4.3.1a")
+    parser.add_argument("--output", type=Path, default=ROOT / "audit_output" / "4.3.5a")
     parser.add_argument("--profiles", default=",".join(PROFILES),
                         help="comma-separated: " + ",".join(PROFILES))
     parser.add_argument("--skip-state", action="store_true")

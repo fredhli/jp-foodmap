@@ -85,6 +85,8 @@ from tabelog.scrape.station_payload import (  # noqa: E402
     OUTPUT_FIELDS as STATION_FIELDS,
     PAYLOAD_VERSION as STATION_PAYLOAD_VERSION,
     PLACEMENT_VERSION,
+    SOURCE_FIELDS as STATION_SOURCE_FIELDS,
+    STATION_IMPORTANCE_OVERRIDES_JSON,
     STATION_SOURCE_JSON,
     ZOOM_MAX as STATION_ZOOM_MAX,
     ZOOM_MIN as STATION_ZOOM_MIN,
@@ -105,7 +107,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.3.4a"
+EXPECTED_APP_VERSION = "4.3.5a"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -625,14 +627,16 @@ def check_station_payload() -> None:
                 not isinstance(row[2], str) or
                 not isinstance(row[3], str) or
                 not isinstance(row[4], str) or
-                not isinstance(row[5], int) or row[5] < 0):
+                not isinstance(row[5], int) or row[5] < 0 or
+                not isinstance(row[6], int) or not 0 <= row[6] <= 3):
             bad.append((i, row))
             if len(bad) == 3:
                 break
         else:
             if not row[2]:
                 unnamed += 1
-            tiers[2 if row[5] >= 6 else 1 if row[5] >= 3 else 0] += 1
+            effective_tier = row[6] or (3 if row[5] >= 6 else 2 if row[5] >= 3 else 1)
+            tiers[effective_tier - 1] += 1
     if bad:
         fail("stations", f"malformed station rows: {bad}")
         return
@@ -666,7 +670,10 @@ def check_station_payload() -> None:
         if any(mask & 1 for mask in masks):
             fail("stations", f"{profile_key} contains a fixed station label at z12")
             return
-        if any((mask & 2) and rows[i][5] < 6 for i, mask in enumerate(masks)):
+        if any(
+            (mask & 2) and (rows[i][6] or (3 if rows[i][5] >= 6 else 2 if rows[i][5] >= 3 else 1)) < 3
+            for i, mask in enumerate(masks)
+        ):
             fail("stations", f"{profile_key} labels a non-mega-hub station at z13")
             return
         if any(not isinstance(width, (int, float)) or width < 0 for width in widths):
@@ -703,10 +710,22 @@ def check_station_payload() -> None:
         not isinstance(source, dict)
         or source.get("sha256") != source_sha
         or source.get("sha256") != build_meta.get("sourceSha256")
-        or source.get("fields") != STATION_FIELDS
+        or source.get("fields") != STATION_SOURCE_FIELDS
         or source.get("stationCount") != len(rows)
     ):
         fail("stations", "source hash, source fields or source row count is wrong")
+        return
+    importance = payload.get("importance")
+    importance_raw = STATION_IMPORTANCE_OVERRIDES_JSON.read_bytes()
+    if (
+        not isinstance(importance, dict)
+        or importance.get("version") != 1
+        or importance.get("reviewed") != "2026-09-16"
+        or importance.get("overrideCount") != 18
+        or importance.get("overrideCount") != build_meta.get("importance", {}).get("overrideCount")
+        or importance.get("configSha256") != hashlib.sha256(importance_raw).hexdigest()
+    ):
+        fail("stations", "importance override metadata is missing or stale")
         return
     wire = len(gzip.compress(raw, compresslevel=9, mtime=0))
     if wire > 210 * 1024:
