@@ -13,6 +13,19 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.3.7] - 2026-09-17
+
+### Fixed
+
+- Picking a place from search now always opens the place menu (新建书签 /
+  新建景点 / 复制坐标 / 在 Google Maps 打开) beside the 📍. It used to open only
+  for results the map flies to at z16, so an OSM neighbourhood or quarter
+  (z15) just moved the map: of the 江之浦 results, the Odawara neighbourhood
+  showed no menu while the Isahaya bus stop did. The fly-to zoom per result
+  type (M-026) is unchanged. `tests/ux/place_search_menu.py` covers a
+  neighbourhood, a bus stop and a city on the Fold cover, iPhone, Fold inner
+  and desktop viewports.
+
 ## [4.3.6] - 2026-09-16
 
 Station importance is no longer hand-curated. The eighteen reviewed

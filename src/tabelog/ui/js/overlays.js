@@ -702,9 +702,11 @@
     if (window.MapMod && MapMod.placeTempPin) {
       try { MapMod.placeTempPin({ lat: p.lat, lon: p.lon, label: p.name }); } catch (e) {}
     }
-    // M-026: only POI-level results earn the "make a pin here" bubble; the
-    // centroid of a whole ward is not a place you would bookmark.
-    if (zoom < 16) return;
+    // Every picked place gets the menu. M-026 kept it to z16 results, which
+    // silently dropped it for OSM place=neighbourhood / quarter rows (z15):
+    // Enoura (Odawara) flew the map and stopped, the bus stop of the same
+    // name got the menu. The zoom still follows the result type; only the
+    // menu stopped depending on it.
     lastTrigger = null;
     openOverlay('placeMenu', { lat: p.lat, lon: p.lon, place: { id: p.id, name: p.name } });
   }
