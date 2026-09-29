@@ -13,6 +13,8 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-09-29
+
 ### Added
 
 - Capture detached Chrome startup stderr and process exit details when CDP 9223 is unavailable; add a read-only Windows diagnostic for project Chrome processes and the AdGuard WFP driver.
@@ -35,11 +37,13 @@ carry the mechanism, the evidence and the red lines for each change.
   the run, blocks the automatic map build or gets rescanned by `--resume`; reports
   written under the old rule are read the same way. Real scan failures (`partial`)
   still leave a region incomplete.
-
 - Opening-hours permits now allow 200 per account a day and 20,000 across the
-  site a month, and the Worker enables them on its next deploy. The code refuses
+  site a month, enabled with the 2026-09-29 Worker deploy. The code refuses
   a monthly limit above 20,000 (was 10,000); missing variables still fall back to
   20 / 9,000.
+- `PLACES_DAILY_OVERRIDES` grants individual accounts their own daily limit,
+  keyed by the SHA-256 of the verified, lowercased Google email; the owner
+  account gets 400 a day. Overrides still count toward the monthly cap.
 - `main.py` now owns one parser, selection-stage order and region loop for full,
   bimonth and append-only modes. Bimonth is a thin compatibility entry.
 - Shared region selection and data commits live in `region_selection.py` and
@@ -67,7 +71,7 @@ carry the mechanism, the evidence and the red lines for each change.
   fallback; original list provenance and detail timestamps are preserved.
 - Added SCRAPING-RULES.md, explicit detail-visit plans and final main-meal deficits.
 
-## [4.4.0] - 2026-09-24 (source only; not deployed)
+## [4.4.0 source preview] - 2026-09-24 (shipped as part of 4.4.0)
 
 ### Added
 

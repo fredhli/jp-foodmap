@@ -124,3 +124,37 @@ test('places: session revocation storage failure cannot issue a permit', async (
   assert.equal(result.body.error,'unavailable');
   assert.equal(objects.size,0);
 });
+
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+test('places: an owner override lifts one account by its verified email', async () => {
+  const owner = await sha256Hex('alice@example.com');
+  const {env} = setup({PLACES_DAILY_LIMIT:'1', PLACES_DAILY_OVERRIDES:JSON.stringify({[owner]:3})});
+  const alice = [];
+  for (let i = 0; i < 4; i++) alice.push(await permit(env));
+  assert.deepEqual(alice.map(r => r.status), [200,200,200,429]);
+  assert.equal(alice[0].body.remainingDaily, 2);
+  assert.equal((await permit(env,{user:'bob'})).status, 200);
+  // The Worker builds the quota request itself; a client cannot claim the owner.
+  const forged = await permit(env,{user:'bob', raw:JSON.stringify({placeId:'ChIJ-test-place',
+    requestId:crypto.randomUUID(), account:owner})});
+  assert.equal(forged.status, 429);
+  // Cookie sessions carry no email, so the profile written at sign-in decides.
+  await env.KV.put('profile:cookie-owner', JSON.stringify({email:' Alice@Example.com '}));
+  const jwt = await signJWT({sub:'cookie-owner',exp:Math.floor(Date.now()/1000)+3600}, env.SESSION_HMAC);
+  const cookie = [];
+  for (let i = 0; i < 4; i++) cookie.push(await permit(env,{cookie:'tabelog_session='+jwt}));
+  assert.deepEqual(cookie.map(r => r.status), [200,200,200,429]);
+});
+
+test('places: malformed owner overrides fail closed', async () => {
+  const account = 'a'.repeat(64);
+  for (const value of ['{', '[]', JSON.stringify({'alice@example.com':400}),
+      JSON.stringify({[account]:1001}), JSON.stringify({[account]:'400'})]) {
+    const {env} = setup({PLACES_DAILY_OVERRIDES:value});
+    assert.equal((await permit(env)).status, 503, value);
+  }
+});

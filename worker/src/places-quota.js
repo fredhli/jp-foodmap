@@ -26,9 +26,23 @@ function limit(value, fallback, max) {
   if (!Number.isSafeInteger(n) || n < 0 || n > max) throw new Error('Invalid Places quota configuration');
   return n;
 }
+// Per-account daily limits the owner grants, keyed by the SHA-256 hex of the
+// lowercased Google account email so the address stays out of the repo.
+function dailyOverrides(value) {
+  if (value === undefined || value === '') return {};
+  const parsed = JSON.parse(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid Places quota configuration');
+  const out = {};
+  for (const [account, daily] of Object.entries(parsed)) {
+    if (!/^[a-f0-9]{64}$/.test(account) || typeof daily !== 'number') throw new Error('Invalid Places quota configuration');
+    out[account] = limit(daily, 0, 1000);
+  }
+  return out;
+}
 export function quotaLimits(env) {
   return {daily: limit(env.PLACES_DAILY_LIMIT, 20, 1000),
-    monthly: limit(env.PLACES_MONTHLY_LIMIT, 9000, 20000)};
+    monthly: limit(env.PLACES_MONTHLY_LIMIT, 9000, 20000),
+    dailyOverrides: dailyOverrides(env.PLACES_DAILY_OVERRIDES)};
 }
 export function validPermitRequest(body) {
   return body && typeof body === 'object' && !Array.isArray(body)
@@ -40,11 +54,13 @@ export class PlacesQuota {
   constructor(ctx, env) { this.storage = ctx.storage; this.env = env; }
   async fetch(req) {
     const body = await req.json();
-    if (!validPermitRequest(body) || !/^[a-f0-9]{64}$/.test(body.user || ''))
+    if (!validPermitRequest(body) || !/^[a-f0-9]{64}$/.test(body.user || '')
+        || (body.account !== undefined && !/^[a-f0-9]{64}$/.test(body.account)))
       return Response.json({error: 'invalid_request'}, {status: 400});
     const window = quotaWindow();
     if (body.month !== window.month) return Response.json({error: 'unavailable'}, {status: 503});
     const limits = quotaLimits(this.env);
+    const dailyLimit = (body.account && limits.dailyOverrides[body.account]) ?? limits.daily;
     const result = await this.storage.transaction(async tx => {
       const grantKey = `grant:${body.user}:${body.requestId}`;
       const previous = await tx.get(grantKey);
@@ -59,8 +75,8 @@ export class PlacesQuota {
       const common = {resetAt: window.resetAt, monthlyResetAt: window.monthlyResetAt, timeZone: window.timeZone};
       if (monthly >= limits.monthly)
         return {status: 429, body: {...common, error: 'monthly_limit', resetAt: window.monthlyResetAt}};
-      if (daily >= limits.daily) return {status: 429, body: {...common, error: 'daily_limit'}};
-      const reply = {...common, allowed: true, requestId: body.requestId, remainingDaily: limits.daily - daily - 1};
+      if (daily >= dailyLimit) return {status: 429, body: {...common, error: 'daily_limit'}};
+      const reply = {...common, allowed: true, requestId: body.requestId, remainingDaily: dailyLimit - daily - 1};
       await tx.put(userKey, daily + 1);
       await tx.put('monthly', monthly + 1);
       await tx.put(grantKey, {day: window.day, placeId: body.placeId, reply});

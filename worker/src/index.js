@@ -610,7 +610,11 @@ async function handleStateDelete(env, auth, cors) {
 
 // ---------- Router ----------
 
-// M-132: 405s advertise what the route does accept.
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', TEXT.encode(text));
+  return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
 async function handlePlacesPermit(req, env, cors) {
   if (!cors['Access-Control-Allow-Origin']) return jsonError(403, 'forbidden_origin', 'origin not allowed', cors);
   if (env.PLACES_UI_ENABLED !== 'true' || !env.PLACES_QUOTA)
@@ -628,14 +632,21 @@ async function handlePlacesPermit(req, env, cors) {
   catch (_) { return jsonError(400, 'invalid_json', 'invalid JSON', cors); }
   if (!validPermitRequest(body)) return jsonError(400, 'invalid_request', 'invalid place or request ID', cors);
   try {
-    quotaLimits(env);
-    const digest = await crypto.subtle.digest('SHA-256', TEXT.encode('places:' + auth.sub));
-    const user = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+    const limits = quotaLimits(env);
+    const user = await sha256Hex('places:' + auth.sub);
+    // Owner overrides are keyed by the verified Google email. Cookies minted
+    // after M-037 carry no email, so read it from the profile only when an
+    // override exists at all.
+    let account;
+    if (Object.keys(limits.dailyOverrides).length) {
+      const email = auth.email || ((await readProfile(env, auth.sub)) || {}).email || '';
+      if (email) account = await sha256Hex(email.trim().toLowerCase());
+    }
     const window = quotaWindow();
     const id = env.PLACES_QUOTA.idFromName('places:' + window.month);
     const reply = await env.PLACES_QUOTA.get(id).fetch(new Request('https://quota.internal/permit', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({placeId: body.placeId, requestId: body.requestId, user, month: window.month}),
+      body: JSON.stringify({placeId: body.placeId, requestId: body.requestId, user, account, month: window.month}),
     }));
     const result = await reply.json();
     const extra = {};
@@ -648,6 +659,7 @@ async function handlePlacesPermit(req, env, cors) {
   }
 }
 
+// M-132: 405s advertise what the route does accept.
 function methodNotAllowed(allow, cors) {
   return jsonError(405, 'method_not_allowed', 'method not allowed', cors, null, {'Allow': allow});
 }

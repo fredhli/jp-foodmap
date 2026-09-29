@@ -9,7 +9,7 @@ Per-user Saved restaurants, the Hidden list, pins and lists sync through a
 small Cloudflare Worker (`worker/`) behind Google Sign-In. Visitors who skip
 sign-in keep their state purely in `localStorage`.
 
-**Source version: 4.4.0 (not yet deployed; rebuild required).**
+**Current version: 4.4.0.**
 See [CHANGELOG.md](CHANGELOG.md) for what changed, and
 [CLAUDE.md](CLAUDE.md) for the architecture notes, the storage-key contract
 and the backwards-compatibility red lines.

@@ -153,6 +153,8 @@ Google 自有内容的语言由 Maps JavaScript 首次加载时确定；切换�
    现有 KV 用户收藏数据不迁移、不重置；额度放在独立存储。
 4. `wrangler.toml` 设为每账号每日 `PLACES_DAILY_LIMIT=200`、全站每月 `PLACES_MONTHLY_LIMIT=20000`。
    变量缺失时代码回退为 20 / 9000；月上限超过 20000 会被拒绝，提高它需要改代码。
+   个别账号的每日额度写在 `PLACES_DAILY_OVERRIDES`：键是 Google 登录邮箱（小写）的 SHA-256，值是每日次数（0–1000），
+   例如 `printf '%s' 'someone@gmail.com' | sha256sum`。仍计入全站月额度；格式写错时额度接口整体返回暂不可用。
    日/月边界采用美国太平洋时间，界面把具体重置时刻显示为用户当地时间。
 5. 先部署支持 `/api/places/permit` 的 Worker，再发布前端，并在真实设备上做小量在线验收。
    Worker 不可用或未启用时，前端不会绕过许可直接创建 Google 查询组件。

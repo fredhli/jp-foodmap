@@ -19,6 +19,8 @@ PLACES_DAILY_LIMIT = "200"
 # The first 10,000 Places UI Kit Query requests a month are free, then about
 # USD 1 per 1,000, so this cap bounds the overage near USD 10 a month.
 PLACES_MONTHLY_LIMIT = "20000"
+# Owner-granted daily limits: {"<SHA-256 of the lowercased Google email>": limit}.
+PLACES_DAILY_OVERRIDES = '{"049d62f32277fd565ecf846a61ce782f5f39a8550b4b2a7a0eea0578c9e3cb49":400}'
 
 [[durable_objects.bindings]]
 name = "PLACES_QUOTA"
