@@ -148,10 +148,11 @@ Google 自有内容的语言由 Maps JavaScript 首次加载时确定；切换�
    设置 HTTP referrer 限制到正式域名；API 限制只允许本功能所需 API，不复用不受限服务端密钥。
 2. 在本地 `.env` 配置 `GOOGLE_PLACES_UI_API_KEY`，然后构建前端。该密钥会公开在网页里，
    它不是服务器秘密；没有设置时网页只显示服务未配置状态。
-3. `worker/wrangler.toml` 的 `PLACES_UI_ENABLED` 默认 `false`。确认配置后设为 `true`，
-   部署 Worker 时会建立 SQLite Durable Object 绑定 `PLACES_QUOTA` 和迁移 `places-quota-v1`。
+3. `worker/wrangler.toml` 的 `PLACES_UI_ENABLED` 已设为 `true`，`wrangler deploy` 后生效；
+   网页构建没有密钥时不会调用额度接口。部署 Worker 时会建立 SQLite Durable Object 绑定 `PLACES_QUOTA` 和迁移 `places-quota-v1`。
    现有 KV 用户收藏数据不迁移、不重置；额度放在独立存储。
-4. 默认 `PLACES_DAILY_LIMIT=20`、`PLACES_MONTHLY_LIMIT=9000`，可调整（代码拒绝月限额超过 10000）。
+4. `wrangler.toml` 设为每账号每日 `PLACES_DAILY_LIMIT=200`、全站每月 `PLACES_MONTHLY_LIMIT=20000`。
+   变量缺失时代码回退为 20 / 9000；月上限超过 20000 会被拒绝，提高它需要改代码。
    日/月边界采用美国太平洋时间，界面把具体重置时刻显示为用户当地时间。
 5. 先部署支持 `/api/places/permit` 的 Worker，再发布前端，并在真实设备上做小量在线验收。
    Worker 不可用或未启用时，前端不会绕过许可直接创建 Google 查询组件。
@@ -164,7 +165,9 @@ Google 自有内容的语言由 Maps JavaScript 首次加载时确定；切换�
 **额度边界：** 以上限制的是本站正常交互发起的组件查询，不是 Google 按账号执行的计费硬上限。
 UI Kit 直接从浏览器使用公开密钥，攻击者可能绕过页面；域名/API 限制、Google 控制台可用配额、
 账单提醒及异常监控仍然需要设置。预算提醒本身不会强制停止计费。
-同一计费账号的其他项目可能也消耗免费额度；9000 是预留余量，不能保证账单一定为零。
+网页端的 Place Details 组件按 Places UI Kit Query 计费：每月前 10,000 次免费，之后约每 1,000 次 1 美元，
+与显示多少字段无关。月上限 20000 意味着正常使用下每月最多约 10 美元超额费用；
+同一计费账号的其他项目也可能消耗这 10,000 次免费额度。
 使用独立项目/受限密钥便于观察本功能用量，不会产生另一份免费额度。
 
 ### 本地验收

@@ -14,9 +14,11 @@ id = "7d6e7c510aec41e6a309d060e40565a7"
 GOOGLE_CLIENT_ID = "536198170238-me7dpu2og75tseuekl3pu8rjjgo2ig2p.apps.googleusercontent.com"
 ALLOWED_ORIGINS = "https://jpfoodmap.com,https://www.jpfoodmap.com,http://localhost:8000"
 
-PLACES_UI_ENABLED = "false"
-PLACES_DAILY_LIMIT = "20"
-PLACES_MONTHLY_LIMIT = "9000"
+PLACES_UI_ENABLED = "true"
+PLACES_DAILY_LIMIT = "200"
+# The first 10,000 Places UI Kit Query requests a month are free, then about
+# USD 1 per 1,000, so this cap bounds the overage near USD 10 a month.
+PLACES_MONTHLY_LIMIT = "20000"
 
 [[durable_objects.bindings]]
 name = "PLACES_QUOTA"

@@ -52,7 +52,8 @@ test('places: authentication, origin, configuration and request validation', asy
   assert.equal(objects.size,0);
   assert.equal((await permit({...env,PLACES_UI_ENABLED:'false'})).status,503);
   assert.equal((await permit({...env,PLACES_QUOTA:null})).status,503);
-  assert.equal((await permit({...env,PLACES_MONTHLY_LIMIT:'12000'})).status,503);
+  assert.equal((await permit({...env,PLACES_MONTHLY_LIMIT:'20001'})).status,503);
+  assert.equal((await permit({...env,PLACES_MONTHLY_LIMIT:'20000',PLACES_DAILY_LIMIT:'200'})).status,200);
 });
 
 test('places: account quota survives simultaneous tabs and ignores claimed identity', async () => {

@@ -36,6 +36,10 @@ carry the mechanism, the evidence and the red lines for each change.
   written under the old rule are read the same way. Real scan failures (`partial`)
   still leave a region incomplete.
 
+- Opening-hours permits now allow 200 per account a day and 20,000 across the
+  site a month, and the Worker enables them on its next deploy. The code refuses
+  a monthly limit above 20,000 (was 10,000); missing variables still fall back to
+  20 / 9,000.
 - `main.py` now owns one parser, selection-stage order and region loop for full,
   bimonth and append-only modes. Bimonth is a thin compatibility entry.
 - Shared region selection and data commits live in `region_selection.py` and

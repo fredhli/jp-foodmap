@@ -28,7 +28,7 @@ function limit(value, fallback, max) {
 }
 export function quotaLimits(env) {
   return {daily: limit(env.PLACES_DAILY_LIMIT, 20, 1000),
-    monthly: limit(env.PLACES_MONTHLY_LIMIT, 9000, 10000)};
+    monthly: limit(env.PLACES_MONTHLY_LIMIT, 9000, 20000)};
 }
 export function validPermitRequest(body) {
   return body && typeof body === 'object' && !Array.isArray(body)
