@@ -589,6 +589,11 @@
       .catch(function (e) { _popupsByLang[lang] = null; throw e; });
     return _popupsByLang[lang];
   }
+  Data.authHeaders = function () {
+    var auth = B.loadAuth();
+    return auth && auth.id_token ? { Authorization: 'Bearer ' + auth.id_token } : {};
+  };
+
   Data.detail = function (id, lang) {
     return popupsFor(lang).then(function (m) {
       var arr = m && m[id];
@@ -1203,6 +1208,11 @@
     // account / sync
     act.signIn = function (container) { biz.renderSignInButton(container); };
     act.signOut = function (clearLocal) { B.signOut({ clearLocal: !!clearLocal }); };
+    act.invalidateSession = function () {
+      try { localStorage.removeItem('tabelog.auth'); } catch (_) {}
+      mirrorAccount();
+    };
+
     act.retrySync = function () { biz.retrySyncNow(); };
     act.deleteCloud = function (cb) { biz.deleteCloudData(cb); };
     act.dismissSyncHint = function () { biz.dismissSyncHint(); mirrorSync(biz.syncStatus); };

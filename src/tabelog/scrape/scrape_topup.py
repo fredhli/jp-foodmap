@@ -1,4 +1,8 @@
 """
+Legacy supplemental-only entry and reusable query helpers. The complete current
+selection and region loop live in project main.py; ordinary main runs already
+include both nationwide main-meal supplementation and Tokyo/Osaka filtered lists.
+
 Supplemental scraper that tops up '正餐' (main-meal) coverage for regions
 where audit_main_meal_coverage.py flagged a shortfall.
 
@@ -22,7 +26,13 @@ Deficits are recomputed live from tabelog.csv + the totals cache at
 data/cache/region_totals.json — refresh that cache via
 audit_main_meal_coverage.py if the region list has changed.
 
---tokyo mode (Tokyo can't be topped up the normal way: the plain list caps
+--tokyo-osaka-append starts from the filtered Tokyo and Osaka list URLs
+(page 10 and page 8 by default), respectively. It scans every card on each
+page and keeps scores of 3.50 or higher until a lower score appears or page
+60 is processed. This mode ignores region deficits and the normal hard cap.
+It keeps the same price and main-meal gates as the older top-up modes.
+
+Legacy --tokyo mode (Tokyo can't be topped up the normal way: the plain list caps
 at 60 pages = the top 1,200 by rating, and the original scrape already used
 all 60, so max(source_page)+1 = page 61 returns nothing). Instead of the
 plain list, --tokyo paginates Tabelog's own pre-filtered list —
@@ -41,7 +51,9 @@ Usage:
   uv run python src/tabelog/scrape/scrape_topup.py --hard-cap 500
   uv run python src/tabelog/scrape/scrape_topup.py --dry-run
   uv run python src/tabelog/scrape/scrape_topup.py --no-translate
-  uv run python src/tabelog/scrape/scrape_topup.py --tokyo               # Tokyo, filtered list from page 10
+  uv run python src/tabelog/scrape/scrape_topup.py --tokyo-osaka-append
+  uv run python src/tabelog/scrape/scrape_topup.py --tokyo-osaka-append --dry-run
+  uv run python src/tabelog/scrape/scrape_topup.py --tokyo               # legacy Tokyo deficit top-up
   uv run python src/tabelog/scrape/scrape_topup.py --tokyo --hard-cap 900   # fill the whole deficit in one run
 """
 
@@ -52,7 +64,11 @@ import datetime
 import json
 import math
 import sys
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+import re
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -95,6 +111,251 @@ TOKYO_LIST_TEMPLATE = (
     "&svd={svd}&svps=2&svt=1900&vac_net=0"
 )
 TOKYO_DEFAULT_START_PAGE = 10
+
+APPEND_SCORE_FLOOR = Decimal("3.50")
+APPEND_PAGE_LIMIT = 60
+
+TOKYO_APPEND_LIST_URL = TOKYO_LIST_TEMPLATE.format(
+    region="tokyo", page=TOKYO_DEFAULT_START_PAGE, svd="{svd}"
+)
+OSAKA_APPEND_LIST_URL = (
+    "https://tabelog.com/osaka/rstLst/RC/8/"
+    "?Srt=D&SrtT=rt&LstSmoking=0"
+    "&svd=%7B%E8%BF%90%E8%A1%8C%E6%97%A5%E6%9C%9FYYYYMMDD%7D"
+    "&svt=1900&svps=2&vac_net=0&LstCos=3&LstCosT=10&RdoCosTp=2"
+)
+
+
+def resolve_list_url_date(list_url: str, today: datetime.date | None = None) -> str:
+    """Replace an svd date placeholder while leaving all other query bytes alone."""
+    parsed = urlsplit(list_url)
+    date = (today or datetime.date.today()).strftime("%Y%m%d")
+    fields = parsed.query.split("&")
+    for i, field in enumerate(fields):
+        name, sep, value = field.partition("=")
+        if name != "svd" or not sep:
+            continue
+        decoded = unquote(value)
+        if decoded in ("{svd}", "{运行日期YYYYMMDD}"):
+            fields[i] = "svd=" + date
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "&".join(fields),
+                       parsed.fragment))
+
+
+@dataclass
+class AppendResult:
+    rows: list[dict]
+    stop_reason: str
+    last_page: int
+    unknown_ratings: int = 0
+
+
+class AppendCollectionError(RuntimeError):
+    def __init__(self, message: str, rows: list[dict], page: int):
+        super().__init__(message)
+        self.rows = rows
+        self.page = page
+
+
+def append_list_page_url(list_url: str, region: str, page: int) -> str:
+    """Replace a list URL's final page path component, keeping its query intact."""
+    parsed = urlsplit(list_url)
+    if (parsed.scheme != "https" or parsed.netloc != "tabelog.com"
+            or parsed.fragment or parsed.username or parsed.password):
+        raise ValueError("list URL must be an HTTPS tabelog.com URL")
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    sort_values = [value for key, value in query if key == "SrtT"]
+    directions = [value for key, value in query if key == "Srt"]
+    sort_modes = [value for key, value in query if key == "sort_mode"]
+    if (sort_values != ["rt"] or any(value != "D" for value in directions)
+            or any(value != "1" for value in sort_modes)):
+        raise ValueError("append list URL must sort by rating descending (SrtT=rt)")
+    parts = parsed.path.strip("/").split("/")
+    if (len(parts) < 2 or parts[0] != region or parts[1] != "rstLst"
+            or any(
+                not part or "/" in unquote(part) or "\\" in unquote(part)
+                or unquote(part) in (".", "..")
+                for part in parts
+            )):
+        raise ValueError(f"list URL must be a /{region}/rstLst/ path")
+    if parts[-1].isdecimal():
+        parts[-1] = str(page)
+    else:
+        parts.append(str(page))
+    if not 1 <= page <= APPEND_PAGE_LIMIT:
+        raise ValueError(f"page must be 1..{APPEND_PAGE_LIMIT}")
+    return urlunsplit(("https", "tabelog.com", "/" + "/".join(parts) + "/",
+                       parsed.query, ""))
+
+
+def append_start_page(list_url: str, region: str, override: int | None) -> int:
+    """Use an explicit start page, or the page already present in the supplied URL."""
+    append_list_page_url(list_url, region, 1)
+    original_last = urlsplit(list_url).path.rstrip("/").split("/")[-1]
+    page = override if override is not None else (int(original_last) if original_last.isdecimal() else 1)
+    if not 1 <= page <= APPEND_PAGE_LIMIT:
+        raise ValueError(f"start page must be 1..{APPEND_PAGE_LIMIT}")
+    return page
+
+
+def _append_detail_url(value: object, region: str) -> str | None:
+    if not isinstance(value, str):
+        return None
+    parsed = urlsplit(value.strip())
+    parts = parsed.path.strip("/").split("/")
+    if (parsed.scheme != "https" or parsed.netloc != "tabelog.com"
+            or len(parts) != 4 or parts[0] != region
+            or not re.fullmatch(r"A\d{4}", parts[1])
+            or not re.fullmatch(r"A\d{6}", parts[2])
+            or not parts[3].isdecimal()
+            or any(
+                not part or "/" in unquote(part) or "\\" in unquote(part)
+                or unquote(part) in (".", "..")
+                for part in parts
+            )):
+        return None
+    return urlunsplit(("https", "tabelog.com", parsed.path.rstrip("/") + "/", "", ""))
+
+
+def _restaurant_id_from_url(value: object) -> str | None:
+    """Read a Tabelog restaurant ID without depending on its area path."""
+    if not isinstance(value, str):
+        return None
+    parsed = urlsplit(value.strip())
+    parts = parsed.path.strip("/").split("/")
+    if (parsed.scheme not in ("http", "https") or parsed.netloc != "tabelog.com"
+            or len(parts) < 4
+            or not re.fullmatch(r"A\d{4}", parts[-3])
+            or not re.fullmatch(r"A\d{6}", parts[-2])
+            or not parts[-1].isdecimal()):
+        return None
+    return parts[-1].lstrip("0") or "0"
+
+
+def _append_rating(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not re.fullmatch(r"(?:[1-4](?:\.\d{1,2})?|5(?:\.0{1,2})?)", text):
+        return None
+    try:
+        rating = Decimal(text)
+    except InvalidOperation:
+        return None
+    return rating if rating.is_finite() else None
+
+
+def append_detail_reject_reason(detail: dict) -> str | None:
+    status = detail.get("operating_status")
+    if status in ("closed", "temporarily_closed"):
+        return status
+    rating = _append_rating(detail.get("rating"))
+    if rating is not None and rating < APPEND_SCORE_FLOOR:
+        return f"detail rating {rating} below 3.50"
+    return None
+
+
+async def collect_append(
+    session: Session,
+    region: str,
+    start_page: int,
+    list_url: str,
+    seen_urls: set[str],
+    apply_legacy_gates: bool = True,
+    cheap_floor: int = CHEAP_EATS_THRESHOLD_YEN,
+) -> AppendResult:
+    """Collect all rated cards through the 3.50 boundary or page 60."""
+    append_list_page_url(list_url, region, start_page)
+    kept: list[dict] = []
+    seen_ids = {
+        restaurant_id for url in seen_urls
+        if (restaurant_id := _restaurant_id_from_url(url)) is not None
+    }
+    signatures: set[tuple[str, ...]] = set()
+    unknown_ratings = 0
+    last_rating: Decimal | None = None
+    for page in range(start_page, APPEND_PAGE_LIMIT + 1):
+        page_url = append_list_page_url(list_url, region, page)
+        try:
+            rows, _ = await scrape_list_page(
+                session, region, page,
+                page_url.replace("{", "{{").replace("}", "}}"),
+            )
+        except Exception as exc:
+            raise AppendCollectionError(
+                f"[{region} p{page}] list request failed: {exc}", kept, page
+            ) from exc
+        if not rows:
+            raise AppendCollectionError(
+                f"[{region} p{page}] no cards parsed before score floor/page limit",
+                kept, page,
+            )
+        signature = tuple(sorted(
+            _restaurant_id_from_url(row.get("detail_url"))
+            or str(row.get("detail_url") or "")
+            for row in rows
+        ))
+        if signature in signatures:
+            raise AppendCollectionError(
+                f"[{region} p{page}] repeated list page", kept, page
+            )
+        signatures.add(signature)
+
+        valid_cards: list[tuple[dict, str, Decimal]] = []
+        p_invalid = p_unknown = 0
+        for row in rows:
+            url = _append_detail_url(row.get("detail_url"), region)
+            if url is None:
+                p_invalid += 1
+                continue
+            rating = _append_rating(row.get("rating"))
+            if rating is None:
+                p_unknown += 1
+                continue
+            if last_rating is not None and rating > last_rating:
+                raise AppendCollectionError(
+                    f"[{region} p{page}] ratings out of descending order: "
+                    f"{rating} after {last_rating}", kept, page
+                )
+            last_rating = rating
+            valid_cards.append((row, url, rating))
+        if not valid_cards:
+            raise AppendCollectionError(
+                f"[{region} p{page}] no cards with valid restaurant URL and rating",
+                kept, page,
+            )
+
+        below_floor = False
+        p_kept = p_dup = p_below = p_filtered = 0
+        for row, url, rating in valid_cards:
+            if rating < APPEND_SCORE_FLOOR:
+                below_floor = True
+                p_below += 1
+                continue
+            restaurant_id = _restaurant_id_from_url(url)
+            if restaurant_id in seen_ids:
+                p_dup += 1
+                continue
+            if apply_legacy_gates and (
+                _is_fine_dine(row)
+                or _is_cheap_eats(row, cheap_floor)
+                or not is_main_meal(row.get("genre") or "")
+            ):
+                p_filtered += 1
+                continue
+            row["detail_url"] = url
+            seen_ids.add(restaurant_id)
+            seen_urls.add(url)
+            kept.append(row)
+            p_kept += 1
+        unknown_ratings += p_unknown
+        print(f"[{region} p{page}] {len(rows)} cards: kept={p_kept} "
+              f"duplicate={p_dup} invalid_url={p_invalid} "
+              f"unknown_rating={p_unknown} below_3.50={p_below} "
+              f"legacy_filtered={p_filtered}")
+        if below_floor:
+            return AppendResult(kept, "score_floor", page, unknown_ratings)
+    return AppendResult(kept, "page_limit", APPEND_PAGE_LIMIT, unknown_ratings)
 
 
 def _int_or_zero(v) -> int:
@@ -319,11 +580,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     ap.add_argument(
         "--hard-cap", type=int, default=HARD_CAP_DEFAULT,
-        help=f"max NEW main-meal rows added per region (default: {HARD_CAP_DEFAULT})",
+        help=f"normal top-up only: max new rows per region (default: {HARD_CAP_DEFAULT})",
     )
     ap.add_argument(
         "--ratio", type=float, default=MAIN_MEAL_RATIO,
-        help=f"main-meal share target as a fraction (default: "
+        help=f"normal top-up only: main-meal share target as a fraction (default: "
              f"{MAIN_MEAL_RATIO} = {MAIN_MEAL_RATIO * 100:.1f}%%)",
     )
     ap.add_argument(
@@ -333,6 +594,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--dry-run", action="store_true",
         help="print the per-region plan and exit without scraping",
+    )
+    ap.add_argument(
+        "--tokyo-osaka-append", action="store_true",
+        help="continue the supplied Tokyo and Osaka ranking lists through score 3.50 or page 60",
+    )
+    ap.add_argument(
+        "--tokyo-list-url", type=str,
+        help="HTTPS Tokyo ranking URL override (default: existing filtered list, page 10)",
+    )
+    ap.add_argument(
+        "--osaka-list-url", type=str,
+        help="HTTPS Osaka ranking URL override (default: supplied filtered list, page 8)",
+    )
+    ap.add_argument(
+        "--tokyo-start-page", type=int,
+        help="Tokyo first page; defaults to the page in --tokyo-list-url, or 1",
+    )
+    ap.add_argument(
+        "--osaka-start-page", type=int,
+        help="Osaka first page; defaults to the page in --osaka-list-url, or 1",
     )
     ap.add_argument(
         "--tokyo", action="store_true",
@@ -363,38 +644,74 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def amain(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.tokyo_osaka_append and args.tokyo:
+        sys.exit("--tokyo-osaka-append and legacy --tokyo are separate modes")
+    if args.tokyo_osaka_append and args.regions:
+        sys.exit("--tokyo-osaka-append always covers both Tokyo and Osaka; omit regions")
     if not TABELOG_CSV.exists():
         sys.exit(f"missing {TABELOG_CSV}")
 
     print(f"Reading {TABELOG_CSV.name} ...")
-    stats = load_region_stats(TABELOG_CSV)
     existing = scan_existing(TABELOG_CSV)
-    totals = load_totals_cache()
-    only = [r.strip().lower() for r in args.regions] if args.regions else None
-
-    if args.tokyo:
-        if only and only != ["tokyo"]:
-            print(f"--tokyo scrapes tokyo only; ignoring extra region args {only}")
-        svd = args.svd or datetime.date.today().strftime("%Y%m%d")
-        tokyo_template = TOKYO_LIST_TEMPLATE.replace("{svd}", svd)
-        print(f"--tokyo: filtered list, start page {args.start_page}, "
-              f"cheap-floor ¥{args.cheap_floor:,}, svd={svd}")
-        plans = plan_tokyo(
-            stats, totals, existing, args.hard_cap, args.ratio,
-            args.start_page, tokyo_template, args.cheap_floor,
-        )
+    if args.tokyo_osaka_append:
+        append_seen_urls = {
+            url for region_data in existing.values()
+            for url in region_data["urls"]
+        }
+        try:
+            plans = [
+                {
+                    "region": region,
+                    "list_url": url,
+                    "start_page": append_start_page(url, region, start),
+                    "seen_urls": append_seen_urls,
+                }
+                for region, url, start in (
+                    ("tokyo", resolve_list_url_date(
+                        args.tokyo_list_url or TOKYO_APPEND_LIST_URL
+                    ), args.tokyo_start_page),
+                    ("osaka", resolve_list_url_date(
+                        args.osaka_list_url or OSAKA_APPEND_LIST_URL
+                    ), args.osaka_start_page),
+                )
+            ]
+        except ValueError as exc:
+            sys.exit(str(exc))
+        for plan in plans:
+            print(f"[{plan['region']}] start page {plan['start_page']}, "
+                  f"page limit {APPEND_PAGE_LIMIT}, score floor {APPEND_SCORE_FLOOR}; "
+                  f"list URL {plan['list_url']}")
     else:
-        plans = plan_topup(stats, totals, existing, only, args.hard_cap, args.ratio)
-    if not plans:
-        print("\nNothing to top up.")
-        return
-    print_plan(plans, args.hard_cap)
+        stats = load_region_stats(TABELOG_CSV)
+        totals = load_totals_cache()
+        only = [r.strip().lower() for r in args.regions] if args.regions else None
+        if args.tokyo:
+            if only and only != ["tokyo"]:
+                print(f"--tokyo scrapes tokyo only; ignoring extra region args {only}")
+            svd = args.svd or datetime.date.today().strftime("%Y%m%d")
+            tokyo_template = TOKYO_LIST_TEMPLATE.replace("{svd}", svd)
+            print(f"--tokyo: filtered list, start page {args.start_page}, "
+                  f"cheap-floor ¥{args.cheap_floor:,}, svd={svd}")
+            plans = plan_tokyo(
+                stats, totals, existing, args.hard_cap, args.ratio,
+                args.start_page, tokyo_template, args.cheap_floor,
+            )
+        else:
+            plans = plan_topup(stats, totals, existing, only, args.hard_cap, args.ratio)
+        if not plans:
+            print("\nNothing to top up.")
+            return
+        print_plan(plans, args.hard_cap)
     if args.dry_run:
         return
 
     INTERMEDIATE_DIR.mkdir(parents=True, exist_ok=True)
-    intermediate = INTERMEDIATE_DIR / "tabelog_topup_intermediate.csv"
+    intermediate = INTERMEDIATE_DIR / (
+        "tabelog_tokyo_osaka_append_intermediate.csv"
+        if args.tokyo_osaka_append else "tabelog_topup_intermediate.csv"
+    )
     all_kept: list[dict] = []
+    append_errors: list[str] = []
 
     async with async_playwright() as p:
         session = Session(p)
@@ -402,26 +719,52 @@ async def amain(argv: list[str] | None = None) -> None:
 
         for plan in plans:
             print(f"\n=== {plan['region']} ===")
-            print(f"  total={plan['total']}, deficit={plan['deficit']}, "
-                  f"target={plan['target']} (hard_cap={args.hard_cap})")
-            print(f"  resume from page {plan['start_page']}")
-            kept = await collect_topup(
-                session,
-                plan["region"],
-                plan["start_page"],
-                plan["target"],
-                plan["seen_urls"],
-                url_template=plan.get("url_template"),
-                cheap_floor=plan.get("cheap_floor", CHEAP_EATS_THRESHOLD_YEN),
-            )
+            if args.tokyo_osaka_append:
+                print(f"  resume from page {plan['start_page']}")
+                try:
+                    result = await collect_append(
+                        session, plan["region"], plan["start_page"],
+                        plan["list_url"], plan["seen_urls"],
+                        cheap_floor=args.cheap_floor,
+                    )
+                    kept = result.rows
+                    if result.stop_reason == "score_floor":
+                        print(f"[{plan['region']}] score_floor: below 3.50 observed "
+                              f"on page {result.last_page}")
+                    else:
+                        print(f"[{plan['region']}] page_limit: reached page "
+                              f"{APPEND_PAGE_LIMIT}; the score floor was not observed")
+                    if result.unknown_ratings:
+                        print(f"[{plan['region']}] {result.unknown_ratings} cards "
+                              f"had no usable rating and were skipped")
+                except AppendCollectionError as exc:
+                    kept = exc.rows
+                    append_errors.append(str(exc))
+                    print(f"[{plan['region']}] INCOMPLETE: {exc}")
+            else:
+                print(f"  total={plan['total']}, deficit={plan['deficit']}, "
+                      f"target={plan['target']} (hard_cap={args.hard_cap})")
+                print(f"  resume from page {plan['start_page']}")
+                kept = await collect_topup(
+                    session,
+                    plan["region"],
+                    plan["start_page"],
+                    plan["target"],
+                    plan["seen_urls"],
+                    url_template=plan.get("url_template"),
+                    cheap_floor=plan.get("cheap_floor", CHEAP_EATS_THRESHOLD_YEN),
+                )
             all_kept.extend(kept)
             write_intermediate(all_kept, intermediate)
 
         if not all_kept:
+            if append_errors:
+                sys.exit("Append incomplete: " + "; ".join(append_errors))
             print("\nNo new rows collected.")
             return
 
         print(f"\nCollected {len(all_kept)} new rows. Visiting detail pages ...")
+        detail_rejected_urls: set[str] = set()
         for n, row in enumerate(all_kept, 1):
             url = row.get("detail_url")
             if not url:
@@ -431,6 +774,14 @@ async def amain(argv: list[str] | None = None) -> None:
             except Exception as e:
                 print(f"  [{n}/{len(all_kept)}] {row.get('name')!r}: gave up — {e}")
                 continue
+            if args.tokyo_osaka_append:
+                reject_reason = append_detail_reject_reason(d)
+                if reject_reason:
+                    detail_rejected_urls.add(url)
+                    print(f"  [{n}/{len(all_kept)}] {row.get('name')!r}: "
+                          f"excluded ({reject_reason})")
+                    continue
+                row["operating_status"] = d.get("operating_status") or "unknown"
             row["seat_count"] = d.get("seat_count") or ""
             row["address"] = d.get("address") or ""
             row["reservation_policy"] = d.get("reservation_policy") or ""
@@ -443,14 +794,30 @@ async def amain(argv: list[str] | None = None) -> None:
                   f"seats={row['seat_count']!r}, bookable={row['tabelog_bookable']}, "
                   f"photos={len(photos)}")
             if n % CHECKPOINT_EVERY == 0:
-                write_intermediate(all_kept, intermediate)
+                write_intermediate(
+                    [r for r in all_kept if r.get("detail_url") not in detail_rejected_urls],
+                    intermediate,
+                )
+        if detail_rejected_urls:
+            all_kept = [
+                row for row in all_kept
+                if row.get("detail_url") not in detail_rejected_urls
+            ]
+            print(f"Excluded {len(detail_rejected_urls)} append candidates "
+                  f"after detail checks")
         write_intermediate(all_kept, intermediate)
 
+    if not all_kept:
+        if append_errors:
+            sys.exit("Append incomplete: " + "; ".join(append_errors))
+        print("No new rows passed detail checks.")
+        return
     if args.translate:
         await translate_reservation_policy(all_kept, intermediate)
 
     append_and_dedupe(all_kept, TABELOG_CSV)
-
+    if append_errors:
+        sys.exit("Append incomplete: " + "; ".join(append_errors))
 
 def main(argv: list[str] | None = None) -> None:
     asyncio.run(amain(argv))

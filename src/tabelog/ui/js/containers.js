@@ -357,13 +357,30 @@
    *  task underneath it. The real persistent roots still move through
    *  placeRoots(), so scroll anchors, listeners and source restoration remain
    *  owned by List/Detail rather than by the animation. */
+  function cloneRouteVisual(node) {
+    if (node.nodeType === 1 && node.localName === 'gmp-place-details') {
+      var placeholder = document.createElement('div');
+      var rect = node.getBoundingClientRect();
+      placeholder.style.width = rect.width + 'px';
+      placeholder.style.height = rect.height + 'px';
+      placeholder.setAttribute('aria-hidden', 'true');
+      return placeholder;
+    }
+    if (node.nodeType !== 1 || !node.querySelector('gmp-place-details')) return node.cloneNode(true);
+    var clone = node.cloneNode(false);
+    for (var child = node.firstChild; child; child = child.nextSibling) clone.appendChild(cloneRouteVisual(child));
+    return clone;
+  }
+
   function routeDetail(direction) {
     var s = App.state;
     if (s.layout.mode !== 'narrow' || ctx.motion.reduced) return;
     cancelRoute();
     var rect = els.sheet.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    var ghost = els.sheet.cloneNode(true);
+    // Cloning a custom element runs its constructor and could issue another
+    // billable query. Keep a sized placeholder in the animation copy.
+    var ghost = cloneRouteVisual(els.sheet);
     ghost.removeAttribute('id');
     ghost.setAttribute('data-route-ghost', direction);
     ghost.setAttribute('aria-hidden', 'true');

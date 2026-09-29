@@ -13,6 +13,78 @@ carry the mechanism, the evidence and the red lines for each change.
 
 ## [Unreleased]
 
+### Added
+
+- Capture detached Chrome startup stderr and process exit details when CDP 9223 is unavailable; add a read-only Windows diagnostic for project Chrome processes and the AdGuard WFP driver.
+- Bimonth `--resume` recovers the latest interrupted run, skips committed regions,
+  and reuses successful list/detail checkpoints while retaining the shared selection rules.
+  Legacy runs without checkpoints recover from their region reports.
+- A read-only Windows reboot diagnostic script exports shutdown, crash, memory,
+  hardware and update events without changing system settings.
+
+### Changed
+
+- Russian cuisine now has its own default-hidden foreign category with the 🇷🇺 marker; Singaporean cuisine and sports-bar categorization stay as before.
+- After the ordinary main-meal count stage, regions still above a 3.50 minimum
+  extend eligible main meals through the 3.50 tie band or page 60, beyond the
+  count-stage cap. Existing cuisine, budget and old-restaurant retention rules stay.
+- All normal/filtered page-limit stops now print a warning and enter both the
+  regional and run reports, including the last score and tie-band coverage.
+- A region whose list reaches page 60 before its quotas fill (`truncated`) now
+  commits as complete and is listed in `page_limited_regions`. It no longer fails
+  the run, blocks the automatic map build or gets rescanned by `--resume`; reports
+  written under the old rule are read the same way. Real scan failures (`partial`)
+  still leave a region incomplete.
+
+- `main.py` now owns one parser, selection-stage order and region loop for full,
+  bimonth and append-only modes. Bimonth is a thin compatibility entry.
+- Shared region selection and data commits live in `region_selection.py` and
+  `region_update.py`. Full mode refreshes old details; bimonth skips resolved scores.
+- Ordinary full runs require explicit regions or `--all-regions`; bimonth without
+  regions retains its all-existing-regions behavior.
+
+### Fixed
+
+- The map i18n audit now skips built-in landmark names that already have four-language data; two comment-only CJK fragments no longer inflate missing EN/JA counts.
+- Resuming a legacy bimonth run now creates its manifest before browser startup,
+  enabling page/detail checkpoints for subsequent interruptions.
+- `verify_build`'s closing-day check (popup slot 10) now compares against the
+  published rows whose CSV `holiday` is a real value, instead of a fixed
+  5,000-5,700 band the grown corpus had outgrown.
+- Bimonth `--resume` no longer refuses a run after `map.py` wrote geocoded lat/lon
+  back into the active CSV. Region and commit fingerprints leave the build
+  columns out; older whole-row digests match once coordinates filled after the
+  commit are blanked. Any other field change still stops the resume.
+- Bimonth updates now combine the base selection, the retained-corpus 0.8%
+  main-meal supplement and the configured Tokyo/Osaka filtered lists.
+  Ordinary supplementation counts only genuinely new IDs against its 300 cap.
+- Every observed old score is reused, including page tails and cards outside
+  entry quotas. Unseen old restaurants get further list coverage before detail
+  fallback; original list provenance and detail timestamps are preserved.
+- Added SCRAPING-RULES.md, explicit detail-visit plans and final main-meal deficits.
+
+## [4.4.0] - 2026-09-24 (source only; not deployed)
+
+### Added
+
+- Manual `--bimonth-update` with list-field patches, region-end detail checks,
+  verified score/closure removals, departure archives and run reports.
+- `--tokyo-osaka-append` using the configured Tokyo p10 and Osaka p8 lists,
+  inclusive 3.50 score floor and page 60 ceiling, with distinct stop reasons.
+- On-demand Google Places UI Kit opening hours in restaurant details, with
+  signed-in daily permits and a shared monthly budget in a Durable Object.
+  Defaults are 20/day and 9000/month; service remains disabled until configured.
+- Offline crawler, quota, entry-point and responsive opening-hours tests.
+
+### Changed
+
+- Detail extraction can read explicit rating and operating-status evidence;
+  unknown, failed, relocated or contradictory pages do not trigger removal.
+- Score verification has its own timestamp and preserves existing detail dates.
+- Mobile detail transitions omit live Google components from their visual copies,
+  preventing a copied widget from issuing an unpermitted query.
+
+
 ## [4.3.7] - 2026-09-17
 
 ### Fixed

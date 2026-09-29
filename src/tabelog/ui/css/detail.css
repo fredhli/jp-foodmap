@@ -143,6 +143,26 @@ html:not([data-mode="narrow"]) .dt-gallery.is-empty { height: var(--gallery-h-co
   .dt-sum-text, .dt-sum-label, .dt-sum-val { max-width: 100%; }
 }
 
+/* Google hours are requested only when the reader opens this section. */
+.dt-hours { min-width: 0; }
+.dt-hours-state { margin-top: var(--c-detail-heading-to-body); }
+.dt-hours-message { margin: 0 0 var(--sp-2); line-height: var(--t-secondary-line); }
+.dt-hours-button { min-height: var(--touch-min); padding-inline: var(--sp-4); }
+.dt-hours-source { margin: 0; line-height: var(--t-secondary-line); }
+.dt-hours-source a { color: var(--accent-strong); font-weight: 600; }
+.dt-hours-source a:hover { text-decoration: underline; }
+.dt-hours-balance, .dt-hours-language { display: block; margin-top: var(--sp-1); }
+.dt-hours-fallback { margin: var(--sp-2) 0 0; }
+.dt-hours-widget { width: 100%; max-width: 400px; margin-top: var(--sp-3); }
+.dt-hours-widget[hidden] { display: none; }
+.dt-hours-widget gmp-place-details {
+  display: block; box-sizing: border-box; width: 100%; height: 260px; max-height: 42vh;
+  border: 1px solid var(--separator); border-radius: var(--r-compact);
+  overflow: auto; background: var(--surface); color-scheme: light;
+  --gmp-mat-color-primary: var(--accent-strong);
+}
+.dt-hours-parking[hidden] { display: none; }
+
 /* ---- reading groups ------------------------------------------------------ */
 .dt-sec { margin-top: var(--c-detail-reading-gap); }
 .dt-sec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }

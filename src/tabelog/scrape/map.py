@@ -240,6 +240,9 @@ _UI_I18N_LITERAL_RE = re.compile(r"window\.UI_I18N_TABLES\s*=[^\n]*?/\*__UI_I18N
 _MEAL_GROUPS_LITERAL_RE = re.compile(r"window\.MEAL_GROUPS\s*=[^\n]*?/\*__MEAL_GROUPS_END__\*/")
 # 4.2.3: the Tokyo district table carries its own four languages per name.
 _TOKYO_AREAS_LITERAL_RE = re.compile(r"window\.TOKYO_AREAS\s*=[^\n]*?/\*__TOKYO_AREAS_END__\*/")
+# Built-in landmarks carry their own names in all four languages. The
+# one-line JSON is data, not copy to run through the UI text translator.
+_FAVORITES_BUILTIN_LITERAL_RE = re.compile(r"\bvar EMBEDDED_FAVORITES_BUILTIN\s*=\s*[^\n]*;")
 
 
 def _scan_cjk_runs(html: str) -> set[str]:
@@ -247,6 +250,7 @@ def _scan_cjk_runs(html: str) -> set[str]:
     scanned = _UI_I18N_LITERAL_RE.sub("", scanned)  # 4.0.0
     scanned = _MEAL_GROUPS_LITERAL_RE.sub("", scanned)  # 4.0.0
     scanned = _TOKYO_AREAS_LITERAL_RE.sub("", scanned)  # 4.2.3
+    scanned = _FAVORITES_BUILTIN_LITERAL_RE.sub("", scanned)
     scanned = _KNOWN_LOCS_LITERAL_RE.sub("", scanned)
     scanned = _PREFS_LITERAL_RE.sub("", scanned)  # M-023
     scanned = _PREF_GROUPS_LITERAL_RE.sub("", scanned)  # M-023 (C1)
@@ -2425,7 +2429,7 @@ MANIFEST_VERSION = "shortcuts-2"
 # M-119: the two build-time facts the "关于本站" sheet states out loud.
 # APP_VERSION is the site version shown under 版本 — CHANGELOG.md and the git
 # tag are kept in step by hand at release time.
-APP_VERSION = "4.3.7"
+APP_VERSION = "4.4.0"
 # Historical corpus baseline. Newer partial scrapes have their own row timestamps;
 # neither the build time nor this date describes every restaurant's freshness.
 DATA_SCRAPED_AT = "2026-05-19"
@@ -8309,8 +8313,16 @@ TILE_DPR_SWITCH_JS = r"""
 UI_40 = os.environ.get("TABELOG_LEGACY_UI", "").strip() != "1"
 UI_DIR = PROJECT_ROOT / "src" / "tabelog" / "ui"
 UI_CSS_ORDER = ["tokens", "base", "map", "containers", "list", "detail", "filters", "overlays"]
-UI_JS_ORDER = ["business", "core", "adapter", "map", "containers", "list", "detail", "filters", "overlays"]
+UI_JS_ORDER = ["business", "core", "adapter", "map", "containers", "list", "hours", "detail", "filters", "overlays"]
 UI_I18N_JSON = UI_DIR / "i18n" / "ui-strings.json"
+
+
+def places_ui_config_json() -> str:
+    config = {
+        "apiKey": os.environ.get("GOOGLE_PLACES_UI_API_KEY", "").strip(),
+        "permitUrl": "https://api.jpfoodmap.com/api/places/permit",
+    }
+    return json.dumps(config, ensure_ascii=True, separators=(",", ":")).replace("<", "\\u003c")
 
 
 def read_ui(rel: str) -> str:
@@ -16158,9 +16170,8 @@ FILTER_JS_TEMPLATE = r"""
       });
     }
     // Helper: button labels go through the runtime localizer so they
-    // pick up the active language without us hardcoding 翻譯 / Translate /
-    // 翻訳 / 原文 / Original / 原文. localizeText is a no-op when there's
-    // no I18N_MAP (i.e. zh-CN), which is exactly what we want there.
+    // pick up the active language without hardcoding labels for each locale.
+    // localizeText is a no-op when there's no I18N_MAP (i.e. zh-CN).
     function setTxBtnLabel(btn, label) {
       btn.textContent = (typeof localizeText === 'function')
         ? localizeText(label)
@@ -20657,7 +20668,7 @@ FILTER_JS_TEMPLATE = r"""
               : (activeLang === 'en')    ? 'en'
               : (activeLang === 'ja')    ? 'ja'
               : 'zh_CN';
-      // Button text variant: "signin_with" = "Sign in with Google" / 等价物.
+      // Google draws the localized button text from the signin_with option.
       google.accounts.id.renderButton(signinBtnContainer, {
         theme: 'outline',
         size: 'large',
@@ -23103,8 +23114,10 @@ def main(argv: list[str] | None = None) -> None:
             + ";/*__UI_I18N_END__*/\n"
             "window.TOKYO_AREAS = "
             + json.dumps(build_tokyo_areas(core_rows), ensure_ascii=False, separators=(",", ":"))
-            + ";/*__TOKYO_AREAS_END__*/"
-            "</script>\n"
+            + ";/*__TOKYO_AREAS_END__*/\n"
+            "window.PLACES_UI_CONFIG = "
+            + places_ui_config_json()
+            + ";\n</script>\n"
         )
         ui_js_filled = {
             name: _fill_placeholders(read_ui(f"js/{name}.js")) for name in UI_JS_ORDER

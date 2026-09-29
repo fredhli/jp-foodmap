@@ -147,7 +147,7 @@ MAX_SHRINK_PCT = 5.0
 # map.py) so that forgetting to bump APP_VERSION fails the gate instead of
 # silently shipping the previous version number in the 关于本站 sheet.
 # Bump this, map.py APP_VERSION, CHANGELOG.md and the git tag together.
-EXPECTED_APP_VERSION = "4.3.7"
+EXPECTED_APP_VERSION = "4.4.0"
 
 # Tokyo district ids that have shipped (4.2.3). They are persisted in
 # tabelog.filterState, so check_tokyo_areas fails if one disappears from the
@@ -342,8 +342,9 @@ def check_popup_slots() -> None:
              43 rows whose policy text does not start with an enumeration
              word, and a sudden drop means the head-word list broke.
       p[10]  None, or a non-empty string that is not the literal '-'
-             (7,926 rows have a non-empty `holiday`, 2,578 of them are '-';
-             rendering those would put "休 -" on a quarter of the cards).
+             (about a third of the non-empty `holiday` values are '-';
+             rendering those would put "休 -" on those cards). At least 99%
+             of published rows whose CSV `holiday` is a real value carry it.
       p[11]  None, or a non-negative int (metres to the station).
     """
     variants: dict[str, dict] = {}
@@ -443,16 +444,35 @@ def check_popup_slots() -> None:
     else:
         ok("popup-slots", f"p[9].b on {b_hits:,}/{total:,} rows ({pct:.1f}%), same in all 4 variants")
 
-    if not 5000 <= holiday_hits <= 5700:
+    # A '-' that got through already failed per row above. What is left to
+    # catch is the day-token filter rejecting real values, measured against
+    # the CSV so the check follows the corpus size.
+    expected = _real_holiday_rows(ref)
+    if expected is None:
+        note(f"{TABELOG_CSV.name} not present — p[10] coverage not cross-checked")
+        ok("popup-slots", f"p[10] closing days on {holiday_hits:,} rows")
+    elif holiday_hits < 0.99 * expected:
         fail(
             "popup-slots",
-            f"p[10] (closing days) present on {holiday_hits:,} rows, expected "
-            f"5,000-5,700. Either the day-token filter stopped rejecting the "
-            f"2,578 '-' rows, or it started rejecting real ones.",
+            f"p[10] (closing days) present on {holiday_hits:,} rows, but "
+            f"{expected:,} published rows have a real `holiday` in the CSV. "
+            f"holiday_slot()'s day-token filter started rejecting real values.",
         )
     else:
-        ok("popup-slots", f"p[10] closing days on {holiday_hits:,} rows")
+        ok("popup-slots", f"p[10] closing days on {holiday_hits:,}/{expected:,} rows with a real `holiday`")
     ok("popup-slots", f"p[11] station distance on {station_hits:,} rows")
+
+
+def _real_holiday_rows(popups: dict) -> int | None:
+    """Published rows whose CSV `holiday` is neither blank nor '-'."""
+    if not TABELOG_CSV.exists():
+        return None
+    import csv
+
+    with TABELOG_CSV.open(encoding="utf-8-sig", newline="") as f:
+        return sum(1 for r in csv.DictReader(f)
+                   if r.get("detail_url") in popups
+                   and (r.get("holiday") or "").strip() not in ("", "-"))
 
 
 def check_restaurant_fields() -> None:
@@ -1245,6 +1265,12 @@ def check_ui_bundle() -> None:
                     f"{len(only_en)} UI key(s) have en but no ja and "
                     f"{len(only_ja)} the reverse — every key needs both"
                 )
+    hours_at = html.find("window.Hours = Hours")
+    detail_at = html.find("Hours.init(")
+    if hours_at < 0 or detail_at < hours_at or "window.PLACES_UI_CONFIG = " not in html:
+        problems.append("opening hours module/config is missing or loaded after detail")
+    if "data-section=\"hours\"" not in html:
+        problems.append("opening hours detail section is missing")
     if "window.MEAL_GROUPS" not in html:
         problems.append("window.MEAL_GROUPS is not in the page")
 

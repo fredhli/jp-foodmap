@@ -19,6 +19,9 @@
 // propagate) but PRESERVES every other top-level field the stored blob has
 // (M-044) — send an explicit null to drop one.
 
+import {quotaWindow, quotaLimits, validPermitRequest} from './places-quota.js';
+export {PlacesQuota} from './places-quota.js';
+
 const COOKIE_NAME = 'tabelog_session';
 const HINT_COOKIE_NAME = 'tabelog_has_session';   // M-013: readable by the page
 const SESSION_TTL_SECS = 90 * 24 * 60 * 60;   // 90 days
@@ -141,11 +144,11 @@ function sessionSecrets(env) {
   if (env.SESSION_HMAC_PREV) out.push(env.SESSION_HMAC_PREV);
   return out;
 }
-async function verifySessionCookie(token, env) {
+async function verifySessionCookie(token, env, strict = false) {
   for (const secret of sessionSecrets(env)) {
     const claims = await verifyJWT(token, secret);
     if (claims) {
-      if (await sessionVersionOk(env, claims)) return claims;
+      if (await sessionVersionOk(env, claims, strict)) return claims;
       return null;
     }
   }
@@ -155,14 +158,15 @@ async function verifySessionCookie(token, env) {
 // M-037: signing out bumps sv:<sub>, which invalidates every cookie minted
 // before it. Cookies with no `sv` claim predate this deploy and stay valid —
 // they cost no KV read either.
-async function sessionVersionOk(env, claims) {
+async function sessionVersionOk(env, claims, strict = false) {
   if (typeof claims.sv !== 'number') return true;
   try {
     const raw = await env.KV.get('sv:' + claims.sub);
     const cur = raw ? (parseInt(raw, 10) || 0) : 0;
     return claims.sv === cur;
-  } catch (_) {
-    return true;   // KV hiccup must not sign everyone out
+  } catch (error) {
+    if (strict) throw error;
+    return true;   // Existing sync sessions tolerate a transient KV failure.
   }
 }
 async function readSessionVersion(env, sub) {
@@ -279,8 +283,8 @@ function looksLikeIdToken(token) {
 // Try cookie first; on miss, fall back to Bearer id_token. Returns
 // {sub, email, name, picture} or null. Also returns `source` so callers
 // can decide whether to refresh-as-cookie on the response.
-async function resolveAuth(req, env) {
-  const claims = await resolveCookieClaims(req, env);
+async function resolveAuth(req, env, strict = false) {
+  const claims = await resolveCookieClaims(req, env, strict);
   if (claims) {
     return {
       source: 'cookie',
@@ -308,7 +312,7 @@ async function resolveAuth(req, env) {
 }
 
 // Every cookie value under COOKIE_NAME, current secret then PREV.
-async function resolveCookieClaims(req, env) {
+async function resolveCookieClaims(req, env, strict = false) {
   if (!env.SESSION_HMAC && !env.SESSION_HMAC_PREV) {
     // M-126: silent fall-through to the Bearer path used to look like a
     // working deploy. Say it out loud in the tail.
@@ -317,7 +321,7 @@ async function resolveCookieClaims(req, env) {
   }
   for (const c of readCookies(req, COOKIE_NAME)) {
     if (!c || c === 'deleted') continue;
-    const claims = await verifySessionCookie(c, env);
+    const claims = await verifySessionCookie(c, env, strict);
     if (claims) return claims;
   }
   return null;
@@ -607,6 +611,43 @@ async function handleStateDelete(env, auth, cors) {
 // ---------- Router ----------
 
 // M-132: 405s advertise what the route does accept.
+async function handlePlacesPermit(req, env, cors) {
+  if (!cors['Access-Control-Allow-Origin']) return jsonError(403, 'forbidden_origin', 'origin not allowed', cors);
+  if (env.PLACES_UI_ENABLED !== 'true' || !env.PLACES_QUOTA)
+    return jsonError(503, 'unavailable', 'opening hours are not configured', cors);
+  let auth;
+  try { auth = await resolveAuth(req, env, true); }
+  catch (_) { return jsonError(503, 'unavailable', 'could not verify session', cors); }
+  if (!auth) return jsonError(401, 'unauthorized', 'sign in to view opening hours', cors);
+  if (!(req.headers.get('Content-Type') || '').toLowerCase().startsWith('application/json'))
+    return jsonError(415, 'invalid_content_type', 'JSON body required', cors);
+  const text = await req.text();
+  if (TEXT.encode(text).length > 2048) return jsonError(413, 'payload_too_large', 'request too large', cors);
+  let body;
+  try { body = JSON.parse(text); }
+  catch (_) { return jsonError(400, 'invalid_json', 'invalid JSON', cors); }
+  if (!validPermitRequest(body)) return jsonError(400, 'invalid_request', 'invalid place or request ID', cors);
+  try {
+    quotaLimits(env);
+    const digest = await crypto.subtle.digest('SHA-256', TEXT.encode('places:' + auth.sub));
+    const user = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+    const window = quotaWindow();
+    const id = env.PLACES_QUOTA.idFromName('places:' + window.month);
+    const reply = await env.PLACES_QUOTA.get(id).fetch(new Request('https://quota.internal/permit', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({placeId: body.placeId, requestId: body.requestId, user, month: window.month}),
+    }));
+    const result = await reply.json();
+    const extra = {};
+    if (reply.status === 429 && result.resetAt)
+      extra['Retry-After'] = String(Math.max(1, Math.ceil((Date.parse(result.resetAt) - Date.now()) / 1000)));
+    return new Response(JSON.stringify(result), {status: reply.status,
+      headers: {...cors, ...NO_STORE, ...extra, 'Content-Type': 'application/json'}});
+  } catch (_) {
+    return jsonError(503, 'unavailable', 'opening hours are temporarily unavailable', cors);
+  }
+}
+
 function methodNotAllowed(allow, cors) {
   return jsonError(405, 'method_not_allowed', 'method not allowed', cors, null, {'Allow': allow});
 }
@@ -616,6 +657,11 @@ async function route(req, env, cors) {
 
   const url = new URL(req.url);
   const path = url.pathname;
+  if (path === '/api/places/permit') {
+    if (req.method === 'POST') return handlePlacesPermit(req, env, cors);
+    return methodNotAllowed('POST, OPTIONS', cors);
+  }
+
 
   if (path === '/api/session') {
     if (req.method === 'POST')   return handleSessionPost(req, env, cors);

@@ -3420,9 +3420,8 @@
       });
     }
     // Helper: button labels go through the runtime localizer so they
-    // pick up the active language without us hardcoding 翻譯 / Translate /
-    // 翻訳 / 原文 / Original / 原文. localizeText is a no-op when there's
-    // no I18N_MAP (i.e. zh-CN), which is exactly what we want there.
+    // pick up the active language without hardcoding labels for each locale.
+    // localizeText is a no-op when there's no I18N_MAP (i.e. zh-CN).
     var rowByUrl = {};
     for (var di = 0; di < data.length; di++) {
       var d = data[di];
@@ -4009,7 +4008,7 @@
               : (activeLang === 'en')    ? 'en'
               : (activeLang === 'ja')    ? 'ja'
               : 'zh_CN';
-      // Button text variant: "signin_with" = "Sign in with Google" / 等价物.
+      // Google draws the localized button text from the signin_with option.
       google.accounts.id.renderButton(signinBtnContainer, {
         theme: 'outline',
         size: 'large',

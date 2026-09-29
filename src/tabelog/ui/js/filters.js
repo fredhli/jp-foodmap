@@ -261,7 +261,7 @@
       '<label class="opt-row ft-all-row"><input type="checkbox" class="checkbox" data-bulk-cb="cuisine"><span class="opt-label">' + esc(t('全选')) + '</span></label>' +
       '<button type="button" class="ft-link" data-bulk="cuisine-none">' + esc(t('全清')) + '</button>' +
       '</div>' + groups +
-      '<p class="ft-note t-secondary">' + esc(t('非日本料理的十类不在这棵树里，由下方「隐藏非日本料理」控制')) + '</p>' +
+      '<p class="ft-note t-secondary">' + esc(t('非日本料理的十一类不在这棵树里，由下方「隐藏非日本料理」控制')) + '</p>' +
       '</div></section>');
 
     /* ---- awards ---- */
@@ -297,7 +297,7 @@
       sw('favOnly', '只看已收藏', '仅匹配收藏集合', 'fav') +
       '<div class="ft-sw-group">' + sw('hideBlack', '隐藏弃用名单', '研究后排除的餐厅不在结果和地图显示') +
       '<p class="ft-sw-extra t-secondary" id="ft-black-extra"></p></div>' +
-      '<div class="ft-sw-group">' + sw('hideForeign', '隐藏非日本料理', '中餐、韩餐、西餐、南亚、中东等十类，独立于上面的菜系树') +
+      '<div class="ft-sw-group">' + sw('hideForeign', '隐藏非日本料理', '中餐、韩餐、俄餐、西餐、南亚、中东等十一类，独立于上面的菜系树') +
       '<p class="ft-sw-extra t-secondary" id="ft-foreign-extra"><span id="ft-foreign-text"></span> ' +
       '<button type="button" class="ft-link" data-act="show-foreign">' + esc(t('一起显示')) + '</button></p></div>' +
       sw('gcalOnly', '只看谷歌地图校准过坐标的餐厅', '只描述坐标来源，不代表谷歌认证餐厅品质', 'gcal') +

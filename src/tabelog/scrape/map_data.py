@@ -6,10 +6,10 @@ and render through the bookmarks layer."""
 import re
 
 
-# Maps Tabelog's JP genre tokens to 20 broad cuisine categories. Dict order
+# Maps Tabelog's JP genre tokens to broad cuisine categories. Dict order
 # drives filter dropdown order. Single-tag: each restaurant lands in exactly
 # one bucket (the first matching token in the comma-separated genre string).
-# The four buckets sitting below 其他 are default-off in the filter panel
+# Buckets sitting below 其他 are default-off in the filter panel
 # (see DEFAULT_OFF_GENRES) — non-Japanese cuisines you usually don't want
 # while map-browsing for Japanese food.
 GENRE_CATEGORIES = {
@@ -200,6 +200,7 @@ GENRE_CATEGORIES = {
     ],
     "台湾料理": ["台湾料理"],
     "韩国料理": ["韓国料理", "冷麺"],
+    "俄罗斯料理": ["ロシア料理"],
     "法餐": ["フレンチ", "ビストロ", "オーベルジュ"],
     "意餐·披萨·意面": ["イタリアン", "ピザ", "パスタ"],
     "美式料理·汉堡": ["アメリカ料理", "ハンバーガー", "ハワイ料理"],
@@ -320,6 +321,7 @@ DEFAULT_OFF_GENRES = {
     "饺子·中餐",
     "台湾料理",
     "韩国料理",
+    "俄罗斯料理",
     "法餐",
     "意餐·披萨·意面",
     "美式料理·汉堡",
@@ -353,6 +355,7 @@ GENRE_EMOJI = {
     "饺子·中餐": "🇨🇳",
     "台湾料理": "🇹🇼",
     "韩国料理": "🇰🇷",
+    "俄罗斯料理": "🇷🇺",
     "法餐": "🇫🇷",
     "意餐·披萨·意面": "🇮🇹",
     "美式料理·汉堡": "🇺🇸",

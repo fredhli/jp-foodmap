@@ -1,4 +1,8 @@
 """
+Low-level Tabelog extraction and a legacy basic-list-only entry. The complete
+current selection and region loop live in project main.py (including main-meal
+coverage and the Tokyo/Osaka lists).
+
 Unified Tabelog list scraper. Pass a Tabelog region slug — the URL only
 varies by that one path segment.
 
@@ -40,6 +44,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
@@ -85,6 +90,7 @@ FIELDS = [
     # unions fieldnames, so adding it is a no-op for the existing corpus.
     # map.py prints age quantiles over the rows that do carry one.
     "scraped_at",
+    "operating_status", "source_query", "score_checked_at", "details_checked_at",
 ]
 
 # M-019: columns whose old value must survive a re-scrape that came back
@@ -162,7 +168,8 @@ CARDS_JS = r"""
 DETAIL_JS = r"""
 () => {
     const out = {seat_count: null, address: null,
-                 reservation_policy: null, tabelog_bookable: false};
+                 reservation_policy: null, tabelog_bookable: false,
+                 rating: null, status_text: null, name_status_text: null};
     for (const tr of document.querySelectorAll('tr')) {
         const th = tr.querySelector('th');
         const td = tr.querySelector('td');
@@ -172,8 +179,22 @@ DETAIL_JS = r"""
         if (label === '席数') out.seat_count = value;
         else if (label === '住所') out.address = value;
         else if (label === '予約可否') out.reservation_policy = value;
+        else if (label === '店名' && value.includes('このお店は現在'))
+            out.name_status_text = value;
     }
     out.tabelog_bookable = document.querySelectorAll('a.js-booking-form-open').length > 0;
+    // Read score and status only from their own detail-page elements.
+    const score = document.querySelector(
+        '.rdheader-rating__score-val-dtl, .rdheader-rating__score-val, '
+        + '.rdheader-rating__score [itemprop="ratingValue"], '
+        + '[itemprop="aggregateRating"] [itemprop="ratingValue"]'
+    );
+    out.rating = score ? (score.getAttribute('content') || score.innerText || '').trim() : null;
+    const status = document.querySelector(
+        '.rst-status, .rst-status__text, .rdheader-status, '
+        + '.rdheader-notice, .c-rst-status, [data-testid="restaurant-status"]'
+    );
+    out.status_text = status ? (status.innerText || '').replace(/\s+/g, ' ').trim() : null;
     return out;
 }
 """
@@ -322,9 +343,20 @@ async def scrape_list_page(
     last_err: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            await session.page.goto(url, wait_until="domcontentloaded")
+            response = await session.page.goto(url, wait_until="domcontentloaded")
+            if response is not None and response.status != 200:
+                raise RuntimeError(f"list page HTTP {response.status}")
+            final_url = getattr(session.page, "url", "")
+            if final_url:
+                final = urlsplit(final_url)
+                if (final.hostname or "").lower() not in ("tabelog.com", "www.tabelog.com") or f"/{region}/rstLst/" not in final.path:
+                    raise RuntimeError(f"list page redirected away from ranking: {final_url}")
             await asyncio.sleep(LIST_PAGE_DELAY_S)
             raw = await session.page.evaluate(CARDS_JS)
+            if not isinstance(raw, dict) or not isinstance(raw.get("cards"), list):
+                raise RuntimeError("list page did not return cards")
+            if not raw["cards"] and page_num == 1:
+                raise RuntimeError("first list page has no cards (possibly a verification page)")
             break
         except Exception as e:
             last_err = e
@@ -353,6 +385,7 @@ async def scrape_list_page(
             "seat_count": "", "address": "", "reservation_policy": "",
             "reservation_policy_chinese": "", "tabelog_bookable": "",
             "detail_url": c["detailUrl"], "source_page": page_num,
+            "source_query": "rating" if url_template == BASE_TEMPLATE else url_template,
             "scraped_at": _now_iso(),  # M-096
         })
     return rows, raw.get("total")
@@ -433,13 +466,62 @@ async def collect_list(
     return kept
 
 
+def parse_detail_rating(value) -> float | None:
+    """Accept only an explicit numeric detail-header score."""
+    text = str(value or "").strip()
+    if not re.fullmatch(r"[0-5](?:\.\d{1,2})?", text):
+        return None
+    score = float(text)
+    return score if 1 <= score <= 5 else None
+
+
+def classify_operating_status(text: str | None) -> str:
+    """Closed requires an explicit status notice; ambiguous notices stay unknown."""
+    text = (text or "").strip()
+    if not text:
+        return "unknown"
+    if any(word in text for word in (
+        "移転", "掲載保留", "確認中", "不明", "再開", "復業", "営業中",
+        "予定", "見込み", "していません", "していない", "ではありません",
+        "ではない", "誤り", "解除",
+    )):
+        return "unknown"
+    if (text in ("閉店", "閉業", "廃業", "永久閉鎖")
+            or any(word in text for word in ("閉店しました", "閉店しております",
+                                            "閉店済", "閉業しました", "廃業しました",
+                                            "永久閉鎖"))):
+        return "closed"
+    if (text == "休業" or any(word in text for word in
+                             ("休業中", "臨時休業", "一時休業", "当面の間休業",
+                              "休業しております", "休業しています"))):
+        return "temporarily_closed"
+    return "unknown"
+
+
 async def fetch_detail(session: Session, url: str) -> dict:
     last_err: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            await session.page.goto(url, wait_until="domcontentloaded")
+            response = await session.page.goto(url, wait_until="domcontentloaded")
+            if response is not None and response.status != 200:
+                raise RuntimeError(f"detail HTTP {response.status}")
+            final_url = getattr(session.page, "url", "")
+            expected_id = re.search(r"/(\d{6,10})/?$", urlsplit(url).path)
+            actual_id = re.search(r"/(\d{6,10})/?$", urlsplit(final_url).path) if final_url else None
+            if final_url and ((urlsplit(final_url).hostname or "").lower() not in ("tabelog.com", "www.tabelog.com")
+                              or (expected_id and (not actual_id or actual_id.group(1) != expected_id.group(1)))):
+                raise RuntimeError(f"detail page redirected away from restaurant: {final_url}")
             await asyncio.sleep(DETAIL_PAGE_DELAY_S)
             data = await session.page.evaluate(DETAIL_JS)
+            if not isinstance(data, dict):
+                raise RuntimeError("detail page did not return structured data")
+            data["rating"] = parse_detail_rating(data.get("rating"))
+            status_css = data.get("status_text") or ""
+            if "の報告" in status_css and "このお店は現在" not in status_css:
+                status_css = ""  # a report link is not an operating-status notice
+            status_evidence = " ".join(filter(None, (status_css,
+                                                     data.get("name_status_text"))))
+            data["operating_status"] = classify_operating_status(status_evidence)
             data["address"] = clean_address(data.get("address"))
             html = await session.page.content()
             data["photos"] = extract_photo_urls(html)

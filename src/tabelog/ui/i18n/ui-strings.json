@@ -92,9 +92,9 @@
     "en": "Chubu",
     "ja": "中部"
   },
-  "中餐、韩餐、西餐、南亚、中东等十类，独立于上面的菜系树": {
-    "en": "Ten buckets — Chinese, Korean, Western, South Asian, Middle Eastern … — kept out of the cuisine tree above",
-    "ja": "中華・韓国・西洋・南アジア・中東など10区分。上の料理ツリーとは別扱いです"
+  "中餐、韩餐、俄餐、西餐、南亚、中东等十一类，独立于上面的菜系树": {
+    "en": "Eleven buckets — Chinese, Korean, Russian, Western, South Asian, Middle Eastern … — kept out of the cuisine tree above",
+    "ja": "中華・韓国・ロシア・西洋・南アジア・中東など11区分。上の料理ツリーとは別扱いです"
   },
   "乌冬·荞麦": {
     "en": "Udon & soba",
@@ -1660,9 +1660,9 @@
     "en": "Reservation required",
     "ja": "予約必須"
   },
-  "非日本料理的十类不在这棵树里，由下方「隐藏非日本料理」控制": {
-    "en": "The ten non-Japanese buckets are not in this tree — the “Hide non-Japanese cuisine” switch below controls them.",
-    "ja": "日本料理以外の10区分はこのツリーに含まれません。下の「日本料理以外を非表示」で切り替えます。"
+  "非日本料理的十一类不在这棵树里，由下方「隐藏非日本料理」控制": {
+    "en": "The eleven non-Japanese buckets are not in this tree — the “Hide non-Japanese cuisine” switch below controls them.",
+    "ja": "日本料理以外の11区分はこのツリーに含まれません。下の「日本料理以外を非表示」で切り替えます。"
   },
   "面板": {
     "en": "Panel",
@@ -1671,6 +1671,10 @@
   "韩国料理": {
     "en": "Korean",
     "ja": "韓国料理"
+  },
+  "俄罗斯料理": {
+    "en": "Russian",
+    "ja": "ロシア料理"
   },
   "预算：{n} 档": {
     "en": "Budget: {n} tiers",
@@ -1859,5 +1863,73 @@
   "全选：{name}": {
     "en": "Select all: {name}",
     "ja": "すべて選択：{name}"
+  },
+  "营业时间": {
+    "en": "Opening hours",
+    "ja": "営業時間"
+  },
+  "未匹配到 Google 地点，可到 Tabelog 查看营业信息。": {
+    "en": "No matching Google place. Check Tabelog for business hours.",
+    "ja": "対応する Google の店舗が見つかりません。営業時間は食べログでご確認ください。"
+  },
+  "登录 Google 账号后可查看营业时间。": {
+    "en": "Sign in with Google to view opening hours.",
+    "ja": "営業時間を見るには Google アカウントでログインしてください。"
+  },
+  "营业时间服务暂不可用，请稍后再试。": {
+    "en": "Opening hours are temporarily unavailable. Try again later.",
+    "ja": "営業時間を現在表示できません。しばらくしてからお試しください。"
+  },
+  "正在加载营业时间…": {
+    "en": "Loading opening hours…",
+    "ja": "営業時間を読み込み中…"
+  },
+  "今日还可查看 {n} 次": {
+    "en": "{n} views remaining today",
+    "ja": "本日はあと{n}回確認できます"
+  },
+  "营业时间由 Google 提供": {
+    "en": "Opening hours provided by Google",
+    "ja": "営業時間の提供元: Google"
+  },
+  "营业时间可能临时变更，请到店前确认。": {
+    "en": "Hours may change. Confirm before visiting.",
+    "ja": "営業時間は変更される場合があります。来店前にご確認ください。"
+  },
+  "今天的查看次数已用完。": {
+    "en": "You've reached today's viewing limit.",
+    "ja": "本日の閲覧回数の上限に達しました。"
+  },
+  "本月的营业时间查看额度已用完。": {
+    "en": "The monthly opening-hours limit has been reached.",
+    "ja": "今月の営業時間閲覧枠を使い切りました。"
+  },
+  "{time} 后可再试。": {
+    "en": "Try again after {time}.",
+    "ja": "{time}以降にもう一度お試しください。"
+  },
+  "营业时间加载失败。再次尝试会使用一次查看额度。": {
+    "en": "Opening hours could not load. Retrying will use another view.",
+    "ja": "営業時間を読み込めませんでした。再試行すると閲覧回数をもう1回使用します。"
+  },
+  "重试营业时间": {
+    "en": "Retry opening hours",
+    "ja": "営業時間を再試行"
+  },
+  "每次查看会使用一次额度；每日及每月额度用完后会显示恢复时间。": {
+    "en": "Each view uses one allowance. If the daily or monthly limit is reached, we'll show when it resets.",
+    "ja": "閲覧するたびに1回分を使用します。日次・月次の上限に達した場合は、再開時刻を表示します。"
+  },
+  "查看营业时间": {
+    "en": "View opening hours",
+    "ja": "営業時間を見る"
+  },
+  "Google 内容沿用首次查看时的语言。": {
+    "en": "Google content stays in the language used for the first view.",
+    "ja": "Google の内容は最初に表示したときの言語のままです。"
+  },
+  "若未显示时段，请到 Google Maps 查看。": {
+    "en": "If no hours appear here, check Google Maps.",
+    "ja": "営業時間が表示されない場合は Google マップでご確認ください。"
   }
 }

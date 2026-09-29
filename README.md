@@ -9,7 +9,7 @@ Per-user Saved restaurants, the Hidden list, pins and lists sync through a
 small Cloudflare Worker (`worker/`) behind Google Sign-In. Visitors who skip
 sign-in keep their state purely in `localStorage`.
 
-**Current version: 4.3.7.**
+**Source version: 4.4.0 (not yet deployed; rebuild required).**
 See [CHANGELOG.md](CHANGELOG.md) for what changed, and
 [CLAUDE.md](CLAUDE.md) for the architecture notes, the storage-key contract
 and the backwards-compatibility red lines.
@@ -114,6 +114,23 @@ uv run python src/tabelog/scrape/build_emoji_cache.py
 `data/` is mostly gitignored — only `data/favorites_builtin.json` and
 `data/i18n/{en,ja}.json` are committed, because they are build-time inputs
 and the page has to be reproducible from a fresh clone.
+
+## Restaurant updates and opening hours
+
+Selection and retention rules are recorded in [SCRAPING-RULES.md](SCRAPING-RULES.md).
+The shared full/bimonth pipeline lives in `main.py`; `bimonth_update.py` only
+forwards to it. The modes are described in [UPDATE-GUIDE.md](UPDATE-GUIDE.md). They are
+manual commands; installing this change does not schedule a scrape.
+
+```bash
+uv run python main.py --tokyo-osaka-append --dry-run
+uv run python main.py --bimonth-update --dry-run
+```
+
+A dry run reads local data only. Remove `--dry-run` in your Tabelog network
+environment to collect data; add `--no-build` to inspect the result before
+rebuilding the map. Google opening hours use the on-demand Places UI Kit and
+require the optional browser key plus the separately deployed quota Worker.
 
 ## Tests
 

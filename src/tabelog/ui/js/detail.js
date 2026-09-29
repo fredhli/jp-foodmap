@@ -561,6 +561,7 @@
     }
     return '<article class="dt">' + indexHtml(s) + notes +
       identityHtml(s, r, det) + galleryHtml(s, det, loading) + summaryHtml(s, r, det, loading) +
+      (window.Hours ? window.Hours.html(s, r) : '') +
       placeHtml(s, r, det, loading) + policyHtml(s, r, det, loading) + listsHtml(s, r) + statusHtml(s, r) +
       '</article>';
   }
@@ -836,13 +837,38 @@
       (s.user.bookmarks || []).length,
       isNarrow(s) ? s.sheet.state : '',
       isNarrow(s) ? '' : indexSig(s), s.selected.origin, Dm.backLabel(s),
-      ctx.Data.scopeKey(ctx.Data.resultScope(s)), (nearFrom(s) || []).join(',')].join('|');
+      ctx.Data.scopeKey(ctx.Data.resultScope(s)), (nearFrom(s) || []).join(','),
+      s.account && s.account.signedIn ? (s.account.email || 'signed-in') : 'guest'].join('|');
     if (sig === bodySig) return false;
     var sc = window.Containers && window.Containers.scroller && window.Containers.scroller('detail');
     var keepTop = (bodySig && bodySig.split('|')[0] === r.id && sc) ? sc.scrollTop : null;
     var idChangedHere = !bodySig || bodySig.split('|')[0] !== r.id;
     bodySig = sig;
-    root.innerHTML = bodyHtml(s, r, entry);
+    var html = bodyHtml(s, r, entry);
+    var oldArticle = root.firstElementChild;
+    var oldHours = oldArticle && oldArticle.querySelector(':scope > [data-section="hours"]');
+    var keepHours = window.Hours && oldHours &&
+      oldHours.getAttribute('data-hours-key') === window.Hours.key(r, s.lang, s);
+    var preserved = false;
+    if (keepHours) {
+      var template = document.createElement('template');
+      template.innerHTML = html;
+      var fresh = template.content.firstElementChild;
+      var marker = fresh && fresh.querySelector(':scope > [data-section="hours"]');
+      if (marker) {
+        while (oldArticle.firstChild && oldArticle.firstChild !== oldHours) oldArticle.firstChild.remove();
+        while (fresh.firstChild && fresh.firstChild !== marker) oldArticle.insertBefore(fresh.firstChild, oldHours);
+        while (oldArticle.lastChild && oldArticle.lastChild !== oldHours) oldArticle.lastChild.remove();
+        marker.remove();
+        while (fresh.firstChild) oldArticle.appendChild(fresh.firstChild);
+        preserved = true;
+      }
+    }
+    if (!preserved) {
+      if (window.Hours) window.Hours.park();
+      root.innerHTML = html;
+    }
+    if (window.Hours) window.Hours.attach(root, r, s.lang, s);
     if (idChangedHere && !ctx.motion.reduced) {
       root.classList.remove('rise-in');
       void root.offsetWidth;
@@ -922,6 +948,7 @@
     foot = c.roots.detailFoot;
     cand = c.roots.candidatesRoot;
     var u = c.util;
+    if (window.Hours) window.Hours.init(c);
 
     function onAct(e, el) {
       var s = ctx.App.state, id = s.selected.id;
@@ -935,6 +962,11 @@
         case 'tx': translateRun(el); break;
         case 'copy-addr': copyAddress(); break;
         case 'retry-detail': retryDetail(id); break;
+        case 'hours-open':
+        case 'hours-retry':
+          if (window.Hours) window.Hours.activate(ctx.Data.byId(id), s.lang);
+          break;
+        case 'hours-login': ctx.act.openOverlay('account', null); break;
         case 'lightbox': openLightbox(Number(el.getAttribute('data-index')) || 0); break;
         case 'prev': step(-1); break;
         case 'next': step(1); break;
@@ -1034,12 +1066,12 @@
   };
 
   Dm.render = function (s, changed) {
-    if (!ctx.App.changedAny(changed, ['selected', 'user', 'detail', 'lang', 'fontScale', 'layout', 'filters', 'sort',
+    if (!ctx.App.changedAny(changed, ['selected', 'user', 'account', 'signedIn', 'detail', 'lang', 'fontScale', 'layout', 'filters', 'sort',
       'overlay', 'columns', 'sheet', 'detail:data', 'detail:ja', 'nearby', 'location'])) return;
     var r = s.selected.id ? ctx.Data.byId(s.selected.id) : null;
     if (!r) {
       measuredTitleH = null;
-      if (bodySig !== null) { root.innerHTML = ''; foot.innerHTML = ''; bodySig = null; footSig = null; }
+      if (bodySig !== null) { if (window.Hours) window.Hours.park(); root.innerHTML = ''; foot.innerHTML = ''; bodySig = null; footSig = null; }
       paintCandidates(s);
       return;
     }
@@ -1062,6 +1094,7 @@
   };
 
   Dm.destroy = function () {
+    if (window.Hours) window.Hours.park();
     root.innerHTML = ''; foot.innerHTML = ''; cand.innerHTML = '';
     bodySig = null; footSig = null; candSig = null;
   };
