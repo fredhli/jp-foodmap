@@ -60,9 +60,11 @@ BOOT = r"""
     const mode = mockPermitMode;
     const errors = {daily_limit:429, monthly_limit:429, unauthorized:401, unavailable:503};
     const status = errors[mode] || 200;
+    // Hours.js lifts a limit whose reset time has passed, so keep it ahead.
+    const resetAt = new Date(Date.now() + 864e5).toISOString();
     const payload = status === 200
-      ? {allowed:true, requestId:body.requestId, remainingDaily:19, resetAt:'2026-09-25T00:00:00Z'}
-      : {error:mode, resetAt:'2026-09-25T00:00:00Z'};
+      ? {allowed:true, requestId:body.requestId, remainingDaily:19, resetAt}
+      : {error:mode, resetAt};
     return {ok:status === 200, status, json:async () => payload};
   };
   const state = {lang:'zh', account:{signedIn:true,email:'fixture@example.test'}};
@@ -230,6 +232,7 @@ with sync_playwright() as p:
     edge.evaluate('fetch = originalPermitFetch; setTimeout = nativeTimeout')
 
     edge.evaluate("""() => {
+      Date.now = () => Date.parse('2026-10-24T12:00:00Z');
       window.fetch = async (url, options) => {
         const body = JSON.parse(options.body);
         mockCalls.push({url,method:options.method,credentials:options.credentials,body});

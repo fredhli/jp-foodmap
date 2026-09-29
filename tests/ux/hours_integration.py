@@ -32,9 +32,11 @@ FAKE = r"""() => {
     const errorCodes = {daily_limit:429, monthly_limit:429, unauthorized:401, unavailable:503};
     const mode = hoursPermitMode;
     const status = errorCodes[mode] || 200;
+    // The page lifts a limit whose reset time has passed, so keep it ahead.
+    const resetAt = new Date(Date.now() + 864e5).toISOString();
     return {ok:status===200,status,json:async()=>status===200
-      ? {allowed:true,requestId:request.requestId,remainingDaily:19,resetAt:'2026-09-25T00:00:00Z'}
-      : {error:mode,resetAt:'2026-09-25T00:00:00Z'}};
+      ? {allowed:true,requestId:request.requestId,remainingDaily:19,resetAt}
+      : {error:mode,resetAt}};
   };
   window.google = {maps:{importLibrary:async name => {
     if (name !== 'places') throw Error('unexpected Google library');
@@ -189,6 +191,8 @@ with lib_browser.serve_docs(8999) as base, sync_playwright() as p:
     assert page.evaluate("""() => localStorage.getItem('tabelog.auth') === null &&
       localStorage.getItem('omakase_state_cache_v2') === hoursStorageBefore.saved &&
       localStorage.getItem('tabelog.bookmarks') === hoursStorageBefore.bookmarks""")
+    # Signing out re-renders the detail card after the state flips.
+    page.wait_for_selector('[data-act="hours-login"]', timeout=10000)
     assert page.locator('[data-act="hours-login"]').count() == 1
     page.evaluate('hoursPermitMode="ok";App.act.closeOverlay("done");App.set({account:{signedIn:true,email:"hours-fixture@example.test"},signedIn:true})')
 
